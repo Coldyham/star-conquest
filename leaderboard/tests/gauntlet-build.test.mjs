@@ -135,6 +135,19 @@ test("only the keys the game reads are kept, and lanes and start must name real 
   assert.match(checkBody({ ...body(), start: [3] }), /start names/);
 });
 
+test("a lane runs one way unless it says two_way, and every stage must be reachable", () => {
+  const three = { stages: [stage(), stage({ id: 1 }), stage({ id: 2 })] };
+  assert.deepEqual(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, { two_way: false }]] })).lanes, [[0, 1], [1, 2]]);
+  assert.deepEqual(checkBody(body({ ...three, lanes: [[0, 1], [2, 1, { two_way: true }]] })).lanes,
+                   [[0, 1], [2, 1, { two_way: true }]]);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [2, 1]] })), /stage 3 can't be reached/);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2]], start: [1] })), /stage 1 can't be reached/);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1]] })), /stage 3 can't be reached/);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, { turns: 9 }]] })), /only say two_way/);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, "both"]] })), /only say two_way/);
+  assert.equal(typeof checkBody(body(three)), "object");
+});
+
 test("a body over 64 KiB is refused", () => {
   const big = { ...SETUP, custom_map: { blob: "x".repeat(LIMITS.bodyBytes) } };
   assert.match(checkBody(body({ stages: [stage({ settings: big })] })), /over 64 KiB/);

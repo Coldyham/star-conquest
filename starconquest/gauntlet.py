@@ -24,9 +24,11 @@ later release is a new, uncleared stage, which is the honest answer.
 **The graph is the campaign's shape.** ``stages`` + ``lanes`` + ``start``, as
 the weekly campaign's ``nodes`` + ``lanes`` are, so a branching gauntlet needs no
 format change. The bordering rule is mirrored in spirit — a stage is open if it
-is a start, is cleared, or borders a cleared one — over local bests, because a
-gauntlet is uncontested: nobody can take a cleared stage back. The campaign's
-own rule stays in JS behind ``/api/campaign`` and is not reimplemented here.
+is a start, is cleared, or a lane leads to it from a cleared one — over local
+bests, because a gauntlet is uncontested: nobody can take a cleared stage back.
+Unlike the campaign's, a lane runs one way, from its first stage to its second,
+unless the file marks it two-way. The campaign's own rule stays in JS behind
+``/api/campaign`` and is not reimplemented here.
 
 ``from_dict`` is total and never raises, like ``CustomMap.from_dict``: it drops
 a malformed stage or lane and clamps text to what the screen can show.
@@ -81,6 +83,8 @@ class Gauntlet:
     stages: tuple[Stage, ...]
     lanes: tuple[tuple[int, int], ...]
     start: tuple[int, ...]
+    # The lanes that also run from their second stage back to their first.
+    two_way: frozenset[tuple[int, int]] = frozenset()
 
     @classmethod
     def from_dict(cls, data) -> Gauntlet | None:
@@ -91,6 +95,8 @@ class Gauntlet:
         is dropped, and a lane to a missing stage with it. With no ``lanes`` the
         stages are joined in list order, so a hand-written linear gauntlet can
         leave them out; with no usable ``start`` the first stage is the start.
+        A lane's optional third element is read only for ``two_way``; anything
+        else there leaves it one-way.
         """
         try:
             return _from_dict(data)
@@ -107,22 +113,24 @@ class Gauntlet:
                 return i + 1
         return 0
 
-    def neighbours(self, sid: int) -> set[int]:
+    def onward(self, sid: int) -> set[int]:
+        """The stages a lane leads to from ``sid``, the way each lane runs."""
         out = set()
         for a, b in self.lanes:
             if a == sid:
                 out.add(b)
-            elif b == sid:
+            elif b == sid and (a, b) in self.two_way:
                 out.add(a)
         return out
 
     def depths(self) -> dict[int, int]:
-        """Lanes from the nearest start, per stage (unreachable ones absent)."""
+        """Lanes from the nearest start, per stage, the way lanes run. A stage
+        no start reaches is absent (``problems`` names it)."""
         depth = {s: 0 for s in self.start}
         queue = deque(self.start)
         while queue:
             at = queue.popleft()
-            for n in sorted(self.neighbours(at)):
+            for n in sorted(self.onward(at)):
                 if n not in depth:
                     depth[n] = depth[at] + 1
                     queue.append(n)
@@ -166,13 +174,16 @@ def _from_dict(data) -> Gauntlet | None:
 
     raw_lanes = data.get("lanes")
     lanes: list[tuple[int, int]] = []
+    two_way: set[tuple[int, int]] = set()
     if isinstance(raw_lanes, list):
         for pair in raw_lanes:
-            if not isinstance(pair, list | tuple) or len(pair) != 2:
+            if not isinstance(pair, list | tuple) or len(pair) not in (2, 3):
                 continue
             a, b = _int(pair[0]), _int(pair[1])
             if a in ids and b in ids and a != b and (a, b) not in lanes and (b, a) not in lanes:
                 lanes.append((a, b))     # type: ignore[arg-type]
+                if len(pair) == 3 and isinstance(pair[2], dict) and pair[2].get("two_way") is True:
+                    two_way.add((a, b))     # type: ignore[arg-type]
     else:
         lanes = [(x.id, y.id) for x, y in zip(stages, stages[1:])]
 
@@ -182,7 +193,19 @@ def _from_dict(data) -> Gauntlet | None:
         start = [stages[0].id]
     gid = _text(data.get("id"), NAME_MAX) or "gauntlet"
     return Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
-                    stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)))
+                    stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
+                    two_way=frozenset(two_way))
+
+
+def problems(g: Gauntlet) -> list[str]:
+    """What stops a player getting through ``g``: each stage no start can reach
+    following the lanes the way they run. Empty when every stage can be played.
+    ``from_dict`` keeps such a gauntlet (the stage just never opens); this is the
+    check to run before one is shipped or stored, mirrored by the board's
+    ``checkBody``."""
+    depth = g.depths()
+    return [f"stage {g.position(s.id)} ({s.title}) can't be reached from a start"
+            for s in g.stages if s.id not in depth]
 
 
 def stage_settings(stage: Stage) -> Settings:
@@ -218,12 +241,14 @@ def cleared(g: Gauntlet) -> set[int]:
 
 
 def open_stages(g: Gauntlet, done: set[int] | None = None) -> set[int]:
-    """The starts, every cleared stage (cleared stays replayable) and every
-    neighbour of one. Everything else is locked. On a path this is "the next one"."""
+    """The starts, every cleared stage (cleared stays replayable) and every stage
+    a lane leads to from one. Everything else is locked. On a path this is "the
+    next one", and never the one before: clearing a later stage first (from a
+    challenge link of the same setup, say) does not open the earlier ones."""
     done = cleared(g) if done is None else done
     out = set(g.start) | done
     for sid in done:
-        out |= g.neighbours(sid)
+        out |= g.onward(sid)
     return out
 
 
@@ -237,7 +262,7 @@ def next_stage(g: Gauntlet, sid: int) -> int | None:
     depth = g.depths()
     if sid not in depth:
         return None
-    deeper = [n for n in g.neighbours(sid) if depth.get(n, -1) > depth[sid]]
+    deeper = [n for n in g.onward(sid) if depth.get(n, -1) > depth[sid]]
     return deeper[0] if len(deeper) == 1 else None
 
 

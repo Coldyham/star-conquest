@@ -149,6 +149,45 @@ def test_a_fork_opens_both_branches_and_has_no_single_next_stage():
     assert gauntlet.open_stages(g) == {0, 1, 2, 3}
 
 
+def test_a_lane_opens_only_its_second_stage_unless_two_way():
+    """Clearing a later stage first (a challenge link of the same setup counts)
+    opens the way on, never the stage before it."""
+    g = _tutorial()
+    ids = [s.id for s in g.stages]
+    _win(g.stages[5])
+    assert gauntlet.open_stages(g) == {ids[0], ids[5], ids[6]}
+
+    g = gauntlet.Gauntlet.from_dict({
+        "stages": [{"id": i, "settings": _setup(200 + i)} for i in range(3)],
+        "lanes": [[0, 1, {"two_way": True}], [1, 2, {"two_way": "yes"}]],
+    })
+    assert g is not None
+    assert g.two_way == {(0, 1)}
+    _win(g.stages[1])
+    assert gauntlet.open_stages(g) == {0, 1, 2}
+    webstore.set(webstore.WEB_BESTS_KEY, "{}")
+    _win(g.stages[2])
+    assert gauntlet.open_stages(g) == {0, 2}
+
+
+def test_a_stage_no_start_reaches_is_a_problem():
+    def gauntlet_with(lanes, start=None):
+        data = {"stages": [{"id": i, "title": f"S{i}", "settings": _setup(300 + i)} for i in range(3)],
+                "lanes": lanes}
+        if start is not None:
+            data["start"] = start
+        g = gauntlet.Gauntlet.from_dict(data)
+        assert g is not None
+        return g
+
+    assert gauntlet.problems(gauntlet_with([[0, 1], [1, 2]])) == []
+    assert gauntlet.problems(gauntlet_with([[0, 1], [2, 1]])) == ["stage 3 (S2) can't be reached from a start"]
+    assert gauntlet.problems(gauntlet_with([[0, 1], [2, 1, {"two_way": True}]])) == []
+    assert gauntlet.problems(gauntlet_with([[0, 1], [1, 2]], start=[1])) == ["stage 1 (S0) can't be reached from a start"]
+    for g in gauntlet.builtin():
+        assert gauntlet.problems(g) == [], g.id
+
+
 def test_next_stage_is_offered_when_replaying_a_cleared_stage():
     g = _tutorial()
     first, second = g.stages[0], g.stages[1]

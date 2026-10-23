@@ -133,9 +133,21 @@ For authors. A gauntlet is one JSON file:
   is missing, the stages are joined in list order, so a linear gauntlet can
   leave it out. `start` lists the stages open from the beginning (default: the
   first).
+- **A lane runs one way**, from its first stage to its second: `[3, 4]` opens 4
+  once 3 is cleared, never 3 once 4 is. `[3, 4, {"two_way": true}]` runs both
+  ways. The default lanes run in list order, so a linear gauntlet only ever
+  opens forwards. A pair joined twice keeps its first lane, so `[4, 3]` after
+  `[3, 4]` is dropped, not read as the way back: say `two_way`.
+- **Every stage must be reachable**: some start leads to it, following the lanes
+  the way they run. `gauntlet.problems` names each stage that is not. The board
+  refuses to store such a gauntlet (`checkBody`), `tools/gauntlet_check.py`
+  refuses to play one, and every built-in is held to it
+  (`test_a_stage_no_start_reaches_is_a_problem`). The game still opens one; the
+  stranded stage just stays locked.
 - `Gauntlet.from_dict` never raises: it drops a stage with no int `id`, a
-  duplicate `id` or no `settings` dict, drops a lane to a missing stage, and
-  clamps text to the lengths above.
+  duplicate `id` or no `settings` dict, drops a lane to a missing stage, reads a
+  lane's third element only for `two_way: true`, and clamps text to the lengths
+  above.
 - A player's own gauntlets come from two places (`gauntlet.user`): the ones
   opened from a link, kept in `webstore` under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remembered`, newest first, the last eight), and on desktop the
@@ -219,10 +231,18 @@ What is shared, so the two stay recognisably one idea:
 - **The graph shape.** `stages` + `lanes` + `start`, as the campaign's `nodes` +
   `lanes`, so a branching gauntlet needs no format change.
 - **The bordering rule, mirrored in spirit.** A stage is open if it is a start,
-  is cleared, or borders a cleared stage (`gauntlet.open_stages`); otherwise it
-  is locked. Cleared stages stay replayable. It is a few lines over local bests,
-  not a port of `attemptStatus`, whose rule stays in JS and is never
-  reimplemented.
+  is cleared, or a lane leads to it from a cleared stage
+  (`gauntlet.open_stages`); otherwise it is locked. Cleared stages stay
+  replayable. It is a few lines over local bests, not a port of
+  `attemptStatus`, whose rule stays in JS and is never reimplemented.
+- **Except that a lane runs one way.** A campaign lane is a border, crossed
+  either way. A gauntlet's first read the same, and that surprised in play
+  (2026-10-23): stage 6 of the tutorial, won from a board challenge link of the
+  same setup, cleared it as it should, and then opened stage 5 as well as 7.
+  The lock is soft by design (any win on the setup counts, however it was
+  reached), so the fix was to the direction, not the clearing: a lane opens
+  only its second stage unless it is marked `two_way`. Clearing 6 first now
+  opens 7 and leaves 5 locked until 4 is cleared.
 - **Derived, never stored.** Holdings there are a fold of scores; clearings
   here are a read of bests.
 

@@ -673,8 +673,8 @@ _PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets
 def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
     """Modal: the gauntlet's stages in order, each with its best once cleared.
 
-    A stage is open if it is a start, is cleared, or borders a cleared one
-    (`gauntlet.open_stages`); a locked one is greyed and is no hit target. A
+    A stage is open if it is a start, is cleared, or a lane leads to it from a
+    cleared one (`gauntlet.open_stages`); a locked one is greyed and is no hit target. A
     picker row appears only when there is more than one gauntlet to choose.
     Measured rows, like `_draw_pbp_prompt`.
     """

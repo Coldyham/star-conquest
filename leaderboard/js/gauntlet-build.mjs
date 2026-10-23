@@ -143,10 +143,15 @@ export function checkBody(body) {
     if (!Array.isArray(body.lanes)) return "lanes is not a list";
     const lanes = [];
     for (const pair of body.lanes) {
-      if (!Array.isArray(pair) || pair.length !== 2) return "a lane is not a pair of stage ids";
-      const [a, b] = pair;
+      if (!Array.isArray(pair) || (pair.length !== 2 && pair.length !== 3)) return "a lane is not a pair of stage ids";
+      const [a, b, how] = pair;
       if (!ids.has(a) || !ids.has(b) || a === b) return "a lane joins a stage that is not there";
-      lanes.push([a, b]);
+      if (pair.length === 3) {
+        if (!isObject(how) || Object.keys(how).some((k) => k !== "two_way") || typeof how.two_way !== "boolean") {
+          return "a lane's third element can only say two_way";
+        }
+      }
+      lanes.push(how?.two_way ? [a, b, { two_way: true }] : [a, b]);
     }
     out.lanes = lanes;
   }
@@ -154,10 +159,41 @@ export function checkBody(body) {
     if (!Array.isArray(body.start) || !body.start.every((s) => ids.has(s))) return "start names a stage that is not there";
     out.start = [...body.start];
   }
+  const stranded = unreachable(out);
+  if (stranded >= 0) return `stage ${stranded + 1} can't be reached from a start`;
   if (new TextEncoder().encode(JSON.stringify(out)).length > LIMITS.bodyBytes) {
     return `the gauntlet is over ${LIMITS.bodyBytes / 1024} KiB`;
   }
   return out;
+}
+
+/**
+ * The index of the first stage no start can reach following the lanes the way
+ * they run, or -1. Read as the game's `Gauntlet.from_dict` reads it (no lanes:
+ * list order; no start: the first stage; a pair already joined: dropped), so
+ * this is `gauntlet.problems` refusing what it would name.
+ */
+function unreachable({ stages, lanes, start }) {
+  const joined = lanes ?? stages.slice(1).map((s, i) => [stages[i].id, s.id]);
+  const onward = new Map(stages.map((s) => [s.id, []]));
+  const seen = new Set();
+  for (const [a, b, how] of joined) {
+    if (seen.has(`${a},${b}`) || seen.has(`${b},${a}`)) continue;
+    seen.add(`${a},${b}`);
+    onward.get(a).push(b);
+    if (how?.two_way) onward.get(b).push(a);
+  }
+  const reached = new Set(start?.length ? start : [stages[0].id]);
+  const queue = [...reached];
+  while (queue.length) {
+    for (const n of onward.get(queue.shift())) {
+      if (!reached.has(n)) {
+        reached.add(n);
+        queue.push(n);
+      }
+    }
+  }
+  return stages.findIndex((s) => !reached.has(s.id));
 }
 
 /** JSON with every object's keys sorted, so equal bodies hash equally. */

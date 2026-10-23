@@ -54,9 +54,9 @@ only for a fight; what is deliberately not animated.
 ## design/gauntlet.md
 - **The tutorial ladder.** A gauntlet is data, never `Settings`; progress derived from `webstore.best`; a stage active only while the setup matches (`menu.active_stage`); every field pinned; the stash and Leave tutorial; no New map in a stage, Next stage by depth (`gauntlet.next_stage`); the briefing card and the hint's row budget (`HINT_MAX`).
   - *The stages*: the ten, and how their seeds were picked (`tools/gauntlet_check.py`, loss share 0 to 86%).
-- **The file format.** For authors: `stages`/`lanes`/`start`, the menu's Save as a stage's `settings`, the text limits, user gauntlets (kept from links, plus the desktop folder).
+- **The file format.** For authors: `stages`/`lanes`/`start`, lanes one way unless `two_way`, every stage reachable (`gauntlet.problems`, `checkBody`), the menu's Save as a stage's `settings`, the text limits, user gauntlets (kept from links, plus the desktop folder).
 - **Gauntlets made on the board.** The gauntlet page and `/api/gauntlet`: stored not carried, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, pruned stages, fetched once and kept (`gauntlet.remember`), the inline `#gauntlet=` form, remixing by `#<id>`, listing by an admin at the author's request.
-- **Relation to the weekly campaign.** Uncontested, so no server; the graph shape and the bordering rule shared in spirit.
+- **Relation to the weekly campaign.** Uncontested, so no server; the graph shape and the bordering rule shared in spirit, except that a gauntlet lane runs one way (stage 6 won from a link opened 5).
 - **The gauntlet: proposed, not built.** A seeded run graph via `tools/campaign.py`'s `_layout`/`cut_nodes`, stages dealt like `_from_family`/`_mystery`, difficulty by depth through `LADDER_ORDER`.
 - **Carry-over.** The open problem: boons via `custommap.from_state`, and the cost on the board.
 ## design/leaderboard.md

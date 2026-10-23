@@ -8,7 +8,8 @@
 Each stage is replayed with a bot in seat 1 (`tests.sim.play_settings`, the
 leaderboard bot column's own funnel), and a stage's difficulty is the share of
 the roster that loses it — the board's own measure. A stage easier than any
-before it is flagged. A stage's seed is pinned, so a (stage, bot) pair is one
+before it is flagged. A gauntlet with a stage no start can reach
+(`gauntlet.problems`) is refused before anything is played. A stage's seed is pinned, so a (stage, bot) pair is one
 game; wall-clock guards are lifted (`ai.set_budget_scale`) so it is the same
 game on any machine.
 
@@ -101,6 +102,8 @@ def main() -> None:
     g = gauntlet.find(gauntlet.every(), a.gauntlet)
     if g is None:
         sys.exit(f"no gauntlet {a.gauntlet!r}")
+    if stuck := gauntlet.problems(g):
+        sys.exit("\n".join(stuck))
     ai.load_models()
     bots = a.bots or ai.available_strategies()
     if a.quick:

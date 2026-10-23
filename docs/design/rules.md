@@ -527,6 +527,11 @@ Reasons: `docs/design/gauntlet.md`.
   (`gauntlet.cleared`). No progress key. `gauntlet.open_stages` is the
   bordering rule, mirrored from the campaign in spirit over local bests; the
   campaign's own rule stays behind `/api/campaign`.
+- **A lane runs one way**, from its first stage to its second, unless the file
+  marks it `two_way` (`Gauntlet.onward`), so clearing a stage never opens the
+  one before it. **Every stage must be reachable from a start**
+  (`gauntlet.problems`): the board's `checkBody` refuses a gauntlet that fails,
+  `tools/gauntlet_check.py` will not play one, and the built-ins are held to it.
 - **A stage is active only while the setup still matches it**
   (`gauntlet.stage_of`, `menu.active_stage`); the banner warns, it never locks.
   A challenge link's setup is never a stage.
