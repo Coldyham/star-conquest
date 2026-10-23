@@ -178,6 +178,8 @@ HUNT_SLOW_FRONT = 1.0       # ...and Greedy's front's share of the pull on slow 
                             # (Field 0.5; 1, the front alone, measured +6.9 pts over
                             # the field, 0.5 null and 0 -1.9: on slow boards the
                             # look-ahead wants the front)
+HUNT_SEND_SMALL = 0         # >0: Hunt also prices sending 1..this many ships down a lane,
+                            # a top-up the greedy's later passes can ask for (measuring)
 
 LOOKAHEAD = True            # roll each candidate plan forward and keep the best
 LOOK_PLIES = 6              # turns each candidate is played on before it is scored
@@ -464,6 +466,8 @@ class _Ledger:
             return []
         spare = self._spare(src)
         amounts = {spare, max(1, spare // 2)}
+        if self.hunt:
+            amounts.update(range(1, min(spare, HUNT_SEND_SMALL) + 1))
         need = self._enough(dst, ((src, self.travel[src][dst]),), spare)
         if need is not None:
             amounts.add(need)
