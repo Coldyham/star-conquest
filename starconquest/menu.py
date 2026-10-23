@@ -596,9 +596,10 @@ def _leave_gauntlet(ms: MenuState, settings: Settings) -> None:
     if active_stage(ms, settings) is not None and ms.stash is not None:
         settings.copy_from(Settings.from_dict(ms.stash))
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
+    word = _playing_word(ms)
     ms.stage_at, ms.stash = None, None
     ms.tutorial_open = False
-    set_status(ms, "Left the tutorial — this is your own setup", True)
+    set_status(ms, f"Left the {word} — this is your own setup", True)
 
 
 def _stage_bits(settings: Settings) -> list[str]:
@@ -670,10 +671,15 @@ def _gauntlets_label(ms: MenuState) -> str:
     return "Gauntlets" if len(ms.gauntlets) > 1 else "Tutorial"
 
 
-def _tutorial_labels() -> tuple[str, str]:
-    if config.touch_ui:
-        return ("Leave tutorial", "Close")
-    return ("Leave tutorial", "Close (Esc)")
+def _playing_word(ms: MenuState) -> str:
+    """What the stage being played belongs to, in a label: "tutorial" only for
+    the built-in one."""
+    return "tutorial" if ms.stage_at is None or ms.stage_at[0] == gauntlet.TUTORIAL_ID else "gauntlet"
+
+
+def _tutorial_labels(ms: MenuState) -> tuple[str, str]:
+    leave = f"Leave {_playing_word(ms)}"
+    return (leave, "Close") if config.touch_ui else (leave, "Close (Esc)")
 
 
 _COPY_GAUNTLET = "Copy link"
@@ -726,7 +732,7 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     found = active_stage(ms, settings)
     here = found[1].id if found is not None and found[0].id == g.id else None
 
-    leave, close = _tutorial_labels()
+    leave, close = _tutorial_labels(ms)
     share = _shareable(ms, g)
     buttons = 1 + (ms.stage_at is not None) + share
     bw = max(f["normal"].size(s)[0] for s in (leave, close, _COPY_GAUNTLET)) + 2 * 18

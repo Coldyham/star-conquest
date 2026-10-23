@@ -1848,6 +1848,16 @@ def test_the_list_button_says_tutorial_until_there_is_another_gauntlet(_gauntlet
     assert main.menu._gauntlets_label(main.MenuState()) == "Gauntlets"
 
 
+def test_leaving_a_gauntlet_that_is_not_the_tutorial_says_gauntlet(_gauntlet_store):
+    ms = _gauntlet_store
+    ms.stage_at = ("tutorial", 0)
+    assert main.menu._tutorial_labels(ms)[0] == "Leave tutorial"
+    ms.stage_at = ("hard-mode-0123456789ab", 0)
+    assert main.menu._tutorial_labels(ms)[0] == "Leave gauntlet"
+    main.menu._leave_gauntlet(ms, Settings())
+    assert "gauntlet" in ms.status and "tutorial" not in ms.status
+
+
 def _watchable_log(tmp_path, monkeypatch, turns=6):
     monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
     state, ui = _setup()

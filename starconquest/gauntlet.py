@@ -361,6 +361,9 @@ def _load_dir(where: Path) -> list[Gauntlet]:
 
 
 _BUILTIN: list[Gauntlet] | None = None
+# The built-in tutorial's id: first in the list, and the one the menu calls
+# "the tutorial" (any other is "a gauntlet").
+TUTORIAL_ID = "tutorial"
 
 
 def builtin() -> list[Gauntlet]:
@@ -368,7 +371,7 @@ def builtin() -> list[Gauntlet]:
     global _BUILTIN
     if _BUILTIN is None:
         found = _load_dir(_ASSETS)
-        found.sort(key=lambda g: g.id != "tutorial")
+        found.sort(key=lambda g: g.id != TUTORIAL_ID)
         _BUILTIN = found
     return list(_BUILTIN)
 
