@@ -112,7 +112,7 @@ class Ui:
     view: WorldView
     human_id: int = 1
     mode: str = IDLE
-    selected: int | None = None  # source system id
+    selected: int | None = None  # any system, to read about; a send's source when ours (`source`)
     hover: int | None = None  # system under the cursor
     dest: int | None = None  # chosen destination system id
     chosen: int = 0  # ships the active one-shot send commits
@@ -428,6 +428,11 @@ class Ui:
     has_next_stage: bool = False
     next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The system whose star info card (`starlore`) is up over the board, or None.
+    # The i button beside a selected system's name in the side panel
+    # (`lore_button_rect`) and the I key open it; any press closes it.
+    lore_sid: int | None = None
+    lore_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
@@ -1336,6 +1341,13 @@ class Ui:
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
+    def source(self, state: GameState) -> int | None:
+        """The selected system when it is ours to send from, else None. Any system
+        can be selected, to read about it in the side panel; only ours sends."""
+        if self.selected in state.systems and state.systems[self.selected].owner_id == self.human_id:
+            return self.selected
+        return None
+
     def reset_selection(self) -> None:
         """Drop all selection/composition state. Committed orders/rules survive
         (they live in `pending`/`auto_forward`), so this only closes the popup."""
