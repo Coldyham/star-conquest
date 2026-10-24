@@ -417,12 +417,19 @@ only the pool's size (stages × N) and each candidate's depth. Two ways to probe
 fewer, compared on the first run's spec, seeds 41-45, by
 `tools/gauntlet_pool_bench.py`:
 
-- **pool**: a pool sized on its own, `stages + 4`, its depths spread evenly
-  (dealt 0, 1, 1/2, 1/4, 3/4, ..., so any prefix is spread evenly too).
-- **stop**: the same order dealt one at a time, stopping once the pick is
-  complete (every stage filled, the last unwon) and either all four usable
-  levels are seen or the last `stages` candidates added no new one; capped at
-  the shipped budget.
+- **pool**: a pool sized on its own, the first `stages + 4` candidates of a
+  round-robin order: one candidate at each stage's depth per round, the ends
+  first (stage 1, 8, 2, 7, ...), so even a partial round favours no depth.
+- **stop**: the same order a round at a time, stopping at the end of a round
+  once the pick is complete (every stage filled, the last unwon) and either
+  shows every usable level or the round added none to it; capped at the
+  shipped budget. **It stops only at a round's end**, so every depth has as
+  many candidates as every other: stopping early cannot lean towards the
+  weaker opponents of the shallow stages, as stopping inside the shipped
+  per-stage blocks would.
+
+With the four shipped probes (a first version of stop, dealing depths 0, 1,
+1/2, 1/4, ... and checking after every candidate):
 
 | Arm | Games (5 seeds) | Stages filled | Usable levels | Last unwon |
 | --- | --- | --- | --- | --- |
@@ -430,16 +437,34 @@ fewer, compared on the first run's spec, seeds 41-45, by
 | pool (stages + 4) | 240 | 37 of 40 | 16 | 5 of 5 |
 | stop | 332 | 40 of 40 | 16 | 5 of 5 |
 
-- **Stopping early halves the games for the same gauntlet quality.** Every seed
-  filled its eight stages and spanned as many levels as the shipped deal; it
-  stopped after 18 candidates on four seeds and 11 on the fifth (which saw all
-  four levels).
-- **A fixed small pool comes up short.** Twelve candidates left seeds 41 and 43
-  one and two stages short: too few were won by any probe. Stopping early
-  sizes the pool to what the seed needs.
-- **The ruler, not the pool, limits the spread.** Every arm reads three usable
-  levels (25, 50, 75%) on most seeds; more candidates only add ties. More or
-  graded probes ("The first run") are what would spread the stages further.
+With six probes (the four plus heuristic with its reserve at 0, and thinker's
+Claudebot stop), round-robin as above:
+
+| Arm | Games (5 seeds) | Stages filled | Usable levels | Last unwon |
+| --- | --- | --- | --- | --- |
+| stage (4 per stage) | 960 | 40 of 40 | 20 | 5 of 5 |
+| pool (stages + 4) | 360 | 38 of 40 | 19 | 5 of 5 |
+| stop | 768 | 40 of 40 | 20 | 5 of 5 |
+
+- **Stopping early keeps the gauntlet and saves games**: every seed filled its
+  stages with as many levels as the full deal. It saved half the games with
+  four probes but a fifth with six: a finer ruler keeps finding a new level, so
+  the pick rarely settles after two rounds.
+- **A fixed small pool comes up short.** Twelve candidates left two or three
+  seeds a stage or two short: too few were won by any probe.
+- **heuristic with its reserve at 0 is a real step up** from stock heuristic:
+  93.6% head to head (`tools/sweep.py --arm 'lean:reserve_floor=0,reserve_fraction=0'`,
+  100 seeds over three cells, both halves reproduced; floor 0 alone 64.6%).
+  As a probe it won 15% of 320 candidates against heuristic's 6%.
+- **Claudebot adds little.** It won 9%, beside rusherplus (8%) and heuristic
+  (6%), and the three disagree on which maps they win (rusherplus won 20 maps
+  heuristic lost, heuristic 12 the other way): at the bottom a win is mostly
+  position. Six probes still spread the easy end (58 of 320 maps won by three
+  or more, against 28 with four).
+- **The spread is limited at the top, not the bottom.** 121 of 320 candidates
+  were won by no probe and 95 by one (mostly marshal), so most picks after the
+  first few read 83% (only marshal won). A probe between thinker (30%) and
+  marshal (53%) would split them; more weak probes would not.
 
 ### In the game
 
