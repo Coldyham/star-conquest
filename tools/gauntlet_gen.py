@@ -6,10 +6,11 @@
         --spec-json '{"rules": {"mode": {"fix": "symmetric"}}, "opponents": {"not": ["knower"]}}'
     uv run python tools/gauntlet_gen.py --run sym8 --targets --target-slack 3   # rerun: picks again, plays nothing
 
-Deals ``--candidates`` setups per stage from the spec (`starconquest/dealer.py`),
-each with opponents for its stage's depth, then plays every candidate with each
-probe bot in seat 1 (`gauntletgen.play`, the bot column's funnel; budgets lifted, so a game is the
-same on any machine). A candidate's difficulty is the share of probes that lose
+Deals candidates from the spec (`starconquest/dealer.py`) a round at a time, one
+at each stage's depth with opponents for that depth, and plays each with every
+probe in seat 1 (`gauntletgen.play`, the bot column's funnel; budgets lifted, so
+a game is the same on any machine). It stops at the end of the first round the
+pick settles (`gauntletgen.settled`), or after ``--rounds``. A candidate's difficulty is the share of probes that lose
 it, as `tools/gauntlet_check.py` measures a stage, with the probes' mean winning
 turns breaking ties. The candidates some probe won are ordered by difficulty and
 one is taken at each of ``stages`` evenly spaced places, so the gauntlet rises
@@ -20,8 +21,8 @@ With ``--targets`` (or ``--targets fastest``) each stage some probe won gets a
 target: the slowest (or the fastest) probe win plus ``--target-slack`` turns. Design: docs/design/gauntlet.md, "Generated gauntlets".
 
 Every game is a line in ``results/gauntlet_gen/<run>.jsonl`` the moment it
-finishes; the run's spec, seed and candidates head the file, and a rerun plays
-only the games not there. The gauntlet is written to
+finishes; the run's spec, seed and rounds head the file, and a rerun plays only
+the games not there. The gauntlet is written to
 ``results/gauntlet_gen/<run>.json`` (and ``--out``), the file a desktop player
 drops in the game's gauntlets folder.
 """
@@ -41,13 +42,14 @@ sys.path.insert(0, str(ROOT))
 
 from starconquest import ai, dealer, gauntlet  # noqa: E402
 from starconquest import gauntletgen as gg  # noqa: E402
-from starconquest.gauntletgen import candidates, measure, pick, target  # noqa: E402,F401
+from starconquest.gauntletgen import candidates, measure, pick, settled, target  # noqa: E402,F401
 from starconquest.settings import Settings, random_seed  # noqa: E402
 
 RESULTS = ROOT / "results" / "gauntlet_gen"
 PROBES = gg.PROBES
 # Bots slow enough to make a probe game, or every turn of a game they sit in,
-# take minutes: worth saying before a run with them starts.
+# take minutes: worth saying before a run with them starts. knower at Off is a
+# probe and fast; only its oracle is slow.
 SLOW = ("knower", "actuary")
 MAX_TURNS = gg.MAX_TURNS
 
@@ -61,7 +63,7 @@ def _shown(path: Path) -> str:
 
 
 def play_one(key: str, stage: dict, bot: str) -> dict:
-    if bot not in ai.STRATEGIES:
+    if gg.probe_profile(bot)[0] not in ai.STRATEGIES:
         ai.load_models()
     ai.set_budget_scale(math.inf)
     return gg.play_one(key, stage, bot, MAX_TURNS)
@@ -123,7 +125,8 @@ def main() -> None:
     ap.add_argument("--spec-json", help="a spec as JSON text")
     ap.add_argument("--stages", type=int, help="overrides the spec's stage count")
     ap.add_argument("--seed", type=int, help="overrides the spec's seed (default: rolled, then kept)")
-    ap.add_argument("--candidates", type=int, default=4, help="candidates dealt per stage (default 4)")
+    ap.add_argument("--rounds", type=int, default=gg.ROUNDS,
+                    help=f"most rounds of candidates, one per stage each (default {gg.ROUNDS})")
     ap.add_argument("--probes", nargs="*", default=list(PROBES), help="bots that measure difficulty")
     ap.add_argument("--name", help="the gauntlet's name (default: Generated <seed>)")
     ap.add_argument("--targets", nargs="?", const="slowest", choices=gg.TARGETS,
@@ -141,9 +144,11 @@ def main() -> None:
     ai.load_models()
     if head is not None:
         # A rerun deals what the first run dealt; flags that would change it are refused.
-        raw, seed, per = head["spec"], head["seed"], head["candidates"]
+        if "rounds" not in head:
+            sys.exit(f"{_shown(path)} was dealt per stage, before rounds: use a new --run")
+        raw, seed, rounds = head["spec"], head["seed"], head["rounds"]
         changed = (a.spec, a.spec_json, a.stages is not None, a.seed not in (None, seed),
-                   a.candidates not in (ap.get_default("candidates"), per))
+                   a.rounds not in (ap.get_default("rounds"), rounds))
         if any(changed):
             sys.exit(f"{_shown(path)} already holds a run: drop the spec flags or use a new --run")
     else:
@@ -153,40 +158,49 @@ def main() -> None:
         seed = a.seed if a.seed is not None else raw.get("seed")
         if not isinstance(seed, int):
             seed = random_seed()
-        per = max(1, a.candidates)
+        rounds = max(1, a.rounds)
     spec = dealer.Spec.from_dict(raw)
     if stuck := dealer.problems(spec):
         sys.exit("\n".join(stuck))
-    if slow := [b for b in SLOW if b in a.probes or any(o.partition(":")[0] == b for o in spec.opponents)]:
+    if slow := [b for b in SLOW if any(o.partition(":")[0] == b for o in spec.opponents)]:
         print(f"note: {', '.join(slow)} may sit in these games and are slow: expect minutes a game")
 
-    cands = candidates(spec, seed, per)
+    cands = candidates(spec, seed, rounds)
     if head is None:
         with open(path, "a") as out:
-            out.write(json.dumps({"header": True, "spec": spec.to_dict(), "seed": seed, "candidates": per}) + "\n")
-    stage_of = {c["key"]: c["stage"] for c in cands}
+            out.write(json.dumps({"header": True, "spec": spec.to_dict(), "seed": seed, "rounds": rounds}) + "\n")
     done = {(r["key"], r["bot"]) for r in rows}
-    jobs = [(c["key"], b) for c in cands for b in a.probes if (c["key"], b) not in done]
-    print(f"seed {seed}: {len(cands)} candidates, {len(jobs)} games to play "
-          f"({len(done)} already in {_shown(path)})", flush=True)
-    t0 = time.time()
-    if jobs:
-        with open(path, "a") as out, ProcessPoolExecutor(a.workers) as pool:
-            futures = [pool.submit(play_one, key, stage_of[key], bot) for key, bot in jobs]
-            for i, fut in enumerate(as_completed(futures), 1):
-                row = fut.result()
-                out.write(json.dumps(row) + "\n")
-                out.flush()
-                rows.append(row)
-                print(f"  {i}/{len(jobs)} {row['bot']}: {'won' if row['won'] else 'lost'} "
-                      f"in {row['turns']}t ({time.time() - t0:.0f}s)", flush=True)
+    print(f"seed {seed}: at most {rounds} rounds of {spec.stages} candidates, "
+          f"{len(done)} games already in {_shown(path)}", flush=True)
+    t0, shown = time.time(), None
+    with ProcessPoolExecutor(a.workers) as pool:
+        for r in range(rounds):
+            dealt = [c for c in cands if c["round"] <= r]
+            jobs = [(c, b) for c in dealt if c["round"] == r for b in a.probes if (c["key"], b) not in done]
+            if jobs:
+                print(f"round {r + 1}: {len(jobs)} games to play", flush=True)
+                with open(path, "a") as out:
+                    futures = [pool.submit(play_one, c["key"], c["stage"], b) for c, b in jobs]
+                    for i, fut in enumerate(as_completed(futures), 1):
+                        row = fut.result()
+                        out.write(json.dumps(row) + "\n")
+                        out.flush()
+                        rows.append(row)
+                        print(f"  {i}/{len(jobs)} {row['bot']}: {'won' if row['won'] else 'lost'} "
+                              f"in {row['turns']}t ({time.time() - t0:.0f}s)", flush=True)
+            stop, shown = settled(measure(dealt, rows, a.probes), spec.stages, not a.no_unwon_last,
+                                  len(a.probes), shown)
+            if stop:
+                print(f"settled after round {r + 1}", flush=True)
+                cands = dealt
+                break
 
     measured = measure(cands, rows, a.probes)
     picked = pick(measured, spec.stages, not a.no_unwon_last)
     report(measured, picked, a.probes)
     if len(picked) < spec.stages:
         print(f"  note: only {len(picked)} candidates could be picked; "
-              f"deal more with a new --run and a larger --candidates")
+              f"deal more with a new --run and a larger --rounds")
     data = gg.build(f"gen-{a.run}", a.name or f"Generated {seed}", picked, a.targets, a.target_slack)
     g = gauntlet.Gauntlet.from_dict(data)
     if g is None or gauntlet.problems(g):

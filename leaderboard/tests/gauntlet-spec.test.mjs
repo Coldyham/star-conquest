@@ -27,7 +27,7 @@ test("the starting form builds a spec a phone can afford", () => {
              mode: { in: ["random", "symmetric"] }, fog: { fix: false } },
     opponents: { in: ["rusherplus", "heuristic", "thinker", "evolved", "marshal", "actuary"] },
   });
-  assert.equal(gameCount(spec), 72);
+  assert.equal(gameCount(spec), 90);
 });
 
 test("each choice becomes the dealer's rule", () => {

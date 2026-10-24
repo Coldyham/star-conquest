@@ -13,7 +13,8 @@
 // pins on the game's default, a switch Off) is left out, so the game keeps that
 // field at its default (`roll` false) or rolls it (`roll` true). The run's own options
 // (`candidates`, `targets`, `slack`, `name`, `unwon_last`) ride beside it, read by
-// `gauntletgen.job_from_link`.
+// `gauntletgen.job_from_link`. `candidates` is the most rounds the game deals, one
+// map per stage each; it stops at the first round its pick settles.
 
 import { SETUP_DEFAULTS } from "./config.mjs";
 import { LADDER_ORDER } from "./standings.mjs";
@@ -22,7 +23,7 @@ import { encodeToken } from "./token-encode.mjs";
 export const SPEC_FRAGMENT = "gauntlet-spec=";
 // The bots that measure a stage (`gauntletgen.PROBES`): each candidate is played
 // once by each, so the count sets how long the game takes.
-export const PROBES = 4;
+export const PROBES = 5;
 export const LIMITS = Object.freeze({
   stages: [2, 16],
   players: [2, 6],
@@ -212,7 +213,8 @@ export function buildSpec(form, rollSeed = () => Math.floor(Math.random() * LIMI
   return spec;
 }
 
-/** How many probe games the game will play for a spec: what a phone waits on. */
+/** The most probe games the game will play for a spec (it often stops sooner):
+ * what a phone waits on. */
 export function gameCount(spec) {
   return spec.stages * spec.candidates * PROBES;
 }

@@ -527,7 +527,7 @@ def land_gauntlet(menu_state: MenuState, settings: Settings, state: str, body: s
 # A `#gauntlet-spec=` launch URL, built on the board's gauntlet page, generates a
 # gauntlet here (`gauntletgen`): every probe game played a slice per menu frame,
 # then the result kept and opened on the Tutorial list, as a `#g=` one is.
-GAUNTLET_GEN_MSG = "Generating a gauntlet: {pct:.0%} (games {done} of {total})"
+GAUNTLET_GEN_MSG = "Generating a gauntlet: {pct:.0%} (games {done} of at most {total})"
 GAUNTLET_GEN_REFUSED_MSG = "Can't generate that gauntlet: {why}"
 GAUNTLET_GEN_EMPTY_MSG = "No generated map was won by any test bot: try a looser setup"
 # How long the generator may hold a menu frame. A probe turn is a few ms for

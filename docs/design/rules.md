@@ -569,9 +569,11 @@ Reasons: `docs/design/gauntlet.md`.
 - **A generated gauntlet is dealt from a spec** (`dealer.py`): no `Settings`
   field, every seat a named bot, the seed through `roll_seed`, a pure function
   of the spec and the rng. `Spec.from_dict` never raises; `dealer.problems`
-  names a spec that can never deal. `tools/gauntlet_gen.py` picks among
-  candidates by the share of probes that lose them and never picks one no probe
-  won (`tests/test_dealer.py`, `tests/test_gauntlet_gen.py`). The game
+  names a spec that can never deal. Candidates are dealt a round at a time,
+  one per stage depth, and a run stops only where a round ends
+  (`gauntletgen.settled`), so stopping early never leans to shallow stages.
+  `tools/gauntlet_gen.py` picks among candidates by the share of probes that
+  lose them and takes one no probe won only as the last stage (`tests/test_dealer.py`, `tests/test_gauntlet_gen.py`). The game
   generates from a `#gauntlet-spec=` link a slice per menu frame
   (`gauntletgen.Job`, `main.pump_generation`), pushes the menu's setup back
   into `config` after every slice, and keeps the result like a linked
