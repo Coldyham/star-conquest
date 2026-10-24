@@ -468,6 +468,25 @@ Claudebot stop), round-robin as above:
   (23 usable levels over five seeds against 20; stop 896 games against 1,120)
   but does not split thinker from marshal: 59 maps were still won by marshal
   alone of the three.
+- **evolved at Look-ahead Off (`evolved:0`) fills the gap and stays fast**:
+  39% of candidates won, between knower at Off (32%) and marshal (53%), at a
+  median 0.30 s a probe game (thinker 0.23 s, marshal 0.23 s). Of the 59 maps
+  marshal alone of thinker, knower and marshal won, it won 17. Look-ahead On
+  (`evolved:1`) is marshal's strength (50%) at 2.1 s a game, seven times the
+  cost for what marshal already measures.
+- **Four probes, chosen for spread** (heuristic with its reserve at 0, thinker,
+  `evolved:0`, marshal), read from the same games, seeds 41-45:
+
+  | Probes | Arm | Games | Stages filled | Usable levels (most 20) |
+  | --- | --- | --- | --- | --- |
+  | shipped four | stage | 640 | 40 of 40 | 15 |
+  | shipped four | stop | 512 | 40 of 40 | 15 |
+  | chosen four | stage | 640 | 40 of 40 | 20 |
+  | chosen four | stop | 384 | 40 of 40 | 20 |
+
+  Every seed's pick used all four usable levels, for 40% fewer games than
+  ships. With more probes stop saves less: a ruler of nine (adding `evolved:1`
+  and the rest) settled late enough to play 1,368 games against 1,440.
 - **The spread is limited at the top, not the bottom.** 121 of 320 candidates
   were won by no probe and 95 by one (mostly marshal), so most picks after the
   first few read 83% (only marshal won). A probe between thinker (30%) and
