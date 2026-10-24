@@ -410,6 +410,37 @@ CPU on the container (actuary sat in some of them).
 - **No stage was won by every probe.** The first stage lost by one probe in
   four, so a "won by all" floor would have left the run without a first stage.
 
+### Dealing fewer candidates (measured 2026-10-24, not shipped)
+
+The pick already pools every candidate and sorts the pool, so "per stage" sets
+only the pool's size (stages × N) and each candidate's depth. Two ways to probe
+fewer, compared on the first run's spec, seeds 41-45, by
+`tools/gauntlet_pool_bench.py`:
+
+- **pool**: a pool sized on its own, `stages + 4`, its depths spread evenly
+  (dealt 0, 1, 1/2, 1/4, 3/4, ..., so any prefix is spread evenly too).
+- **stop**: the same order dealt one at a time, stopping once the pick is
+  complete (every stage filled, the last unwon) and either all four usable
+  levels are seen or the last `stages` candidates added no new one; capped at
+  the shipped budget.
+
+| Arm | Games (5 seeds) | Stages filled | Usable levels | Last unwon |
+| --- | --- | --- | --- | --- |
+| stage (4 per stage, shipped) | 640 | 40 of 40 | 15 | 5 of 5 |
+| pool (stages + 4) | 240 | 37 of 40 | 16 | 5 of 5 |
+| stop | 332 | 40 of 40 | 16 | 5 of 5 |
+
+- **Stopping early halves the games for the same gauntlet quality.** Every seed
+  filled its eight stages and spanned as many levels as the shipped deal; it
+  stopped after 18 candidates on four seeds and 11 on the fifth (which saw all
+  four levels).
+- **A fixed small pool comes up short.** Twelve candidates left seeds 41 and 43
+  one and two stages short: too few were won by any probe. Stopping early
+  sizes the pool to what the seed needs.
+- **The ruler, not the pool, limits the spread.** Every arm reads three usable
+  levels (25, 50, 75%) on most seeds; more candidates only add ties. More or
+  graded probes ("The first run") are what would spread the stages further.
+
 ### In the game
 
 - **`#gauntlet-spec=<payload>`** carries the spec as deflated JSON in base64url,
