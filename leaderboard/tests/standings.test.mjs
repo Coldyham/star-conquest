@@ -5,8 +5,8 @@ import test from "node:test";
 
 import { CURRENT_RULES_VERSION } from "../js/config.mjs";
 import {
-  bestBot, botOrder, botWatchKind, compareScores, displayOrder, humanVsBots,
-  rankAmong, scoreComparator, standings, tally,
+  bestBot, botOrder, botWatchKind, compareScores, displayOrder, embargoLiftedAt, humanVsBots,
+  leaderAt, rankAmong, scoreComparator, standings, tally,
 } from "../js/standings.mjs";
 
 const at = (day) => `2026-09-${String(day).padStart(2, "0")}T12:00:00+00:00`;
@@ -255,4 +255,29 @@ test("a loss offers nothing, whatever match_id/rules_version happen to be set", 
   // an old row can never accidentally offer a Watch link for a failed replay.
   assert.equal(botWatchKind({ won: false, match_id: "", rules_version: 0 }), "none");
   assert.equal(botWatchKind({ won: false, match_id: "00112233445566ff", rules_version: CURRENT_RULES_VERSION }), "none");
+});
+
+test("embargoLiftedAt: the later of the stored reveal and the campaign week's end, once both have passed", () => {
+  const now = Date.parse("2026-10-20T12:00:00Z");
+  assert.equal(embargoLiftedAt(null, null, now), null);
+  assert.equal(embargoLiftedAt("2026-10-01T00:00:00Z", null, now), "2026-10-01T00:00:00.000Z");
+  // The week of Monday 5 October ends Monday the 12th.
+  assert.equal(embargoLiftedAt(null, "2026-10-05", now), "2026-10-12T00:00:00.000Z");
+  assert.equal(embargoLiftedAt("2026-10-01T00:00:00Z", "2026-10-05", now), "2026-10-12T00:00:00.000Z");
+  // Still in force, by either half: nothing has lifted yet.
+  assert.equal(embargoLiftedAt("2026-10-25T00:00:00Z", "2026-10-05", now), null);
+  assert.equal(embargoLiftedAt(null, "2026-10-19", now), null);
+});
+
+test("leaderAt: the best counted score posted by then, ignoring later and uncounted ones", () => {
+  const score = (id, turns, lost, day) => ({ id, turns, lost, submitted_at: at(day) });
+  const early = score(1, 30, 2, 1);
+  const tiedLater = score(2, 30, 2, 3);
+  const unchecked = score(3, 20, 0, 2);   // better, but doesn't count
+  const after = score(4, 25, 1, 9);       // better, but posted after the lift
+  const scores = [after, tiedLater, unchecked, early];
+  const counted = new Set([1, 2, 4]);
+  assert.equal(leaderAt(scores, counted, at(5)), early);
+  assert.equal(leaderAt(scores, counted, at(10)), after);
+  assert.equal(leaderAt(scores, counted, at(1).replace("12:00", "11:00")), null);
 });

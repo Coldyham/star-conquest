@@ -1084,6 +1084,16 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 /* A score whose replay the worker checked (score_checks.verdict = 'verified'). */
 .verified { margin-left: 0.35em; color: var(--green); cursor: help; }
 
+/* The score that was ahead when the map's embargo lifted (game.mjs's revealMark). */
+.at-reveal {
+  margin-left: 0.6em;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  cursor: help;
+  border-bottom: 1px dotted currentColor;
+  white-space: nowrap;
+}
+
 /* -- the weekly campaign (campaign.html) --------------------------------- */
 .campaign-status { margin: 0 0 1rem; color: var(--dim); }
 .campaign-map svg { display: block; width: 100%; height: auto; }
