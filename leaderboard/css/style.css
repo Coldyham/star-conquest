@@ -1226,3 +1226,45 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 }
 .gauntlet-form #problem { color: var(--gold); }
 .gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
+
+/* -- the generate form (gauntlet.html) --------------------------------------- */
+.gen { margin: 1.5rem 0; }
+.gen summary { cursor: pointer; color: var(--gold); }
+.gen .row input[type="number"] { width: 6rem; }
+.gen-bots { border: 1px solid var(--line); padding: 0.5rem 1rem; margin: 0.5rem 0; }
+.gen-bots legend { padding: 0 0.5rem; color: var(--gold); }
+.gen-bots #gen-opponents { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+/* The generate form's sliders: tabs and headings fold away; each knob is two
+   range inputs over one track, only their thumbs taking a press. */
+.gen-tab, .gen-group { border: 1px solid var(--line); padding: 0.25rem 0.75rem; margin: 0.5rem 0; }
+.gen-group { border-style: dashed; }
+.gen-tab > summary, .gen-group > summary { cursor: pointer; color: var(--gold); padding: 0.25rem 0; }
+.gen-group > summary { color: var(--dim); }
+.gen .count { color: var(--dim); font-size: 0.9em; }
+.gen .knob { margin: 0.5rem 0; }
+.gen .knob select { width: 100%; }
+.gen .knob-head { display: flex; justify-content: space-between; gap: 1rem; }
+.gen .knob-head .readout { color: var(--gold); white-space: nowrap; }
+.gen .dual { position: relative; height: 2.25rem; }
+.gen .dual .track, .gen .dual .fill {
+  position: absolute; top: 50%; height: 4px; transform: translateY(-50%); border-radius: 2px;
+}
+.gen .dual .track { left: 0; right: 0; background: var(--line); }
+.gen .dual .fill { background: var(--gold); }
+.gen .dual input[type="range"] {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0;
+  background: none; pointer-events: none; -webkit-appearance: none; appearance: none;
+}
+.gen .dual input[type="range"]::-webkit-slider-runnable-track { background: none; }
+.gen .dual input[type="range"]::-moz-range-track { background: none; }
+.gen .dual input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto; -webkit-appearance: none; appearance: none; width: 1.5rem; height: 1.5rem;
+  border-radius: 50%; background: var(--gold); border: 2px solid #0b0a1a; cursor: pointer;
+}
+.gen .dual input[type="range"]::-moz-range-thumb {
+  pointer-events: auto; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: var(--gold); border: 2px solid #0b0a1a; cursor: pointer;
+}
+.gen .dual input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
+.gen .dual input[type="range"]:disabled::-moz-range-thumb { background: var(--dim); }
+.gen-group > .mini { margin: 0.25rem 0 0.5rem; }

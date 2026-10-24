@@ -1,0 +1,209 @@
+{
+  "spec": {
+    "stages": 3,
+    "seed": 12,
+    "rules": {
+      "players": {
+        "range": [
+          2,
+          3
+        ]
+      },
+      "systems": {
+        "range": [
+          13,
+          18
+        ]
+      },
+      "mode": {
+        "fix": "symmetric"
+      },
+      "fog": {
+        "fix": false
+      },
+      "garrison_k": {
+        "range": [
+          6,
+          10
+        ]
+      },
+      "defender_advantage": {
+        "fix": 1.1
+      }
+    },
+    "opponents": {
+      "in": [
+        "rusherplus",
+        "heuristic"
+      ]
+    },
+    "roll": false,
+    "candidates": 1,
+    "targets": "fastest"
+  },
+  "fragment": "gauntlet-spec=eNpVj1FqAzEMRO8y36LEWSjBVwkliLW8MfXai-QtXYLvXhxKaP8GPXiaecAaL2LwE8FEArw7E3TP4_bAlvkQfUblsgj89UzTRyfYYU3Wf8RN5C6DrTXIADF9w8OOdZWmaUYnxLq8SORs0gkLqyar5fb51_ZO7jRkQaKUIHrj8MVltH0J3JvrnVC3rRYp7VkmFfgrdLe76JZ3A-EuuyZracbwac359zdh5hJS4DbWOkJjXWR4ENmaWEP_AXRgYY0",
+  "knobs": [
+    {
+      "tab": "Advanced",
+      "groups": [
+        {
+          "heading": "Map",
+          "knobs": [
+            {
+              "attr": "node_jitter",
+              "label": "Node jitter",
+              "lo": 0,
+              "hi": 1,
+              "step": 0.05
+            },
+            {
+              "attr": "relax_min_sep_frac",
+              "label": "Relax min-sep",
+              "lo": 0,
+              "hi": 1.2,
+              "step": 0.05
+            },
+            {
+              "attr": "lloyd_passes",
+              "label": "Relax passes",
+              "lo": 0,
+              "hi": 5,
+              "step": 1
+            },
+            {
+              "attr": "extra_edge_fraction",
+              "label": "Extra edges",
+              "lo": 0,
+              "hi": 1,
+              "step": 0.05
+            },
+            {
+              "attr": "max_edge_length_frac",
+              "label": "Max edge len",
+              "lo": 0.1,
+              "hi": 1,
+              "step": 0.05
+            }
+          ],
+          "switches": []
+        },
+        {
+          "heading": "Travel",
+          "knobs": [
+            {
+              "attr": "ship_ly_per_turn",
+              "label": "Ship speed (ly/turn)",
+              "lo": 1,
+              "hi": 30,
+              "step": 0.5
+            },
+            {
+              "attr": "ship_speed_growth_pct",
+              "label": "Speed gain %/turn",
+              "lo": 0,
+              "hi": 2,
+              "step": 0.05
+            }
+          ],
+          "switches": []
+        },
+        {
+          "heading": "Visibility",
+          "knobs": [
+            {
+              "attr": "fog_sight",
+              "label": "Sight range",
+              "lo": 0,
+              "hi": 8,
+              "step": 1
+            },
+            {
+              "attr": "fog_scout",
+              "label": "Scout range",
+              "lo": 1,
+              "hi": 8,
+              "step": 1
+            }
+          ],
+          "switches": []
+        },
+        {
+          "heading": "Economy",
+          "knobs": [
+            {
+              "attr": "home_start_ships",
+              "label": "Home ships",
+              "lo": 1,
+              "hi": 50,
+              "step": 1
+            },
+            {
+              "attr": "home_production",
+              "label": "Home production",
+              "lo": 1,
+              "hi": 8,
+              "step": 1
+            },
+            {
+              "attr": "garrison_base",
+              "label": "Garrison base",
+              "lo": 0,
+              "hi": 20,
+              "step": 1
+            },
+            {
+              "attr": "garrison_k",
+              "label": "Garrison scale",
+              "lo": 0,
+              "hi": 40,
+              "step": 1
+            },
+            {
+              "attr": "garrison_jitter",
+              "label": "Garrison jitter",
+              "lo": 0,
+              "hi": 10,
+              "step": 1
+            }
+          ],
+          "switches": [
+            {
+              "attr": "neutral_produces",
+              "label": "Neutral produces"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Combat",
+      "groups": [
+        {
+          "heading": "Combat",
+          "knobs": [
+            {
+              "attr": "combat_jitter",
+              "label": "Combat jitter",
+              "lo": 0,
+              "hi": 0.5,
+              "step": 0.02
+            },
+            {
+              "attr": "defender_advantage",
+              "label": "Defender advantage",
+              "lo": 0.75,
+              "hi": 1.5,
+              "step": 0.05
+            }
+          ],
+          "switches": [
+            {
+              "attr": "in_lane_battles",
+              "label": "In-lane battles"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

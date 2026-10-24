@@ -6,10 +6,14 @@ stays pure. Shared by input.py (mutates it) and render.py (reads it).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from . import config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
+
+if TYPE_CHECKING:
+    from .gauntlet import Target
 
 # interaction modes
 IDLE = "idle"  # nothing selected
@@ -420,12 +424,16 @@ class Ui:
     # closes it and the hint line in the side panel (`stage_hint_rect`) opens it
     # again. `has_next_stage` puts Next stage where New map was on the win
     # overlay: a stage's seed is pinned, so a new map would leave the stage.
+    # `stage_target` is the stage's `gauntlet.Target` (a plain value), and
+    # `stage_met_before` whether a best filed before this match already meets it.
     stage_label: str | None = None
     stage_title: str = ""
     briefing: tuple[str, ...] = ()
     briefing_open: bool = False
     stage_hint: str | None = None
     has_next_stage: bool = False
+    stage_target: Target | None = None
+    stage_met_before: bool = False
     next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The system whose star info card (`starlore`) is up over the board, or None.
@@ -706,12 +714,23 @@ class Ui:
     def in_stage(self) -> bool:
         return self.stage_label is not None
 
+    def met_target(self, state: GameState) -> bool:
+        """Does this win meet the stage's target (any win, with none)?"""
+        if self.stage_target is None:
+            return True
+        return self.stage_target.met((state.turn, state.players[self.human_id].ships_lost))
+
+    def stage_cleared(self, state: GameState) -> bool:
+        """Is the stage cleared once this win is filed? `main.record_best` files
+        it on the same `can_post` gate, and a stage is cleared by a best that
+        meets its target (`gauntlet.cleared`): this game's, or an earlier one."""
+        return self.can_post(state) and (self.stage_met_before or self.met_target(state))
+
     def offers_next_stage(self, state: GameState) -> bool:
-        """Is Next stage on the win overlay? Only for a win that cleared the stage
-        — `main.record_best` files it on the same `can_post` gate, and a stage is
-        cleared by exactly that best (`gauntlet.cleared`) — so the button never
-        leads to a stage the list would still show locked."""
-        return self.in_stage and self.has_next_stage and self.can_post(state)
+        """Is Next stage on the win overlay? Only for a win that leaves the stage
+        cleared (`stage_cleared`), so the button never leads to a stage the list
+        would still show locked."""
+        return self.in_stage and self.has_next_stage and self.stage_cleared(state)
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

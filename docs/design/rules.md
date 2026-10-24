@@ -15,7 +15,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`. `tests/test_settings.py::test_no_core_module_imports_pygame`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`. `tests/test_settings.py::test_no_core_module_imports_pygame`
   parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
   writes into and never reads back) are presentation-only: the engine and AI
   never consult them.
@@ -524,9 +524,21 @@ Reasons: `docs/design/gauntlet.md`.
   stage posts to the leaderboard as an ordinary game.
 - **Progress is derived, never stored**: a stage is cleared when
   `webstore.best(*stage_settings.challenge_keys())` holds a by-hand win
-  (`gauntlet.cleared`). No progress key. `gauntlet.open_stages` is the
+  that meets the stage's `target`, if it has one (`gauntlet.cleared`,
+  `Target.met`). No progress key. `gauntlet.open_stages` is the
   bordering rule, mirrored from the campaign in spirit over local bests; the
   campaign's own rule stays behind `/api/campaign`.
+- **A stage target is gauntlet data, never `Settings`**: `{turns, lost?, bot?,
+  beat?}`, scored as a best is (turns, then lost). An author's is met (at or
+  under), a bot's (`beat`) is beaten (strictly under). A win short of it leaves
+  the stage open (`open_stages`' `won`) and opens nothing beyond. Fixed into the
+  file, never looked up live; none in the tutorial
+  (`test_no_builtin_stage_has_a_target`).
+- **A lane runs one way**, from its first stage to its second, unless the file
+  marks it `two_way` (`Gauntlet.onward`), so clearing a stage never opens the
+  one before it. **Every stage must be reachable from a start**
+  (`gauntlet.problems`): the board's `checkBody` refuses a gauntlet that fails,
+  `tools/gauntlet_check.py` will not play one, and the built-ins are held to it.
 - **A stage is active only while the setup still matches it**
   (`gauntlet.stage_of`, `menu.active_stage`); the banner warns, it never locks.
   A challenge link's setup is never a stage.
@@ -536,9 +548,11 @@ Reasons: `docs/design/gauntlet.md`.
   clamps text (`HINT_MAX` is what `test_a_stage_hint_fits_the_empty_panel`
   holds).
 - **Render never sees a `Gauntlet`**: `main.stage_ui` copies a stage onto `Ui`
-  as plain values (`stage_label`, `briefing`, `stage_hint`, `has_next_stage`).
-  A stage offers no New map (its seed is pinned); Next stage appears only for a
-  win that cleared it (`Ui.offers_next_stage`).
+  as plain values (`stage_label`, `briefing`, `stage_hint`, `has_next_stage`,
+  `stage_target`, `stage_met_before`). A stage offers no New map (its seed is
+  pinned); Next stage appears only for a win that leaves it cleared, this
+  game's or an earlier best meeting the target (`Ui.stage_cleared`,
+  `Ui.offers_next_stage`).
 - **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
   the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in
@@ -552,6 +566,20 @@ Reasons: `docs/design/gauntlet.md`.
   characters (`NAME_MAX`). Never store a gauntlet in `campaigns`: its views would
   read it as a campaign week. `tests/test_admin.py`,
   `leaderboard/tests/gauntlet-*.test.mjs`.
+- **A generated gauntlet is dealt from a spec** (`dealer.py`): no `Settings`
+  field, every seat a named bot, the seed through `roll_seed`, a pure function
+  of the spec and the rng. `Spec.from_dict` never raises; `dealer.problems`
+  names a spec that can never deal. Candidates are dealt a round at a time,
+  one per stage depth, and a run stops only where a round ends
+  (`gauntletgen.settled`), so stopping early never leans to shallow stages.
+  `tools/gauntlet_gen.py` picks among candidates by the share of probes that
+  lose them and takes one no probe won only as the last stage (`tests/test_dealer.py`, `tests/test_gauntlet_gen.py`). The game
+  generates from a `#gauntlet-spec=` link a slice per menu frame
+  (`gauntletgen.Job`, `main.pump_generation`), pushes the menu's setup back
+  into `config` after every slice, and keeps the result like a linked
+  gauntlet; the board's form only builds the link (`gauntlet-spec.mjs`). One
+  probe path, `gauntletgen.play`, for the tool and the game
+  (`tests/test_gauntletgen.py`).
 - **`#g=<id>` is fetched once and kept**, `#gauntlet=<payload>` carries the file
   (`gauntlet.link_id`, `gauntlet.inline_data`); both open the Tutorial list on
   it (`main.open_linked_gauntlet`). A kept one opens without a fetch. What the
