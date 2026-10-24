@@ -349,17 +349,26 @@ That matters because a random map is decided by position as much as by play
 
 ### The benchmark
 
-1. **Deal more candidates than stages**: `--candidates` per stage (default 4),
-   each at its stage's depth.
-2. **Probe every candidate** with fixed bots in seat 1 (`tests.sim.
+1. **Deal candidates a round at a time** (`gauntletgen.candidates`, since
+   2026-10-24): one at each stage's depth per round, the ends first, at most
+   `--rounds` rounds (default 4; a link asks with `candidates`, default 3).
+2. **Probe every candidate** with fixed probes in seat 1 (`tests.sim.
    play_settings`, budgets lifted, so the result is the same on any machine):
-   rusherplus, heuristic, thinker and marshal by default. A candidate's
+   heuristic with its reserve at 0, thinker, knower at Off, evolved at
+   Look-ahead Off and marshal (`gauntletgen.PROBES`, spaced by strength and
+   free of any wall-clock guard; "Dealing fewer candidates"). Until 2026-10-24
+   they were rusherplus, heuristic, thinker and marshal. A candidate's
    difficulty is the share of probes that lose it, `tools/gauntlet_check.py`'s
    measure, with the probes' mean winning turns breaking ties.
 3. **Pick a rising sequence across the spread**, not the top of a sort: the
    usable candidates (at least one probe won) ordered by difficulty, then one
    at each of `stages` evenly spaced places. The tool reports a first stage
    some probe lost or a last stage every probe won.
+   **The run stops at the end of the first round its pick settles**
+   (`gauntletgen.settled`): every stage filled, the last unwon (with
+   `unwon_last`), and the pick either shows every usable level the probes tell
+   apart or the round added none to it. Checked only where a round ends, so
+   every depth has as many candidates as every other.
    **The last stage may be one no probe won** (`unwon_last`, on by default;
    `--no-unwon-last`, or the form's checkbox, turns it off). On the board in
    October 2026, of 163 maps with a posted win (scores are wins) and bot
@@ -379,8 +388,8 @@ That matters because a random map is decided by position as much as by play
    probe won has no target, there being no bot score to set it.
 
 Every game is a line in `results/gauntlet_gen/<run>.jsonl` the moment it
-finishes, under a header line holding the spec, seed and candidate count; a
-rerun deals the same candidates, skips the games already there, refuses flags
+finishes, under a header line holding the spec, seed and rounds; a
+rerun deals the same candidates, stops at the same round, skips the games already there, refuses flags
 that would deal differently, and picks again (so `--targets` can be changed for
 free).
 
@@ -410,7 +419,7 @@ CPU on the container (actuary sat in some of them).
 - **No stage was won by every probe.** The first stage lost by one probe in
   four, so a "won by all" floor would have left the run without a first stage.
 
-### Dealing fewer candidates (measured 2026-10-24, not shipped)
+### Dealing fewer candidates (measured 2026-10-24, shipped)
 
 The pick already pools every candidate and sorts the pool, so "per stage" sets
 only the pool's size (stages × N) and each candidate's depth. Two ways to probe
@@ -492,11 +501,21 @@ Claudebot stop), round-robin as above:
   first few read 83% (only marshal won). A probe between thinker (30%) and
   marshal (53%) would split them; more weak probes would not.
 
+**What shipped** (2026-10-24): rounds and stop as above, with five probes:
+heuristic with its reserve at 0, thinker, knower at Off, evolved at Look-ahead
+Off and marshal (15, 30, 32, 39 and 53% of candidates won). Nothing fast plays
+above marshal: knower at Predict won 52% and agreed with marshal on most maps,
+and runs rivals' bots inside a 50 ms wall-clock guard the game never lifts, so
+the same link could measure differently on a slow phone. From the recorded
+games, seeds 41-45: the old per-stage deal of four would play 800 games for 25
+usable levels; stop played 600 for 23, every stage filled and the last unwon on
+every seed.
+
 ### In the game
 
 - **`#gauntlet-spec=<payload>`** carries the spec as deflated JSON in base64url,
-  as a settings token does, with the run's options beside it (`candidates`,
-  `targets`, `slack`, `name`), which `Spec.from_dict` ignores
+  as a settings token does, with the run's options beside it (`candidates`, now
+  the most rounds, `targets`, `slack`, `name`), which `Spec.from_dict` ignores
   (`gauntletgen.spec_from_fragment`, `job_from_link`). A link with no `seed`
   gets one rolled; the board's form always names one, so opening a link twice
   makes the same gauntlet. On desktop, `--gauntlet-spec SPEC.json` does the
@@ -505,7 +524,8 @@ Claudebot stop), round-robin as above:
   game a turn at a time (`gauntletgen.play`, a generator), and `main.
   pump_generation` gives it `GAUNTLET_GEN_BUDGET_S` (30 ms) a frame while the
   menu is up, with the progress on the menu's status line ("Generating a
-  gauntlet: 40% (games 13 of 32)"). It pauses while a game is played. Done, the
+  gauntlet: 40% (games 13 of at most 32)"; a run that settles early jumps to
+  done). It pauses while a game is played. Done, the
   file is kept (`gauntlet.remember`) and the Tutorial list opens on it, as a
   `#g=` link does.
 - **A probe's balance never leaks into the menu.** A probe game goes through
@@ -522,8 +542,9 @@ Claudebot stop), round-robin as above:
   holds the stepped job to the whole one.
 - **Measured on desktop** (2026-10-23): a four-stage, two-candidate run, 32
   games, took 617 menu frames, about 18 s. A phone is slower by a factor not
-  yet measured; the form defaults to six stages and three candidates (72 games)
-  and says how many games a spec will play.
+  yet measured; the form defaults to six stages and three candidates (72 games
+  then; since rounds, six stages and at most three rounds, at most 90) and says
+  at most how many games a spec will play.
 - **Copy link** on the Tutorial list (web only, for a gauntlet opened from a
   link or generated here: `MenuState.kept_ids`) copies a `#gauntlet=` link
   carrying the whole file (`gauntlet.kept`), so a generated gauntlet is shared

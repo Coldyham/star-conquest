@@ -29,8 +29,9 @@ def test_a_stepped_job_plays_the_same_games_as_playing_them_whole():
     job = gg.job_from_link({**SMALL, "candidates": 2}, seed=0)
     assert job.total == len(job.cands) * len(gg.PROBES) and job.progress() == 0.0
     steps = _finish(job)
-    assert steps > job.total and job.progress() == 1.0
-    whole = [gg.play_one(c["key"], c["stage"], b) for c in job.cands for b in gg.PROBES]
+    assert steps > len(job.rows) and len(job.rows) % len(gg.PROBES) == 0
+    whole = [gg.play_one(r["key"], next(c["stage"] for c in job.cands if c["key"] == r["key"]), r["bot"])
+             for r in job.rows]
     strip = lambda rows: [{k: r[k] for k in ("key", "bot", "won", "turns", "lost")} for r in rows]  # noqa: E731
     assert strip(job.rows) == strip(whole)
 
@@ -60,15 +61,68 @@ def test_the_id_follows_the_spec_and_seed():
     assert gg.job_from_link(unseeded, seed=4).seed == 4
 
 
-@pytest.mark.parametrize("opts, per, targets, slack", [
-    ({}, gg.LINK_CANDIDATES, None, 0),
-    ({"candidates": 99, "targets": "yes", "slack": -1}, gg.MAX_CANDIDATES, None, 0),
-    ({"candidates": True, "targets": True, "slack": 5}, gg.LINK_CANDIDATES, "slowest", 5),
-    ({"targets": "fastest"}, gg.LINK_CANDIDATES, "fastest", 0),
+@pytest.mark.parametrize("opts, rounds, targets, slack", [
+    ({}, gg.LINK_ROUNDS, None, 0),
+    ({"candidates": 99, "targets": "yes", "slack": -1}, gg.MAX_ROUNDS, None, 0),
+    ({"candidates": True, "targets": True, "slack": 5}, gg.LINK_ROUNDS, "slowest", 5),
+    ({"targets": "fastest"}, gg.LINK_ROUNDS, "fastest", 0),
 ])
-def test_link_options_fall_back_when_unreadable(opts, per, targets, slack):
+def test_link_options_fall_back_when_unreadable(opts, rounds, targets, slack):
     job = gg.job_from_link({**SMALL, "stages": 1, **opts}, seed=0)
-    assert len(job.cands) <= per and (job.targets, job.slack) == (targets, slack)
+    assert job.rounds == rounds and (job.targets, job.slack) == (targets, slack)
+
+
+def test_candidates_come_a_round_at_a_time_the_ends_first():
+    spec = dealer.Spec.from_dict({**SMALL, "stages": 5})
+    cands = gg.candidates(spec, 9, 2)
+    assert cands == gg.candidates(spec, 9, 2)
+    assert [c["round"] for c in cands] == [0] * 5 + [1] * 5
+    assert [c["depth"] for c in cands[:5]] == [0.0, 1.0, 0.25, 0.75, 0.5]
+
+
+def test_probes_are_bots_stops_and_tweaks():
+    assert gg.probe_profile("marshal") == ("marshal", gg.AiParams())
+    assert gg.probe_profile("evolved:0") == ("evolved", gg.AiParams(aux=0.0))
+    bot, params = gg.probe_profile("heuristic+lean")
+    assert bot == "heuristic" and (params.reserve_floor, params.reserve_fraction) == (0, 0.0)
+    params.reserve_floor = 9                 # a copy: the table is never written through
+    assert gg.TWEAKS["heuristic+lean"][1].reserve_floor == 0
+    assert all(gg.probe_profile(p)[0] in ai.STRATEGIES for p in gg.PROBES)
+
+
+def _m(key, lost, played=4, depth=0.5, timeouts=0):
+    wins = [{"bot": f"b{i}", "won": True, "turns": 50 + i, "lost": i} for i in range(played - lost)]
+    return {"key": key, "played": played, "wins": wins, "difficulty": lost / played, "depth": depth,
+            "timeouts": timeouts, "win_turns": 50 if wins else None, "stage": {}}
+
+
+def test_a_run_settles_once_its_pick_is_complete_and_stops_rising():
+    rising = [_m("a", 1), _m("b", 2), _m("c", 3), _m("hard", 4, depth=1.0)]
+    # Every usable level the probes can show, the last unwon: settled at once.
+    assert gg.settled(rising, 4, True, 4, None)[0]
+    # Short of a level: not until a round adds nothing to what the pick shows.
+    flat = [_m("a", 1), _m("b", 1), _m("c", 3), _m("hard", 4, depth=1.0)]
+    stop, shown = gg.settled(flat, 4, True, 4, None)
+    assert not stop and gg.settled(flat + [_m("d", 3)], 4, True, 4, shown)[0]
+    assert gg.settled(flat + [_m("d", 2)], 4, True, 4, shown)[0]     # a level that fills it
+    # A round that adds a level short of every one goes on.
+    six = [_m("a", 0, 5), _m("b", 0, 5), _m("c", 2, 5), _m("d", 4, 5), _m("hard", 5, 5, depth=1.0)]
+    stop, shown = gg.settled(six, 5, True, 5, None)
+    assert not stop and not gg.settled(six + [_m("e", 3, 5)], 5, True, 5, shown)[0]
+    # Incomplete: a stage short, or no unwon map for the last.
+    assert gg.settled(rising[:3], 4, True, 4, None) == (False, None)
+    assert gg.settled(rising[:3] + [_m("d", 3)], 4, True, 4, None) == (False, None)
+
+
+def test_a_job_stops_at_the_end_of_a_round_that_settles(monkeypatch):
+    calls = []
+    real = gg.settled
+    monkeypatch.setattr(gg, "settled", lambda *a: calls.append(len(a[0])) or (True, real(*a)[1]))
+    job = gg.job_from_link({**SMALL, "candidates": 3}, seed=0)
+    _finish(job)
+    per_round = len([c for c in job.cands if c["round"] == 0])
+    assert calls == [per_round] and len(job.rows) == per_round * len(gg.PROBES)
+    assert job.result() is None or job.result()["stages"]
 
 
 def test_a_spec_that_can_never_deal_is_refused():
@@ -86,7 +140,7 @@ def test_a_spec_fragment_round_trips_and_junk_is_none():
 
 
 def test_nothing_won_is_no_gauntlet():
-    job = gg.Job(dealer.Spec.from_dict({**SMALL, "stages": 1}), 9, per_stage=1, probes=("heuristic",))
+    job = gg.Job(dealer.Spec.from_dict({**SMALL, "stages": 1}), 9, rounds=1, probes=("heuristic",))
     job.queue.clear()
     job.rows = [{"key": job.cands[0]["key"], "bot": "heuristic", "won": False, "turns": 400,
                  "lost": 9, "timed_out": True}]

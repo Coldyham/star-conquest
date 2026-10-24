@@ -30,7 +30,7 @@ def test_candidates_are_a_pure_function_of_the_spec_and_seed():
     spec = dealer.Spec.from_dict(SMALL)
     a, b = gen.candidates(spec, 5, 3), gen.candidates(spec, 5, 3)
     assert a == b and len(a) == 6
-    assert [c["depth"] for c in a] == [0.0] * 3 + [1.0] * 3
+    assert [c["depth"] for c in a] == [0.0, 1.0] * 3 and [c["round"] for c in a] == [0, 0, 1, 1, 2, 2]
     assert a != gen.candidates(spec, 6, 3)
 
 
@@ -81,12 +81,14 @@ def gg_build(picked):
 
 def test_a_run_writes_a_gauntlet_the_game_reads_and_resumes(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(gen, "RESULTS", tmp_path)
-    argv = ["gauntlet_gen.py", "--run", "t", "--seed", "3", "--candidates", "2", "--workers", "1",
+    argv = ["gauntlet_gen.py", "--run", "t", "--seed", "3", "--rounds", "2", "--workers", "1",
             "--probes", "heuristic", "marshal", "--targets", "--spec-json", json.dumps(SMALL)]
     monkeypatch.setattr(sys, "argv", argv)
     gen.main()
     lines = (tmp_path / "t.jsonl").read_text().splitlines()
-    assert json.loads(lines[0])["header"] and len(lines) == 1 + 4 * 2
+    head = json.loads(lines[0])
+    assert head["header"] and head["rounds"] == 2
+    assert len(lines) - 1 in (2 * 2, 4 * 2)       # one round or both, two probes each
     data = json.loads((tmp_path / "t.json").read_text())
     g = gauntlet.Gauntlet.from_dict(data)
     assert g is not None and gauntlet.problems(g) == [] and 1 <= len(g.stages) <= 2
@@ -96,7 +98,7 @@ def test_a_run_writes_a_gauntlet_the_game_reads_and_resumes(tmp_path, monkeypatc
     monkeypatch.setattr(sys, "argv", argv[:5] + ["--workers", "1", "--probes", "heuristic", "marshal"])
     gen.main()
     assert len((tmp_path / "t.jsonl").read_text().splitlines()) == len(lines)
-    assert "0 games to play" in capsys.readouterr().out
+    assert "games to play" not in capsys.readouterr().out.split("seed 3:")[-1]
     monkeypatch.setattr(sys, "argv", argv[:5] + ["--seed", "4"])
     with pytest.raises(SystemExit):
         gen.main()

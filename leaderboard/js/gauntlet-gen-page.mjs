@@ -172,7 +172,7 @@ function check() {
   const bad = typeof spec === "string";
   $("gen-problem").textContent = bad ? `To make the link: ${spec}.` : "";
   $("gen-cost").textContent = bad ? ""
-    : `The game will play ${gameCount(spec)} test games: about a minute on a computer, longer on a phone.`;
+    : `The game will play at most ${gameCount(spec)} test games, often fewer: about a minute on a computer, longer on a phone.`;
   $("gen-make").disabled = bad;
   $("gen-slack").disabled = form.targets === "none";
 }

@@ -7,8 +7,8 @@
 Three ways to spend probe games on one spec and seed, all picked by
 ``gauntletgen.pick``:
 
-- **stage** (what ships): ``--per`` candidates dealt per stage, in blocks, each
-  block at its stage's depth (``gauntletgen.candidates``); every one probed.
+- **stage** (what shipped before rounds): ``--per`` candidates dealt per
+  stage, in blocks, each block at its stage's depth; every one probed.
 - **pool** (a pool sized on its own): the first ``stages + --extra``
   candidates of the round-robin order below.
 - **stop** (stop early): the round-robin order dealt a round at a time,
@@ -63,6 +63,21 @@ SPEC = {"stages": 8,
 # Probes beyond a bot name: (strategy, AiParams).
 TWEAKS = {"heuristic+lean": ("heuristic", AiParams(reserve_fraction=0.0, reserve_floor=0))}
 PROBES = ("rusherplus", "heuristic", "heuristic+lean", "thinker:0", "thinker", "marshal")
+
+
+def staged_candidates(spec: dealer.Spec, seed: int, per_stage: int) -> list[dict]:
+    """The deal before rounds: ``per_stage`` candidates per stage, in blocks."""
+    rng = random.Random(f"{seed}:gauntlet")
+    out, seen = [], set()
+    for i in range(spec.stages):
+        depth = i / (spec.stages - 1) if spec.stages > 1 else 0.0
+        for _ in range(per_stage):
+            s = dealer.deal(spec, rng, depth)
+            key = s.challenge_key()
+            if key not in seen:
+                seen.add(key)
+                out.append({"key": key, "depth": round(depth, 4), "stage": dealer.stage_dict(s)})
+    return out
 
 
 def ends_first(n: int) -> list[int]:
@@ -168,7 +183,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seeds", type=int, nargs="+", default=[41])
     ap.add_argument("--spec-json", help="a spec as JSON text (default: the first run's)")
-    ap.add_argument("--per", type=int, default=gg.CANDIDATES,
+    ap.add_argument("--per", type=int, default=gg.ROUNDS,
                     help="stage: candidates per stage; pool and stop: at most this many rounds")
     ap.add_argument("--probes", nargs="+", default=list(PROBES))
     ap.add_argument("--extra", type=int, default=4, help="pool: candidates beyond the stage count")
@@ -189,7 +204,7 @@ def main() -> None:
 
     for seed in a.seeds:
         path = RESULTS / f"{seed}.jsonl"
-        staged = gg.candidates(spec, seed, a.per)
+        staged = staged_candidates(spec, seed, a.per)
         pooled = pool_candidates(spec, seed, a.per)
         rows = load(path)
         done = {(r["key"], r["bot"]) for r in rows}

@@ -61,8 +61,9 @@
     <form id="gen-form" class="form gauntlet-form" autocomplete="off">
       <p class="hint">
         The game deals maps within these rules, has test bots play each one,
-        and orders them from easiest to hardest. It runs in your browser, so
-        more stages or candidates take longer.
+        and orders them from easiest to hardest. It deals a round of maps at a
+        time, one per stage, and stops once another round would not improve the
+        order. It runs in your browser, so more stages or rounds take longer.
       </p>
       <label for="gen-name">Name (optional)</label>
       <input id="gen-name" class="plain" type="text" placeholder="e.g. Symmetric climb">
@@ -123,7 +124,7 @@
       <label for="gen-slack">Target slack (extra turns)</label>
       <input id="gen-slack" type="number" min="0" max="99" value="0">
 
-      <label for="gen-candidates">Candidate maps per stage</label>
+      <label for="gen-candidates">Rounds of maps (at most)</label>
       <input id="gen-candidates" type="number" min="1" max="8" value="3">
 
       <label for="gen-seed">Seed (blank: a new one)</label>
