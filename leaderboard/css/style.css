@@ -1119,20 +1119,57 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
 .campaign-detail .btn + .btn { margin-left: 0.5rem; }
 
+/* -- the Badges panel (user.html) ----------------------------------------- */
+/* Earned badges in gold; locked ones dimmed but still readable, since the hint
+ * on a locked badge is the point: it says what to try next. */
+.badges-panel { margin: 2rem 0 1rem; }
+.medals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.4rem 1.5rem;
+}
+.medal-group-title {
+  margin: 0.8rem 0 0.4rem;
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.medal-list { margin: 0; padding: 0; list-style: none; }
+.medal {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-top: 1px dashed rgba(42, 35, 80, 0.9);
+}
+.medal-mark { flex: none; width: 1.2em; text-align: center; }
+.medal-text { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.medal-title { font-family: var(--pixel); font-size: 0.7rem; line-height: 1.8; text-transform: uppercase; }
+.medal-how { color: var(--dim); font-size: 0.85rem; }
+.medal.got .medal-mark, .medal.got .medal-title { color: var(--gold); }
+.medal.locked { opacity: 0.6; }
+.medal.unknown { opacity: 0.4; }
+
 /* -- the Playstyle panel (user.html) -------------------------------------- */
 /* A native <details>, closed by default; the heading is its summary, with our
  * own marker since the browsers' differ. */
 .playstyle-panel { margin: 2.5rem 0 1.5rem; }
-.playstyle-panel > summary { cursor: pointer; list-style: none; }
-.playstyle-panel > summary::-webkit-details-marker { display: none; }
-.playstyle-panel > summary .section-title { display: inline; margin: 0; }
-.playstyle-panel > summary .section-title::before {
+.playstyle-panel > summary, .badges-fold > summary { cursor: pointer; list-style: none; }
+.playstyle-panel > summary::-webkit-details-marker,
+.badges-fold > summary::-webkit-details-marker { display: none; }
+.playstyle-panel > summary .section-title,
+.badges-fold > summary .section-title { display: inline; margin: 0; }
+.playstyle-panel > summary .section-title::before,
+.badges-fold > summary .section-title::before {
   content: "▸ ";
   display: inline-block;
   width: 1.2em;
 }
-.playstyle-panel[open] > summary .section-title::before { content: "▾ "; }
-.playstyle-panel[open] > summary { margin-bottom: 0.6rem; }
+.playstyle-panel[open] > summary .section-title::before,
+.badges-fold[open] > summary .section-title::before { content: "▾ "; }
+.playstyle-panel[open] > summary, .badges-fold[open] > summary { margin-bottom: 0.6rem; }
 .playstyle-note { margin: 0 0 0.8rem; color: var(--dim); }
 .playstyle-wrap { overflow-x: auto; margin: 0 0 2rem; }
 .playstyle {

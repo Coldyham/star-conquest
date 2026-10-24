@@ -23,6 +23,7 @@ import {
   textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { inflate } from "./inflate-browser.mjs";
+import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { configLabel } from "./setup.mjs";
 import { decodeToken, setupIdentity } from "./token-decode.mjs";
@@ -32,6 +33,12 @@ const ENDPOINT = "/api/gauntlet";
 const DRAFT_KEY = "sc_gauntlet_draft";
 
 let draft = emptyDraft();
+
+/** A new draft, signed with the name this browser posts under: the Architect badge reads it. */
+function freshDraft() {
+  const name = myName();
+  return { ...emptyDraft(), by_name: [...name].length <= LIMITS.byName ? name : "" };
+}
 // What each stage's link said, by stage object: the summary line or the reason
 // it could not be a stage, and the link's score and game key for a target.
 // Rebuilt from the link on load, never stored.
@@ -407,7 +414,7 @@ async function load() {
     } catch {
       // storage blocked: start empty
     }
-    draft = stored || emptyDraft();
+    draft = stored || freshDraft();
   }
   await Promise.all(draft.stages.map(readLink));
   render();
@@ -433,7 +440,7 @@ function main() {
   $("download").addEventListener("click", download);
   $("reset").addEventListener("click", () => {
     if (!confirm("Clear this draft and start over?")) return;
-    draft = emptyDraft();
+    draft = freshDraft();
     changed();
     render();
   });

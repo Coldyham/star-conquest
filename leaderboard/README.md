@@ -17,7 +17,7 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 |---|---|
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
-| [`user.html?u=…`](user.html) | one player's card — see below |
+| [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
@@ -756,6 +756,43 @@ agree). It is also what puts a campaign badge on a map's page and its index
 row, linking back to that node on the campaign page. Tests: `tests/test_campaign.py` for the
 generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 `tests/test_crowns_sql.py` for the view.
+
+## Badges
+
+A player card for one name (`user.html?u=…`) opens with its badges: one-off
+milestones, most of them pointing at a part of the game the player hasn't tried
+yet. A locked badge stays on the card with what earns it, which is the point.
+
+| Group | Badges |
+|---|---|
+| The board | a win posted · the first win on a map · a win on a map somebody else opened · a crown stolen · the most steals in a finished week (a tie shares it) |
+| Campaign | a home claimed · the most field nodes when a week closes |
+| Gauntlets | a win on the tutorial's last stage · a win on the last stage of a listed gauntlet · a gauntlet saved under this name |
+| Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
+| Bots | a win with each `LADDER_ORDER` bot in a seat |
+| Play-by-post | a turn played in a match · a match won |
+
+**Derived, never stored**, like crowns and the campaign. Wins count only through
+`counted_scores`, so a score that is deleted or found to be a mismatch takes its
+badges with it. The rules are [`js/badges.mjs`](js/badges.mjs) (no DOM, no
+fetch; `tests/badges.test.mjs`); the reads and the drawing are
+[`js/badges-card.mjs`](js/badges-card.mjs). A comparison shows none.
+
+- **The tutorial** leaves no trace on the board but a win on its last stage, which
+  the board can only know by key: `TUTORIAL_FINAL_KEYS` is that stage's
+  `challenge_keys()`, pinned by `tests/test_leaderboard_sync.py`. A Settings
+  field that moves it gets the new key added, never swapped in.
+- **A listed gauntlet** is matched by its last stage's setup (`setupIdentity`),
+  never a key, since the board can't compute one.
+- **Two counts come from the functions**, since their tables are closed to the
+  public: `/api/pbp?action=record&name=` answers `{played, won}` and
+  `/api/gauntlet?by=` answers `{made}`. Counts only, so a private match or an
+  unlisted gauntlet never leaks an id. When either can't be reached its badges
+  show greyed as unknown rather than locked. The gauntlet page signs a new draft
+  with the name this browser posts under, so the Architect badge finds it.
+- **A name is not an identity** here any more than anywhere else: a badge
+  belongs to whoever posts under the name, and a seat's play-by-post name is the
+  one typed when it was claimed.
 
 ## Known limitations, accepted on purpose
 

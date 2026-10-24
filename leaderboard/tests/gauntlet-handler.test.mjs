@@ -36,10 +36,11 @@ function install() {
       }
       return new Response("", { status: 201 });
     }
-    const id = parsed.searchParams.get("gauntlet_id").replace(/^eq\./, "");
     const select = parsed.searchParams.get("select").split(",");
     for (const col of select) assert.ok(COLUMNS.includes(col), `no column ${col}`);
-    const hits = ROWS.filter((r) => r.gauntlet_id === id)
+    const byName = parsed.searchParams.get("by_name");
+    const id = (parsed.searchParams.get("gauntlet_id") || "").replace(/^eq\./, "");
+    const hits = ROWS.filter((r) => (byName === null ? r.gauntlet_id === id : r.by_name !== ""))
       .map((r) => Object.fromEntries(select.map((c) => [c, r[c]])));
     return new Response(JSON.stringify(hits), { status: 200 });
   };
@@ -144,4 +145,19 @@ test("rowFor answers the stored row or why not", async () => {
   const row = await rowFor({ gauntlet: GAUNTLET, wants_listing: "yes" });
   assert.equal(row.wants_listing, false);   // only a real true asks
   assert.equal(row.body.id, row.gauntlet_id);
+});
+
+test("?by= counts the gauntlets saved under a name, case folded, and hands back no id", async () => {
+  install();
+  const other = { ...GAUNTLET, name: "Other" };
+  const third = { ...GAUNTLET, name: "Third" };
+  await handler(request("POST", { body: { gauntlet: GAUNTLET, by_name: "Ada" } }));
+  await handler(request("POST", { body: { gauntlet: other, by_name: " ada " } }));
+  await handler(request("POST", { body: { gauntlet: third } }));
+  const reply = await handler(request("GET", { query: "?by=ADA" }));
+  assert.equal(reply.status, 200);
+  const body = await reply.json();
+  assert.deepEqual(body, { made: 2 });
+  assert.equal((await (await handler(request("GET", { query: "?by=Bo" }))).json()).made, 0);
+  assert.equal((await handler(request("GET", { query: "?by=" }))).status, 400);
 });

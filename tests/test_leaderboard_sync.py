@@ -188,3 +188,16 @@ def test_the_database_reads_each_seats_stop_as_the_game_does():
         off, on = (stop[min(stop)], stop[max(stop)]) if isinstance(stop, dict) else (stop, stop)
         legacy[old] = (family, str(off), str(on))
     assert {row[0]: row[1:] for row in _sql_rows("legacy")} == legacy
+
+
+def test_the_graduate_badge_knows_the_tutorials_last_stage():
+    """The player card's Graduate badge is a posted win on the tutorial's last
+    stage, which the board can only recognise by key: it can't compute
+    `challenge_key()`. Every key the game reads that stage's best under must be
+    in `badges.mjs`'s `TUTORIAL_FINAL_KEYS` (old ones stay, for older scores)."""
+    from starconquest import gauntlet
+
+    tutorial = next(g for g in gauntlet.builtin() if g.id == gauntlet.TUTORIAL_ID)
+    keys = gauntlet.stage_settings(tutorial.stages[-1]).challenge_keys()
+    listed = _js_string_list(ROOT / "leaderboard" / "js" / "badges.mjs", "TUTORIAL_FINAL_KEYS")
+    assert set(keys) <= set(listed), f"add {sorted(set(keys) - set(listed))} to TUTORIAL_FINAL_KEYS"
