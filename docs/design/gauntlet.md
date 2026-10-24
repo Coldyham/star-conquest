@@ -327,9 +327,13 @@ to its slider):
   named bot, never `random`: a stage pins its setup.
 - **`roll`** (default false): a knob no rule names is left at its default, or
   with `roll` true rolled over its whole slider as `_mystery` rolls them (map,
-  travel, economy and fog; combat only when ruled), with mode, layout, players
-  and systems (up to `STANDARD_MAX_NODES`) rolled too. Off by default for the
+  travel, economy and fog; combat only when ruled), with mode, players and
+  systems (up to `STANDARD_MAX_NODES`) rolled too. Off by default for the
   reason "The first run" gives.
+- **A symmetric stage's `layout` is always drawn**, `roll` or not: any of
+  `mapgen.SYMMETRIC_LAYOUTS` alike unless ruled, as the campaign rolls it
+  (`tools/campaign._symmetric_layout`). Left at its default every symmetric
+  stage was a hub, since the board's form names no layout.
 - **No `Settings` field is added**, so no challenge key moves, and a dealt stage
   is an ordinary setup that posts to the board as itself.
 - **`dealer.problems(spec)`** names a spec nothing can satisfy (an empty range,

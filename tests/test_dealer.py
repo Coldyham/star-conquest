@@ -8,7 +8,7 @@ from dataclasses import fields
 
 import pytest
 
-from starconquest import ai, config, dealer, gauntlet
+from starconquest import ai, config, dealer, gauntlet, mapgen
 from starconquest.settings import Settings, build_state
 
 SPEC = {"stages": 6,
@@ -93,6 +93,14 @@ def test_fog_on_always_leaves_a_range_short_of_unlimited():
     spec = dealer.Spec.from_dict({"rules": {"fog": {"fix": True}}, "roll": True})
     for s in _deals(spec, 10):
         assert min(s.fog_sight, s.fog_scout) < config.FOG_MAX_HOPS
+
+
+def test_a_symmetric_stage_draws_every_layout_without_roll():
+    spec = dealer.Spec.from_dict(SPEC)
+    assert not spec.roll
+    assert {s.layout for s in _deals(spec, 40)} == set(mapgen.SYMMETRIC_LAYOUTS)
+    ruled = dealer.Spec.from_dict({**SPEC, "rules": {**SPEC["rules"], "layout": {"fix": "ring"}}})
+    assert {s.layout for s in _deals(ruled, 10)} == {"ring"}
 
 
 def test_fog_on_with_nothing_else_said_is_the_menu_checkbox_preset():
