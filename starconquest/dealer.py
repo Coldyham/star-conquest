@@ -371,7 +371,9 @@ def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> S
 
     if "mode" in rules or spec.roll:
         settings.mode = _draw_choice("mode", rules.get("mode"), rng)
-    if settings.mode == "symmetric" and ("layout" in rules or spec.roll):
+    if settings.mode == "symmetric":
+        # Always drawn, `roll` or not: left alone it is the default hub, and a
+        # run would never show the other layouts (as `tools/campaign.py` rolls it).
         settings.layout = _draw_choice("layout", rules.get("layout"), rng)
 
     if "players" in rules or spec.roll:
