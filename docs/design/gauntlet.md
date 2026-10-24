@@ -461,6 +461,13 @@ Claudebot stop), round-robin as above:
   heuristic lost, heuristic 12 the other way): at the bottom a win is mostly
   position. Six probes still spread the easy end (58 of 320 maps won by three
   or more, against 28 with four).
+- **knower at Off (`knower:0`) is as fast as thinker** (median 0.2 s a probe
+  game) **and about as strong**: it won 32% of the 320 candidates to thinker's
+  30%, as "thinker-strength" in [`knower.md`](knower.md) says. They disagree on
+  72 maps (39 one way, 33 the other), so as a seventh probe it adds a level
+  (23 usable levels over five seeds against 20; stop 896 games against 1,120)
+  but does not split thinker from marshal: 59 maps were still won by marshal
+  alone of the three.
 - **The spread is limited at the top, not the bottom.** 121 of 320 candidates
   were won by no probe and 95 by one (mostly marshal), so most picks after the
   first few read 83% (only marshal won). A probe between thinker (30%) and
