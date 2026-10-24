@@ -242,7 +242,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   (`test_schema_grants`), never `submitted_at`. `Ui.can_post` gates sharing.
 - **Playstyle readings are keyed by match, never by name**;
   `leaderboard/js/playstyle-baseline.mjs` is generated, never edited.
-- **Crowns, campaign and embargoes are derived, never stored.**
+- **Crowns, campaign, embargoes and badges are derived, never stored**
+  (badges: `leaderboard/README.md`, "Badges").
   `campaign_games` matches by jsonb equality. `attemptStatus` is the one answer
   to "may I move here"; the game asks `/api/campaign` and never reimplements a
   rule.

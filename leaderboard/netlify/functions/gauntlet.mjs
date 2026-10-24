@@ -6,6 +6,9 @@
  *        that answers the same id, since the id is a hash of the content.
  *   GET  ?id=<gauntlet_id>  {id, gauntlet, by_name, created_at}, or 404. What
  *        the game fetches when it opens a `#g=<id>` link.
+ *   GET  ?by=<name>  {made}: how many gauntlets were saved under that author
+ *        name, case folded as `users.name_key` folds it. The player card's
+ *        Architect badge. A count only: an unlisted row's id never leaves here.
  *
  * The only writer of `gauntlets`, for log.mjs's reason: a gauntlet is up to 64
  * KiB of free text, so an insert path anyone can aim a script at would be a
@@ -110,6 +113,23 @@ async function handleRead(call, query, origin) {
                       created_at: row.created_at }, origin);
 }
 
+/** How many `by_name`s fold to `name`, as `users.name_key` folds (lower, trimmed). */
+export function madeBy(rows, name) {
+  const key = String(name || "").trim().toLowerCase();
+  return key ? rows.filter((row) => String(row.by_name || "").trim().toLowerCase() === key).length : 0;
+}
+
+async function handleMade(call, query, origin) {
+  const name = query.get("by") || "";
+  // A board name runs to 60 (users.name); past LIMITS.byName it simply made none.
+  if (!name.trim() || name.length > 60) return reply(400, { error: "bad name" }, origin);
+  // Every signed row, folded here: an ilike filter would read a name's own % or _
+  // as a wildcard. The table is one row per saved gauntlet, so this stays small.
+  const rows = await call("/gauntlets?select=by_name&by_name=neq.");
+  if (rows === null) return reply(502, { error: "lookup failed" }, origin);
+  return reply(200, { made: madeBy(rows, name) }, origin);
+}
+
 async function handleSave(call, payload, origin) {
   const row = await rowFor(payload);
   if (typeof row === "string") return reply(400, { error: row }, origin);
@@ -148,7 +168,10 @@ export default async function handler(request) {
   if (limited) return reply(429, { error: "slow down" }, origin);
 
   const call = db(url, key);
-  if (reading) return await handleRead(call, new URL(request.url).searchParams, origin);
+  if (reading) {
+    const query = new URL(request.url).searchParams;
+    return query.has("by") ? await handleMade(call, query, origin) : await handleRead(call, query, origin);
+  }
 
   let text;
   try {
