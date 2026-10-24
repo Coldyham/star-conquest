@@ -60,6 +60,7 @@ uv run python tools/mp_tactics.py --seeds 400   # marshal's multiplayer tactics 
 uv run python tools/bait_bench.py --seeds 200    # knower's Search offered bait openings, paired
 uv run python tools/fold_check.py               # a stop plays as the bot folded into it
 uv run python tools/gauntlet_check.py --quick   # the tutorial's stages rise in difficulty
+uv run python tools/gauntlet_gen.py --run NAME --spec spec.json   # deal, probe, pick a gauntlet
 uv run python tools/win_turns.py                # turns to win: Council, Hunt, marshal vs the weak bots
                                                 # (--label NEW --base OLD pairs two trees game by game)
 uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
@@ -95,7 +96,7 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `stats` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `stats` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -206,8 +207,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   `pbp.reseed`, `replay.reseed`, `engine._Dice`.
 - **Everything is keyed by integer id.** Lanes use `model.lane_key`. Neutral is
   player `id == 0`. Star names are flavour, stamped **last**
-  (`mapgen._name_systems`), never a key; `starnames.py` is generated
-  (`tools/gen_starnames.py`) — regenerate, don't hand-edit.
+  (`mapgen._name_systems`), never a key; `starnames.py` and `starlore.py` are
+  generated (`tools/gen_starnames.py`) — regenerate, don't hand-edit.
 - **Travel time is a query**: `state.travel_turns(a, b)`, never
   `Lane.travel_turns`.
 - **A fleet's lane track is stored, never ranked** (`Fleet.lane_slot`).

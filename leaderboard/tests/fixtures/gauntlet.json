@@ -16,6 +16,10 @@
           "players": 3,
           "nodes": 18,
           "seed": 42
+        },
+        "target": {
+          "turns": 14,
+          "lost": 3
         }
       },
       {
@@ -52,6 +56,12 @@
             "heuristic",
             "marshal"
           ]
+        },
+        "target": {
+          "turns": 31,
+          "lost": 12,
+          "bot": "thinker",
+          "beat": true
         }
       },
       {
@@ -246,9 +256,9 @@
       }
     ]
   },
-  "id": "fixture-run-three-089d71ab93b2",
+  "id": "fixture-run-three-b20a155e2c59",
   "body": {
-    "id": "fixture-run-three-089d71ab93b2",
+    "id": "fixture-run-three-b20a155e2c59",
     "name": "Fixture run: three maps",
     "stages": [
       {
@@ -264,6 +274,10 @@
           "players": 3,
           "nodes": 18,
           "seed": 42
+        },
+        "target": {
+          "turns": 14,
+          "lost": 3
         }
       },
       {
@@ -301,6 +315,12 @@
             "heuristic",
             "marshal"
           ]
+        },
+        "target": {
+          "turns": 31,
+          "lost": 12,
+          "bot": "thinker",
+          "beat": true
         }
       },
       {
@@ -496,5 +516,5 @@
       }
     ]
   },
-  "inline": "eNq9UjuO2zAQvYow9dgQKVK_AwQpglQBUgiCQEtjm1mLEkjKWWNhIIdImQukyiH2JjlJQHrX3k1SpUgzxHzevMeZeQA9QA1bfe8XSyu7mJXfW6JVWlZDwdSmyjYcEIwaCWp4c6lL7GLqJBYmo5odIDivduSgbh5ixxTBa38ImI_KjskyA8LGatpqs4O6gQ_qjhI6kj0l7uQ8jWtAeE-Lt-rgkq22zq-hRdhr46H-I4PgyHttdg7qBxinITBZZYZpBIT5oE5kHdQZgpmGoIuVAUID1IKfz3hRyW4qX8u7Ef-dyZ3GkbzV_UsycSXjV7KqqiqG4PZ67txMNHQ7O332-27ufUT007hRvvukvScLdbrmEmGgLZmBbKeGozJhslCztURQOk7YkiN7pG5rVe_1ZJ5x1_hhmizUHIHuZ2WGblR2p01okiEo71V_9yIWkdpsJ9vTNcwR1HIPNQvD-p-E_NyGj3bOW-VpdwrXsqfFaufjvEdl3V4doL2ukd_W-FaZYTWqgZKfX74mvdo-fv_t8B6_mccf_TRQ0k-L8S7ZnJLozpM2r27unXI-mQz9y7WJ5wPgKQ9bXpyfxm5Uc2hwjJdnoG6aUghkPMUMGcesxUakDGWVo8AC0xYblleYVwKzJ7_IBcosveZFITArSsywjL6UDItSonjyWc5QFPmFgLfYZCLD0OS5Qc5TzFmGARL8ssqxLOQFwELHokKW8RtAChRFgRLzC0PKsJQFcqwuinKGPJAhSzFtW4RD-GmKLFZHEQxFtDLaItqyxYZjHm0RLYt6YyJDFrSI6xNmJWOdjAUSqyD-kmdpKGjP53N7_gUf-3l9"
+  "inline": "eNq9UkuO4zgMvYrBNatgyZJ_BxjMotGrBnoRGIZiM4m6YtmQ6OoKCgH6ELOcC8xqDlE3mZMMpHSS_q1mMRsKFPnIR_K9gh2hhZ194dXTg1_dAx880cNW5kZoTXLQDSA4MxG08NslL_Ora7OUmE1mCYAQ2OwpQLt5TRVzBLZ8jJiPxk_ZugDC1lvaWbeHdgMfzBNl9Ez-lIVTYJoeAeE9rezNMWQ76wM_QodwsI6h_SmCEIjZun2A9hWmeYydvHHjPAHCcjQn8gHaAsHNY-Ql6gihEVolzwhs_J44Ynn1LsYVwnEODG1xPuNlCHEf4nv2d16_JhJO00Ts7fAtF3XjIm9cmqZpBEI42KUPC9HY7_38mQ_9MnBCDPO0Ndx_sszkoc0fpUYYaUduJN-b8dm4uHhoxaNGMDYdwFMg_0z9zpuB7eyuuNv_cZ49tBKBXhbjxn4yfm9dLFIgGGYzPH3zl5DW7WY_0O1bIpj1BVoRl_V_NpTnLg7aB_aGaX-KYjrQ6m3gtO_J-HAwR-h-deVCXK8sJMJ2jifkg3VP5OOFyTC07Fe6SUDeJfC7cePDZEbK_vnyRzaY3dtfP2j67U_39vcwj5QN8-o4ZNtTltxltu47Ob8zgbPZ0X8RsrqKR-YyKmQNPE_9ZJZY4Dmp1kG72dRKoZA5FigkFh1uVC5QNyUqrDDvcCPKBstGYfHVr0qFushvcVUpLKoaC6yTr7XAqtaovvqiFKiq8tJAdrgpVIGxyLVAKXMsRYEREv26KbGu9AUgYsWqQVHIO0ArVFWFGstLh1xgrSuU2FwYlQJlbIYix7zrEI5x0hxFyk4kBKpkdbJVsnWHG4llslWyIvFNgQJF5KJuT9yVTnk6JWhsIvlLXOQxoTufz935X4RylqA"
 }

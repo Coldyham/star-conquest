@@ -18,6 +18,8 @@
 // one is a new row. 19 + 1 + 12 = 32, gauntlet.py's NAME_MAX, so the id
 // survives the game's own clamp of a gauntlet's `id` intact.
 
+import { bestBot } from "./standings.mjs";
+
 export const LIMITS = Object.freeze({
   name: 32,
   title: 32,
@@ -28,6 +30,7 @@ export const LIMITS = Object.freeze({
   byName: 32,
   bodyBytes: 65536,
   slug: 19,
+  bot: 24,
 });
 
 /** `schema.sql`'s check on `gauntlets.gauntlet_id`. */
@@ -84,9 +87,65 @@ export function setupProblem(settings) {
   return "";
 }
 
+// -- stage targets ------------------------------------------------------------
+// A score a stage must be won within before the stages beyond it open
+// (docs/design/gauntlet.md, "Stage targets"; the game's `gauntlet.Target`):
+// `{turns, lost?, bot?, beat?}`. An author's own score is met; a bot's, copied
+// off the board's bot column when the gauntlet is saved, is beaten (`beat`).
+// Fixed into the file, never looked up live.
+
+const TARGET_KEYS = new Set(["turns", "lost", "bot", "beat"]);
+
+/** A stage's target as stored, or a string saying what is wrong with it. */
+export function checkTarget(raw) {
+  if (!isObject(raw) || Object.keys(raw).some((k) => !TARGET_KEYS.has(k))) {
+    return "has a target that is not turns, lost, bot and beat";
+  }
+  if (!isInt(raw.turns) || raw.turns < 1) return "has a target with no turns";
+  if (raw.lost !== undefined && (!isInt(raw.lost) || raw.lost < 0)) return "has a target with a bad ships-lost count";
+  if (raw.bot !== undefined && typeof raw.bot !== "string") return "has a target whose bot is not a name";
+  const bot = tidy(raw.bot);
+  if (textLength(bot) > LIMITS.bot) return `has a target whose bot is over ${LIMITS.bot} characters`;
+  if (raw.beat !== undefined && typeof raw.beat !== "boolean") return "has a target whose beat is not true or false";
+  const out = { turns: raw.turns };
+  if (raw.lost !== undefined) out.lost = raw.lost;
+  if (bot) out.bot = bot;
+  if (raw.beat) out.beat = true;
+  return out;
+}
+
+/** A pasted challenge link's score as a target the author has shown can be met. */
+export function linkTarget(challenge) {
+  return challenge && isInt(challenge.turns) && challenge.turns > 0
+    ? { turns: challenge.turns, lost: challenge.lost } : null;
+}
+
+/**
+ * The best bot's win on a setup as a target to beat, from that setup's
+ * `bot_scores` rows: `{target}`, or `{none}` saying why there is none ("no-rows":
+ * the setup has no bot column yet; "no-win": no bot won it, so any win clears).
+ */
+export function botTarget(rows) {
+  if (!rows?.length) return { none: "no-rows" };
+  const best = bestBot(rows);
+  if (!best) return { none: "no-win" };
+  return { target: { turns: best.turns, lost: best.lost, bot: tidy(best.bot).slice(0, LIMITS.bot), beat: true } };
+}
+
+/** "14 turns", "14 turns / 30 lost": as the game's `Target.score_text`. */
+export function targetScore(target) {
+  return `${target.turns} turns${isInt(target.lost) ? ` / ${target.lost} lost` : ""}`;
+}
+
+/** The whole condition, as the game's `Target.text` words it. */
+export function targetText(target) {
+  if (target.beat) return `Beat ${target.bot || "the target"}: ${targetScore(target)}`;
+  return isInt(target.lost) ? `Win within ${targetScore(target)}` : `Win in ${target.turns} turns or fewer`;
+}
+
 /**
  * The gauntlet the page's form describes: `{name, stages: [{title, briefing,
- * hint, settings}]}` in play order. Stages are numbered from 0 in that order,
+ * hint, settings, target?}]}` in play order. Stages are numbered from 0 in that order,
  * and a linear gauntlet needs no `lanes` or `start` (the game joins stages in
  * list order and opens the first).
  */
@@ -97,6 +156,7 @@ export function buildBody(draft) {
     briefing: (stage.briefing || []).map(tidy).filter(Boolean),
     hint: tidy(stage.hint),
     settings: stageSetup(stage.settings),
+    ...(stage.target ? { target: stage.target } : {}),
   }));
   return { name: tidy(draft?.name), stages };
 }
@@ -135,7 +195,13 @@ export function checkBody(body) {
     if (long >= 0) return `${where}'s briefing paragraph ${long + 1} is over ${LIMITS.briefingLine} characters`;
     const problem = setupProblem(raw.settings);
     if (problem) return `${where} ${problem}`;
-    stages.push({ id: raw.id, title, briefing, hint, settings: stageSetup(raw.settings) });
+    const stage = { id: raw.id, title, briefing, hint, settings: stageSetup(raw.settings) };
+    if (raw.target !== undefined && raw.target !== null) {
+      const target = checkTarget(raw.target);
+      if (typeof target === "string") return `${where} ${target}`;
+      stage.target = target;
+    }
+    stages.push(stage);
   }
 
   const out = { name, stages };
@@ -246,8 +312,17 @@ export function fileName(body, gauntletId) {
 
 /** A stage with nothing in it yet. */
 export function emptyStage() {
-  return { link: "", settings: null, title: "", briefing: [""], hint: "" };
+  return { link: "", settings: null, title: "", briefing: [""], hint: "", aim: "none", target: null };
 }
+
+/** A stored or kept target that checks out, or null. */
+function keptTarget(raw) {
+  const target = isObject(raw) ? checkTarget(raw) : null;
+  return typeof target === "string" ? null : target;
+}
+
+/** How a draft stage's target was chosen: none, the link's score, the best bot. */
+export const AIMS = Object.freeze(["none", "link", "bot"]);
 
 /** A draft with one empty stage. */
 export function emptyDraft() {
@@ -265,7 +340,10 @@ export async function draftFromBody(body, linkFor) {
   for (const stage of body?.stages || []) {
     if (!isObject(stage) || !isObject(stage.settings)) continue;
     const briefing = (stage.briefing || []).filter((p) => typeof p === "string");
+    const target = keptTarget(stage.target);
     stages.push({
+      aim: target ? (target.beat ? "bot" : "link") : "none",
+      target,
       link: await linkFor(stage.settings),
       settings: stage.settings,
       title: typeof stage.title === "string" ? stage.title : "",
@@ -295,14 +373,19 @@ export function readDraft(text) {
   }
   if (!isObject(data) || !Array.isArray(data.stages)) return null;
   const str = (v) => (typeof v === "string" ? v : "");
-  const stages = data.stages.filter(isObject).slice(0, LIMITS.stages).map((s) => ({
-    link: str(s.link),
-    settings: isObject(s.settings) ? s.settings : null,
-    title: str(s.title),
-    briefing: Array.isArray(s.briefing) && s.briefing.length
-      ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
-    hint: str(s.hint),
-  }));
+  const stages = data.stages.filter(isObject).slice(0, LIMITS.stages).map((s) => {
+    const target = keptTarget(s.target);
+    return {
+      link: str(s.link),
+      settings: isObject(s.settings) ? s.settings : null,
+      title: str(s.title),
+      briefing: Array.isArray(s.briefing) && s.briefing.length
+        ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
+      hint: str(s.hint),
+      aim: target && AIMS.includes(s.aim) ? s.aim : "none",
+      target,
+    };
+  });
   return {
     name: str(data.name),
     by_name: str(data.by_name),

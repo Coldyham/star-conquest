@@ -336,11 +336,16 @@ class MenuState:
     stage_at: tuple[str, int] | None = None
     stash: dict | None = None
     tutorial_open: bool = False
-    gauntlets: list[gauntlet.Gauntlet] = field(default_factory=gauntlet.builtin)
+    # Every gauntlet, the player's own included, so the button can say whether
+    # there is more than the tutorial; read again each time the list opens.
+    gauntlets: list[gauntlet.Gauntlet] = field(default_factory=gauntlet.every)
     gauntlet_pick: int = 0
     # Each gauntlet's bests by stage, read when the list opens rather than once
     # a frame (a desktop `webstore.get` is a file read).
     stage_bests: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
+    # The gauntlets opened from a link or generated here, read with the list for
+    # the same reason: those are the ones Copy link can send on.
+    kept_ids: frozenset[str] = frozenset()
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -591,9 +596,10 @@ def _leave_gauntlet(ms: MenuState, settings: Settings) -> None:
     if active_stage(ms, settings) is not None and ms.stash is not None:
         settings.copy_from(Settings.from_dict(ms.stash))
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
+    word = _playing_word(ms)
     ms.stage_at, ms.stash = None, None
     ms.tutorial_open = False
-    set_status(ms, "Left the tutorial — this is your own setup", True)
+    set_status(ms, f"Left the {word} — this is your own setup", True)
 
 
 def _stage_bits(settings: Settings) -> list[str]:
@@ -622,7 +628,7 @@ def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> No
         return
     if found is None:
         _text(surface, f["small"], f"{g.name.upper()} — settings changed", _WARN, center=(w // 2, 124))
-        _text(surface, f["small"], "this isn't the stage any more — open Tutorial to pick one, or leave",
+        _text(surface, f["small"], f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave",
               _WARN, center=(w // 2, 144))
         return
     _g, stage = found
@@ -638,6 +644,7 @@ def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> No
 def _open_tutorial(ms: MenuState, settings: Settings, pick: str | None = None) -> None:
     ms.gauntlets = gauntlet.every()     # a user gauntlet dropped in since shows now
     ms.stage_bests = {}
+    ms.kept_ids = frozenset(g.id for g in gauntlet.remembered())
     ids = [g.id for g in ms.gauntlets]
     if pick is None and ms.stage_at:
         pick = ms.stage_at[0]
@@ -659,10 +666,41 @@ def _picked(ms: MenuState) -> gauntlet.Gauntlet | None:
     return ms.gauntlets[max(0, min(len(ms.gauntlets) - 1, ms.gauntlet_pick))]
 
 
-def _tutorial_labels() -> tuple[str, str]:
-    if config.touch_ui:
-        return ("Leave tutorial", "Close")
-    return ("Leave tutorial", "Close (Esc)")
+def _gauntlets_label(ms: MenuState) -> str:
+    """The button that opens the list: "Tutorial" while that is all there is."""
+    return "Gauntlets" if len(ms.gauntlets) > 1 else "Tutorial"
+
+
+def _playing_word(ms: MenuState) -> str:
+    """What the stage being played belongs to, in a label: "tutorial" only for
+    the built-in one."""
+    return "tutorial" if ms.stage_at is None or ms.stage_at[0] == gauntlet.TUTORIAL_ID else "gauntlet"
+
+
+def _tutorial_labels(ms: MenuState) -> tuple[str, str]:
+    leave = f"Leave {_playing_word(ms)}"
+    return (leave, "Close") if config.touch_ui else (leave, "Close (Esc)")
+
+
+_COPY_GAUNTLET = "Copy link"
+
+
+def _shareable(ms: MenuState, g: gauntlet.Gauntlet) -> bool:
+    """Can Copy link send ``g`` on: one opened from a link or generated here, on
+    the web (where there is a clipboard and a page to link to). Never a built-in
+    or a desktop file."""
+    return is_web() and g.id in ms.kept_ids
+
+
+def _copy_gauntlet(ms: MenuState, g: gauntlet.Gauntlet) -> None:
+    """Copy a ``#gauntlet=`` link carrying the whole file: no board needed, so a
+    generated gauntlet can be shared as it is."""
+    data = gauntlet.kept(g.id) if _shareable(ms, g) else None
+    url = webstore.link_url(gauntlet.link_fragment(data)) if data is not None else ""
+    if url and webstore.copy_to_clipboard(url):
+        set_status(ms, f"Link to {g.name} copied", True)
+    else:
+        set_status(ms, "Couldn't copy the gauntlet's link", False)
 
 
 _STAGE_ROW_H = 36
@@ -671,11 +709,14 @@ _PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets
 
 
 def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
-    """Modal: the gauntlet's stages in order, each with its best once cleared.
+    """Modal: the gauntlet's stages in order, each with its best once won and
+    its target if it has one.
 
-    A stage is open if it is a start, is cleared, or a lane leads to it from a
-    cleared one (`gauntlet.open_stages`); a locked one is greyed and is no hit target. A
-    picker row appears only when there is more than one gauntlet to choose.
+    A stage is open if it is a start, is won, or a lane leads to it from a
+    cleared one (`gauntlet.open_stages`): a win short of the stage's target
+    leaves it open but opens nothing beyond. A locked one is greyed and is no
+    hit target. A picker row appears only when there is more than one gauntlet
+    to choose.
     Measured rows, like `_draw_pbp_prompt`.
     """
     g = _picked(ms)
@@ -686,16 +727,19 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     if g.id not in ms.stage_bests:
         ms.stage_bests[g.id] = gauntlet.bests(g)
     bests = ms.stage_bests[g.id]
-    opened = gauntlet.open_stages(g, set(bests))
+    done = gauntlet.cleared(g, bests)
+    opened = gauntlet.open_stages(g, done, set(bests))
     found = active_stage(ms, settings)
     here = found[1].id if found is not None and found[0].id == g.id else None
 
-    leave, close = _tutorial_labels()
-    bw = max(f["normal"].size(s)[0] for s in (leave, close)) + 2 * 18
+    leave, close = _tutorial_labels(ms)
+    share = _shareable(ms, g)
+    buttons = 1 + (ms.stage_at is not None) + share
+    bw = max(f["normal"].size(s)[0] for s in (leave, close, _COPY_GAUNTLET)) + 2 * 18
     bh = 40
-    status_w = f["small"].size("✓ 999 turns / 999 lost")[0]
+    status_w = f["small"].size("999 turns / 999 lost · beat 999/999")[0]
     title_w = max(f["normal"].size(f"{i + 1:>2}  {s.title}")[0] for i, s in enumerate(g.stages))
-    pw = max(title_w + status_w + 3 * pad, 2 * bw + gap + 2 * pad, f["normal"].size(g.name)[0] + 2 * 34 + 4 * pad)
+    pw = max(title_w + status_w + 3 * pad, buttons * bw + (buttons - 1) * gap + 2 * pad, f["normal"].size(g.name)[0] + 2 * 34 + 4 * pad)
     picker = len(ms.gauntlets) > 1
     # Progress is the bests in `localStorage` (`webstore`), so on the web say
     # where it lives: it outlasts a reload but not cleared site data, a private
@@ -740,12 +784,15 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         _text(surface, f["normal"], f"{i + 1:>2}  {stage.title}", colour,
               midleft=(row.x + pad // 2, row.centery))
         mine = bests.get(stage.id)
-        if mine is not None:
+        aim = f" · {stage.target.short()}" if stage.target is not None else ""
+        if stage.id in done and mine is not None:
             status, scol = f"✓ {mine[0]} turns / {mine[1]} lost", _START_BORDER
+        elif mine is not None:     # won, short of the target: "18 turns · target 14"
+            status, scol = f"{mine[0]} turns / {mine[1]} lost{aim}", _HL_BORDER
         elif open_:
-            status, scol = "next" if bests else "start here", _HL_BORDER
+            status, scol = ("next" if bests else "start here") + aim, _HL_BORDER
         else:
-            status, scol = "locked", _DISABLED_TEXT
+            status, scol = "locked" + aim, _DISABLED_TEXT
         _text(surface, f["small"], status, scol, midright=(row.right - pad // 2, row.centery))
         y += _STAGE_ROW_H
 
@@ -753,15 +800,24 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         _text(surface, f["small"], note, config.COLOR_TEXT_DIM,
               center=(panel.centerx, y + gap + _NOTE_H // 2))
 
+    # The bottom row, centred: Leave (while playing a stage), Copy link (a
+    # gauntlet that can be sent on), Close.
     by = panel.bottom - pad - bh
-    if ms.stage_at is not None:
-        go = pygame.Rect(panel.centerx - bw - gap // 2, by, bw, bh)
-        stay = pygame.Rect(panel.centerx + gap // 2, by, bw, bh)
-        _button(surface, ms, "tutorial_leave", go, leave, fill=_BTN_FILL, border=_WARN, tcol=config.COLOR_TEXT)
-    else:
-        ms.rects.pop("tutorial_leave", None)
-        stay = pygame.Rect(panel.centerx - bw // 2, by, bw, bh)
-    _button(surface, ms, "tutorial_close", stay, close, fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM)
+    row = [key for key, on in (("tutorial_leave", ms.stage_at is not None), ("tutorial_copy", share),
+                               ("tutorial_close", True)) if on]
+    x = panel.centerx - (len(row) * bw + (len(row) - 1) * gap) // 2
+    for key in ("tutorial_leave", "tutorial_copy"):
+        if key not in row:
+            ms.rects.pop(key, None)
+    for key in row:
+        rect = pygame.Rect(x, by, bw, bh)
+        if key == "tutorial_leave":
+            _button(surface, ms, key, rect, leave, fill=_BTN_FILL, border=_WARN, tcol=config.COLOR_TEXT)
+        elif key == "tutorial_copy":
+            _button(surface, ms, key, rect, _COPY_GAUNTLET, fill=_BTN_FILL, border=_HL_BORDER, tcol=config.COLOR_TEXT)
+        else:
+            _button(surface, ms, key, rect, close, fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT_DIM)
+        x += bw + gap
 
 
 def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
@@ -781,12 +837,15 @@ def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
         ms.tutorial_open = False
     elif hit == "tutorial_leave":
         _leave_gauntlet(ms, settings)
+    elif hit == "tutorial_copy" and g is not None:
+        _copy_gauntlet(ms, g)
     elif hit in ("gauntlet_pick_dec", "gauntlet_pick_inc") and ms.gauntlets:
         step = 1 if hit.endswith("inc") else -1
         ms.gauntlet_pick = (ms.gauntlet_pick + step) % len(ms.gauntlets)
     elif hit is not None and hit.startswith("stage_") and g is not None:
         sid = int(hit[len("stage_"):])
-        if sid in gauntlet.open_stages(g, set(ms.stage_bests.get(g.id, {}))):
+        found = ms.stage_bests.get(g.id, {})
+        if sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found)):
             if _load_stage(ms, settings, g, sid) is not None:
                 ms.tutorial_open = False
                 return _start(ms, settings)
@@ -1746,8 +1805,9 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     lx, rx = w // 2 - 280, w // 2 + 280
     # The tutorial sits outside the row's left end, the same on every build.
     if ms.gauntlets:
-        tw = f["normal"].size("Tutorial")[0] + 36
-        _button(surface, ms, "tutorial", pygame.Rect(lx - 14 - tw, y, tw, _CH), "Tutorial",
+        label = _gauntlets_label(ms)
+        tw = f["normal"].size(label)[0] + 36
+        _button(surface, ms, "tutorial", pygame.Rect(lx - 14 - tw, y, tw, _CH), label,
                 fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
     else:
         ms.rects.pop("tutorial", None)

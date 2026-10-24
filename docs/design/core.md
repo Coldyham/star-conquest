@@ -559,6 +559,27 @@ to be staged and fetched. Regenerating is `uv run python
 tools/gen_starnames.py` after replacing `tools/iau-star-names.csv` with a fresh
 export.
 
+The same run writes `starlore.py`: each name's language, origin and reference
+from the catalogue, shown on the star's info card. It is a separate module so
+`starnames`, which mapgen imports, stays small; only `render` and `input` import
+`starlore`. Any system can be selected, to read about it: the panel shows no
+more than a hover already does, and only `Ui.source` (the selection when it is
+ours) sends, rings destinations or lights lanes. The ⓘ button beside a selected
+system's name in the side panel
+(`render._draw_lore_button`) and the I key (selected system, else the hovered
+one) open the card (`Ui.lore_sid`), and any press closes it and is spent, like
+the briefing card's. The card is `render._draw_card`, shared with the briefing:
+it widens to the map, then drops to the small font, before it cuts anything,
+and `test_every_star_card_fits_whole` holds every entry to fitting whole.
+
+The generator strips the scripts the bundled DejaVu Sans Mono can't draw
+(`gen_starnames._UNDRAWABLE`): CJK, Devanagari, Thai, cuneiform, Cherokee,
+Mongolian and Hangul have no glyphs, and Arabic has glyphs but pygame lays them
+out left to right and unjoined. The catalogue gives a romanisation beside each
+of them, and the brackets and commas a removed run leaves behind are tidied up.
+The `NEWC` language value (the NameExoWorlds contest) is dropped, since the
+reference line already names it.
+
 `_name_systems` runs last in both generators, after every roll that shapes a
 map, so a seed lays out exactly the board it did before names existed — which
 is what keeps saved setups, shared tokens and recorded games (whose replays
@@ -883,7 +904,8 @@ held off mid-drag, and restoring `config` after it generates.
   **last**, after every roll that shapes the map, so a seed still lays out the
   board it always did and a replay recreates the names from `state.rng` with
   nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
-  `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
+  `tools/gen_starnames.py` — regenerate, don't hand-edit; the same run writes
+  `starlore.py`, the info card's text, keyed by name. On the map,
   `render._draw_node_names` places labels collision-first and drops what doesn't
   fit (see "Star names" above) — including the fixed slot above every system that a
   playback writes its numbers into (`render._mark_slot`), reserved whether or not
