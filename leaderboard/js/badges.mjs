@@ -154,7 +154,7 @@ export function gauntletsCleared(gauntlets, setups) {
  * Everything the badges read, from what badges-card.mjs fetched. `wins` are
  * the player's counted scores joined to their map: `{game_key, mode,
  * settings_json, bots}`. A part that could not be read (`pbp`, `gauntletsMade`
- * when a function is down) stays null, and its badges show as unknown rather
+ * when a function is down, `gauntletsCleared` without the table) stays null, and its badges show as unknown rather
  * than locked.
  */
 export function factsFrom({
@@ -214,7 +214,8 @@ export const BADGES = [
   { id: "graduate", group: "Gauntlets", title: "Graduate",
     how: "Win the tutorial's last stage and post the score.", has: (f) => f.tutorial },
   { id: "gauntlet-runner", group: "Gauntlets", title: "Gauntlet runner",
-    how: "Win the last stage of a listed gauntlet and post the score.", has: (f) => f.gauntletsCleared > 0 },
+    how: "Win the last stage of a listed gauntlet and post the score.",
+    has: (f) => atLeastOne(f.gauntletsCleared) },
   { id: "architect", group: "Gauntlets", title: "Architect",
     how: "Save a gauntlet on the Make a gauntlet page, under this name.",
     has: (f) => atLeastOne(f.gauntletsMade) },

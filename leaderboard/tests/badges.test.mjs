@@ -136,6 +136,7 @@ test("a count a function couldn't answer is unknown, never locked", () => {
   assert.equal(state["by-return"], null);
   assert.equal(state.architect, null);
   assert.equal(state["first-win"], false);
+  assert.equal(badgeList(factsFrom({ gauntletsCleared: null })).find((b) => b.id === "gauntlet-runner").earned, null);
 
   const known = Object.fromEntries(badgeList(factsFrom({ pbp: { played: 2, won: 0 }, gauntletsMade: 1 }))
     .map((b) => [b.id, b.earned]));

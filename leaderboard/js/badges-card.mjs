@@ -88,7 +88,9 @@ export async function loadFacts(nameKey, now = new Date()) {
     chunked(keys, (list) => `counted_scores?select=${FIELD}&game_key=${list}&limit=10000`),
     stealWeeks(name, now),
     campaignWeeks(id),
-    select("gauntlets?select=gauntlet_id,stages:body->stages&listed=is.true&limit=1000"),
+    // Optional: a board whose schema predates gauntlets has no such table, and
+    // that leaves one badge unknown rather than the panel gone.
+    select("gauntlets?select=gauntlet_id,stages:body->stages&listed=is.true&limit=1000").catch(() => null),
     count(`/api/pbp?action=record&name=${encodeURIComponent(name)}`),
     count(`/api/gauntlet?by=${encodeURIComponent(name)}`),
   ]);
@@ -104,7 +106,7 @@ export async function loadFacts(nameKey, now = new Date()) {
     ...steals,
     campaign: campaignRecord(weeks, name, now),
     gauntletsMade: made && Number.isInteger(made.made) ? made.made : null,
-    gauntletsCleared: gauntletsCleared(listed, wins.map((win) => win.settings_json)),
+    gauntletsCleared: listed ? gauntletsCleared(listed, wins.map((win) => win.settings_json)) : null,
     pbp: pbp && Number.isInteger(pbp.played) ? pbp : null,
   });
 }
