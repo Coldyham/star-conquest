@@ -20,7 +20,7 @@ from starconquest import main
 from starconquest import config, engine, mapgen, replay, turnfilm
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
-from starconquest.model import Fleet, ForwardRule
+from starconquest.model import Fleet, ForwardRule, Order
 from starconquest.settings import Challenge, Settings
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
@@ -527,6 +527,26 @@ def test_can_select_owned_system_with_zero_available_ships():
 
         _click(state, ui, home)
         assert ui.mode == SELECTED and ui.selected == home
+    finally:
+        pygame.quit()
+
+
+def test_queued_sends_are_not_taken_off_a_history_board():
+    """A send queued this turn is promised out of the live garrison only: review
+    shows a past board's counts as they were, never minus the queue (the bug was
+    sending 20 of 20 and the system reading -18 on a turn it held 2)."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 20
+        dest = next(s.id for s in state.systems.values() if state.are_adjacent(home, s.id))
+        ui.pending.append(Order(1, home, dest, 20))
+        assert ui.available(state, home) == 0
+        ui.history = True
+        state.systems[home].ships = 2   # the board being reviewed
+        assert ui.available(state, home) == 2
+        ui.history = False
+        assert ui.committed(home) == 20  # the queue itself is untouched
     finally:
         pygame.quit()
 
