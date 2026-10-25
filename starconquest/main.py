@@ -173,7 +173,11 @@ def _accumulate_fog(state: GameState, human_id: int, seen: set[int],
     return the systems currently in full view. Mutates `seen`/`intel` in place so
     the same helper serves both the live turn loop and replaying a resumed game.
     """
-    if state.is_defeated(human_id):
+    if human_id == pbp.SPECTATOR or state.is_defeated(human_id):
+        # A spectator holds no seat to see *from* (`pbp.SPECTATOR` is neutral's
+        # id), and is only let in on a match with fog off, where every seat sees
+        # the whole board anyway (`pbp.Match.watchable`).
+        #
         # Knocked out: there is no territory left to observe *from*, so `fog.observe`
         # returns nothing and every remembered system falls back to a grey "?" — the
         # whole map, when fog was off. A defeated player is a spectator with nothing
@@ -701,6 +705,8 @@ PBP_OPENING_MSG = "Opening the match..."
 PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
 PBP_BAD_LOG_MSG = "The match's record doesn't match its orders — can't play it on"
+PBP_NO_SPECTATORS_MSG = "That match doesn't take spectators"
+PBP_FOGGED_MSG = "That match has fog of war on, so it can't be spectated"
 
 # What the endpoint's own refusals mean from this side of the wire. Keyed by the
 # exact `error` string `pbp.mjs` sends; anything not here is relayed with a
@@ -754,6 +760,19 @@ def pbp_request() -> tuple[str, str] | None:
     equivalent, exactly as ``--watch`` is for ``#log=``.
     """
     return pbp.parse_link(webstore.url_token())
+
+
+def pbp_spectate_request() -> str | None:
+    """The match id a ``#spectate=<match>`` launch URL carries. ``--spectate``
+    is the desktop equivalent."""
+    return pbp.parse_spectate_link(webstore.url_token())
+
+
+def pbp_unwatchable(match: pbp.Match) -> str:
+    """Why a spectator link may not open ``match``, or "" when it may."""
+    if match.watchable:
+        return ""
+    return PBP_FOGGED_MSG if match.spectators != "none" else PBP_NO_SPECTATORS_MSG
 
 
 def pbp_adopt(match: pbp.Match, seat: pbp.Seat, ui: Ui) -> None:
@@ -875,7 +894,7 @@ def pbp_opened(ui: Ui) -> None:
 def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
             deadline_hours: int = pbp.DEADLINE_HOURS,
             public: bool = False, title: str = "",
-            name: str = "") -> tuple[str, pbp.Request | None]:
+            name: str = "", spectators: str = "none") -> tuple[str, pbp.Request | None]:
     """Ask the endpoint to open a shared match on this setup.
 
     ``seats`` is the roster to seat a person at — any seat left out plays its
@@ -901,6 +920,9 @@ def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
     (``menu.MenuState.pbp_title``/``pbp_name``); the name is remembered for the
     next prompt, blank included, so clearing it sticks.
 
+    ``spectators`` (``menu.MenuState.pbp_spectators``) is who may watch from no
+    seat: nobody, whoever has the spectator link, or anyone on the lobby page.
+
     The id is minted here and sent rather than handed back, so the call is
     idempotent in the only sense that matters: a retry after a lost reply opens
     a second match rather than silently rewriting the first.
@@ -910,7 +932,7 @@ def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
         seats = [pid for pid in range(1, settings.players + 1)]
     webstore.set_pbp_name(name)
     return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours, public,
-                                title, name)
+                                title, name, spectators)
 
 
 def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str]]:
@@ -923,6 +945,13 @@ def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str
     return [(seat, webstore.link_url(pbp.link_fragment(match_id, token))
                     or pbp.link_fragment(match_id, token))
             for seat, token in sorted(tokens.items())]
+
+
+def pbp_spectate_link(match_id: str) -> str:
+    """The spectator link to ``match_id``: a full URL on the web, the bare
+    fragment off it, as ``pbp_seat_links`` does for a seat."""
+    fragment = pbp.spectate_fragment(match_id)
+    return webstore.link_url(fragment) or fragment
 
 
 def pbp_links(match_id: str, tokens: dict[int, str]) -> list[str]:
@@ -1508,6 +1537,9 @@ async def main() -> None:
     ap.add_argument("--match", default="", metavar="MATCH:TOKEN",
                     help="open a play-by-post seat (the desktop equivalent of a "
                          "#pbp=<match>:<token> link)")
+    ap.add_argument("--spectate", default="", metavar="MATCH",
+                    help="watch a play-by-post match from no seat (the desktop "
+                         "equivalent of a #spectate=<match> link)")
     ap.add_argument("--gauntlet-spec", default="", metavar="SPEC.json",
                     help="generate a gauntlet from a spec file (the desktop equivalent "
                          "of a #gauntlet-spec= link)")
@@ -1623,6 +1655,7 @@ async def main() -> None:
     # instead of quietly rewriting the first.
     pbp_make: pbp.Request | None = None
     pbp_making = ""
+    pbp_spectators = "none"       # ...and who it was asked to let watch
     pbp_accum = 0
     pbp_wait = PBP_POLL_MS        # how long `pbp_accum` runs before the next read
     pbp_failures = 0              # reads in a row that came back with no match
@@ -1656,6 +1689,23 @@ async def main() -> None:
     elif args.match.strip() and invite is None:
         print(f"--match {args.match.strip()!r} is not a seat link")
         menu.set_status(menu_state, PBP_REFUSED_MSG, False)
+    # A `#spectate=<match>` link (or --spectate) watches one from no seat: the same
+    # read as a seat's, with nothing to identify and nothing ever written.
+    watching = (pbp.parse_spectate_link(pbp.SPECTATE_FRAGMENT + args.spectate.strip())
+                if args.spectate.strip() else pbp_spectate_request())
+    if watching is not None and pending_replay is None and invite is None:
+        pbp_seat = pbp.spectator(watching)
+        pbp_poll = pbp.fetch_state(watching)
+        if pbp_poll is None:
+            print(f"cannot watch match {watching!r}: no endpoint is configured")
+            menu.set_status(menu_state, PBP_UNREACHABLE_MSG, False)
+            pbp_seat = None
+        else:
+            invite = (watching, "")
+            menu.set_status(menu_state, "Opening match...", True)
+    elif args.spectate.strip() and watching is None:
+        print(f"--spectate {args.spectate.strip()!r} is not a match id")
+        menu.set_status(menu_state, PBP_MISSING_MSG, False)
 
     # A `#g=<id>` or `#gauntlet=` link opens a gauntlet on the menu's Tutorial
     # list. One fragment per launch, so it never meets the two above.
@@ -1780,6 +1830,9 @@ async def main() -> None:
                     pbp_poll = pbp.fetch_state(pbp_seat.match_id)
                     resume_prompt = None
                     pending_invite_links = pbp_seat_links(pbp_making, tokens)
+                    if pbp_spectators != "none":
+                        pending_invite_links.append(
+                            (viewstate.SPECTATE_ROW, pbp_spectate_link(pbp_making)))
                     menu.set_status(menu_state, "Match created — copy each seat's link", True)
         if pbp_ident is not None and invite is not None:
             status, body = pbp_ident.poll()
@@ -1854,6 +1907,11 @@ async def main() -> None:
                           f"this build plays v{engine.RULES_VERSION}")
                     menu.set_status(menu_state, PBP_OUTDATED_MSG, False)
                     invite, pbp_seat = None, None
+                elif opening and pbp_seat.spectating and pbp_unwatchable(match):
+                    # Checked on the way in, from what the endpoint says about
+                    # the match, rather than trusted from the link.
+                    menu.set_status(menu_state, pbp_unwatchable(match), False)
+                    invite, pbp_seat = None, None
                 elif opening and (opened := open_match(match, pbp_seat,
                                                        settings)) is None:
                     menu.set_status(menu_state, PBP_BAD_LOG_MSG, False)
@@ -1873,7 +1931,13 @@ async def main() -> None:
                     pbp_read_line = ""
                     pbp_adopt(match, pbp_seat, ui)
                     verdict = pbp_verdict(match, state, pbp_stale)
-                    if verdict == PBP_WAIT and match.lapsed and pbp_write is None:
+                    if pbp_seat.spectating and verdict == PBP_RESOLVE:
+                        # Resolving writes the log every seat will be held to,
+                        # which takes a seat's token. A spectator waits for one
+                        # of the players' clients to do it, then steps.
+                        verdict = PBP_WAIT
+                    if (verdict == PBP_WAIT and match.lapsed and pbp_write is None
+                            and not pbp_seat.spectating):   # ...nor files a lapse
                         # The clock has run out on somebody. Filing their turn is
                         # what keeps a match from stopping dead because one person
                         # stopped answering; it does not resolve anything, so the
@@ -1943,7 +2007,11 @@ async def main() -> None:
                 and pbp_ident is None and pbp_write is None and state is not None
                 and state.winner is None):
             pbp_accum += dt
-            if pbp_accum >= max(pbp_wait, pbp_idle_floor(pbp_idle)):
+            # A spectator's screen is one nobody touches by design (a TV across
+            # the room), and the whole point of it is stepping the moment the
+            # last seat is in, so the idle floor does not apply to it.
+            idle_floor = 0 if ui.spectating else pbp_idle_floor(pbp_idle)
+            if pbp_accum >= max(pbp_wait, idle_floor):
                 pbp_accum = 0
                 # A brief is only asked for when the board stands where our last
                 # read did; a board ahead of it (our own resolve) or a stale one
@@ -2111,7 +2179,10 @@ async def main() -> None:
                         pbp_making, pbp_make = pbp_open(
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
                             menu_state.pbp_deadline_hours, menu_state.pbp_public,
-                            menu_state.pbp_title, menu_state.pbp_name)
+                            menu_state.pbp_title, menu_state.pbp_name,
+                            menu_state.pbp_spectators)
+                        pbp_spectators = (menu_state.pbp_spectators
+                                          if pbp.fog_off(settings) else "none")
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:
@@ -2167,7 +2238,8 @@ async def main() -> None:
                     # advances when the last seat submits, not when anybody
                     # presses a key. So this sends ours and waits (`input` already
                     # declines a second press while we are waiting).
-                    if pbp_seat is not None and pbp_write is None:
+                    if (pbp_seat is not None and not pbp_seat.spectating
+                            and pbp_write is None):
                         pbp_write = pbp_send(state, ui, pbp_seat)
                         # A read already in flight was asked before our orders
                         # existed, and landing after them it would put us back on

@@ -210,3 +210,4 @@ the measured result was indistinguishable from the baseline.
 
 ## Play-by-post ([`design/pbp.md`](design/pbp.md))
 - Every client re-running every bot from the stored orders: forked matches. Replaced by "the stored log is the record". Enforced fog: not attempted; fog is convenience. Resolving a turn on a clock: never. *The one idea everything follows from*, *Traps*.
+- Spectating a fogged match: not offered. Showing the whole board on a room's screen gives every player's position away. A spectator who sees only what every seat sees, or a view delayed by a turn: set aside as more than the room-TV use needs. Enforcing "no spectators" on the server: not attempted, since `state` is open to anyone with the id. *Spectators.*

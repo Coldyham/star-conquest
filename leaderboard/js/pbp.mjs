@@ -1,6 +1,6 @@
 // The play-by-post lobby: open invitations, the matches this browser holds a
-// seat in, and finished results — plus one match's own page (`?match=<id>`),
-// where an open seat is taken. Pure helpers are exported for
+// seat in, matches open to spectators, and finished results — plus one match's
+// own page (`?match=<id>`), where an open seat is taken or the match watched. Pure helpers are exported for
 // tests/pbp-page.test.mjs; the DOM half runs only in a browser.
 //
 // "Yours" is the game's own seat store, `sc_pbp_seats` (`pbp.remember` in
@@ -16,7 +16,7 @@ import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 import { phrase } from "./matchnames.mjs";
 import { myName, rememberName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
-import { configLabel, tweaks } from "./setup.mjs";
+import { configLabel, hasFog, tweaks } from "./setup.mjs";
 
 const ENDPOINT = "/api/pbp";
 const MATCH_ID = /^[0-9a-f]{16}$/;
@@ -31,6 +31,7 @@ const MAX_IDS = 50;
 export const GROUPS = [
   ["open", "Open seats"],
   ["mine", "Your matches"],
+  ["watch", "Watch live"],
   ["finished", "Finished"],
 ];
 
@@ -166,12 +167,23 @@ export function waitingNote(match) {
 }
 
 /**
- * `{open, mine, finished}`: the public open invitations you are not in, your
- * live matches, and every finished match either list returned. A stranger's
- * match that is under way is none of those, and is not shown.
+ * Whether the game will open a spectator link to `match`: it takes spectators,
+ * it is still being played, and it has no fog — a spectator sees the whole
+ * board, so the game refuses a fogged match (`pbp.Match.watchable`).
+ */
+export function watchable(match) {
+  return !match.finished && ["link", "lobby"].includes(match.spectators)
+    && !hasFog(match.settings_json);
+}
+
+/**
+ * `{open, mine, watch, finished}`: the public open invitations you are not in,
+ * your live matches, the live matches whose creator asked the lobby to offer
+ * spectating, and every finished match either list returned. Any other
+ * stranger's match that is under way is none of those, and is not shown.
  */
 export function groupMatches(matches, mine = {}) {
-  const out = { open: [], mine: [], finished: [] };
+  const out = { open: [], mine: [], watch: [], finished: [] };
   const seen = new Set();
   for (const match of matches) {
     if (seen.has(match.match_id)) continue;
@@ -179,6 +191,7 @@ export function groupMatches(matches, mine = {}) {
     if (match.finished) out.finished.push(match);
     else if (match.match_id in mine) out.mine.push(match);
     else if (match.status === "open") out.open.push(match);
+    else if (match.spectators === "lobby" && watchable(match)) out.watch.push(match);
   }
   return out;
 }
@@ -186,6 +199,21 @@ export function groupMatches(matches, mine = {}) {
 /** The link a seat's token opens in the game: `pbp.link_fragment`'s shape. */
 export function seatLink(matchId, token, game = GAME_URL) {
   return `${game}#pbp=${matchId}:${token}`;
+}
+
+/** The link that watches a match from no seat: `pbp.spectate_fragment`'s shape. */
+export function watchLink(matchId, game = GAME_URL) {
+  return `${game}#spectate=${matchId}`;
+}
+
+/**
+ * "Watch in game" on a match's page, or null: offered when the lobby may show
+ * it (`lobby`), or to a seat holder of a `link` match, who is who the creator
+ * gave that link to and so may need it again.
+ */
+export function watchHref(match, entry, game = GAME_URL) {
+  if (!watchable(match)) return null;
+  return match.spectators === "lobby" || entry ? watchLink(match.match_id, game) : null;
 }
 
 /** "Open in game" for a seat this browser holds: always the full seat link. */
@@ -310,6 +338,9 @@ function matchCard(match, mine) {
 
   const tags = [el("span", { class: "badge", text: configLabel(match.settings_json) }), ...rosterChips(match)];
   if (match.match_id in mine) tags.unshift(el("span", { class: "badge yours", text: "Yours" }));
+  if (match.spectators === "lobby" && watchable(match)) {
+    tags.push(el("span", { class: "badge", text: "Spectators welcome" }));
+  }
   return el("div", { class: "card" }, [
     el("a", { class: "card-body", href: `pbp.html?match=${match.match_id}` },
        [el("div", { class: "card-main" }, children)]),
@@ -337,7 +368,7 @@ async function renderList(node, mine) {
     if (holder !== section) section.append(holder);
     node.append(section);
   }
-  if (!any) node.append(el("p", { class: "lede", text: "No open seats or finished matches right now." }));
+  if (!any) node.append(el("p", { class: "lede", text: "No open seats, live matches to watch or finished matches right now." }));
 }
 
 function stateText(row) {
@@ -449,6 +480,9 @@ async function renderDetail(node, matchId, mine) {
   const yours = el("div", { class: "yours-slot" });
   const button = entry ? openButton(match, entry) : null;
   if (button) yours.append(button);
+  // The whole board and nobody's orders, for a screen the table shares.
+  const watch = watchHref(match, entry);
+  if (watch) yours.append(el("a", { class: "btn", href: watch, text: "Watch in game" }));
   node.append(yours);
 
   const open = match.finished ? [] : match.unclaimed || [];

@@ -53,7 +53,7 @@ import copy
 import json
 from dataclasses import dataclass, field, replace
 
-from . import engine, replay, webstore
+from . import config, engine, replay, webstore
 from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
@@ -78,6 +78,17 @@ TITLE_MAX = 60
 # would put one back. The first miss only holds (see ``lapse_orders``), so what
 # this really sets is how long a match waits before it is allowed to keep moving.
 DEADLINE_HOURS = 48
+
+# Who may watch a match without holding a seat: nobody, whoever has its
+# spectator link, or anyone, from the lobby page as well. The endpoint keeps
+# the creator's choice (`SPECTATORS` in `pbp.mjs`, pinned by
+# tests/test_leaderboard_sync.py) and hands it back on every read.
+SPECTATORS = ("none", "link", "lobby")
+
+# The seat a spectator sits at: neutral's id, which no person can hold. It owns
+# no token, so every write refuses it (``Seat.valid``) and nothing here can file
+# a spectator's orders, a lapse or a resolve.
+SPECTATOR = 0
 
 
 def endpoint(action: str) -> str:
@@ -114,6 +125,16 @@ class Seat:
         return (bool(replay._MATCH_ID_RE.match(self.match_id))
                 and 1 <= self.seat <= 6 and valid_token(self.token))
 
+    @property
+    def spectating(self) -> bool:
+        """Whether this is a spectator's view rather than a seat (``spectator``)."""
+        return self.seat == SPECTATOR
+
+
+def spectator(match_id: str) -> Seat:
+    """The seat a spectator link opens: the match, no seat in it and no token."""
+    return Seat(match_id, SPECTATOR, "")
+
 
 # --------------------------------------------------------------------------- #
 # The link
@@ -142,6 +163,33 @@ def parse_link(token_text: str) -> tuple[str, str] | None:
 def link_fragment(match_id: str, token: str) -> str:
     """The fragment to hand a player, for the link that seats them."""
     return f"{PBP_FRAGMENT}{match_id}:{token}"
+
+
+# `#spectate=<match id>`: the whole board and nobody's orders, for a screen the
+# whole table can see. A fragment of its own rather than a seat link without its
+# token, so a seat link that lost its token on the way is refused as one,
+# rather than quietly opening as somebody's spectator view.
+SPECTATE_FRAGMENT = "spectate="
+
+
+def parse_spectate_link(token_text: str) -> str | None:
+    """The match id out of a ``#spectate=…`` fragment, or None."""
+    if not token_text.startswith(SPECTATE_FRAGMENT):
+        return None
+    match_id = token_text[len(SPECTATE_FRAGMENT):]
+    return match_id if replay._MATCH_ID_RE.match(match_id) else None
+
+
+def spectate_fragment(match_id: str) -> str:
+    """The fragment to hand a spectator: the match id, and nothing that writes."""
+    return f"{SPECTATE_FRAGMENT}{match_id}"
+
+
+def fog_off(settings: Settings) -> bool:
+    """Whether every seat of ``settings`` sees the whole board (both fog ranges
+    at their unlimited end). The menu's own fog checkbox reads the same."""
+    return (settings.fog_sight >= config.FOG_MAX_HOPS
+            and settings.fog_scout >= config.FOG_MAX_HOPS)
 
 
 # --------------------------------------------------------------------------- #
@@ -252,6 +300,21 @@ class Match:
     turn_opened_at: str = ""
     title: str = ""
     names: dict[int, str] = field(default_factory=dict)
+    # Who may watch without a seat (one of ``SPECTATORS``). "none" for a match
+    # created before the choice existed.
+    spectators: str = "none"
+
+    @property
+    def watchable(self) -> bool:
+        """Whether a spectator link may open this match.
+
+        Only with fog off. A spectator sees the whole board, so on a fogged map
+        the shared screen would show every player what none of them should see.
+        Fog is convenience rather than secrecy here (any client could rebuild
+        the board), so this is about not putting it on the wall, not about
+        stopping anyone.
+        """
+        return self.spectators in ("link", "lobby") and fog_off(self.settings)
 
     @property
     def waiting(self) -> list[int]:
@@ -364,7 +427,13 @@ def match_from_dict(data: dict) -> Match | None:
         turn_opened_at=str(data.get("turn_opened_at", "") or ""),
         title=str(data.get("title", "") or ""),
         names=_names_from(data.get("names")),
+        spectators=_spectators_from(data.get("spectators")),
     )
+
+
+def _spectators_from(raw) -> str:
+    """One of ``SPECTATORS``; "none" for anything else, the closed default."""
+    return raw if raw in SPECTATORS else "none"
 
 
 def with_brief(match: Match, data: dict) -> Match | None:
@@ -861,7 +930,8 @@ def parse_body(text: str) -> dict | None:
 
 def create(match_id: str, settings: Settings, seed: int, seats: list[int],
            deadline_hours: int | None = DEADLINE_HOURS,
-           public: bool = False, title: str = "", name: str = "") -> Request | None:
+           public: bool = False, title: str = "", name: str = "",
+           spectators: str = "none") -> Request | None:
     """Open a match, seating a person at each of ``seats``.
 
     A ``public`` match is listed on the leaderboard's lobby page and mints only
@@ -869,6 +939,8 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
     there (``?action=claim``), so the reply carries the creator's link alone.
     ``title`` and ``name`` (the creator's own, for seat 1) are optional display
     text for the lobby; the endpoint trims them and refuses one over its limit.
+    ``spectators`` is one of ``SPECTATORS``; on a fogged setup it is sent as
+    "none", since no spectator link could open the match (``Match.watchable``).
 
     The reply is the one and only time the seat tokens exist in the clear —
     nothing stores them, here or there, so whoever opened the match is who hands
@@ -877,6 +949,8 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
     """
     if not replay._MATCH_ID_RE.match(match_id) or not seats:
         return None
+    if spectators not in SPECTATORS or not fog_off(settings):
+        spectators = "none"
     return call("create", {
         "match_id": match_id,
         "settings_json": settings.without_challenge().token_dict(),
@@ -888,6 +962,7 @@ def create(match_id: str, settings: Settings, seed: int, seats: list[int],
         "claimed": [1] if public else sorted(set(seats)),
         "title": title.strip()[:TITLE_MAX],
         "name": name.strip()[:NAME_MAX],
+        "spectators": spectators,
     })
 
 

@@ -995,6 +995,17 @@ alter table public.pbp_matches
   add column if not exists winner integer
     check (winner is null or winner between 0 and 6);
 
+-- Who may watch a match from no seat: nobody, whoever has its spectator link
+-- (`#spectate=<match id>` in the game), or anyone, from the lobby page too. The
+-- game only offers it with fog off. Not enforced here, and could not be: a
+-- match's state is readable by its id alone, which a seat link already carries.
+alter table public.pbp_matches
+  add column if not exists spectators text not null default 'none'
+    check (spectators in ('none', 'link', 'lobby'));
+
+create index if not exists pbp_matches_watchable_idx
+  on public.pbp_matches (updated_at desc) where spectators = 'lobby';
+
 -- ONE-OFF, testing only: list the matches that predate the flag. Run once when
 -- adding the column above, never again -- re-running it would publish every
 -- private match since.

@@ -297,6 +297,10 @@ class MenuState:
     # List the match on the leaderboard's lobby page, where its other seats are
     # claimed, rather than handing every seat's link to the creator.
     pbp_public: bool = False
+    # Who may watch from no seat (`pbp.SPECTATORS`): nobody, whoever has the
+    # spectator link, or anyone, from the lobby too. Only offered with fog off,
+    # since a spectator sees the whole board (`pbp.Match.watchable`).
+    pbp_spectators: str = "none"
     # Optional display text for the lobby: the creator's own name (remembered
     # between matches, `webstore.pbp_name`) and a title for the match. Which of
     # the two has the caret, if either: "name", "title" or None.
@@ -1003,6 +1007,11 @@ def _step_deadline(ms: MenuState, by: int) -> None:
         _PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * _PBP_DEADLINE_STEP_H))
 
 
+# The spectator row's choices: (`pbp.SPECTATORS` value, label).
+_PBP_SPECTATOR_OPTIONS = (("none", "Off"), ("link", "By link"), ("lobby", "In lobby"))
+_PBP_SPECTATORS_FOGGED = "Off: fog is on"
+
+
 # The prompt's two free-text rows: (label, which, character limit).
 _PBP_TEXT_ROWS = (("Your name", "name", pbp.NAME_MAX), ("Title", "title", pbp.TITLE_MAX))
 _PBP_FIELD_W = 300
@@ -1027,11 +1036,13 @@ def _pbp_char(ch: str) -> bool:
 
 def _open_pbp_prompt(ms: MenuState, settings: Settings) -> None:
     """Open the roster prompt on its defaults: every seat a person, the format's
-    own deadline, private, and the name this installation last used."""
+    own deadline, private, no spectators, and the name this installation last
+    used."""
     ms.pbp_prompt = True
     ms.pbp_roster = set(range(1, settings.players + 1))
     ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
     ms.pbp_public = False
+    ms.pbp_spectators = "none"
     ms.pbp_name = _filter(webstore.pbp_name(), _pbp_char, pbp.NAME_MAX)
     ms.pbp_title = ""
     ms.pbp_editing = None
@@ -1071,8 +1082,10 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
              deadline_w + 2 * pad, 2 * bw + gap + 2 * pad)
     public_w = f["normal"].size("Publicly joinable")[0] + 10 + _CH
     label_w = max(f["normal"].size(label)[0] for label, _, _ in _PBP_TEXT_ROWS)
-    pw = max(pw, public_w + 2 * pad, label_w + 16 + _PBP_FIELD_W + 2 * pad)
-    rows = settings.players + 2 + len(_PBP_TEXT_ROWS)
+    spect_w = f["normal"].size("Spectators")[0] + 16 + _segmented_w(len(_PBP_SPECTATOR_OPTIONS))
+    pw = max(pw, public_w + 2 * pad, label_w + 16 + _PBP_FIELD_W + 2 * pad,
+             spect_w + 2 * pad)
+    rows = settings.players + 3 + len(_PBP_TEXT_ROWS)
     ph = pad + f["normal"].get_height() + gap + rows * (row_h + gap) + bh + pad
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
 
@@ -1112,6 +1125,22 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
           midleft=(panel.x + pad, y + row_h // 2))
     _checkbox(surface, ms, "pbp_public", ms.pbp_public,
               panel.right - pad, y + (row_h - _CH) // 2)
+    y += row_h + gap
+
+    # A spectator sees the whole board, so with fog on there is nothing a shared
+    # screen could show that wouldn't give every player away: the row says so
+    # rather than offering a choice the match would refuse.
+    _text(surface, f["normal"], "Spectators", config.COLOR_TEXT,
+          midleft=(panel.x + pad, y + row_h // 2))
+    for value, _ in _PBP_SPECTATOR_OPTIONS:
+        ms.rects.pop(f"pbp_spect_{value}", None)
+    if pbp.fog_off(settings):
+        _segmented(surface, ms, panel.right - pad, y + (row_h - _CH) // 2,
+                   [(f"pbp_spect_{value}", label, ms.pbp_spectators == value)
+                    for value, label in _PBP_SPECTATOR_OPTIONS])
+    else:
+        _text(surface, f["normal"], _PBP_SPECTATORS_FOGGED, config.COLOR_TEXT_DIM,
+              midright=(panel.right - pad, y + row_h // 2))
     y += row_h + gap
 
     for label, which, _ in _PBP_TEXT_ROWS:
@@ -1753,9 +1782,14 @@ def _stepper(surface, ms, key, value: str, right: int, y: int, value_w: int = 64
     _button(surface, ms, f"{key}_inc", plus, "+", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
 
 
+def _segmented_w(count: int) -> int:
+    """How wide ``_segmented`` draws ``count`` options."""
+    return count * 118 + (count - 1) * 6
+
+
 def _segmented(surface, ms, right: int, y: int, options) -> None:
     ow, gap = 118, 6
-    total = len(options) * ow + (len(options) - 1) * gap
+    total = _segmented_w(len(options))
     x = right - total
     for key, label, active in options:
         rect = pygame.Rect(x, y, ow, _CH)
@@ -2070,7 +2104,7 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
 
 def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     """Answer the play-by-post roster prompt: toggle a seat, nudge the deadline,
-    type a name or title, confirm (opens the match with whichever seats are
+    pick who may spectate, type a name or title, confirm (opens the match with whichever seats are
     still checked, on the deadline shown), or cancel outright.
 
     Seat 1's row is never a hit target (`_draw_pbp_prompt` draws it but records
@@ -2099,6 +2133,11 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
         if rect is not None and rect.collidepoint(event.pos):
             ms.pbp_public = not ms.pbp_public
             return None
+        for value, _ in _PBP_SPECTATOR_OPTIONS:
+            rect = ms.rects.get(f"pbp_spect_{value}")
+            if rect is not None and rect.collidepoint(event.pos):
+                ms.pbp_spectators = value
+                return None
         if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
             _close_pbp_prompt(ms)
             return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})

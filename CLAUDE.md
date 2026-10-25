@@ -192,7 +192,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   in ascending seat id, never submission order. `RULES_VERSION` must not move.
 - **Fog is convenience, not secrecy**; the board digest is a drift tripwire.
 - **Nothing resolves a play-by-post turn on a clock**; play and autoplay are
-  unavailable. **The roster is the truth about who is a person**
+  unavailable. **A spectator holds no seat** (`#spectate=`, `pbp.SPECTATOR`):
+  whole board, no writes, fog off only (`pbp.Match.watchable`). **The roster is the truth about who is a person**
   (`pbp.seat_people`), not `is_human`.
 - A match's name is derived (`matchnames.phrase`, mirrored in
   `leaderboard/js/matchnames.mjs`) and never a key.

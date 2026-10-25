@@ -27,6 +27,10 @@ CHOOSING = "choosing"
 # existing ones — too much to undo click-by-click the way a single send is.
 ROUTING = "routing"
 
+# The invite overlay's row for the spectator link (`Ui.pbp_invite`): not a seat,
+# so outside 1..6, and not 0, which `pbp_copy_seat` uses for "no row".
+SPECTATE_ROW = -1
+
 
 @dataclass(frozen=True)
 class FadingFight:
@@ -394,8 +398,9 @@ class Ui:
     # "a modal listing the seats with a Copy button each" rather than a status
     # line over a clipboard blob nobody thought to check (`main.pbp_seat_links`
     # fills it in, only on the creation path — following someone else's link
-    # never sets it). `(seat, link)` pairs; empty means there is nothing to show,
-    # which is what render/input gate the overlay's presence on.
+    # never sets it). `(seat, link)` pairs, plus `(SPECTATE_ROW, link)` when the
+    # match takes spectators; empty means there is nothing to show, which is
+    # what render/input gate the overlay's presence on.
     pbp_invite: tuple[tuple[int, str], ...] = ()
     pbp_invite_rects: dict[int, tuple[int, int, int, int]] = field(default_factory=dict)
     pbp_invite_close_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -670,6 +675,17 @@ class Ui:
     def in_pbp(self) -> bool:
         """Whether this is a shared match rather than a game of our own."""
         return bool(self.pbp_match)
+
+    @property
+    def spectating(self) -> bool:
+        """Whether we are watching a shared match from no seat at all.
+
+        A spectator sits at neutral's id (``pbp.SPECTATOR``), which no person
+        holds, so nothing on the board is ours: input takes no orders, the End
+        Turn block says so instead, and the whole board is in view
+        (``main._accumulate_fog``).
+        """
+        return self.in_pbp and self.human_id == 0
 
     def awaiting_others(self, state: GameState) -> bool:
         """Whether to hold the board and say we are waiting.
@@ -1016,6 +1032,7 @@ class Ui:
             state.winner is None
             and not state.is_defeated(self.human_id)
             and not self.autoplay
+            and not self.spectating
         )
 
     def begin_route(self) -> None:

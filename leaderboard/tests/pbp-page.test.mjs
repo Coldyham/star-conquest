@@ -8,7 +8,8 @@ import test from "node:test";
 import { phrase } from "../js/matchnames.mjs";
 import {
   SEATS_KEY, deadlineLabel, deadlineNote, groupMatches, matchLabel, mineIds, openLink,
-  parseSeats, resultNote, roster, seatLink, seatWho, setupLine, waitingNote, withSeat,
+  parseSeats, resultNote, roster, seatLink, seatWho, setupLine, waitingNote, watchHref,
+  watchLink, watchable, withSeat,
 } from "../js/pbp.mjs";
 
 const ID = "00112233445566ff";
@@ -70,6 +71,35 @@ test("the lobby shows open invitations, your live matches and finished ones — 
   assert.deepEqual(groups.open.map((m) => m.match_id[0]), ["a"]);
   assert.deepEqual(groups.mine.map((m) => m.match_id[0]), ["b", "e"]);
   assert.deepEqual(groups.finished.map((m) => m.match_id[0]), ["d"]);
+});
+
+test("a match open to spectators from the lobby gets a group of its own", () => {
+  const matches = [
+    { ...base, match_id: "a".repeat(16), status: "in_progress", spectators: "lobby" },
+    { ...base, match_id: "b".repeat(16), status: "in_progress", spectators: "lobby",
+      settings_json: { ...base.settings_json, fog_sight: 2 } },
+    { ...base, match_id: "c".repeat(16), status: "open", spectators: "lobby" },
+    { ...base, match_id: "d".repeat(16), status: "in_progress", spectators: "lobby" },
+  ];
+  const groups = groupMatches(matches, { ["d".repeat(16)]: {} });
+  assert.deepEqual(groups.watch.map((m) => m.match_id[0]), ["a"], "a fogged match can't be watched");
+  assert.deepEqual(groups.open.map((m) => m.match_id[0]), ["c"]);
+  assert.deepEqual(groups.mine.map((m) => m.match_id[0]), ["d"]);
+});
+
+test("watching is offered with fog off, live, and to a link match's own players only", () => {
+  const live = { ...base, match_id: ID, finished: false };
+  assert.equal(watchLink(ID, "https://g/"), `https://g/#spectate=${ID}`);
+  assert.equal(watchHref({ ...live, spectators: "lobby" }, undefined, "https://g/"),
+               `https://g/#spectate=${ID}`);
+  assert.equal(watchHref({ ...live, spectators: "link" }, undefined, "https://g/"), null);
+  assert.equal(watchHref({ ...live, spectators: "link" }, { seat: 1 }, "https://g/"),
+               `https://g/#spectate=${ID}`);
+  assert.equal(watchHref({ ...live, spectators: "none" }, { seat: 1 }), null);
+  assert.equal(watchHref({ ...live }, { seat: 1 }), null, "an older match takes no spectators");
+  assert.equal(watchable({ ...live, spectators: "lobby", finished: true }), false);
+  assert.equal(watchable({ ...live, spectators: "lobby",
+                           settings_json: { fog_scout: 4 } }), false);
 });
 
 const TOKEN = "ab".repeat(16);
