@@ -660,6 +660,15 @@ built.
     an embargo honours this one with no JS of its own. It cannot be stamped on
     the row instead: a node's seed is fresh, so its `games` row is created
     mid-week by whoever posts first, and `games` is append-only after that.
+  - **Once it lifts, the map page names who was ahead at that moment.**
+    `game.mjs`'s `liftNote` and the row's *Led at reveal* mark: the best
+    counted score posted by then (`standings.mjs`'s `leaderAt`), and who has
+    beaten it since, if anyone. The moment is the later of the stored reveal
+    and the end of the last campaign week the map was a node of
+    (`embargoLiftedAt`), read off the `campaign_games` row the page already
+    fetches rather than added to `game_embargoes`, which reads live weeks only
+    so `game_summary` never scans every past campaign. Counted by today's
+    verdicts, so a score whose replay later fails its check was never ahead.
 
 ## The grace period
 

@@ -11,7 +11,9 @@ import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
-import { bestBot, botOrder, botWatchKind, displayOrder, humanVsBots } from "./standings.mjs";
+import {
+  bestBot, botOrder, botWatchKind, compareScores, displayOrder, embargoLiftedAt, humanVsBots, leaderAt,
+} from "./standings.mjs";
 
 const heading = document.getElementById("setup");
 const tagsTarget = document.getElementById("setup-tags");
@@ -30,11 +32,13 @@ const sortKey = params.get("sort") === "lost" ? "lost" : "turns";
  * link's `by` field rather than to a poster, which names nobody to look up.
  */
 function nameCell(score) {
-  const posted = ((score.users && score.users.name) || "").trim();
+  const posted = postedName(score);
   return posted
     ? el("a", { class: "nm", href: userHref([posted]), text: posted })
     : el("span", { class: "nm", text: credit(score) });
 }
+
+const postedName = (score) => ((score.users && score.users.name) || "").trim();
 
 /**
  * Did the worker replay this score's log and get the same result? The embed is
@@ -54,7 +58,7 @@ function verifiedMark() {
   });
 }
 
-function scoreRow(score, rank, replays) {
+function scoreRow(score, rank, replays, lift) {
   const version = replays.get(score.match_id);
   const watchable = version === CURRENT_RULES_VERSION;
   const outdated = version !== undefined && !watchable;
@@ -65,6 +69,7 @@ function scoreRow(score, rank, replays) {
     el("span", { class: "who" }, [
       nameCell(score),
       ...(isVerified(score) ? [verifiedMark()] : []),
+      ...(lift && lift.score === score ? [revealMark(lift.at)] : []),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
     // Watch (or its outdated-replay note) rides *inside* the result cell rather
@@ -77,6 +82,35 @@ function scoreRow(score, rank, replays) {
       ...(outdated ? [outdatedNote()] : []),
     ]),
     el("span", { class: "when", title: relativeTime(score.submitted_at), text: shortTime(score.submitted_at) }),
+  ]);
+}
+
+/**
+ * The score that held the record when the map's embargo lifted (`liftNote`).
+ */
+function revealMark(at) {
+  return el("span", {
+    class: "at-reveal",
+    title: `Ahead when the embargo lifted, ${relativeTime(at)}`,
+    text: "Led at reveal",
+  });
+}
+
+/**
+ * Who was ahead when the embargo lifted, and whether they still are — the
+ * result the embargo was a deadline for, which the full list alone would bury
+ * once someone has watched the replays and beaten it. Null on a map that never
+ * had an embargo, or had nothing counted by the time it lifted.
+ */
+function liftNote(lift, leader) {
+  if (!lift) return null;
+  const name = (score) => postedName(score) || credit(score);
+  const beaten = leader && compareScores(leader, lift.score) < 0;
+  return el("p", { class: "lede" }, [
+    `When the embargo lifted ${relativeTime(lift.at)}, `,
+    el("strong", { text: name(lift.score) }),
+    ` was ahead — ${lift.score.turns} turns. `,
+    beaten ? `Beaten since by ${name(leader)} — ${leader.turns} turns.` : "Still the record.",
   ]);
 }
 
@@ -485,11 +519,19 @@ async function load() {
     const leader = scores.find((score) => countedIds.has(score.id)) || null;
     const link = leader ? playLink(leader.raw_token) : await freshPlayLink(game);
 
+    // An embargo that has lifted: the stored reveal date, or the end of the
+    // campaign week this map was a node of (game_embargoes forgets a week once
+    // it is over, so it is read off the node instead).
+    const liftedAt = embargoLiftedAt(game.embargo_until, nodes.length ? nodes[0].week_start : null);
+    const ahead = liftedAt ? leaderAt(scores, countedIds, liftedAt) : null;
+    const lift = ahead ? { score: ahead, at: liftedAt } : null;
+
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
     const replays = await replayVersions(scores);
     clear(target).append(
-      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays))),
+      ...[liftNote(lift, leader)].filter(Boolean),
+      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays, lift))),
       ...mapActions(link, campaign, await note),
     );
 

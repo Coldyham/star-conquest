@@ -178,6 +178,18 @@ links treat a campaign node exactly like a map embargoed by hand. It has to be
 derived, since a node's `games` row doesn't exist until someone first posts on
 it, and nothing on the board may update that row afterwards.
 
+**Once an embargo lifts, the map page says who was ahead when it did**: a line
+over the score list ("When the embargo lifted 5 days ago, alice was ahead — 28
+turns. Beaten since by bo — 22 turns.", or "Still the record.") and a *Led at
+reveal* mark on that score's row. That is the result the deadline was for, and
+the one the full list buries once somebody has watched the replays and beaten
+it. The leader at that moment is the best counted score posted by then, by
+today's verdicts (`standings.mjs`'s `leaderAt`). The moment itself is the later
+of `games.embargo_until` and the end of the last campaign week the map was a
+node of (`embargoLiftedAt`), worked out on the map page from the node it
+already fetches: `game_embargoes` forgets a week once it is over, so the home
+page never scans every past campaign.
+
 ## Same setup, different seed
 
 Every game with a `game_key` still gets its own row and its own board — a seed is
