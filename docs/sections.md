@@ -92,7 +92,7 @@ only for a fight; what is deliberately not animated.
 - **What was built from these games.** Four marshal arms (all deleted) and actuary's `SELF_RELIEF`.
 
 ## design/pbp.md
-- **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **Spectators** (the room's TV: none / link / lobby, a seat nobody holds, fog on means none, why the setting is not a lock, no idle floor); **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
+- **Context** and *Decisions taken up front*; **Constraints that shape the design**; **What it reuses**; **The one idea everything follows from** (the stored log is the record, so a turn is decided once); **Verified against a real deploy** and *the bug that made the digest worth having*; **Testing the backend**; **Opening a match**; **How a deadline works**; **Public matches and the lobby**; **Spectators** (the room's TV: none / link / lobby, a seat nobody holds, fog on means none, why the setting is not a lock, polling that backs off when the match goes quiet, and what a poll costs); **What a poll costs** (briefs, the idle floor; *decided against: a slower steady cadence*); **Traps**.
 
 ## design/bots.md
 - **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with a pointer to the evidence for each item.

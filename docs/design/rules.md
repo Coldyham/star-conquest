@@ -220,7 +220,8 @@ already resolve simultaneously. The rationale for each rule is in
   resolve, no lapse (`Seat.valid` is false). It waits for a player's client and
   steps. A `lobby` match is listed on the lobby page, public or not, but none of
   its seats are claimable from it. The setting decides what is offered, not who
-  can read (`state` is open by id). A spectator's tab has no idle floor.
+  can read (`state` is open by id). A spectator's polling backs off when the
+  match goes quiet, not on input (`main.pbp_spectator_floor`).
 - **A match's name is derived; its title, seat names and winner are claims.**
   `matchnames.phrase` (mirrored in `leaderboard/js/matchnames.mjs`, pinned by
   `test_leaderboard_sync`) labels a match from its id and is never a key. Title

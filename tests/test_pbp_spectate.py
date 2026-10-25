@@ -235,3 +235,17 @@ def test_the_invite_overlay_offers_the_spectate_link(monkeypatch):
                                pos=(rect[0] + rect[2] // 2, rect[1] + rect[3] // 2), button=1)
     assert game_input.handle_event(press, state, ui) == "pbp_copy_seat"
     assert ui.pbp_copy_seat == viewstate.SPECTATE_ROW
+
+
+def test_a_spectator_reads_quickly_while_the_match_moves_and_slowly_once_it_stops():
+    """Nobody touches a TV, so its reads key on the match rather than on input:
+    the ordinary cadence while a turn resolved or a seat submitted in the last
+    half hour, then the idle ceiling, and straight back on a touch."""
+    quiet, never_touched = app.PBP_SPECTATOR_QUIET_MS, 10 ** 9
+    assert app.pbp_spectator_floor(0, never_touched) == 0
+    assert app.pbp_spectator_floor(quiet - 1, never_touched) == 0
+    assert app.pbp_spectator_floor(quiet, never_touched) == app.PBP_IDLE_MAX_MS
+    assert app.pbp_spectator_floor(10 ** 9, never_touched) == app.PBP_IDLE_MAX_MS
+    assert app.pbp_spectator_floor(10 ** 9, 0) == 0, "a touch brings it back"
+    # Backed off, a forgotten tab reads at a twelfth of the steady cadence.
+    assert app.PBP_IDLE_MAX_MS // app.PBP_POLL_MS == 12

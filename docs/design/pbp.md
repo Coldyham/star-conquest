@@ -460,11 +460,22 @@ labelled, not secrecy. A *link* match is listed nowhere. The lobby offers its
 link again only on the match's own page, and only to a browser holding a seat in
 it, since that is who the creator handed it to.
 
-**A spectator's tab is never idle.** A screen nobody touches is exactly what a
-TV is, and the idle floor (below) would slow its reads to one a minute, so the
-board would step up to a minute after the last seat is in. It reads at the
-ordinary cadence instead. One TV is 720 reads an hour, inside the endpoint's
-read budget alongside a table of players behind the same address.
+**A spectator's tab is idle by the match, not by input.** A screen nobody
+touches is exactly what a TV is, and the idle floor (below) would slow its reads
+to one a minute from the start, so the board would step up to a minute after the
+last seat is in. Instead `main.pbp_spectator_floor` keys on the match: while a
+turn resolved or a seat submitted in the last half hour
+(`PBP_SPECTATOR_QUIET_MS`), it reads at the ordinary 5 s cadence; past that it
+drops to the idle ceiling of a minute, and a touch brings it straight back.
+
+The reason is cost. At Netlify's current rates (2 credits per 10,000 requests,
+10 per GB-hour of function compute) one tab at 5 s is roughly 0.45 credits an
+hour, assuming about 150 ms per call at 1 GB. A game night of three hours costs
+about 1.3. A TV tab left open on a match that runs for days would cost about 11
+a day at that cadence, the whole free tier's 300 in a month, and the free tier
+pauses the game, board and `/api/` together. Backed off, that tab costs a
+twelfth as much. Supabase barely notices either way: a brief is two small
+indexed reads and a few hundred bytes back.
 
 ## What a poll costs
 

@@ -742,6 +742,23 @@ def pbp_idle_floor(idle_ms: int) -> int:
     return min(idle_ms // PBP_IDLE_SHARE, PBP_IDLE_MAX_MS)
 
 
+# A spectator's screen is one nobody touches by design (a TV across the room), so
+# the idle floor above, which keys on input, would slow it from the start. It
+# keys on the match instead: while a turn has resolved or a seat has submitted
+# within the last half hour, it reads at the ordinary cadence and steps the
+# moment the last seat is in. Past that the table has gone quiet (or the tab was
+# left open on a match that runs for days) and it drops to the idle ceiling, a
+# twelfth of the reads. Any input brings it straight back, as it does for a player.
+PBP_SPECTATOR_QUIET_MS = 30 * 60_000
+
+
+def pbp_spectator_floor(quiet_ms: int, idle_ms: int) -> int:
+    """The soonest a spectator's next read may go: none while the match moved, or
+    the screen was touched, within ``PBP_SPECTATOR_QUIET_MS``; else the idle
+    ceiling."""
+    return 0 if min(quiet_ms, idle_ms) < PBP_SPECTATOR_QUIET_MS else PBP_IDLE_MAX_MS
+
+
 def pbp_poll_delay(failures: int) -> int:
     """How long to wait before the next read, after ``failures`` in a row.
 
@@ -1664,6 +1681,8 @@ async def main() -> None:
     pbp_stale = False             # our resolve was refused: rebuild on the next read
     pbp_last: pbp.Match | None = None   # the latest read, which a brief merges into
     pbp_idle = 0                  # ms since the last input, which stretches the wait
+    pbp_quiet = 0                 # ms since the match last moved (a spectator's floor)
+    pbp_moved: tuple | None = None   # (turn, seats waited on) when it last moved
     # Every other seat's link, from a match *we* just created — handed to `Ui`
     # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
     # opens on the very first frame of the match rather than a status line that
@@ -2002,15 +2021,18 @@ async def main() -> None:
             pbp_seat, pbp_poll, pbp_write, pbp_ident = None, None, None, None
             pbp_failures, pbp_wait, pbp_read_line = 0, PBP_POLL_MS, ""
             pbp_resolving = pbp_stale = False
-            pbp_last = None
+            pbp_last, pbp_moved, pbp_quiet = None, None, 0
         elif (ui is not None and pbp_seat is not None and pbp_poll is None
                 and pbp_ident is None and pbp_write is None and state is not None
                 and state.winner is None):
             pbp_accum += dt
-            # A spectator's screen is one nobody touches by design (a TV across
-            # the room), and the whole point of it is stepping the moment the
-            # last seat is in, so the idle floor does not apply to it.
-            idle_floor = 0 if ui.spectating else pbp_idle_floor(pbp_idle)
+            # A turn resolving or a seat submitting is the match moving, which
+            # is what keeps a spectator's reads quick (`pbp_spectator_floor`).
+            moved = (state.turn, ui.pbp_waiting)
+            pbp_quiet = 0 if moved != pbp_moved else pbp_quiet + dt
+            pbp_moved = moved
+            idle_floor = (pbp_spectator_floor(pbp_quiet, pbp_idle) if ui.spectating
+                          else pbp_idle_floor(pbp_idle))
             if pbp_accum >= max(pbp_wait, idle_floor):
                 pbp_accum = 0
                 # A brief is only asked for when the board stands where our last
