@@ -734,7 +734,13 @@ class Ui:
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
-        """Ships already promised out of a system by queued (not yet run) orders."""
+        """Ships already promised out of a system by queued (not yet run) orders.
+
+        Nothing while reviewing history: the queue is for the live board, and
+        taking it off a past board's garrison would show counts that never were
+        (sending all 20 out of a system now read as -18 on a turn it held 2)."""
+        if self.history:
+            return 0
         return sum(o.ships for o in self.pending if o.source_id == sid)
 
     def available(self, state: GameState, sid: int) -> int:
