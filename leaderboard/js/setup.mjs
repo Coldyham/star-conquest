@@ -33,7 +33,7 @@ export const KNOB_LABELS = {
 };
 
 // The two fog ranges read as one entry, "Fog": the Basic tab's checkbox is a
-// single on/off over both (`menu._fog_off`), and fog changes how a map plays
+// single on/off over both (`settings.fog_off`), and fog changes how a map plays
 // more than any one slider does, so it must never vanish into "N tweaks".
 const FOG_KEYS = ["fog_sight", "fog_scout"];
 

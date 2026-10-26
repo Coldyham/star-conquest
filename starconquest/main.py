@@ -47,7 +47,7 @@ from starconquest.menu import MenuState
 from starconquest.model import GameState, Order
 from starconquest.replay import GameLog
 from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_globals, build_state,
-                                   random_seed, resolve_seed)
+                                   fog_off, random_seed, resolve_seed)
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
@@ -2199,7 +2199,7 @@ async def main() -> None:
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
                             menu_state.pbp_deadline_hours, menu_state.pbp_public,
                             menu_state.pbp_title, menu_state.pbp_name)
-                        pbp_watchable = pbp.fog_off(settings)
+                        pbp_watchable = fog_off(settings)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:

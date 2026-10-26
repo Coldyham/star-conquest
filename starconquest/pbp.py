@@ -53,7 +53,7 @@ import copy
 import json
 from dataclasses import dataclass, field, replace
 
-from . import config, engine, replay, webstore
+from . import engine, replay, webstore
 from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
@@ -63,7 +63,7 @@ from .paths import (
     WEB_PBP_STATE_KEY,
     is_web,
 )
-from .settings import Settings, build_state
+from .settings import Settings, build_state, fog_off
 
 # A seat token as the endpoint mints one: 128 bits as hex.
 TOKEN_CHARS = 32
@@ -177,13 +177,6 @@ def parse_spectate_link(token_text: str) -> str | None:
 def spectate_fragment(match_id: str) -> str:
     """The fragment to hand a spectator: the match id, and nothing that writes."""
     return f"{SPECTATE_FRAGMENT}{match_id}"
-
-
-def fog_off(settings: Settings) -> bool:
-    """Whether every seat of ``settings`` sees the whole board (both fog ranges
-    at their unlimited end). The menu's own fog checkbox reads the same."""
-    return (settings.fog_sight >= config.FOG_MAX_HOPS
-            and settings.fog_scout >= config.FOG_MAX_HOPS)
 
 
 # --------------------------------------------------------------------------- #
