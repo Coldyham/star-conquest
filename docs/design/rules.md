@@ -216,8 +216,9 @@ already resolve simultaneously. The rationale for each rule is in
   (`pbp.Match.watchable`) and shows the whole board; nothing is stored or opted
   into. The invite overlay offers the link with fog off only, and the game
   refuses it for a fogged match. A spectator never writes: no orders, no
-  resolve, no lapse (`Seat.valid` is false). It waits for a player's client and
-  steps. A spectator's polling backs off when the match goes quiet, not on input
+  resolve, no lapse (`Seat.valid` is false), and never a seat's saved rules
+  (`pbp.remember_rules`). It waits for a player's client and steps. A spectator's
+  polling backs off when the match goes quiet, not on input
   (`main.pbp_spectator_floor`).
 - **A match's name is derived; its title, seat names and winner are claims.**
   `matchnames.phrase` (mirrored in `leaderboard/js/matchnames.mjs`, pinned by

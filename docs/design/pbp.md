@@ -458,6 +458,12 @@ player does. `?action=state` is open to anyone holding the id in any case. A
 match is listed for watching nowhere: the lobby offers the link only on the
 match's own page, to a browser holding a seat in it.
 
+**A spectator holds no rules.** A device may hold a seat in the match as well,
+with standing rules saved for it (`pbp.remember_rules`). A spectator neither
+loads them (`main.open_match`) nor writes its own empty set over them when a turn
+steps (`main.resolve_turn`), so watching on the device that also plays leaves
+that seat's rules where they were.
+
 **A spectator's tab is idle by the match, not by input.** A screen nobody
 touches is exactly what a TV is, and the idle floor (below) would slow its reads
 to one a minute from the start, so the board would step up to a minute after the

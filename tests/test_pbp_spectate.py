@@ -18,7 +18,7 @@ import pygame
 import pytest
 
 from starconquest import main as app
-from starconquest import ai, config, engine, pbp, replay, viewstate, webstore
+from starconquest import ai, config, engine, model, pbp, replay, viewstate, webstore
 from starconquest import input as game_input
 from starconquest.settings import Settings
 
@@ -155,6 +155,21 @@ def test_a_spectator_steps_to_the_board_the_players_resolved():
     app.resolve_turn(state, ui, local, Settings(), script=pbp.settled_turn(moved, 0))
     assert replay.digest_hex(state) == digest
     assert ui.visible == set(state.systems)
+
+
+def test_a_spectator_never_touches_a_seats_saved_rules():
+    """This device may hold a seat in the match too, with standing rules saved
+    for it; watching neither loads them nor writes them away."""
+    ai.load_models()
+    rules = {3: model.ForwardRule(shares={4: 100})}
+    pbp.remember_rules(MATCH, rules)
+    complete = pbp.match_from_dict(_payload(submitted=[1, 2]))
+    _elsewhere, log, _digest = pbp.resolve(complete, ai.decide)
+    _, state, ui, local = _watching()
+    assert ui.auto_forward == {}
+    moved = pbp.match_from_dict(_payload(turn=1, log=pbp.shareable(log).encoded()))
+    app.resolve_turn(state, ui, local, Settings(), script=pbp.settled_turn(moved, 0))
+    assert pbp.remembered_rules(MATCH) == rules
 
 
 def _drawn(monkeypatch, state, ui) -> list[str]:

@@ -825,8 +825,11 @@ def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
     if log is None:
         return None
     state, ui = resume_game(log, settings, seat.seat)
-    ui.auto_forward = pbp.remembered_rules(match.match_id)
-    ui.prune_forward(state)
+    # A spectator holds no rules; any this device keeps for the match are a
+    # seat's, and stay where they are for when that seat is opened here again.
+    if not seat.spectating:
+        ui.auto_forward = pbp.remembered_rules(match.match_id)
+        ui.prune_forward(state)
     pbp.seat_people(state, match.seats)
     pbp_adopt(match, seat, ui)
     return state, ui, log
@@ -1275,7 +1278,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         record_best(settings, state, ui)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
-    if ui.in_pbp:
+    if ui.in_pbp and not ui.spectating:
         # A shared match's log goes up without our rules, so this device keeps its
         # own copy — the one a solo game gets from `log.record_turn` above.
         pbp.remember_rules(ui.pbp_match, ui.auto_forward)
