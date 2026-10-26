@@ -136,12 +136,18 @@ def test_a_spectator_has_no_turn_to_end_and_nothing_to_send():
     enter = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="\r")
     assert game_input.handle_event(enter, state, ui) is None
     assert not ui.can_route(state)
-    # A press on a system selects nothing: nothing on the board is ours.
+    # A press on a system selects nothing, since nothing on the board is ours,
+    # but it does bring the system up in the side panel: on touch there is no
+    # pointing at it. Empty space puts it away again.
     sid = next(iter(state.systems))
     pos = ui.view.to_screen(state.systems[sid].pos)
     game_input.handle_event(
         pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), state, ui)
     assert ui.selected is None and not ui.pending
+    assert ui.hover == sid
+    game_input.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(-50, -50), button=1), state, ui)
+    assert ui.hover is None
 
 
 def test_a_spectator_steps_to_the_board_the_players_resolved():
@@ -172,6 +178,13 @@ def test_a_spectator_never_touches_a_seats_saved_rules():
     assert pbp.remembered_rules(MATCH) == rules
 
 
+def test_a_spectator_is_never_told_they_conquered_a_draw():
+    _, state, ui, _ = _watching()
+    from starconquest import render
+    state.winner = 0
+    assert all(not text.startswith("Conquered") for _k, text, _c in render._result_lines(state, ui))
+
+
 def _drawn(monkeypatch, state, ui) -> list[str]:
     from starconquest import render
     pygame.init()
@@ -196,6 +209,16 @@ def test_the_spectators_screen_says_who_the_turn_is_waiting_on(monkeypatch):
     assert ui.end_turn_rect[2] == 0, "no End Turn to press"
     assert ui.clear_button_rect[2] == 0, "nothing to clear"
     assert not any("send its garrison" in line for line in drawn), "no how-to-send help"
+    assert not any(line.endswith(" lost") for line in drawn), "neutral's losses are nobody's"
+
+
+def test_a_spectator_reads_a_neutral_system_as_nobodys(monkeypatch):
+    """Neutral's id is the spectator's, but its systems are not theirs to send from."""
+    _, state, ui, _ = _watching()
+    ui.hover = next(sid for sid, s in state.systems.items() if s.owner_id == 0)
+    drawn = _drawn(monkeypatch, state, ui)
+    assert not any(" free / " in line for line in drawn)
+    assert any(line.startswith("Ships: ") for line in drawn)
 
 
 def test_the_invite_overlay_offers_the_spectate_link(monkeypatch):

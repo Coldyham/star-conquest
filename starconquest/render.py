@@ -1730,7 +1730,7 @@ def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> py
     counter's.
     """
     player = state.players.get(ui.human_id)
-    if player is None:
+    if player is None or ui.spectating:   # a spectator sits at neutral's id
         return turn
     label = _text(surface, _fonts()["small"], f"{player.ships_lost} lost", config.COLOR_TEXT_DIM,
                   midleft=(turn.right + config.HUD_PAD, config.HUD_TOP_H // 2))
@@ -2080,7 +2080,7 @@ def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
         return y
     y = _head_named(surface, x, y, sys.label, config.player_color(sys.owner_id), width)
     y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}", config.player_color(sys.owner_id))
-    if sys.owner_id == ui.human_id:
+    if sys.owner_id == ui.human_id and not ui.spectating:
         y = _row(surface, x, y, f"Ships: {ui.available(state, sys.id)} free / {sys.ships} total", config.COLOR_TEXT)
     else:
         y = _row(surface, x, y, f"Ships: {sys.ships}", config.COLOR_TEXT)
@@ -2201,7 +2201,14 @@ Drag to pan, wheel to zoom."""
 
 # A spectator has nothing to send, so none of the live legend's verbs are theirs:
 # only what the screen is for, and how to look around it.
-_LEGEND_SPECTATING = """Watching from no seat: the whole board, and nobody's orders.
+_LEGEND_SPECTATING_TOUCH = """Watching from no seat: the whole board, and nobody's orders.
+
+Each turn plays out here once every seat is in. The line at the top says who the
+turn is waiting on.
+
+Tap a system to see it. Drag to pan, −/+ to zoom."""
+
+_LEGEND_SPECTATING_KEYS = """Watching from no seat: the whole board, and nobody's orders.
 
 Each turn plays out here once every seat is in. The line at the top says who the
 turn is waiting on.
@@ -2296,7 +2303,7 @@ def _legend_text(history: bool, spectating: bool = False) -> str:
     if history:
         return _LEGEND_HISTORY_TOUCH if config.touch_ui else _LEGEND_HISTORY_KEYS
     if spectating:
-        return _LEGEND_SPECTATING
+        return _LEGEND_SPECTATING_TOUCH if config.touch_ui else _LEGEND_SPECTATING_KEYS
     return _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS
 
 
@@ -2852,7 +2859,9 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     """
     note = ([("small", "Someone else's game, replayed", config.COLOR_TEXT_DIM)]
             if ui.watched else [])
-    if state.winner != ui.human_id:
+    # A spectator sits at neutral's id, which is also a mutual annihilation's
+    # winner: no result here is theirs.
+    if ui.spectating or state.winner != ui.human_id:
         if ui.challenge_target is not None:
             return note + [("normal", "Challenge failed", (214, 130, 110))]
         return note

@@ -800,9 +800,12 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
     if ui.autoplay:
         return None
     if ui.spectating:
-        # Nothing on the board is a spectator's to send, so a press only moves
-        # the camera: empty space pans, as it does for a player.
-        if pick_node(state, ui, pos) is None:
+        # Nothing on the board is a spectator's to send, so a press on a system
+        # only puts it in the side panel, as pointing at it does; on touch there is
+        # no pointing. Hover rather than a selection: `Ui.source` would take a
+        # neutral system for the spectator's own. Empty space clears it and pans.
+        ui.hover = pick_node(state, ui, pos)
+        if ui.hover is None:
             _arm_pan(ui, pos)
         return None
 
