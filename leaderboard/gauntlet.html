@@ -23,11 +23,7 @@
         <a class="btn" href="campaign.html">Campaign</a>
         <a class="btn" href="crowns.html">Crowns</a>
         <a class="btn" href="pbp.html">Shared matches</a>
-        <details class="sub">
-          <summary class="btn">Gauntlets</summary>
-          <a class="btn" href="gauntlets.html">See public</a>
-          <a class="btn" href="gauntlet.html">Make new</a>
-        </details>
+        <a class="btn" href="gauntlets.html">Gauntlets</a>
         <a class="btn" href="submit.html">Enter score</a>
       </nav>
     </details>
@@ -37,6 +33,11 @@
 <main>
   <a class="back" href="index.html">← All maps</a>
   <h1>Make a gauntlet</h1>
+  <!-- The two gauntlet pages share one menu entry; these tabs move between them. -->
+  <nav class="sorts" aria-label="Gauntlets">
+    <a class="btn ghost" href="gauntlets.html">Public</a>
+    <a class="btn" href="gauntlet.html" aria-current="page">Make new</a>
+  </nav>
   <!-- A gauntlet is a run of maps played in order, each with a briefing card
        and a one-line hint: the game's tutorial is one. This page builds one
        from game links and stores it (/api/gauntlet), which hands back a short

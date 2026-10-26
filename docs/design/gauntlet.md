@@ -220,8 +220,9 @@ the link `/game/#g=<id>`. A `.json` download of the same file is for desktop.
   list-gauntlet` sets `listed`, and only a listed row is readable with the
   publishable key. `gauntlets.html` lists those rows newest first, each
   opening in the game by `#g=<id>` or in the builder to remix, and the player
-  card's Gauntlet runner badge counts clears of them. The menu nests both pages
-  under one Gauntlets entry: see public, make new.
+  card's Gauntlet runner badge counts clears of them. The menu has one
+  Gauntlets entry (the public page); tabs on both pages move between Public
+  and Make new, to keep the menu short.
 
 ## Relation to the weekly campaign
 
