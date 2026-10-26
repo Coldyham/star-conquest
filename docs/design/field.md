@@ -259,7 +259,7 @@ has actuary at 1.0% in the same cell on its own seeds.
 settings) puts fulcrum first: 370 wins to actuary's 343 and marshal's 305, 61%
 head to head against actuary, 75% against marshal and 93% against knower. Every
 pair without fulcrum reproduced the previous run game for game. The grid is in
-[`marshal.md`](marshal.md), "Where marshal stands".
+[`ladder.md`](ladder.md).
 
 **Against a bot from outside the roster.** `bots/severance` (Rust, built
 offline with `cargo build --release`) plays the graph rather than the fight. 18

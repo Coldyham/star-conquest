@@ -189,8 +189,7 @@ export function tally(rows, roster) {
 }
 
 /**
- * The measured full-roster ladder (docs/design/marshal.md "Full roster ladder" in
- * the Python repo, mirrored here since JS can't import it), strongest to
+ * The measured full-roster ladder (docs/design/ladder.md in the Python repo, mirrored here since JS can't import it), strongest to
  * weakest, one entry per family. Keep in sync with `starconquest/ai.py`'s
  * `LADDER_ORDER`.
  */

@@ -154,7 +154,7 @@ def family(name: str) -> str:
     return entry[0] if entry is not None else name
 
 
-# The measured full-roster ladder (docs/design/marshal.md "Full roster ladder"),
+# The measured full-roster ladder (docs/design/ladder.md),
 # strongest to weakest. knower leads despite tests/sim.py --ladder finding
 # marshal a shade ahead at knower's untuned default (aux=1, a near-tie within
 # noise) — the ladder ranks knower on its oracle ceiling (deep search, e.g.

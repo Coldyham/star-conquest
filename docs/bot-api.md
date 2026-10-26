@@ -3,7 +3,7 @@
 A wire protocol so a bot can be written in any language, judged in the ladder,
 and never need to be Python. Why it takes this shape — and why the in-app
 rule-builder it replaces was not merged — is in
-[`design/bots.md`](design/bots.md) under "Bots that aren't Python".
+[`design/external-bots.md`](design/external-bots.md) under "Bots that aren't Python".
 
 **Built:** the schema (`starconquest/botio.py`, pure core), the transport
 (`tests/botproc.py`), a worked example (`bots/rusherwire`, a port of
