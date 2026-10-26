@@ -705,7 +705,6 @@ PBP_OPENING_MSG = "Opening the match..."
 PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
 PBP_BAD_LOG_MSG = "The match's record doesn't match its orders — can't play it on"
-PBP_NO_SPECTATORS_MSG = "That match doesn't take spectators"
 PBP_FOGGED_MSG = "That match has fog of war on, so it can't be spectated"
 
 # What the endpoint's own refusals mean from this side of the wire. Keyed by the
@@ -787,9 +786,7 @@ def pbp_spectate_request() -> str | None:
 
 def pbp_unwatchable(match: pbp.Match) -> str:
     """Why a spectator link may not open ``match``, or "" when it may."""
-    if match.watchable:
-        return ""
-    return PBP_FOGGED_MSG if match.spectators != "none" else PBP_NO_SPECTATORS_MSG
+    return "" if match.watchable else PBP_FOGGED_MSG
 
 
 def pbp_adopt(match: pbp.Match, seat: pbp.Seat, ui: Ui) -> None:
@@ -911,7 +908,7 @@ def pbp_opened(ui: Ui) -> None:
 def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
             deadline_hours: int = pbp.DEADLINE_HOURS,
             public: bool = False, title: str = "",
-            name: str = "", spectators: str = "none") -> tuple[str, pbp.Request | None]:
+            name: str = "") -> tuple[str, pbp.Request | None]:
     """Ask the endpoint to open a shared match on this setup.
 
     ``seats`` is the roster to seat a person at — any seat left out plays its
@@ -937,9 +934,6 @@ def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
     (``menu.MenuState.pbp_title``/``pbp_name``); the name is remembered for the
     next prompt, blank included, so clearing it sticks.
 
-    ``spectators`` (``menu.MenuState.pbp_spectators``) is who may watch from no
-    seat: nobody, whoever has the spectator link, or anyone on the lobby page.
-
     The id is minted here and sent rather than handed back, so the call is
     idempotent in the only sense that matters: a retry after a lost reply opens
     a second match rather than silently rewriting the first.
@@ -949,7 +943,7 @@ def pbp_open(settings: Settings, seed: int, seats: list[int] | None = None,
         seats = [pid for pid in range(1, settings.players + 1)]
     webstore.set_pbp_name(name)
     return match_id, pbp.create(match_id, settings, seed, seats, deadline_hours, public,
-                                title, name, spectators)
+                                title, name)
 
 
 def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str]]:
@@ -1672,7 +1666,7 @@ async def main() -> None:
     # instead of quietly rewriting the first.
     pbp_make: pbp.Request | None = None
     pbp_making = ""
-    pbp_spectators = "none"       # ...and who it was asked to let watch
+    pbp_watchable = False         # ...and whether its setup can be spectated
     pbp_accum = 0
     pbp_wait = PBP_POLL_MS        # how long `pbp_accum` runs before the next read
     pbp_failures = 0              # reads in a row that came back with no match
@@ -1849,7 +1843,7 @@ async def main() -> None:
                     pbp_poll = pbp.fetch_state(pbp_seat.match_id)
                     resume_prompt = None
                     pending_invite_links = pbp_seat_links(pbp_making, tokens)
-                    if pbp_spectators != "none":
+                    if pbp_watchable:
                         pending_invite_links.append(
                             (viewstate.SPECTATE_ROW, pbp_spectate_link(pbp_making)))
                     menu.set_status(menu_state, "Match created — copy each seat's link", True)
@@ -2201,10 +2195,8 @@ async def main() -> None:
                         pbp_making, pbp_make = pbp_open(
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
                             menu_state.pbp_deadline_hours, menu_state.pbp_public,
-                            menu_state.pbp_title, menu_state.pbp_name,
-                            menu_state.pbp_spectators)
-                        pbp_spectators = (menu_state.pbp_spectators
-                                          if pbp.fog_off(settings) else "none")
+                            menu_state.pbp_title, menu_state.pbp_name)
+                        pbp_watchable = pbp.fog_off(settings)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:

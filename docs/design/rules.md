@@ -212,16 +212,13 @@ already resolve simultaneously. The rationale for each rule is in
   A public match mints the creator's token alone, and an open seat is one with
   no stored hash until `?action=claim` mints it.
 - **A spectator holds no seat** (`pbp.SPECTATOR`, neutral's id, and no token).
-  `#spectate=<match>` (or `--spectate`) opens a match whose creator allowed it
-  (`spectators`: `none`, `link` or `lobby`, chosen on the create prompt) and
-  shows the whole board. **Only with fog off** (`pbp.Match.watchable`): the
-  prompt offers no choice under fog, `pbp.create` sends `none` for a fogged
-  setup, and the game refuses the link. A spectator never writes: no orders, no
+  `#spectate=<match>` (or `--spectate`) opens any match **with fog off**
+  (`pbp.Match.watchable`) and shows the whole board; nothing is stored or opted
+  into. The invite overlay offers the link with fog off only, and the game
+  refuses it for a fogged match. A spectator never writes: no orders, no
   resolve, no lapse (`Seat.valid` is false). It waits for a player's client and
-  steps. A `lobby` match is listed on the lobby page, public or not, but none of
-  its seats are claimable from it. The setting decides what is offered, not who
-  can read (`state` is open by id). A spectator's polling backs off when the
-  match goes quiet, not on input (`main.pbp_spectator_floor`).
+  steps. A spectator's polling backs off when the match goes quiet, not on input
+  (`main.pbp_spectator_floor`).
 - **A match's name is derived; its title, seat names and winner are claims.**
   `matchnames.phrase` (mirrored in `leaderboard/js/matchnames.mjs`, pinned by
   `test_leaderboard_sync`) labels a match from its id and is never a key. Title

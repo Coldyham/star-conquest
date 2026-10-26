@@ -235,37 +235,6 @@ def test_the_roster_prompt_never_lets_seat_one_off_the_hook():
         pygame.quit()
 
 
-def test_the_roster_prompt_picks_who_may_spectate_and_resets():
-    """Off by default, one of three choices, and off again the next time the
-    prompt opens."""
-    screen, ms, settings = _setup()
-    try:
-        _click_key(screen, ms, settings, "play_by_post")
-        assert ms.pbp_spectators == "none"
-        _click_key(screen, ms, settings, "pbp_spect_lobby")
-        assert ms.pbp_spectators == "lobby"
-        _click_key(screen, ms, settings, "pbp_spect_link")
-        assert ms.pbp_spectators == "link"
-        assert _click_key(screen, ms, settings, "pbp_confirm") == "play_by_post"
-        _click_key(screen, ms, settings, "play_by_post")
-        assert ms.pbp_spectators == "none"
-    finally:
-        pygame.quit()
-
-
-def test_the_roster_prompt_offers_no_spectators_under_fog():
-    """A spectator sees the whole board, so with fog on the row only says why
-    there is no choice, and has nothing to press."""
-    screen, ms, settings = _setup()
-    try:
-        settings.fog_sight, settings.fog_scout = config.FOG_ON_SIGHT, config.FOG_ON_SCOUT
-        _click_key(screen, ms, settings, "play_by_post")
-        menu.draw(screen, ms, settings)
-        assert not any(key.startswith("pbp_spect_") for key in ms.rects)
-    finally:
-        pygame.quit()
-
-
 def test_the_roster_prompt_public_checkbox_toggles_and_resets(monkeypatch):
     """Off by default, toggled by its checkbox, and off again the next time
     the prompt opens."""
@@ -364,8 +333,7 @@ def test_the_roster_prompt_fields_sit_inside_the_panel_and_clear_of_each_other()
         _click_key(screen, ms, settings, "play_by_post")
         menu.draw(screen, ms, settings)
         keys = ["pbp_name_field", "pbp_title_field", "pbp_public", "pbp_deadline_inc",
-                "pbp_confirm", "pbp_cancel", "pbp_spect_none", "pbp_spect_link",
-                "pbp_spect_lobby"] + [f"pbp_seat_{s}" for s in range(2, 7)]
+                "pbp_confirm", "pbp_cancel"] + [f"pbp_seat_{s}" for s in range(2, 7)]
         rects = [ms.rects[k] for k in keys]
         for i, a in enumerate(rects):
             for b in rects[i + 1:]:

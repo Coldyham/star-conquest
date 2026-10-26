@@ -40,7 +40,7 @@ def _settings(**over) -> Settings:
     return Settings(mode="random", players=3, nodes=16, seed=7, **over)
 
 
-def _payload(spectators="lobby", settings=None, **over):
+def _payload(settings=None, **over):
     payload = {
         "match_id": MATCH,
         "settings_json": (settings or _settings()).to_dict(),
@@ -54,7 +54,6 @@ def _payload(spectators="lobby", settings=None, **over):
         "rules_version": engine.RULES_VERSION,
         "deadline_hours": 48,
         "turn_opened_at": "2026-09-22T12:00:00+00:00",
-        "spectators": spectators,
     }
     payload.update(over)
     return payload
@@ -67,7 +66,7 @@ def _watching(**over):
 
 
 # --------------------------------------------------------------------------- #
-# The link, and what a match says about spectators
+# The link, and which matches it opens
 # --------------------------------------------------------------------------- #
 def test_a_spectate_link_carries_the_match_and_nothing_else():
     fragment = pbp.spectate_fragment(MATCH)
@@ -82,58 +81,19 @@ def test_a_spectate_link_carries_the_match_and_nothing_else():
     assert pbp.parse_spectate_link(f"pbp={MATCH}") is None
 
 
-@pytest.mark.parametrize("raw, read", [("lobby", "lobby"), ("link", "link"),
-                                       ("none", "none"), ("all", "none"), (None, "none"),
-                                       (3, "none")])
-def test_who_may_spectate_reads_closed(raw, read):
-    """Anything the build does not know is read as no spectators."""
-    assert pbp.match_from_dict(_payload(spectators=raw)).spectators == read
-
-
-def test_a_match_is_watchable_only_with_spectators_on_and_fog_off():
-    assert pbp.match_from_dict(_payload("lobby")).watchable
-    assert pbp.match_from_dict(_payload("link")).watchable
-    assert not pbp.match_from_dict(_payload("none")).watchable
+def test_a_match_is_watchable_only_with_fog_off():
+    assert pbp.match_from_dict(_payload()).watchable
     fogged = _settings(fog_sight=config.FOG_ON_SIGHT, fog_scout=config.FOG_ON_SCOUT)
-    assert not pbp.match_from_dict(_payload("lobby", settings=fogged)).watchable
+    assert not pbp.match_from_dict(_payload(settings=fogged)).watchable
     scouted = _settings(fog_scout=config.FOG_ON_SCOUT)
-    assert not pbp.match_from_dict(_payload("lobby", settings=scouted)).watchable
+    assert not pbp.match_from_dict(_payload(settings=scouted)).watchable
 
 
 def test_a_match_that_may_not_be_watched_says_why():
-    assert app.pbp_unwatchable(pbp.match_from_dict(_payload("lobby"))) == ""
-    assert (app.pbp_unwatchable(pbp.match_from_dict(_payload("none")))
-            == app.PBP_NO_SPECTATORS_MSG)
+    assert app.pbp_unwatchable(pbp.match_from_dict(_payload())) == ""
     fogged = _settings(fog_sight=config.FOG_ON_SIGHT, fog_scout=config.FOG_ON_SCOUT)
-    assert (app.pbp_unwatchable(pbp.match_from_dict(_payload("link", settings=fogged)))
+    assert (app.pbp_unwatchable(pbp.match_from_dict(_payload(settings=fogged)))
             == app.PBP_FOGGED_MSG)
-
-
-# --------------------------------------------------------------------------- #
-# Creating a match that takes spectators
-# --------------------------------------------------------------------------- #
-def _sent(monkeypatch) -> dict:
-    sent: dict = {}
-    monkeypatch.setattr(pbp, "call",
-                        lambda action, payload=None, **kw: sent.update(payload or {}))
-    return sent
-
-
-def test_a_new_match_carries_who_may_spectate(monkeypatch):
-    sent = _sent(monkeypatch)
-    app.pbp_open(_settings(), seed=1, spectators="lobby")
-    assert sent["spectators"] == "lobby"
-    app.pbp_open(_settings(), seed=1)
-    assert sent["spectators"] == "none", "off unless asked for"
-
-
-def test_a_fogged_match_is_never_opened_to_spectators(monkeypatch):
-    sent = _sent(monkeypatch)
-    fogged = _settings(fog_sight=config.FOG_ON_SIGHT, fog_scout=config.FOG_ON_SCOUT)
-    app.pbp_open(fogged, seed=1, spectators="link")
-    assert sent["spectators"] == "none"
-    app.pbp_open(_settings(), seed=1, spectators="everyone")
-    assert sent["spectators"] == "none"
 
 
 def test_the_spectate_link_handed_out_is_the_match_alone():

@@ -1,7 +1,7 @@
 // The play-by-post lobby: open invitations, the matches this browser holds a
-// seat in, matches open to spectators, and finished results — plus one match's
-// own page (`?match=<id>`), where an open seat is taken or the match watched. Pure helpers are exported for
-// tests/pbp-page.test.mjs; the DOM half runs only in a browser.
+// seat in, and finished results — plus one match's own page (`?match=<id>`),
+// where an open seat is taken or the match watched. Pure helpers are exported
+// for tests/pbp-page.test.mjs; the DOM half runs only in a browser.
 //
 // "Yours" is the game's own seat store, `sc_pbp_seats` (`pbp.remember` in
 // starconquest/pbp.py): this page is served from the game's origin, under
@@ -31,7 +31,6 @@ const MAX_IDS = 50;
 export const GROUPS = [
   ["open", "Open seats"],
   ["mine", "Your matches"],
-  ["watch", "Watch live"],
   ["finished", "Finished"],
 ];
 
@@ -167,23 +166,21 @@ export function waitingNote(match) {
 }
 
 /**
- * Whether the game will open a spectator link to `match`: it takes spectators,
- * it is still being played, and it has no fog — a spectator sees the whole
- * board, so the game refuses a fogged match (`pbp.Match.watchable`).
+ * Whether the game will open a spectator link to `match`: it is still being
+ * played and has no fog — a spectator sees the whole board, so the game refuses
+ * a fogged match (`pbp.Match.watchable`).
  */
 export function watchable(match) {
-  return !match.finished && ["link", "lobby"].includes(match.spectators)
-    && !hasFog(match.settings_json);
+  return !match.finished && !hasFog(match.settings_json);
 }
 
 /**
- * `{open, mine, watch, finished}`: the public open invitations you are not in,
- * your live matches, the live matches whose creator asked the lobby to offer
- * spectating, and every finished match either list returned. Any other
- * stranger's match that is under way is none of those, and is not shown.
+ * `{open, mine, finished}`: the public open invitations you are not in, your
+ * live matches, and every finished match either list returned. A stranger's
+ * match that is under way is none of those, and is not shown.
  */
 export function groupMatches(matches, mine = {}) {
-  const out = { open: [], mine: [], watch: [], finished: [] };
+  const out = { open: [], mine: [], finished: [] };
   const seen = new Set();
   for (const match of matches) {
     if (seen.has(match.match_id)) continue;
@@ -191,7 +188,6 @@ export function groupMatches(matches, mine = {}) {
     if (match.finished) out.finished.push(match);
     else if (match.match_id in mine) out.mine.push(match);
     else if (match.status === "open") out.open.push(match);
-    else if (match.spectators === "lobby" && watchable(match)) out.watch.push(match);
   }
   return out;
 }
@@ -207,13 +203,11 @@ export function watchLink(matchId, game = GAME_URL) {
 }
 
 /**
- * "Watch in game" on a match's page, or null: offered when the lobby may show
- * it (`lobby`), or to a seat holder of a `link` match, who is who the creator
- * gave that link to and so may need it again.
+ * "Watch in game" on a match's page, or null: offered to a browser holding a
+ * seat in a match the game will let be watched, for the screen the table shares.
  */
 export function watchHref(match, entry, game = GAME_URL) {
-  if (!watchable(match)) return null;
-  return match.spectators === "lobby" || entry ? watchLink(match.match_id, game) : null;
+  return entry && watchable(match) ? watchLink(match.match_id, game) : null;
 }
 
 /** "Open in game" for a seat this browser holds: always the full seat link. */
@@ -338,9 +332,6 @@ function matchCard(match, mine) {
 
   const tags = [el("span", { class: "badge", text: configLabel(match.settings_json) }), ...rosterChips(match)];
   if (match.match_id in mine) tags.unshift(el("span", { class: "badge yours", text: "Yours" }));
-  if (match.spectators === "lobby" && watchable(match)) {
-    tags.push(el("span", { class: "badge", text: "Spectators welcome" }));
-  }
   return el("div", { class: "card" }, [
     el("a", { class: "card-body", href: `pbp.html?match=${match.match_id}` },
        [el("div", { class: "card-main" }, children)]),
@@ -368,7 +359,7 @@ async function renderList(node, mine) {
     if (holder !== section) section.append(holder);
     node.append(section);
   }
-  if (!any) node.append(el("p", { class: "lede", text: "No open seats, live matches to watch or finished matches right now." }));
+  if (!any) node.append(el("p", { class: "lede", text: "No open seats or finished matches right now." }));
 }
 
 function stateText(row) {

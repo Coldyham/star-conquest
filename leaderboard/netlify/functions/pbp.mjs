@@ -18,11 +18,10 @@
  *                  turn, who is outstanding, and every resolved turn's orders.
  *                  With `&have=<turn>` from a client already on that turn, and
  *                  while it is still waiting on somebody, only the live turn.
- *   list    (GET)  the public matches and the ones open to spectators, for the
- *                  lobby page (`pbp.html`): each one's setup, status, who is
- *                  outstanding, and which seats are open. With `&ids=a,b,…`,
- *                  those matches instead, public or not — the same
- *                  knowing-the-id rule `state` follows.
+ *   list    (GET)  the public matches, for the lobby page (`pbp.html`): each
+ *                  one's setup, status, who is outstanding, and which seats are
+ *                  open. With `&ids=a,b,…`, those matches instead, public or
+ *                  not — the same knowing-the-id rule `state` follows.
  *   record  (GET)  `&name=<name>`: `{played, won}`, how many matches a seat
  *                  under that name has had a turn resolved in, and won. The
  *                  player card's play-by-post badges. Counts only, so a
@@ -267,8 +266,6 @@ export function validateMatch(body) {
   if (title === null) return "bad title";
   const name = cleanText(body.name, NAME_MAX);
   if (name === null) return "bad name";
-  const spectators = body.spectators ?? "none";
-  if (!SPECTATORS.includes(spectators)) return "bad spectators";
   return {
     match_id: matchId,
     settings_json: settings,
@@ -280,7 +277,6 @@ export function validateMatch(body) {
     deadline_hours: hours === undefined ? null : hours,
     title,
     names: name && claimed.includes(1) ? { 1: name } : {},
-    spectators,
   };
 }
 
@@ -531,7 +527,6 @@ async function handleState(call, query, origin) {
     title: match.title ?? "",
     names: match.names ?? {},
     winner: match.winner ?? null,
-    spectators: match.spectators ?? "none",
     // Who is still to submit for the live turn. The waiting overlay is built
     // from exactly this.
     submitted: live.map((row) => row.seat),
@@ -620,7 +615,6 @@ async function handleCreate(call, body, origin) {
       deadline_hours: row.deadline_hours,
       title: row.title,
       names: row.names,
-      spectators: row.spectators,
     }]),
   });
   if (stored === null) return reply(502, { error: "store refused" }, origin);
@@ -633,11 +627,6 @@ async function handleCreate(call, body, origin) {
 // How many matches the lobby lists. Newest activity first; a lobby that has
 // outgrown this wants paging, not a bigger number.
 export const LIST_LIMIT = 100;
-
-// Who may watch a match from no seat: nobody, whoever has the spectator link,
-// or anyone, from the lobby too (`pbp.SPECTATORS` in the game; pinned by
-// tests/test_leaderboard_sync.py).
-export const SPECTATORS = ["none", "link", "lobby"];
 
 /**
  * The ids a `list&ids=` read asks about, or null for a malformed list. Deduped,
@@ -659,7 +648,6 @@ export function lobbyEntry(match, orders) {
   return {
     match_id: match.match_id,
     public: match.public === true,
-    spectators: match.spectators ?? "none",
     title: match.title ?? "",
     names: match.names ?? {},
     winner: match.winner ?? null,
@@ -686,16 +674,15 @@ export function lobbyEntry(match, orders) {
  * those matches, which is how the lobby shows the ones this browser holds a
  * seat in.
  *
- * Without `ids`, only `public` rows and those whose creator asked for the lobby
- * to offer spectating: a private match is reachable by knowing its id, and a
- * list of every id would undo that. The log is never selected — the
+ * Without `ids`, only `public` rows: a private match is reachable by knowing its
+ * id, and a list of every id would undo that. The log is never selected — the
  * lobby shows status, not the game — and neither are the token hashes, which
  * leave this function as nothing but which seats are still open.
  */
 async function handleList(call, query, origin) {
   const columns = "match_id,settings_json,seed,seats,turn,turn_opened_at,deadline_hours,"
-    + "finished,public,spectators,title,names,winner,created_at,updated_at";
-  let filter = `or=(public.eq.true,spectators.eq.lobby)&order=updated_at.desc&limit=${LIST_LIMIT}`;
+    + "finished,public,title,names,winner,created_at,updated_at";
+  let filter = `public=eq.true&order=updated_at.desc&limit=${LIST_LIMIT}`;
   if (query.has("ids")) {
     const ids = listIds(query.get("ids"));
     if (ids === null) return reply(400, { error: "bad ids" }, origin);

@@ -423,11 +423,10 @@ before a deploy.
 
 The ask: friends in one room each play on their own phone, and the board goes
 up on the room's TV, which must not show any one player's view or orders. So a
-match can be watched from no seat at all. The creator picks one of three on the
-create prompt (`MenuState.pbp_spectators`, stored as `pbp_matches.spectators`):
-**none** (the default), **link** (the invite overlay gets a Spectators row with
-its own Copy button), or **lobby** (that, and the lobby lists the match under
-*Watch live*, private or not, with a *Watch in game* button).
+match can be watched from no seat at all. There is nothing to switch on: every
+fog-off match can be watched, the invite overlay gets a Spectators row with its
+own Copy button, and the lobby's page for a match offers *Watch in game* to a
+browser holding a seat in it. Nothing is stored and the endpoint is unchanged.
 
 **A spectator is a seat nobody can hold.** The link is `#spectate=<match id>`
 (`--spectate` on desktop), and it opens the match through the same read, rebuild
@@ -444,21 +443,20 @@ the screen.
 **Fog on means no spectators.** A spectator sees the whole board
 (`main._accumulate_fog`, as a knocked-out player does). On a fogged map that
 screen would show every player what none of them should see, which defeats the
-point of a TV in a room of players. So the prompt offers no choice under fog,
-`pbp.create` sends "none" for a fogged setup, and the game refuses to open a
-spectate link to a match that is not `Match.watchable`, saying which reason
-applies. The lobby hides *Watch* for a fogged match too (`watchable` in
-`js/pbp.mjs`). The other possible answers were a spectator who sees only what
-every seat sees (the shared knowledge of the table) or a delayed view. Both were
-set aside as more machinery than this use needs; see `decided-against.md`.
+point of a TV in a room of players. So the invite overlay leaves the row out
+under fog, and the game refuses to open a spectate link to a match that is not
+`Match.watchable`. The lobby hides *Watch in game* for a fogged match too
+(`watchable` in `js/pbp.mjs`). The other possible answers were a spectator who
+sees only what every seat sees (the shared knowledge of the table) or a delayed
+view. Both were set aside as more machinery than this use needs; see
+`decided-against.md`.
 
-**"None" is a choice, not a lock.** `?action=state` is open to anyone holding
-the id, and every seat link carries the id, so the server could not stop a
-determined spectator without changing that. The setting decides what the game
-and the lobby offer, which is the same footing fog has: convenience, honestly
-labelled, not secrecy. A *link* match is listed nowhere. The lobby offers its
-link again only on the match's own page, and only to a browser holding a seat in
-it, since that is who the creator handed it to.
+**Fog off means anyone with the id may watch, and that gives nothing away.**
+With fog off every seat already sees the whole board, and no seat ever sees
+another's orders before the turn resolves, so a spectator sees exactly what a
+player does. `?action=state` is open to anyone holding the id in any case. A
+match is listed for watching nowhere: the lobby offers the link only on the
+match's own page, to a browser holding a seat in it.
 
 **A spectator's tab is idle by the match, not by input.** A screen nobody
 touches is exactly what a TV is, and the idle floor (below) would slow its reads

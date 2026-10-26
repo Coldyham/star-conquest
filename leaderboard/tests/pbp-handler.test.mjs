@@ -35,7 +35,7 @@ const MATCH = "00112233445566ff";
 // failure rather than as a row that happens to have whatever was inserted.
 const DEFAULTS = {
   pbp_matches: { turn: 0, finished: false, log: "", deadline_hours: null, public: false,
-                 title: "", names: () => ({}), winner: null, spectators: "none",
+                 title: "", names: () => ({}), winner: null,
                  turn_opened_at: () => new Date().toISOString(),
                  created_at: "", updated_at: "" },
   pbp_orders: { source: "human", board_digest: "", submitted_at: "", id: 0 },
@@ -59,30 +59,15 @@ function install() {
     const table = parsed.pathname.replace(/^\/rest\/v1\//, "");
     assert.ok(table in TABLES, `stub: no table ${table}`);
     const filters = [];
-    // `or=(a.eq.x,b.eq.y)`: any one of its `eq` terms, as PostgREST reads it.
-    const alternatives = [];
     for (const [key, val] of parsed.searchParams) {
       if (key === "select" || key === "order" || key === "limit") continue;
-      if (key === "or") {
-        for (const term of val.replace(/^\(|\)$/g, "").split(",")) {
-          const [col, op, ...rest] = term.split(".");
-          assert.ok(op === "eq", `stub: unsupported operator ${op} in or=`);
-          alternatives.push([col, op, rest.join(".")]);
-        }
-        continue;
-      }
       const [op, ...rest] = val.split(".");
       assert.ok(op === "eq" || op === "in", `stub: unsupported operator ${op}`);
       filters.push([key, op, rest.join(".")]);
     }
-    const one = (r, [col, op, val]) => {
-      assert.ok(col in r, `stub: no column "${col}" on ${table}`);
-      return op === "in"
-        ? val.replace(/^\(|\)$/g, "").split(",").includes(String(r[col]))
-        : String(r[col]) === val;
-    };
-    const hit = (r) => filters.every((f) => one(r, f))
-      && (!alternatives.length || alternatives.some((f) => one(r, f)));
+    const hit = (r) => filters.every(([col, op, val]) => (op === "in"
+      ? val.replace(/^\(|\)$/g, "").split(",").includes(String(r[col]))
+      : String(r[col]) === val));
     const select = parsed.searchParams.get("select");
     const project = (r) => {
       if (!select || select === "*") return { ...r };
@@ -599,48 +584,6 @@ test("ids= lists exactly those matches, private ones included, with no seat to c
     const [refused] = await call("list", { ids }, "GET");
     assert.equal(refused, 400, ids.slice(0, 20));
   }
-});
-
-// --------------------------------------------------------------------------
-// Spectators
-// --------------------------------------------------------------------------
-test("a match stores who may spectate, and refuses anything else", async () => {
-  install();
-  const base = { match_id: MATCH, settings_json: {}, seed: 7, seats: [1, 2] };
-  for (const bad of ["all", "", 1, true]) {
-    const [status] = await call("create", { ...base, spectators: bad });
-    assert.equal(status, 400, JSON.stringify(bad));
-  }
-  const [status] = await call("create", { ...base, spectators: "link" });
-  assert.equal(status, 201);
-  assert.equal(TABLES.pbp_matches[0].spectators, "link");
-  const [, read] = await state();
-  assert.equal(read.spectators, "link");
-});
-
-test("a match created without saying takes no spectators", async () => {
-  await opened([1, 2]);
-  assert.equal(TABLES.pbp_matches[0].spectators, "none");
-  const [, read] = await state();
-  assert.equal(read.spectators, "none");
-});
-
-test("the lobby lists a private match open to spectators, but never one by link", async () => {
-  install();
-  for (const [id, spectators] of [["0000000000000001", "lobby"], ["0000000000000002", "link"],
-                                  ["0000000000000003", "none"]]) {
-    const [status] = await call("create", { match_id: id, settings_json: {}, seed: 7,
-                                            seats: [1, 2], spectators });
-    assert.equal(status, 201);
-  }
-  const [status, body] = await list();
-  assert.equal(status, 200, JSON.stringify(body));
-  assert.deepEqual(body.matches.map((m) => m.match_id), ["0000000000000001"]);
-  const [m] = body.matches;
-  assert.equal(m.public, false);
-  assert.equal(m.spectators, "lobby");
-  assert.deepEqual(m.unclaimed, [], "watching a match is not joining it");
-  assert.ok(!JSON.stringify(body).includes("tokens"));
 });
 
 test("the winner is stored only on the resolve that finishes the match", async () => {

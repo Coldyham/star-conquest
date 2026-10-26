@@ -203,16 +203,8 @@ def test_the_graduate_badge_knows_the_tutorials_last_stage():
     assert set(keys) <= set(listed), f"add {sorted(set(keys) - set(listed))} to TUTORIAL_FINAL_KEYS"
 
 
-def test_who_may_spectate_reads_the_same_on_every_side():
-    """The game sends a match's ``spectators`` choice, the endpoint refuses any
-    value it does not list, and the table's check refuses any it does not; a
-    value one side adds alone is a match that cannot be created. The lobby's
-    Watch link is the game's spectate fragment."""
-    fn = ROOT / "leaderboard" / "netlify" / "functions" / "pbp.mjs"
-    assert _js_string_list(fn, "SPECTATORS") == list(pbp.SPECTATORS)
-    schema = (ROOT / "leaderboard" / "schema.sql").read_text()
-    check = re.search(r"spectators text not null default 'none'\s+check \(spectators in \(([^)]*)\)\)", schema)
-    assert check is not None, "spectators column not found in schema.sql"
-    assert re.findall(r"'([^']*)'", check.group(1)) == list(pbp.SPECTATORS)
+def test_the_lobbys_watch_link_is_the_games_spectate_fragment():
+    """The lobby's Watch in game link opens what ``pbp.parse_spectate_link``
+    reads."""
     lobby = (ROOT / "leaderboard" / "js" / "pbp.mjs").read_text()
     assert f"#{pbp.SPECTATE_FRAGMENT}${{matchId}}" in lobby
