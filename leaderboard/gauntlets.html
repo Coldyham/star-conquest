@@ -1,0 +1,29 @@
+{% extends "templates/base.html" %}
+{% set title = "Gauntlets" %}
+{% set script = "js/gauntlets-page.mjs" %}
+
+{% block main %}
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Gauntlets</h1>
+  <!-- The two gauntlet pages share one menu entry; these tabs move between them. -->
+  <nav class="sorts" aria-label="Gauntlets">
+    <a class="btn" href="gauntlets.html" aria-current="page">Public</a>
+    <a class="btn ghost" href="gauntlet.html">Make new</a>
+  </nav>
+  <p class="lede">
+    Runs of maps played in order, made by players and listed for everyone.
+    Each opens in the game's <strong>Gauntlets</strong> list, where a stage opens
+    once the one before it is won. Win the last stage and post the score to earn
+    the <strong>Gauntlet runner</strong> badge.
+  </p>
+  <p class="lede">
+    <a href="gauntlet.html">Make your own</a> and tick
+    <strong>Ask for it to be listed publicly</strong> to have it shown here.
+  </p>
+
+  <div id="gauntlets" class="loading">Loading…</div>
+{% endblock %}
+
+{% block footer %}Player 1 &nbsp;·&nbsp;
+  <a href="index.html">All maps</a> &nbsp;·&nbsp;
+  <a href="gauntlet.html">Make a gauntlet</a>{% endblock %}

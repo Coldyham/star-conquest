@@ -5,6 +5,11 @@
 {% block main %}
   <a class="back" href="index.html">← All maps</a>
   <h1>Make a gauntlet</h1>
+  <!-- The two gauntlet pages share one menu entry; these tabs move between them. -->
+  <nav class="sorts" aria-label="Gauntlets">
+    <a class="btn ghost" href="gauntlets.html">Public</a>
+    <a class="btn" href="gauntlet.html" aria-current="page">Make new</a>
+  </nav>
   <!-- A gauntlet is a run of maps played in order, each with a briefing card
        and a one-line hint: the game's tutorial is one. This page builds one
        from game links and stores it (/api/gauntlet), which hands back a short

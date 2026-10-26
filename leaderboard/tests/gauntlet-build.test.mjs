@@ -16,7 +16,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 
 import {
   GAUNTLET_ID, LIMITS, botTarget, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
-  draftFromBody, draftProblem, emptyDraft, emptyStage, fileName, gameLink, linkTarget, moveStage, readDraft,
+  draftFromBody, draftProblem, emptyDraft, emptyStage, fileName, gameLink, linkTarget, listingOf, moveStage, readDraft,
   mintId, setupProblem, slugOf, stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
@@ -299,4 +299,19 @@ test("a draft's target builds into the body and opens again with how it was chos
   const back = await draftFromBody(built, async () => "link");
   assert.deepEqual(back.stages.map((s) => s.aim), ["bot", "link", "none"]);
   assert.deepEqual(checkBody(buildBody(back)), built);
+});
+
+test("a listed row reads tolerantly for the public page", () => {
+  const row = {
+    gauntlet_id: "hard-mode-0123456789ab", by_name: "  Ada  ", created_at: "2026-10-22T10:00:00Z",
+    name: "Hard  mode", stages: [{ title: "Opening" }, { title: "" }, null],
+  };
+  assert.deepEqual(listingOf(row), {
+    id: "hard-mode-0123456789ab", name: "Hard mode", by: "Ada",
+    titles: ["Opening", "Stage 2", "Stage 3"], created: "2026-10-22T10:00:00Z",
+  });
+  const bare = listingOf({ gauntlet_id: "x-0123456789ab", stages: "nope" });
+  assert.equal(bare.name, "x-0123456789ab");
+  assert.deepEqual(bare.titles, []);
+  assert.equal(bare.by, "");
 });
