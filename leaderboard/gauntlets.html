@@ -1,36 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gauntlets · Star Conquest Leaderboard</title>
-<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
-<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/style.css">
-<link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0a0c14">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-</head>
-<body>
-<header class="bar">
-  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
-  <div class="bar-end">
-    <a class="btn play" href="../game/">▶ Play</a>
-    <details class="menu">
-      <summary class="btn" aria-label="Menu">☰ Menu</summary>
-      <nav class="actions">
-        <a class="btn" href="index.html">All maps</a>
-        <a class="btn" href="campaign.html">Campaign</a>
-        <a class="btn" href="crowns.html">Crowns</a>
-        <a class="btn" href="pbp.html">Shared matches</a>
-        <a class="btn" href="gauntlets.html">Gauntlets</a>
-        <a class="btn" href="submit.html">Enter score</a>
-      </nav>
-    </details>
-  </div>
-</header>
+{% extends "templates/base.html" %}
+{% set title = "Gauntlets" %}
+{% set script = "js/gauntlets-page.mjs" %}
 
-<main>
+{% block main %}
   <a class="back" href="index.html">← All maps</a>
   <h1>Gauntlets</h1>
   <!-- The two gauntlet pages share one menu entry; these tabs move between them. -->
@@ -50,14 +22,8 @@
   </p>
 
   <div id="gauntlets" class="loading">Loading…</div>
-</main>
+{% endblock %}
 
-<footer class="attract">
-  <span class="coin">▚</span> Player 1 &nbsp;·&nbsp;
+{% block footer %}Player 1 &nbsp;·&nbsp;
   <a href="index.html">All maps</a> &nbsp;·&nbsp;
-  <a href="gauntlet.html">Make a gauntlet</a>
-</footer>
-
-<script type="module" src="js/gauntlets-page.mjs"></script>
-</body>
-</html>
+  <a href="gauntlet.html">Make a gauntlet</a>{% endblock %}

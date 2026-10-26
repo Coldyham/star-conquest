@@ -575,6 +575,58 @@ built.
   follow a redirect on POST. `tools/pwa/sw.js` never touches `/api/` and
   fetches `/board/` network-first, both pinned by `tests/test_web_build.py`.
 
+**Why one site.** The game and the board were two Netlify sites until the
+merge, which went live in October 2026.
+- **Deploys.** Both drew on one free-tier pool of about 20 production
+  publishes a month, and most changes touched both. The pool ran out once,
+  with a merged board fix waiting over a week for a slot.
+- **One localStorage.** Separate origins meant the lobby's "your matches" was
+  a hand-off from the game plus a lobby-side cache, and two name keys.
+- **The PWA stays a PWA.** Leaving the fullscreen game for the board brought
+  back the browser chrome, and on iOS lost the app's storage.
+- **No hostname hacks.** Previews found each other by adding or removing
+  `-leaderboard` in the URL (`sibling_host`/`siblingGame`); one origin needs
+  none of it.
+
+**Onto the game's origin, not the board's,** because localStorage doesn't
+migrate between origins: the game's holds seat tokens, bests and preferences,
+and the board's held only a posting name and the lobby cache. The board went
+under `/board/`, which also settled the `index.html` and `favicon.png`
+collisions. The cost: every change now builds the game with pygbag, so a board
+typo fix is no longer cheap to preview.
+
+**Decided against: keeping the functions on the old board site behind a
+`/api/` proxy** (the merge brief's option B). It kept `SUPABASE_SECRET_KEY` off
+the site that builds fork previews, but left two sites to deploy and put a
+proxy between the rate limit and the client's IP. The functions moved instead,
+and the fork-preview risk is held by the "Require approval" policy.
+
+### The pages are templates
+
+Every page carried an identical copy of the head and the menu, so adding a page
+or a menu entry meant editing all of them. Each page is now a Jinja2 template
+extending `leaderboard/templates/base.html`, rendered by
+`tools/render_board.py` inside `build_web.sh`. A page sets `title`,
+`description`, `main_class` and `script` (a list for more than one module), and
+fills `main`, `before_main` and `footer`; the footer's flavour text stays per
+page, and a page with no `footer` block has no footer.
+
+- **At build time, because Netlify serves files.** There is no server to render
+  on, so the include runs either before deploy or in the browser. The build
+  already runs Python (`tools/pwa/inject.py`), and what reaches a visitor is the
+  same complete HTML as before, menu and all, with no script needed to show it.
+  Converting changed no rendered byte.
+- **Decided against: a JS include** (an empty `<header>` a module fills on
+  load). It kept "no build step", but the menu would vanish when the script
+  failed and could pop in a frame late, and the markup would live in JS strings.
+- **Decided against: copies pinned by a test.** It catches drift but still
+  makes every menu change an edit to every page.
+- **The cost** is that `leaderboard/` is no longer servable raw: local work
+  renders first (`leaderboard/README.md`, "Local development"). The allow-list
+  of servable files moved from `build_web.sh` into `render_board.PAGES`,
+  `STATIC_FILES` and `STATIC_DIRS`, and `tests/test_web_build.py` checks that
+  every page renders with exactly one, identical header.
+
 ## Crowns, the weekly campaign and embargoes
 
 - **Crowns reward stealing a record, not volume.** `crowns.html` ranks players
