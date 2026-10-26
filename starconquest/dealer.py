@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 from . import ai, config, mapgen
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, ROLL_FLOORS, Settings,
-                       roll_seed, setup_warnings)
+                       fog_off, roll_seed, setup_warnings)
 
 MAX_STAGES = 64
 # How far a roll of `systems` goes when no rule bounds it: a standard board, as
@@ -362,7 +362,7 @@ def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> S
             if not spec.roll and "fog_sight" not in rules and "fog_scout" not in rules:
                 # Fog with nothing else said about it is the Basic menu's "Fog of war".
                 settings.fog_sight, settings.fog_scout = config.FOG_ON_SIGHT, config.FOG_ON_SCOUT
-            elif settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS:
+            elif fog_off(settings):
                 # Fog is on, so at least one range must be short of unlimited.
                 settings.fog_sight = _draw_number("fog_sight", rules.get("fog_sight"), rng,
                                                   hi=config.FOG_MAX_HOPS - 1)

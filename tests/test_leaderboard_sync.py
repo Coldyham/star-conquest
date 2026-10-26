@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from starconquest import ai, config, engine, matchnames, paths
+from starconquest import ai, config, engine, matchnames, paths, pbp
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_MJS = ROOT / "leaderboard" / "js" / "config.mjs"
@@ -201,3 +201,10 @@ def test_the_graduate_badge_knows_the_tutorials_last_stage():
     keys = gauntlet.stage_settings(tutorial.stages[-1]).challenge_keys()
     listed = _js_string_list(ROOT / "leaderboard" / "js" / "badges.mjs", "TUTORIAL_FINAL_KEYS")
     assert set(keys) <= set(listed), f"add {sorted(set(keys) - set(listed))} to TUTORIAL_FINAL_KEYS"
+
+
+def test_the_lobbys_watch_link_is_the_games_spectate_fragment():
+    """The lobby's Watch in game link opens what ``pbp.parse_spectate_link``
+    reads."""
+    lobby = (ROOT / "leaderboard" / "js" / "pbp.mjs").read_text()
+    assert f"#{pbp.SPECTATE_FRAGMENT}${{matchId}}" in lobby

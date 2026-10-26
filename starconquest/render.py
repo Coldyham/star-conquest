@@ -13,7 +13,7 @@ import pygame
 from . import config, fog, matchnames, model, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
-from .viewstate import CHOOSING, ROUTING, Ui
+from .viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
 # The measured-layout kit lives in `widgets` now that the map creator draws with
 # it too. Bound to module-level names here rather than called qualified, because
@@ -140,6 +140,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_waiting_overlay(surface, state, ui)
     elif ui.in_pbp and ui.pbp_msg:
         _draw_pbp_notice(surface, ui)
+    elif ui.spectating:
+        _draw_spectator_notice(surface, state, ui)
     _draw_score_tooltip(surface, state, ui)
 
 
@@ -1516,10 +1518,12 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # turn we have already submitted is the same case for a different reason: the
     # turn advances when the last seat is in, and nothing anyone presses here
     # brings that forward.
-    _gone = ui.film is not None or ui.awaiting_others(state)
+    # A spectator has no turn to end at all, so the block only says so.
+    _gone = ui.film is not None or ui.awaiting_others(state) or ui.spectating
     ui.end_turn_rect = (0, 0, 0, 0) if _gone else (br.x, br.y, br.w, br.h)
-    if _gone and ui.awaiting_others(state):
-        _text(surface, _fonts()["normal"], "Orders sent", config.COLOR_TEXT_DIM,
+    if _gone and (ui.awaiting_others(state) or ui.spectating):
+        _text(surface, _fonts()["normal"],
+              "Spectating" if ui.spectating else "Orders sent", config.COLOR_TEXT_DIM,
               center=br.center)
         _draw_footer_buttons(surface, state, ui, by)
         return
@@ -1636,7 +1640,8 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
-    specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1, "right"))
+    if not ui.spectating:   # a spectator has nothing to clear
+        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1, "right"))
     # Route mode: multi-select a group of systems and forward them all to one
     # destination. Gated on the same predicate as the G key, so the button is
     # drawn exactly when the mode means something.
@@ -1725,7 +1730,7 @@ def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> py
     counter's.
     """
     player = state.players.get(ui.human_id)
-    if player is None:
+    if player is None or ui.spectating:   # a spectator sits at neutral's id
         return turn
     label = _text(surface, _fonts()["small"], f"{player.ships_lost} lost", config.COLOR_TEXT_DIM,
                   midleft=(turn.right + config.HUD_PAD, config.HUD_TOP_H // 2))
@@ -1950,7 +1955,8 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     if focus is None or focus not in state.systems:
         if ui.stage_hint and not ui.history:
             y = _panel_stage_hint(surface, ui, x, y, content_bottom)
-        _panel_legend(surface, x, y, content_bottom, history=ui.history)
+        _panel_legend(surface, x, y, content_bottom, history=ui.history,
+                      spectating=ui.spectating)
         return
 
     y = _panel_system(surface, state, ui, x, y, state.systems[focus])
@@ -2025,11 +2031,15 @@ def _panel_you_are(surface, ui: Ui, x, y) -> int:
     """'You are {seat}', in that seat's own colour — the one line that says
     outright which colour is yours. Only drawn in play-by-post (`in_pbp`): a
     shared match can seat a person at any colour, but a solo game has no such
-    ambiguity, since it is always the one seat you are looking at. Under it,
+    ambiguity, since it is always the one seat you are looking at. A
+    spectator holds no seat, and the line says that instead. Under it,
     the match's title, or its pass-phrase name where it has none — whichever the
     lobby headlines it by."""
-    y = _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
-             config.player_color(ui.human_id))
+    if ui.spectating:
+        y = _row(surface, x, y, "Spectating", config.COLOR_TEXT)
+    else:
+        y = _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
+                 config.player_color(ui.human_id))
     label = ui.pbp_title or matchnames.phrase(ui.pbp_match)
     return _rows_named(surface, x, y, label, config.COLOR_TEXT_DIM) if label else y
 
@@ -2070,7 +2080,7 @@ def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
         return y
     y = _head_named(surface, x, y, sys.label, config.player_color(sys.owner_id), width)
     y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}", config.player_color(sys.owner_id))
-    if sys.owner_id == ui.human_id:
+    if sys.owner_id == ui.human_id and not ui.spectating:
         y = _row(surface, x, y, f"Ships: {ui.available(state, sys.id)} free / {sys.ships} total", config.COLOR_TEXT)
     else:
         y = _row(surface, x, y, f"Ships: {sys.ships}", config.COLOR_TEXT)
@@ -2189,6 +2199,22 @@ Route (G) plans a whole front's worth of rules at once.
 
 Drag to pan, wheel to zoom."""
 
+# A spectator has nothing to send, so none of the live legend's verbs are theirs:
+# only what the screen is for, and how to look around it.
+_LEGEND_SPECTATING_TOUCH = """Watching from no seat: the whole board, and nobody's orders.
+
+Each turn plays out here once every seat is in. The line at the top says who the
+turn is waiting on.
+
+Tap a system to see it. Drag to pan, −/+ to zoom."""
+
+_LEGEND_SPECTATING_KEYS = """Watching from no seat: the whole board, and nobody's orders.
+
+Each turn plays out here once every seat is in. The line at the top says who the
+turn is waiting on.
+
+Point at a system to see it. Drag to pan, wheel or −/+ to zoom."""
+
 # History review is a different scene with different controls, so it gets its own
 # pair rather than the live-play text above: none of the live legend's verbs work
 # while scrubbing (there is no turn to end and no order to give —
@@ -2270,16 +2296,19 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     return y
 
 
-def _legend_text(history: bool) -> str:
-    """The legend for the scene and the input modality — the one place the four
+def _legend_text(history: bool, spectating: bool = False) -> str:
+    """The legend for the scene and the input modality — the one place the
     variants are chosen between, so the test that measures whether a legend fits
     the panel measures the same string the panel draws."""
     if history:
         return _LEGEND_HISTORY_TOUCH if config.touch_ui else _LEGEND_HISTORY_KEYS
+    if spectating:
+        return _LEGEND_SPECTATING_TOUCH if config.touch_ui else _LEGEND_SPECTATING_KEYS
     return _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS
 
 
-def _panel_legend(surface, x, y, bottom: int, history: bool = False) -> int:
+def _panel_legend(surface, x, y, bottom: int, history: bool = False,
+                  spectating: bool = False) -> int:
     """How to play, shown whenever no system is in focus. Reflowed to the panel's
     width and cut off at ``bottom`` rather than spilling under the End Turn button
     — at a big UI scale the panel simply hasn't room for every line.
@@ -2291,7 +2320,7 @@ def _panel_legend(surface, x, y, bottom: int, history: bool = False) -> int:
     y = _head(surface, x, y, "History" if history else "Star Conquest", config.COLOR_TEXT)
     font = _fonts()["small"]
     width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-    for line in _wrap(font, _legend_text(history), width):
+    for line in _wrap(font, _legend_text(history, spectating), width):
         if y + _row_h() > bottom:  # a whole row, so the returned y clears it too
             break
         y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)
@@ -2533,6 +2562,8 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
     row_h = max(normal.get_height(), copy_h) + config.s(4)
 
     def seat_label(seat: int) -> str:
+        if seat == SPECTATE_ROW:
+            return "Spectators"
         return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
 
     name_w = max((normal.size(seat_label(seat))[0] for seat, _ in ui.pbp_invite), default=0)
@@ -2572,7 +2603,8 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
 
     ui.pbp_invite_rects = {}
     for seat, link in ui.pbp_invite:
-        color = config.player_color(seat)
+        # The spectator row has no colour of its own: it is nobody's seat.
+        color = config.COLOR_TEXT_DIM if seat == SPECTATE_ROW else config.player_color(seat)
         swatch = pygame.Rect(panel.x + pad, y + (row_h - sw) // 2, sw, sw)
         pygame.draw.rect(surface, color, swatch, border_radius=config.s(3))
         _text(surface, normal, seat_label(seat), color,
@@ -2651,6 +2683,21 @@ def _draw_pbp_notice(surface, ui: Ui) -> None:
     x, y, w, _ = config.play_rect()
     _label_pill(surface, _fonts()["small"], ui.pbp_msg, config.COLOR_TEXT,
                 (x + w // 2, y + config.FILM_CAPTION_GAP))
+
+
+def _draw_spectator_notice(surface, state: GameState, ui: Ui) -> None:
+    """Who the live turn is waiting on, for a spectator's shared screen.
+
+    The players' own veil (``_draw_waiting_overlay``) only goes up once their
+    orders are in; a spectator has none to send, and what the room wants from
+    the screen is which of them is holding the turn up. A pill rather than a
+    veil, in the notice's place, so the board stays the thing on the wall.
+    """
+    names = [_seat_name(state, seat) for seat in ui.pbp_waiting]
+    line = ("Waiting for " + ", ".join(names)) if names else "Resolving the turn..."
+    x, y, w, _ = config.play_rect()
+    _label_pill(surface, _fonts()["small"], line,
+                config.COLOR_TEXT, (x + w // 2, y + config.FILM_CAPTION_GAP))
 
 
 def _seat_name(state: GameState, seat: int) -> str:
@@ -2812,7 +2859,9 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     """
     note = ([("small", "Someone else's game, replayed", config.COLOR_TEXT_DIM)]
             if ui.watched else [])
-    if state.winner != ui.human_id:
+    # A spectator sits at neutral's id, which is also a mutual annihilation's
+    # winner: no result here is theirs.
+    if ui.spectating or state.winner != ui.human_id:
         if ui.challenge_target is not None:
             return note + [("normal", "Challenge failed", (214, 130, 110))]
         return note

@@ -570,7 +570,8 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         # the turn advances when the last seat is in, not when anyone presses a
         # key. Suppressed rather than swallowed further up so every other control
         # — panning, looking, opening history — keeps working while you wait.
-        return None if ui.awaiting_others(state) else "end_turn"
+        # A spectator has no turn to end at all.
+        return None if ui.awaiting_others(state) or ui.spectating else "end_turn"
     if event.key in (pygame.K_p, pygame.K_a):
         # Play and autoplay both resolve turns on a clock of their own, which a
         # shared match has no room for: its turns advance when the last seat
@@ -797,6 +798,15 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
     if ui.play_pause_rect[2] and _point_in_rect(pos, ui.play_pause_rect):
         return "toggle_play"
     if ui.autoplay:
+        return None
+    if ui.spectating:
+        # Nothing on the board is a spectator's to send, so a press on a system
+        # only puts it in the side panel, as pointing at it does; on touch there is
+        # no pointing. Hover rather than a selection: `Ui.source` would take a
+        # neutral system for the spectator's own. Empty space clears it and pans.
+        ui.hover = pick_node(state, ui, pos)
+        if ui.hover is None:
+            _arm_pan(ui, pos)
         return None
 
     # Persistent side-panel button: clear every standing forward rule at once.

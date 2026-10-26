@@ -668,6 +668,13 @@ def _challenge_from_dict(d) -> Challenge | None:
     return out if out.turns > 0 else None
 
 
+def fog_off(settings: Settings) -> bool:
+    """True when both fog ranges sit at max — every seat sees the whole board.
+    The menu's "Fog of war" checkbox is the inverse of this, derived live from the
+    sliders so editing them on the Advanced tab flips the checkbox automatically."""
+    return settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS
+
+
 def resolve_seed(settings: Settings) -> int:
     """The concrete seed to generate with: the chosen one, or a fresh random."""
     return settings.seed if settings.seed is not None else random_seed()

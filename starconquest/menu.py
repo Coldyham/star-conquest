@@ -45,7 +45,7 @@ from . import ai, campaign, combat, config, gauntlet, mapgen, pbp, softkeyboard,
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
-                       Settings, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
+                       Settings, fog_off, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
                        randomise_knobs, random_seed, seed_top, setup_warnings)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
@@ -392,13 +392,6 @@ def _ai_seats(settings: Settings) -> list[int]:
     return list(range(start, settings.players + 1))
 
 
-def _fog_off(settings: Settings) -> bool:
-    """True when both fog ranges sit at max — full visibility. The Basic-tab
-    "Fog of war" checkbox is the inverse of this, derived live from the sliders so
-    editing them on the Advanced tab flips the checkbox automatically."""
-    return settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS
-
-
 # --------------------------------------------------------------------------- #
 # Drawing
 # --------------------------------------------------------------------------- #
@@ -610,7 +603,7 @@ def _stage_bits(settings: Settings) -> list[str]:
         name = settings.seat_strategy(seat)
         stop = ai.aux_stop_name(name, settings.seat_params(seat).aux)
         bots.append(f"{name} · {stop}" if stop else name)
-    bits = [f"{settings.system_count()} systems", "no fog" if _fog_off(settings) else "fog of war"]
+    bits = [f"{settings.system_count()} systems", "no fog" if fog_off(settings) else "fog of war"]
     if bots:
         bits.append("vs " + ", ".join(bots))
     return bits
@@ -1272,7 +1265,7 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     # State is derived from the sliders, so it tracks Advanced edits automatically.
     fog_changed = _changed(settings, "fog_sight") or _changed(settings, "fog_scout")
     _row_label(surface, "Fog of war", left, y, fog_changed)
-    _checkbox(surface, ms, "fog_of_war", not _fog_off(settings), col_r, y)
+    _checkbox(surface, ms, "fog_of_war", not fog_off(settings), col_r, y)
 
     y = top
     # Off until switched on — see `webstore.share_games` and `share`.
@@ -2449,7 +2442,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         if not webstore.set_ironman(want) and want:
             set_status(ms, "Couldn't save that here — History stays available", False)
     elif hit == "fog_of_war":
-        if _fog_off(settings):  # off -> on: apply the fog preset
+        if fog_off(settings):  # off -> on: apply the fog preset
             settings.fog_sight = config.FOG_ON_SIGHT
             settings.fog_scout = config.FOG_ON_SCOUT
         else:  # on -> off: full visibility

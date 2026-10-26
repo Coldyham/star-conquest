@@ -905,13 +905,15 @@ def test_help_text_fits_the_empty_panel_whole():
             y = config.HUD_TOP_H + config.PANEL_PAD
             font = render._fonts()["small"]
             width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-            for history in (False, True):
-                text = render._legend_text(history)
-                drawn = render._panel_legend(screen, 0, y, bottom, history=history)
+            for history, spectating in ((False, False), (True, False), (False, True)):
+                text = render._legend_text(history, spectating)
+                drawn = render._panel_legend(screen, 0, y, bottom, history=history,
+                                             spectating=spectating)
                 lines = render._wrap(font, text, width)
                 room = (bottom - y - render._row_h("normal")) // render._row_h()
+                scene = "history" if history else "spectator" if spectating else "live"
                 assert room >= len(lines), (
-                    f"{'history' if history else 'live'} legend needs {len(lines)} "
+                    f"{scene} legend needs {len(lines)} "
                     f"rows, panel holds {room}"
                 )
                 assert drawn <= bottom
