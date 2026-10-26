@@ -203,6 +203,7 @@ the measured result was indistinguishable from the baseline.
 - Counting every score but a `mismatch` toward crowns and the campaign: replaced from 2026-10-15 by verified only, with 24 hours' grace, since anyone can insert a score; older scores keep the old rule. `schema.md`, *counted_scores and the crowns*.
 - `outdated` as a fifth verdict: split into a column, since a score can be verified and outdated at once. `schema.md`, *score_checks*.
 - A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
+- Keeping the functions on the old board site behind a `/api/` proxy (the merge brief's option B): rejected for one site with the functions on it, the secret guarded by "Require approval". *The game and the board are one site.*
 
 ## Par search ([`design/par.md`](design/par.md))
 - A par or floor per map on the board: decided against; the tool stays local. *Not on the board.*
