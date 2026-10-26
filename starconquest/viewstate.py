@@ -144,6 +144,14 @@ class Ui:
     # (`forward_this_turn`, expanded by main.auto_forward_orders).
     auto_forward: dict[int, ForwardRule] = field(default_factory=dict)
     sel_forward: int | None = None  # source id of the rule being edited, if any
+    # source_id -> the turn a lane was last added to its rule from the popup (or
+    # a route confirmed through it). A rule set up this turn opens the popup on its
+    # Forward tab and a further lane splits it; one from an earlier turn is
+    # replaced outright by the next lane added (see `toggle_forward`).
+    forward_set_on: dict[int, int] = field(default_factory=dict)
+    # The rule a fresh compose replaced, kept so Cancel or the Send tab can put
+    # it back as it was: (source, rule). None when nothing was replaced.
+    forward_replaced: tuple[int, ForwardRule] | None = None
     # Route mode (see ROUTING above) has two sub-modes, both of which end in one
     # `route_plan` the player confirms. They differ only in how `model.flow_field`
     # is seeded, so everything downstream of the plan is shared.
@@ -750,7 +758,13 @@ class Ui:
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
-        """Ships already promised out of a system by queued (not yet run) orders."""
+        """Ships already promised out of a system by queued (not yet run) orders.
+
+        Nothing while reviewing history: the queue is for the live board, and
+        taking it off a past board's garrison would show counts that never were
+        (sending all 20 out of a system now read as -18 on a turn it held 2)."""
+        if self.history:
+            return 0
         return sum(o.ships for o in self.pending if o.source_id == sid)
 
     def available(self, state: GameState, sid: int) -> int:
@@ -836,6 +850,7 @@ class Ui:
         self.dest = dest
         self.mode = CHOOSING
         self.forward_armed = False
+        self.forward_replaced = None  # a replace by an earlier compose is committed
         self.editing_existing = False  # this popup created its own subject
         self.chosen = max(0, avail)
         self.popup_pos = None  # fresh target -> auto-place the popup
@@ -928,23 +943,44 @@ class Ui:
     def send_half(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state) // 2)
 
+    def forwarded_this_turn(self, state: GameState, sid: int) -> bool:
+        """Was ``sid``'s standing rule set up this turn? Such a rule opens the
+        popup on its Forward tab, and a lane added to it splits it."""
+        return sid in self.auto_forward and self.forward_set_on.get(sid) == state.turn
+
+    def opens_on_forward(self, state: GameState, sid: int) -> bool:
+        """Should a send composed from ``sid`` open on the Forward tab? When it
+        has no ships to send now (forwarding future production is the only useful
+        action), or when it already forwards by a rule set up this turn."""
+        return self.available(state, sid) == 0 or self.forwarded_this_turn(state, sid)
+
     def toggle_forward(self, state: GameState) -> None:
         """Flip the active send between a one-shot order (sized by `chosen`) and
-        a lane of the source's standing rule. Arming adds the lane with
-        `model.shares_with` — the only lane gets 100%, a second makes it 50/50 —
-        and disarming takes it back out with `model.shares_without`, so trying the
-        Forward tab and leaving it puts the other lanes back as they were."""
+        a lane of the source's standing rule.
+
+        Arming onto a rule set up this turn adds the lane with `model.shares_with`
+        (a second makes it 50/50); arming onto one from an earlier turn replaces it
+        with this lane alone at 100%, hold 0, keeping the old rule aside. Disarming
+        undoes either — `model.shares_without`, or the old rule put back — so trying
+        the Forward tab and leaving it leaves the system as it was."""
         if self.mode != CHOOSING or self.selected is None or self.dest is None:
             return
         self.forward_armed = not self.forward_armed
+        sid = self.selected
         if self.forward_armed:
             if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
                 del self.pending[self.sel_order]
             self.sel_order = None
-            rule = self.auto_forward.setdefault(self.selected, ForwardRule())
-            rule.shares = model.shares_with(rule.shares, self.dest)
+            old = self.auto_forward.get(sid)
+            if old is not None and not self.forwarded_this_turn(state, sid):
+                self.forward_replaced = (sid, old)
+                self.auto_forward[sid] = ForwardRule({self.dest: 100})
+            else:
+                rule = self.auto_forward.setdefault(sid, ForwardRule())
+                rule.shares = model.shares_with(rule.shares, self.dest)
+            self.forward_set_on[sid] = state.turn
         else:
-            self._drop_lane(self.selected, self.dest)
+            self._unarm_lane(sid, self.dest)
             cap = self._active_cap(state)
             if cap > 0:
                 self.chosen = max(1, min(cap, self.chosen))
@@ -975,6 +1011,16 @@ class Ui:
             for dest in [d for d in self.auto_forward[sid].shares if self.lane_is_hostile(state, d)]:
                 self._drop_lane(sid, dest)
 
+    def _unarm_lane(self, sid: int, dest: int) -> None:
+        """Undo arming the composed lane: put back a rule it replaced, else take
+        the lane back out of the rule it joined."""
+        if self.forward_replaced is not None and self.forward_replaced[0] == sid:
+            self.auto_forward[sid] = self.forward_replaced[1]
+            self.forward_set_on.pop(sid, None)  # the old rule predates this turn
+            self.forward_replaced = None
+        else:
+            self._drop_lane(sid, dest)
+
     def _drop_lane(self, sid: int, dest: int) -> None:
         """Take one lane out of ``sid``'s rule, handing its share to the others, and
         drop the rule with its last lane."""
@@ -990,7 +1036,7 @@ class Ui:
         tab that is the one lane being edited; the system's other lanes stay."""
         if self.forward_armed:
             if self.selected is not None and self.dest is not None:
-                self._drop_lane(self.selected, self.dest)
+                self._unarm_lane(self.selected, self.dest)
         elif self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             del self.pending[self.sel_order]
         self._close_send()
@@ -1011,6 +1057,7 @@ class Ui:
             return
         self.sel_order = None
         self.forward_armed = False
+        self.forward_replaced = None
         self.dest = None
         self.chosen = 0
         self.popup_pos = None
@@ -1374,6 +1421,7 @@ class Ui:
                 self.clear_forward(sid)
         for src, rule in plan.items():
             self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold)
+            self.forward_set_on[src] = state.turn
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
@@ -1393,6 +1441,7 @@ class Ui:
         self.chosen = 0
         self.sel_order = None
         self.forward_armed = False
+        self.forward_replaced = None
         self.editing_existing = False
         self.popup_pos = None
         self.dragging_popup = False
@@ -1489,6 +1538,7 @@ class Ui:
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""
         self.auto_forward.pop(sid, None)
+        self.forward_set_on.pop(sid, None)
         if self.sel_forward == sid:
             self.sel_forward = None
 

@@ -546,7 +546,7 @@ def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
     ui.sel_forward = None
     ui.selected = src
     ui.mode = SELECTED
-    forward = shift or ui.available(state, src) == 0
+    forward = shift or ui.opens_on_forward(state, src)
     ui.begin_send(state, target, forward=forward)
 
 
@@ -906,10 +906,11 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
             return None  # already targeting it; adjust via popup
         elif ui.source(state) is not None and state.are_adjacent(ui.selected, node):
             # commit a send-all to this neighbour and open the popup. Arm it as a
-            # forward rule when Shift is held (desktop) or when the source has no
+            # forward rule when Shift is held (desktop), when the source has no
             # ships to send right now — forwarding future production is then the
-            # only useful action, and it's the mobile-friendly default (no Shift).
-            forward = shift or ui.available(state, ui.selected) == 0
+            # only useful action, and it's the mobile-friendly default (no Shift) —
+            # or when it already forwards by a rule set up this turn.
+            forward = shift or ui.opens_on_forward(state, ui.selected)
             ui.begin_send(state, node, forward=forward)
         else:
             ui.reset_selection()
