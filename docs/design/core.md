@@ -23,7 +23,7 @@ keep pre-compression links working.
 
 The Strategy dropdown's last entry, `random`, is the one option that names no
 decision function. `settings.resolve_strategy` turns it into a real bot inside
-`build_state`, drawing from `settings.RANDOM_POOL`. The point is to play
+`build_state`, drawing from `settings.RANDOM_POOLS`. The point is to play
 without knowing who you are playing: a large part of this game's skill is
 knowing how a given bot answers a given opening, and that is knowledge a fixed
 opponent hands you before the first turn.
@@ -76,14 +76,15 @@ win overlay named today's pick.
 
 Two fixes, each covering what the other cannot:
 
-- **`settings.RANDOM_POOL` is written out**, so every build deals a seed the same
-  bots whatever its `models/` holds, a stale cached build included, as long as
-  the pool is unchanged. A pool name that is not registered plays as the
-  heuristic (`ai.decide`'s fallback); `test_every_bot_in_the_pool_ships` keeps
-  that from happening silently, and `test_the_pool_still_deals_what_it_dealt`
-  pins the deal. A new bot is not dealt until someone adds it, and adding it
-  re-deals every random map, so it is done on purpose, like a `RULES_VERSION`
-  bump. Drop-ins are never dealt.
+- **The pools are written out** (`settings.RANDOM_POOLS`), so every build deals
+  a seed the same bots whatever its `models/` holds, a stale cached build
+  included. A pool name that is not registered plays as the heuristic
+  (`ai.decide`'s fallback); `test_every_bot_in_every_pool_ships` keeps that from
+  happening silently, accepting a legacy name (`ai.LEGACY`), which plays as its
+  family. Drop-ins are never dealt. An entry `name:stop` deals the stop with
+  the bot (`settings.resolve_profile`), so a seat's carried aux never reaches
+  it; the second pool deals every stop of every family that way
+  ([`bot-families.md`](bot-families.md)).
 - **`replay.GameLog.strategies` records each seat's strategy as built**
   (`replay.seat_strategies`), and `reconstruct` stamps it back on.
   `main.start_game` records it through `new_log`. `sim.play_settings` records it
@@ -91,6 +92,42 @@ Two fixes, each covering what the other cannot:
   A play-by-post log records it on its first rebuild, while it has no turns, so
   the resolver's upload carries the picks and every other client adopts them. A
   log from before the field existed has none and rebuilds with today's picks.
+
+**The pools are append-only, and the seed names its pool.** With one written-out
+pool, a new bot was dealt only by editing it, and an edit re-dealt nearly every
+random seat on every map ever shared: their scores, crowns, the bot column and
+the campaign's all-random nodes with them, and older scores were set aside as
+`outdated` by `tools/verify_scores.py`. So the pool was never edited. No pick
+from one growing list can avoid that: any rule that ever deals the new bot deals
+it to some seed that already existed, unless something says which seeds are
+new. So the pools are numbered, oldest first, and the seed says:
+seed // `POOL_ERA` (ten million) names its pool (`settings.pool_for`), and every
+seed below the second pool's era deals from the first. That first era holds
+every seed anyone could make before the pools were numbered: rolled seeds were
+under `config.SEED_MAX` (a million) and the menu typed seven digits.
+`settings.roll_seed` rolls a new seed in the newest pool's era, the newest pool
+times ten million plus up to `SEED_MAX` (`20xxxxxx` for the second), and it is
+the only roller (`random_seed`, the menu's dice, `tools/campaign.py`). To change
+what a random seat deals, append a pool: only seeds rolled from then on deal
+from it. `test_a_shipped_pool_is_never_edited` lists the pools and
+`test_each_pool_still_deals_what_it_dealt` pins a deal in each era.
+
+Why the seed and not a field. The seed is the one part of a setup that is
+rolled rather than chosen, it is always in a link (`_TOKEN_ALWAYS`), the
+challenge key, the log, the play-by-post match and the campaign node, and it is
+what a person reads out and types. Carrying the era in it moves no challenge
+key, adds no `Settings` field (and no `_LEGACY_KEY_DROPS` entry), leaves
+`settings_json`, `sc_bots` and `sc_config_key` exactly as they were, so a config
+does not split when a pool is appended, and keeps "the same setup and seed face
+the same opponents" true of a seed typed by hand. The cost is longer seeds
+(eight digits from the second pool on) and a rule a reader has to know.
+
+Two edges. A seed from an era with no pool yet would deal from today's newest
+pool and then from whichever is appended for its era, so the menu's seed field
+stops at `settings.seed_top` (`menu._seed_digits`); only a hand-written link or
+`--seed` can reach past it. A stale cached build does not know a newer era and
+deals that seed from the newest pool it has; `verify_scores` sets a score from
+one aside as `outdated`, as it did for a build from before the pool was fixed.
 
 The alternative to a fixed pool was a roster fingerprint in the challenge key
 whenever a seat is random: the same key would always mean the same lineup, but
@@ -341,6 +378,14 @@ no re-timing, no moving. That is what keeps the rule checkable from the map, and
 it is the invariant worth keeping if this is ever touched again — every fight is
 between two fleets whose gap actually reached zero.
 
+Same-turn launches down one lane are one fleet (`end_turn` tops up the fleet an
+owner already launched down a lane that turn rather than putting another beside
+it), so a stack sent as single-ship orders no longer reads as a column of 1s.
+Without this option the pieces would land together and pool anyway. With it
+they used to fight an interceptor one at a time; a stored lane-battle game that
+split a stack may replay differently now, and `RULES_VERSION` was left alone for
+it (see rules.md, "One lane, one turn, one fleet").
+
 **Ship-speed growth mostly switches the feature off**, which is worth knowing
 before tuning either knob. A fleet is exposed to the lane-battle phase exactly
 `turns_total` times, so as growth drives lanes toward a single turn the window
@@ -513,6 +558,27 @@ only `starconquest/` plus `models/`, and a data file loaded at import would have
 to be staged and fetched. Regenerating is `uv run python
 tools/gen_starnames.py` after replacing `tools/iau-star-names.csv` with a fresh
 export.
+
+The same run writes `starlore.py`: each name's language, origin and reference
+from the catalogue, shown on the star's info card. It is a separate module so
+`starnames`, which mapgen imports, stays small; only `render` and `input` import
+`starlore`. Any system can be selected, to read about it: the panel shows no
+more than a hover already does, and only `Ui.source` (the selection when it is
+ours) sends, rings destinations or lights lanes. The ⓘ button beside a selected
+system's name in the side panel
+(`render._draw_lore_button`) and the I key (selected system, else the hovered
+one) open the card (`Ui.lore_sid`), and any press closes it and is spent, like
+the briefing card's. The card is `render._draw_card`, shared with the briefing:
+it widens to the map, then drops to the small font, before it cuts anything,
+and `test_every_star_card_fits_whole` holds every entry to fitting whole.
+
+The generator strips the scripts the bundled DejaVu Sans Mono can't draw
+(`gen_starnames._UNDRAWABLE`): CJK, Devanagari, Thai, cuneiform, Cherokee,
+Mongolian and Hangul have no glyphs, and Arabic has glyphs but pygame lays them
+out left to right and unjoined. The catalogue gives a romanisation beside each
+of them, and the brackets and commas a removed run leaves behind are tidied up.
+The `NEWC` language value (the NameExoWorlds contest) is dropped, since the
+reference line already names it.
 
 `_name_systems` runs last in both generators, after every roll that shapes a
 map, so a seed lays out exactly the board it did before names existed — which
@@ -691,9 +757,22 @@ light relaxation + a Euclidean MST for connectivity, which is planar so edges
 don't cross, plus a few crossing-rejected extra edges for loops) and `symmetric`
 (one base sector rotated N times about a shared contested centre for a perfectly
 fair start). Both must stay connected and planar-ish — `test_mapgen.py` guards
-both. Note `symmetric` rounds the node count up to a whole number per sector and
-adds the shared centre, so it can return **more than it was asked for** (41 at 40
-nodes) — which is why `config.CUSTOM_MAX_NODES` exists separately.
+both. Note `symmetric` rounds the node count to a whole number per sector (at
+least two) and adds any shared systems, so it rarely returns what it was asked
+for: 41 at 40 nodes, and 18 for six seats on a `core` map asked for anything from
+9 to 21. That is why `config.CUSTOM_MAX_NODES` exists separately.
+
+**A setup shows the systems it builds, not the number it asked for.**
+`mapgen.symmetric_size` is the count (`generate_symmetric` takes its per-sector
+figure from the same helper), `Settings.system_count` applies it to a setup, and
+the menu's Systems row shows that and steps between sizes a symmetric map can
+actually have (`menu._step_systems`), storing the size it lands on, which builds
+itself. Stored `nodes` is never rewritten on read: an old link asking for 10
+still asks for 10, and its challenge key stays where it was. The board mirrors
+the count in `format.mjs` (`symmetricSize`, with Python's round-half-to-even,
+which `Math.round` is not), pinned by `leaderboard/tests/fixtures/symmetric-sizes.json`
+on both sides; it reads `layout` off `settings_json`, taking a row without one as
+the hub it predates.
 
 **A symmetric map's layout says what joins its sectors.** The original board ran
 every sector into one shared hub and nothing else, so every symmetric game was
@@ -726,10 +805,22 @@ The rules that keep it fair and keep old games replaying:
   it, so a lane clean on one seam is clean on all of them.
   `test_every_layout_turns_onto_itself` checks the result maps onto itself.
 - **`core` opens the middle up.** Core systems sit on the seams at
-  `max(0.6 * r_inner, gap / (2 sin(pi/N)))` with `gap = 2.5 * node_clearance()`,
-  so they stay a gap apart at six seats, and the sectors' inner radius moves out
-  to a gap behind them. At the old radius, six-seat core maps put systems on top
-  of each other in every seed.
+  `max(0.6 * r_inner, gap / (2 sin(pi/N)))` with `gap = config.CORE_GAP` (90
+  world units), so they stay a gap apart at six seats, and the sectors' inner
+  radius moves out to a gap behind them. At the old radius, six-seat core maps
+  put systems on top of each other in every seed.
+- **A map never depends on the screen.** The gap was first written as
+  `2.5 * node_clearance()`, a pixel figure that follows the UI scale. The
+  headless worker builds at scale 1.0 and the browser at whatever its window
+  gives, so the same seed laid out a different core board in each, and a bot's
+  winning replay played its orders onto the wrong map when watched (it ended
+  with the winner on 2 systems of 18). `CORE_GAP` is that figure at scale 1.0,
+  so every core map the worker, the verifier and the bot column ever built is
+  unchanged (`test_the_core_layout_is_the_board_the_worker_has_always_built`)
+  and `RULES_VERSION` did not move. A core game played in a browser at any other
+  scale was already unreproducible off it, and stays so.
+  `test_no_core_module_reads_a_screen_size` parses every core module and
+  `models/` for a read of a scaled `config` name.
 - **`layout` is inert off a generated symmetric map** (`Settings.layout_inert`:
   a random map, or any hand map). Then `challenge_keys` hashes it as `hub` and
   `token_dict` leaves it out, so a random map's key does not depend on what the
@@ -813,7 +904,8 @@ held off mid-drag, and restoring `config` after it generates.
   **last**, after every roll that shapes the map, so a seed still lays out the
   board it always did and a replay recreates the names from `state.rng` with
   nothing serialized. `NAMES` is generated from `tools/iau-star-names.csv` by
-  `tools/gen_starnames.py` — regenerate, don't hand-edit. On the map,
+  `tools/gen_starnames.py` — regenerate, don't hand-edit; the same run writes
+  `starlore.py`, the info card's text, keyed by name. On the map,
   `render._draw_node_names` places labels collision-first and drops what doesn't
   fit (see "Star names" above) — including the fixed slot above every system that a
   playback writes its numbers into (`render._mark_slot`), reserved whether or not

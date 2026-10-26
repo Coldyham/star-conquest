@@ -154,3 +154,170 @@ def test_campaign_scores_carry_the_stamp_from_the_start_of_the_game(board):
          " values ('stamped', 3, 30, 0, 30, '', 'Adjacent; drop')"],
         capture_output=True, text=True)
     assert refused.returncode != 0 and "campaign_start" in refused.stderr
+
+
+def test_a_score_counts_once_verified_or_for_a_day_while_its_replay_is_awaited(board):
+    """Posting a score is a public insert, so one the worker has not vouched for
+    counts only while the worker may not have reached it yet, and only if it
+    names a replay that could vouch for it. A score from before the cutoff
+    counts as it did when posted. Only the first post of a match counts, so a
+    verified replay can't be posted again under a second name."""
+    _psql("""
+      create or replace function sc_legacy_cutoff() returns timestamptz
+        language sql immutable as $$ select timestamptz '2026-10-01 00:00Z' $$;
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        select k, 'random', 2, 18, 0, '{}' from unnest(array[
+          'fresh', 'stale', 'blank', 'gone', 'forged', 'copied', 'lineup',
+          'legacy', 'rules']) k;
+      with v(g, u, t, at, m, verdict, outdated) as (values
+        -- alice's verified score, then bob's unchecked one from an hour ago
+        ('fresh', 1, 40, now() - interval '3 days', 'a000000000000001', 'verified', false),
+        ('fresh', 2, 30, now() - interval '1 hour', 'a000000000000002', null, null),
+        -- more than a day on, an unchecked score no longer counts
+        ('stale', 1, 40, now() - interval '3 days', 'a000000000000003', 'verified', false),
+        ('stale', 2, 30, now() - interval '25 hours', 'a000000000000004', null, null),
+        -- a score that names no replay never counts, however fresh
+        ('blank', 1, 40, now() - interval '3 days', 'a000000000000005', 'verified', false),
+        ('blank', 2, 30, now() - interval '1 hour', '', null, null),
+        -- `missing` is retried, so it gets its day like an unchecked one
+        ('gone', 1, 40, now() - interval '3 days', 'a000000000000006', 'verified', false),
+        ('gone', 2, 30, now() - interval '1 hour', 'a000000000000007', 'missing', false),
+        -- a log claiming older rules is excused, not counted
+        ('forged', 1, 40, now() - interval '3 days', 'a000000000000008', 'verified', false),
+        ('forged', 2, 30, now() - interval '1 hour', 'a000000000000009', 'mismatch', true),
+        ('forged', 3, 20, now() - interval '1 hour', 'a00000000000000a', 'unreadable', false),
+        -- bob re-posts alice's verified match under his own name
+        ('copied', 1, 30, now() - interval '3 days', 'a00000000000000b', 'verified', false),
+        ('copied', 2, 30, now() - interval '2 days', 'a00000000000000b', 'verified', false),
+        -- verified against an older lineup: still a real score
+        ('lineup', 1, 40, now() - interval '3 days', 'a00000000000000c', 'verified', false),
+        ('lineup', 2, 30, now() - interval '3 days', 'a00000000000000d', 'verified', true),
+        -- before the cutoff, anything but a mismatch under current rules
+        ('legacy', 1, 40, timestamptz '2026-09-01', 'a00000000000000e', 'missing', false),
+        ('legacy', 2, 30, timestamptz '2026-09-02', '', null, null),
+        ('legacy', 3, 20, timestamptz '2026-09-03', 'a00000000000000f', 'mismatch', false),
+        ('rules', 1, 40, timestamptz '2026-09-01', 'a000000000000010', 'mismatch', true),
+        ('rules', 2, 30, now() - interval '1 hour', 'a000000000000011', 'mismatch', true)
+      ), posted as (
+        insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, match_id)
+        select g, u, t, 0, t, '', at, m from v
+        returning id, game_key, user_id
+      )
+      insert into score_checks (score_id, verdict, outdated)
+      select p.id, v.verdict, v.outdated from posted p
+      join v on v.g = p.game_key and v.u = p.user_id
+      where v.verdict is not null;
+    """, board)
+    rows = _psql("select game_key, user_name from counted_scores where game_key in"
+                 " ('fresh', 'stale', 'blank', 'gone', 'forged', 'copied', 'lineup',"
+                 " 'legacy', 'rules') order by game_key, user_name", board)
+    assert rows.splitlines() == [
+        "blank|alice",
+        "copied|alice",
+        "forged|alice",
+        "fresh|alice", "fresh|bob",
+        "gone|alice", "gone|bob",
+        "legacy|alice", "legacy|bob",
+        "lineup|alice", "lineup|bob",
+        "rules|alice",
+        "stale|alice",
+    ]
+
+
+def test_a_replay_is_the_log_its_matchs_first_score_was_checked_on(board):
+    """Anyone can upload under a public match_id, so the longest upload is not
+    evidence. The Watch link serves the log the match's first score verified
+    on, even past a later poster's own verified copy; before any check, the
+    longest uploaded before the score was posted, else the longest."""
+    _psql("""
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('watch', 'random', 2, 18, 0, '{}');
+      insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, match_id)
+        values ('watch', 1, 30, 0, 30, '', now() - interval '3 days', 'b000000000000001'),
+               ('watch', 2, 50, 0, 50, '', now() - interval '2 days', 'b000000000000001'),
+               ('watch', 1, 30, 0, 30, '', now() - interval '1 hour', 'b000000000000002'),
+               ('watch', 1, 30, 0, 30, '', now() - interval '1 hour', 'b000000000000003');
+      insert into game_logs (match_id, game_key, turns, log) values
+        ('b000000000000001', 'watch', 30, 'real'),
+        ('b000000000000001', 'watch', 99, 'forged'),
+        ('b000000000000001', 'watch', 50, 'copy'),
+        ('b000000000000002', 'watch', 10, 'checkpoint'),
+        ('b000000000000002', 'watch', 30, 'final'),
+        ('b000000000000003', 'watch', 99, 'forged');
+      insert into game_logs (match_id, game_key, turns, log, submitted_at) values
+        ('b000000000000003', 'watch', 30, 'own', now() - interval '2 hours');
+      insert into score_checks (score_id, verdict, log_id)
+        select s.id, 'verified', l.id from scores s
+        join game_logs l on l.match_id = s.match_id
+          and l.log = case s.user_id when 1 then 'real' else 'copy' end
+        where s.match_id = 'b000000000000001';
+    """, board)
+    rows = _psql("select match_id, log from public_replays where game_key = 'watch'"
+                 " order by match_id", board)
+    assert rows.splitlines() == ["b000000000000001|real", "b000000000000002|final",
+                                 "b000000000000003|own"]
+
+
+def test_a_game_counts_once_whatever_match_it_is_posted_under(board):
+    """A verified replay is public, so it can be uploaded again under a fresh
+    match_id and posted under another name. It replays through the same boards
+    (score_checks.game_digest), so only its first post counts."""
+    _psql("""
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('twin', 'random', 2, 18, 0, '{}');
+      with v(u, t, at, m, digest) as (values
+        (1, 30, now() - interval '3 days', 'c000000000000001', 'aaaa'),
+        (2, 30, now() - interval '2 days', 'c000000000000002', 'aaaa'),
+        (3, 31, now() - interval '1 day', 'c000000000000003', 'bbbb')
+      ), posted as (
+        insert into scores (game_key, user_id, turns, lost, hand, raw_token, submitted_at, match_id)
+        select 'twin', u, t, 0, t, '', at, m from v
+        returning id, user_id
+      )
+      insert into score_checks (score_id, verdict, game_digest)
+      select p.id, 'verified', v.digest from posted p join v on v.u = p.user_id;
+    """, board)
+    rows = _psql("select user_name from counted_scores where game_key = 'twin'"
+                 " order by user_name", board)
+    assert rows.splitlines() == ["alice", "cara"]
+
+
+def test_a_maps_record_is_its_best_counted_score(board):
+    """game_summary's best is what the home card and "Bot leads" show, so a
+    score that doesn't count for a crown isn't the record either; with nothing
+    counted there is no record, though the scores are still there."""
+    _psql("""
+      create or replace function sc_legacy_cutoff() returns timestamptz
+        language sql immutable as $$ select timestamptz '2026-10-01 00:00Z' $$;
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('record', 'random', 2, 18, 0, '{}'), ('nothing', 'random', 2, 18, 0, '{}');
+      insert into scores (game_key, user_id, turns, lost, hand, by_name, raw_token, submitted_at, match_id)
+        values ('record', 1, 40, 0, 40, 'Al', '', now() - interval '3 days', 'd000000000000001'),
+               ('record', 2, 40, 0, 40, '', '', now() - interval '2 days', 'd000000000000002'),
+               ('record', 3, 10, 0, 10, '', '', now() - interval '2 days', ''),
+               ('nothing', 3, 10, 0, 10, '', '', now() - interval '2 days', '');
+      insert into score_checks (score_id, verdict)
+        select id, 'verified' from scores where match_id in ('d000000000000001', 'd000000000000002');
+    """, board)
+    rows = _psql("select game_key, best_turns, best_by_name, best_user_name, best_holders,"
+                 " score_count from game_summary where game_key in ('record', 'nothing')"
+                 " order by game_key", board)
+    assert rows.splitlines() == ["nothing||||0|1", "record|40|Al|alice|2|3"]
+
+
+def test_the_public_cannot_choose_when_a_score_was_posted(board):
+    """counted_scores trusts submitted_at, so the public's insert leaves it to
+    the server: a backdated score is refused, and one without it is stamped now."""
+    _psql("insert into games (game_key, mode, players, nodes, seed, settings_json)"
+          " values ('stamp', 'random', 2, 18, 0, '{}')", board)
+    backdated = subprocess.run(
+        ["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
+         "set role anon; insert into scores"
+         " (game_key, user_id, turns, lost, hand, raw_token, submitted_at)"
+         " values ('stamp', 1, 30, 0, 30, '', '2026-09-01 00:00Z')"],
+        capture_output=True, text=True)
+    assert backdated.returncode != 0 and "permission denied" in backdated.stderr
+    _psql("set role anon; insert into scores (game_key, user_id, turns, lost, hand, raw_token)"
+          " values ('stamp', 1, 30, 0, 30, '')", board)
+    assert _psql("select count(*) from scores where game_key = 'stamp'"
+                 " and submitted_at > now() - interval '1 minute'", board) == "1"

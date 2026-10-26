@@ -131,11 +131,124 @@ the whole map once `state.winner` is set or the human is defeated, and frames
 just `Ui.seen` otherwise (game start, the reset button, a window resize).
 `WorldView.fit_to` gets there by layering a fresh zoom/pan on top of the
 existing full-map `_world_bounds`/`_fit_scale` rather than recomputing them,
-so `ZOOM_MIN` and the pan clamp stay keyed to the true full map regardless of
+so the zoom limit and the pan clamp stay keyed to the true full map regardless of
 what was last framed — manually zooming out always reaches it. `resolve_turn`
 compares defeat/winner state before and after `engine.end_turn` rather than
 checking it plain, so a spectator fast-forwarding an already-decided match
 doesn't get re-snapped every turn, only the one that actually crosses into it.
+
+## Ironman and the ships-lost readout
+
+Ironman (`webstore.ironman`, the menu's *Ironman* row) is honour-based: it takes
+History away while the game is undecided, because History is where rewind
+lives, and nothing records or posts that it was on. It is a local preference
+for the reason `animate_turns` is: on `Settings` it would move `challenge_key()`
+for every map ever shared. `main.new_ui` stamps it onto `Ui.ironman` so nothing
+reads the store once a frame, and `Ui.can_review` is the one gate render's
+footer button and main's `toggle_history` both ask. A spectator who has been
+knocked out still can't open History, or they could rewind and play on; once
+the game has a winner, *Review history* on the win overlay is offered as usual.
+
+The top bar shows our seat's `ships_lost` beside the turn counter
+(`render._draw_ships_lost`) all game, since it is a score's tie-break and
+someone chasing a posted result would otherwise only learn it at the end.
+
+## End-of-game graphs (`stats`, `render._draw_history_graph`)
+
+History review can lay a chart over the lower part of the map, after the
+Civilization games' map-replay-plus-graphs end screen: tabs for systems, ships
+including in transit, income in ships/turn and cumulative ships lost, each a
+line per seat across every recorded turn, plus *Lost/turn*, a bar per turn
+stacked by seat (`stats.STACKED`) — as a line it is all spikes, while a
+stacked bar shows at once when the big fights were and who paid for them —
+and *Map share*, stacked bands that always fill 0-100% (`stats.AREA`): each
+seat's share of every system, with the unclaimed share as a grey band on top.
+A hidden seat leaves a gap rather than rescaling the rest, so a band always
+reads as a true share. Mid-game the unclaimed band is charted on the same terms
+as a rival (below): on the turns some unclaimed system was in sight. (Until
+2026-10-23 it waited for review to be revealed.) A cursor marks the
+turn the map is showing. *Graphs (G)* on the scrubber bar toggles it, Tab cycles the metric,
+and a click or drag across the plot seeks a turn as the track does. The ^
+caret (F) at its top right makes it full screen, filling everything between
+the bars with the scrubber kept, and the v caret docks it again. The legend is
+the trace selector: a click on a seat's row (or 1-9) shows or hides its line,
+and the y scale fits the lines shown, so hiding a runaway leader makes the
+rest readable.
+
+On a landscape screen the legend is a column right of the plot, as wide as its
+names (bot names included) up to 40% of the panel, past which the bot names
+drop and give their room back to the plot. On a portrait one it runs under the
+plot instead, full width, in as many columns as fit a whole row, and a docked
+panel grows to hold it: a column beside the plot there left it half the width
+and still clipped the bot names. The tabs wrap short of the caret.
+
+The camera is as free in review as in live play: drag the map to pan, wheel or
+−/+ to zoom, Reset (R) to re-frame. The Reset/−/+ cluster sits at the map's
+foot, lifted above the docked chart when it is open; full screen there is no
+map, so no cluster. A press on the reviewed map is always a pan, since there is
+nothing to select.
+
+The game's camera is free past the fit, by a ``room`` (`WorldView.zoom_at`,
+`pan`): it zooms out until ``room`` of the map's size shows past each side, and
+pans anywhere that keeps ``1 - room`` of the map on screen on each axis (of the
+view, once the zoomed map is the wider, so an edge stays reachable), so a
+player can't easily end up looking at nothing. Live play gets
+`config.LIVE_ROOM` (0.5: the map half the view across at the most zoomed
+out); review gets more, `config.REVIEW_ROOM` (0.85: about 37%), so the part
+of the map under the docked chart can be brought into view without the
+default squashing the map into the space above it. Reset restores the
+ordinary framing either way, and leaving review calls `WorldView.settle` to
+bring the camera back inside live play's room. The map maker keeps the strict
+clamp (no ``room``).
+
+- **Read off the history boards, never the log.** `stats.chart` runs once in
+  `main.open_history` over the boards `build_history` already reconstructed, so
+  a curve can never disagree with the map at the same turn, and nothing decides
+  or rolls again. `stats` is core (no pygame), drawing nothing from `state.rng`.
+- **The graphs know what the top bar knew.** A finished game charts every seat
+  on every turn. Mid-game, `main.open_history` masks the chart
+  (`stats.sightings`, `stats.masked`) so a rival is charted only on the turns
+  the top bar showed its standings: while it held a system in that turn's
+  sight (with fog off, always), and once knocked out if it was ever sighted.
+  Its other turns are NaN, a gap and never a zero. A line is drawn solid
+  along each run of known turns and dotted straight across a gap, since what
+  happened out of sight is a guess. Bars and bands skip the unknown turns, and
+  the legend reads "–" on one. `Ui.graph_seats` offers our seat and each rival
+  sighted at least once; Map share's unclaimed band follows the same rule.
+  Losses are cumulative, so a running total is known
+  whenever the seat is. A turn's *Lost/turn* bar needs that turn and the one
+  before it known; otherwise the first turn back in sight would carry the whole
+  gap's losses as its own. (Until 2026-10-23 a mid-game review charted our seat
+  alone, even with fog off.)
+- **Open by default on a finished game**, where it is the summary review is
+  for; closed in a mid-game review, where the board is the point.
+- **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
+- Not yet: the default camera does not reframe into the space above the docked
+  chart (on purpose: it would squash the map; the loose camera covers it), and
+  there is no per-turn losses or kills view (a fight's dead are recorded per
+  owner, not per killer).
+
+## Naming each seat's bot (`Ui.bot_label`)
+
+Pointing at (or tapping) a scoreboard entry in the top bar opens a tooltip
+under it: the seat, who plays it, and its standings in words (or the last-known
+ones, or that it is out). The graph legend names the same after each seat,
+and the win line uses the same label (`render._winner_label`): "Verdant
+(Knower · Predict) wins!", or "(Marshal, random)" for a seat dealt at random.
+
+- **Labels are worked out once, in `main.new_ui`** (`seat_bot_labels`): the
+  family (`ai.canonical`, so a legacy name reads as its family) and the stop its
+  knob sits on (`ai.aux_stop_name`). Render imports no `ai`, so it reads them
+  off `Ui.seat_bots`.
+- **A random seat stays secret until the game is decided.** `Ui.random_seats`
+  comes from the `Settings` (`RANDOM_STRATEGY`), since `Player` only ever holds
+  the resolved bot. It reads "Random" until `Ui.bots_revealed`: a winner on the
+  board, or review of a finished game. A knocked-out spectator still waits,
+  because the bot is half of what the remaining seats are playing against.
+- **A person's seat is never a bot**: `Player.is_human` on the board being drawn,
+  so a seat claimed part-way through reads as its bot on the turns before.
+- The tooltip goes through the scoreboard's own fog (`_score_vis`): a rival
+  never sighted has no entry to hover.
 
 ## Route mode (`viewstate.ROUTING`)
 
@@ -342,6 +455,16 @@ inverse — an even split re-splits evenly, anything else hands the freed share 
 in proportion — so Cancel on a lane just added, or going back to the Send tab,
 leaves the others as they were. A rule sending nothing at all splits 100% when a
 lane joins, or the new lane would be born idle.
+
+**Splitting is for this turn's rule; an older one is replaced.** Adding a lane
+splits only a rule set up this turn (`Ui.forward_set_on`, stamped when the popup
+arms a lane or a route is confirmed). A rule from an earlier turn is what the
+player set up *then*; a new lane on a later turn almost always means "send here
+now", so it replaces the whole rule with that lane at 100% and hold 0. The old
+rule is kept aside (`Ui.forward_replaced`) so Cancel or the Send tab puts it back.
+A system whose rule was set up this turn also opens the popup on the Forward tab
+(`Ui.opens_on_forward`), as an empty one does: the next lane is most likely
+another split of it.
 
 **A lane taken to 0% is deleted.** A lane sending nothing is not a rule, so when the
 lane the popup is on reaches 0% — by −, the wheel or the slider — `Ui.set_share`

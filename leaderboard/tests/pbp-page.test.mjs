@@ -8,7 +8,8 @@ import test from "node:test";
 import { phrase } from "../js/matchnames.mjs";
 import {
   SEATS_KEY, deadlineLabel, deadlineNote, groupMatches, matchLabel, mineIds, openLink,
-  parseSeats, resultNote, roster, seatLink, seatWho, setupLine, waitingNote, withSeat,
+  parseSeats, resultNote, roster, seatLink, seatWho, setupLine, waitingNote, watchHref,
+  watchLink, watchable, withSeat,
 } from "../js/pbp.mjs";
 
 const ID = "00112233445566ff";
@@ -70,6 +71,17 @@ test("the lobby shows open invitations, your live matches and finished ones — 
   assert.deepEqual(groups.open.map((m) => m.match_id[0]), ["a"]);
   assert.deepEqual(groups.mine.map((m) => m.match_id[0]), ["b", "e"]);
   assert.deepEqual(groups.finished.map((m) => m.match_id[0]), ["d"]);
+});
+
+test("watching is offered with fog off, live, and to the match's own players only", () => {
+  const live = { ...base, match_id: ID, finished: false };
+  assert.equal(watchLink(ID, "https://g/"), `https://g/#spectate=${ID}`);
+  assert.equal(watchHref(live, { seat: 1 }, "https://g/"), `https://g/#spectate=${ID}`);
+  assert.equal(watchHref(live, undefined, "https://g/"), null, "not to a stranger");
+  assert.equal(watchHref({ ...live, finished: true }, { seat: 1 }), null);
+  assert.equal(watchHref({ ...live, settings_json: { fog_scout: 4 } }, { seat: 1 }), null);
+  assert.equal(watchable(live), true);
+  assert.equal(watchable({ ...live, settings_json: { fog_sight: 2 } }), false);
 });
 
 const TOKEN = "ab".repeat(16);

@@ -13,7 +13,7 @@
  * seat to decide. So this stores the inputs, and each client rebuilds the
  * position. What arrives here is orders; what leaves is orders.
  *
- * Seven actions, chosen by `?action=`:
+ * Eight actions, chosen by `?action=`:
  *   state   (GET)  what a client needs to show the match: the setup, the live
  *                  turn, who is outstanding, and every resolved turn's orders.
  *                  With `&have=<turn>` from a client already on that turn, and
@@ -22,6 +22,10 @@
  *                  one's setup, status, who is outstanding, and which seats are
  *                  open. With `&ids=a,b,…`, those matches instead, public or
  *                  not — the same knowing-the-id rule `state` follows.
+ *   record  (GET)  `&name=<name>`: `{played, won}`, how many matches a seat
+ *                  under that name has had a turn resolved in, and won. The
+ *                  player card's play-by-post badges. Counts only, so a
+ *                  private match's id never leaves here.
  *   claim   (POST) mint the token for an open seat of a public match. The only
  *                  way a seat's token comes into being after `create`.
  *   seat    (POST) which seat a token holds — the one thing a client opening a
@@ -488,7 +492,8 @@ export default async function handler(request) {
     || "unknown";
   const query = new URL(request.url).searchParams;
   const action = query.get("action") || "state";
-  const reading = (action === "state" || action === "list") && request.method === "GET";
+  const reading = (action === "state" || action === "list" || action === "record")
+    && request.method === "GET";
   const limited = reading
     ? rateLimited(`read:${ip}`, Date.now(), seen, MAX_READS_PER_WINDOW)
     : rateLimited(ip);
@@ -496,6 +501,7 @@ export default async function handler(request) {
 
   const call = db(url, key);
   if (reading && action === "list") return await handleList(call, query, origin);
+  if (reading && action === "record") return await handleRecord(call, query, origin);
   if (reading) return await handleState(call, query, origin);
   if (request.method !== "POST") return reply(405, { error: "POST only" }, origin);
 
@@ -737,6 +743,41 @@ async function handleList(call, query, origin) {
     if (orders === null) return reply(502, { error: "store refused" }, origin);
   }
   return reply(200, { matches: matches.map((match) => lobbyEntry(match, orders)) }, origin);
+}
+
+/**
+ * `{played, won}` for one name over `matches` (`names`, `turn`, `finished`,
+ * `winner`), names folded as `users.name_key` folds them. Played is a seat under
+ * that name in a match with a resolved turn; won is that seat being the winner
+ * the finishing resolve reported. A name is self-declared display text, so this
+ * is exactly as much of an identity as a posted score's name.
+ */
+export function recordFor(matches, name) {
+  const key = String(name || "").trim().toLowerCase();
+  const out = { played: 0, won: 0 };
+  if (!key) return out;
+  for (const match of matches) {
+    const names = match.names || {};
+    const seats = Object.keys(names).filter((seat) => String(names[seat]).trim().toLowerCase() === key);
+    if (!seats.length || !(match.turn >= 1)) continue;
+    out.played += 1;
+    if (match.finished && seats.includes(String(match.winner))) out.won += 1;
+  }
+  return out;
+}
+
+// How many matches `record` reads. Every match is a small row without its log,
+// and a board past this many wants a filter on names, not a bigger number.
+export const RECORD_LIMIT = 5000;
+
+async function handleRecord(call, query, origin) {
+  const name = query.get("name") || "";
+  // A board name runs to 60 (users.name); past NAME_MAX it simply held no seat.
+  if (!name.trim() || name.length > 60) return reply(400, { error: "bad name" }, origin);
+  const matches = await call(
+    `/pbp_matches?select=names,turn,finished,winner&order=created_at.desc&limit=${RECORD_LIMIT}`);
+  if (matches === null) return reply(502, { error: "store refused" }, origin);
+  return reply(200, recordFor(matches, name), origin);
 }
 
 /**

@@ -187,6 +187,8 @@ def test_the_scrape_actually_found_the_callers():
     assert ("pbp_orders", "insert") in uses         # ...and takes a submission
     assert ("admin_actions", "insert") in uses      # tools/admin.py's audit row
     assert ("pbp_matches", "update") in uses        # ...and a seat's token rewritten
+    assert ("gauntlets", "insert") in uses          # netlify/functions/gauntlet.mjs
+    assert ("gauntlets", "delete") in uses          # tools/admin.py's delete-gauntlet
     assert len(uses) >= 8
 
 
@@ -246,3 +248,25 @@ def test_a_views_new_columns_land_after_its_old_ones():
     assert _view_columns("public_watchable_replays") == [
         "match_id", "game_key", "turns", "finished", "won", "hand", "log", "rules_version",
     ]
+
+
+def test_the_public_cannot_choose_when_a_score_was_posted():
+    """counted_scores and public_replays trust `scores.submitted_at`, so the
+    public's insert on scores is granted column by column and never on that one.
+    The table grant is revoked first, since a revoke after would take the column
+    grants with it, and every column the submit page sends is granted."""
+    text = SCHEMA.read_text()
+    table_grants = re.findall(r"^grant insert on (.+?) to ", text, re.MULTILINE | re.DOTALL)
+    assert not any("public.scores" in {r.strip() for r in rels.split(",")}
+                   for rels in table_grants)
+    revoke = text.index("revoke insert on public.scores from anon, authenticated;")
+    grant = re.search(r"^grant insert \(([^)]*)\) on public\.scores to anon, authenticated;",
+                      text, re.MULTILINE)
+    assert grant is not None and revoke < grant.start()
+    columns = {c.strip() for c in grant.group(1).split(",")}
+    assert "submitted_at" not in columns
+    submit = (ROOT / "leaderboard" / "js" / "submit.mjs").read_text()
+    body = re.search(r'insert\("scores", \{(.*?)\n\s*\}, \{', submit, re.DOTALL)
+    assert body is not None, "the submit page's score insert has moved"
+    sent = set(re.findall(r"^\s*(\w+):", body.group(1), re.MULTILINE))
+    assert sent and sent <= columns, f"not granted: {sorted(sent - columns)}"

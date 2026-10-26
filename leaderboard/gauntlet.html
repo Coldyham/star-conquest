@@ -1,0 +1,165 @@
+{% extends "templates/base.html" %}
+{% set title = "Make a gauntlet" %}
+{% set script = ["js/gauntlet-page.mjs", "js/gauntlet-gen-page.mjs"] %}
+
+{% block main %}
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Make a gauntlet</h1>
+  <!-- The two gauntlet pages share one menu entry; these tabs move between them. -->
+  <nav class="sorts" aria-label="Gauntlets">
+    <a class="btn ghost" href="gauntlets.html">Public</a>
+    <a class="btn" href="gauntlet.html" aria-current="page">Make new</a>
+  </nav>
+  <!-- A gauntlet is a run of maps played in order, each with a briefing card
+       and a one-line hint: the game's tutorial is one. This page builds one
+       from game links and stores it (/api/gauntlet), which hands back a short
+       link that opens it in the game. Nothing about progress is stored: a
+       player's clears are their own wins, kept in their own browser. -->
+  <p class="lede">
+    String maps together into a run for friends, a club or a class. In the
+    game's setup menu, set up a map with a fixed seed and press
+    <strong>Get Link</strong>, or use <strong>Challenge a friend</strong> after a
+    game. Paste one link per stage here, write what each stage should teach,
+    and save.
+  </p>
+  <p class="lede">
+    Saving gives you a link that opens the gauntlet in the game's
+    <strong>Gauntlets</strong> list. Each stage opens once the one before it is won,
+    or won within its target if you give it one: your own score from a
+    <strong>Challenge a friend</strong> link, or the best bot's on the board.
+  </p>
+
+  <!-- Generate: the page builds a spec, the game deals the maps and plays test
+       bots on them to order them by difficulty (gauntlet-spec.mjs; the board
+       has no engine). The link opens the game, which makes the gauntlet in the
+       browser and opens it on its Gauntlets list. -->
+  <details id="gen" class="gen">
+    <summary>Or generate one: pick the rules, the game picks the maps</summary>
+    <form id="gen-form" class="form gauntlet-form" autocomplete="off">
+      <p class="hint">
+        The game deals maps within these rules, has test bots play each one,
+        and orders them from easiest to hardest. It deals a round of maps at a
+        time, one per stage, and stops once another round would not improve the
+        order. It runs in your browser, so more stages or rounds take longer.
+      </p>
+      <label for="gen-name">Name (optional)</label>
+      <input id="gen-name" class="plain" type="text" placeholder="e.g. Symmetric climb">
+
+      <label for="gen-stages">Stages</label>
+      <input id="gen-stages" type="number" min="2" max="16" value="6">
+
+      <label for="gen-mode">Map type</label>
+      <select id="gen-mode">
+        <option value="any">Either</option>
+        <option value="random">Random</option>
+        <option value="symmetric">Symmetric</option>
+      </select>
+
+      <label for="gen-players-min">Players (you included)</label>
+      <div class="row">
+        <input id="gen-players-min" type="number" min="2" max="6" value="2" aria-label="Fewest players">
+        <span>to</span>
+        <input id="gen-players-max" type="number" min="2" max="6" value="4" aria-label="Most players">
+      </div>
+
+      <label for="gen-systems-min">Systems</label>
+      <div class="row">
+        <input id="gen-systems-min" type="number" min="5" max="40" value="13" aria-label="Fewest systems">
+        <span>to</span>
+        <input id="gen-systems-max" type="number" min="5" max="40" value="24" aria-label="Most systems">
+      </div>
+
+      <fieldset class="gen-bots">
+        <legend>Opponents (weakest first)</legend>
+        <div id="gen-opponents"></div>
+      </fieldset>
+
+      <label for="gen-fog">Fog of war</label>
+      <select id="gen-fog">
+        <option value="off">Off</option>
+        <option value="on">On</option>
+        <option value="either">Either</option>
+      </select>
+
+      <p class="hint">
+        Each slider below has a pin for the least and the most a map may deal.
+        Left on the game's default, it stays at the default.
+      </p>
+      <div id="gen-knobs"></div>
+
+      <label class="check"><input id="gen-roll" type="checkbox">
+        Vary the Advanced sliders left on their default too (makes wilder maps)</label>
+      <label class="check"><input id="gen-unwon-last" type="checkbox" checked>
+        The last stage may be a map no test bot won (people win about half the
+        maps the bots up to marshal lose)</label>
+      <label for="gen-targets">Stage targets</label>
+      <select id="gen-targets">
+        <option value="none">None: any win clears a stage</option>
+        <option value="slowest">The slowest test-bot win</option>
+        <option value="fastest">The fastest test-bot win</option>
+      </select>
+      <label for="gen-slack">Target slack (extra turns)</label>
+      <input id="gen-slack" type="number" min="0" max="99" value="0">
+
+      <label for="gen-candidates">Rounds of maps (at most)</label>
+      <input id="gen-candidates" type="number" min="1" max="8" value="3">
+
+      <label for="gen-seed">Seed (blank: a new one)</label>
+      <input id="gen-seed" class="plain" type="text" inputmode="numeric" placeholder="random">
+
+      <p class="status error" id="gen-problem" role="status" aria-live="polite"></p>
+      <p class="hint" id="gen-cost"></p>
+      <button id="gen-make" type="submit">Make the link</button>
+
+      <div id="gen-result" class="result" hidden>
+        <label for="gen-link">Link (opens the game, which generates the gauntlet)</label>
+        <input id="gen-link" class="plain" type="text" readonly>
+        <div class="row">
+          <button id="gen-copy" class="mini" type="button">Copy link</button>
+          <a id="gen-open" class="btn" href="#" target="_blank" rel="noopener">Generate in the game</a>
+        </div>
+        <p class="hint">
+          Once it is made, the game's Gauntlets list has a <strong>Copy link</strong>
+          button that shares the finished gauntlet itself.
+        </p>
+      </div>
+    </form>
+  </details>
+
+  <form id="form" class="form gauntlet-form" autocomplete="off">
+    <label for="g-name">Gauntlet name</label>
+    <input id="g-name" class="plain" type="text" placeholder="e.g. Fog for beginners">
+    <p class="count" id="g-name-count"></p>
+
+    <label for="g-by">Your name (optional)</label>
+    <input id="g-by" class="plain" type="text" placeholder="Shown as the author">
+
+    <label class="check"><input id="g-listing" type="checkbox">
+      Ask for it to be listed publicly</label>
+
+    <div id="stages" class="stages"></div>
+    <button id="add-stage" class="mini" type="button">+ Add a stage</button>
+
+    <p class="status error" id="problem" role="status" aria-live="polite"></p>
+    <button id="save" type="submit">Save gauntlet</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+
+    <div id="result" class="result" hidden>
+      <label for="g-link">Link to share</label>
+      <input id="g-link" class="plain" type="text" readonly>
+      <div class="row">
+        <button id="copy" class="mini" type="button">Copy link</button>
+        <a id="open" class="btn" href="#" target="_blank" rel="noopener">Open in the game</a>
+        <button id="download" class="mini" type="button">Download .json</button>
+      </div>
+      <p class="hint">
+        Desktop players: put the .json file in the game's gauntlets folder.
+      </p>
+    </div>
+
+    <button id="reset" class="drop" type="button">Start over</button>
+  </form>
+{% endblock %}
+
+{% block footer %}No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>{% endblock %}

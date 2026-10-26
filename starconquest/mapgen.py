@@ -141,8 +141,7 @@ def generate_symmetric(
 
     state = GameState.new(seed, mode="symmetric")
     num_players = max(2, num_players)
-    shared = 1 if hub else num_players if core else 0
-    per_player = max(2, round((num_nodes - shared) / num_players))
+    per_player, shared = _symmetric_counts(num_nodes, num_players, layout)
 
     side = config.world_side(num_nodes)
     cx = cy = side / 2.0
@@ -154,7 +153,7 @@ def generate_symmetric(
         # crowd each other (their spacing shrinks with the seat count) nor the
         # sectors' innermost systems: so the core opens up and the sectors
         # move out behind it, a full gap clear of it.
-        gap = 2.5 * config.node_clearance()
+        gap = config.CORE_GAP
         r_core = max(0.6 * r_inner, gap / (2.0 * math.sin(math.pi / num_players)))
         r_inner = max(r_inner, r_core + gap)
 
@@ -232,6 +231,26 @@ def generate_symmetric(
     _name_systems(state)
     assert is_connected(state), "symmetric map is not connected"
     return state
+
+
+def _symmetric_counts(num_nodes: int, num_players: int, layout: str) -> tuple[int, int]:
+    """(systems per sector, shared systems) for a symmetric map of this request."""
+    if layout not in SYMMETRIC_LAYOUTS:
+        layout = SYMMETRIC_LAYOUTS[0]
+    num_players = max(2, num_players)
+    shared = 1 if layout in ("hub", "wheel") else num_players if layout == "core" else 0
+    return max(2, round((num_nodes - shared) / num_players)), shared
+
+
+def symmetric_size(num_nodes: int, num_players: int, layout: str = SYMMETRIC_LAYOUTS[0]) -> int:
+    """How many systems ``generate_symmetric`` builds when asked for ``num_nodes``.
+
+    Every sector is whole and has at least two systems, so this is rarely the
+    number asked for. It never depends on the seed. ``leaderboard/js/format.mjs``
+    mirrors it (``symmetricSize``), down to Python's round-half-to-even.
+    """
+    per_player, shared = _symmetric_counts(num_nodes, num_players, layout)
+    return max(2, num_players) * per_player + shared
 
 
 def _lane_absent(state: GameState, a: int, b: int) -> bool:

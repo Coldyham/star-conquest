@@ -1,7 +1,7 @@
 // The play-by-post lobby: open invitations, the matches this browser holds a
 // seat in, and finished results — plus one match's own page (`?match=<id>`),
-// where an open seat is taken. Pure helpers are exported for
-// tests/pbp-page.test.mjs; the DOM half runs only in a browser.
+// where an open seat is taken or the match watched. Pure helpers are exported
+// for tests/pbp-page.test.mjs; the DOM half runs only in a browser.
 //
 // "Yours" is the game's own seat store, `sc_pbp_seats` (`pbp.remember` in
 // starconquest/pbp.py): this page is served from the game's origin, under
@@ -11,12 +11,13 @@
 // prunes it.
 
 import { authHeader } from "./auth.mjs";
+import { profileLabel, seatProfile } from "./bots.mjs";
 import { GAME_URL, PLAYER_COLORS, PLAYER_NAMES } from "./config.mjs";
 import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
 import { phrase } from "./matchnames.mjs";
 import { myName, rememberName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
-import { configLabel, tweaks } from "./setup.mjs";
+import { configLabel, hasFog, tweaks } from "./setup.mjs";
 
 const ENDPOINT = "/api/pbp";
 const MATCH_ID = /^[0-9a-f]{16}$/;
@@ -51,6 +52,7 @@ export function setupLine(match) {
     players: settings.players ?? match.players ?? match.seats.length,
     nodes: settings.nodes ?? "?",
     seed: match.seed,
+    settings_json: settings,
   });
   return settings.custom_map ? `${line} · custom map` : line;
 }
@@ -98,10 +100,16 @@ export function roster(match) {
       kind,
       state,
       name: kind === "person" ? (names[seat] || "").trim() : "",
-      bot: kind === "bot" ? ((settings.ai_strategy || [])[seat - 1] || "heuristic") : "",
+      bot: kind === "bot" ? seatBot(settings, seat) : "",
     });
   }
   return rows;
+}
+
+/** A bot seat's name as the board shows it: "knower · council", "random", "heuristic". */
+function seatBot(settings, seat) {
+  const name = (settings.ai_strategy || [])[seat - 1] || "heuristic";
+  return name === "random" ? name : profileLabel(seatProfile(name, ((settings.ai || [])[seat - 1] || {}).aux));
 }
 
 /** "Alice", "open seat", "knower (bot)", "random bot", or "player" for an unnamed person. */
@@ -159,6 +167,15 @@ export function waitingNote(match) {
 }
 
 /**
+ * Whether the game will open a spectator link to `match`: it is still being
+ * played and has no fog — a spectator sees the whole board, so the game refuses
+ * a fogged match (`pbp.Match.watchable`).
+ */
+export function watchable(match) {
+  return !match.finished && !hasFog(match.settings_json);
+}
+
+/**
  * `{open, mine, finished}`: the public open invitations you are not in, your
  * live matches, and every finished match either list returned. A stranger's
  * match that is under way is none of those, and is not shown.
@@ -179,6 +196,19 @@ export function groupMatches(matches, mine = {}) {
 /** The link a seat's token opens in the game: `pbp.link_fragment`'s shape. */
 export function seatLink(matchId, token, game = GAME_URL) {
   return `${game}#pbp=${matchId}:${token}`;
+}
+
+/** The link that watches a match from no seat: `pbp.spectate_fragment`'s shape. */
+export function watchLink(matchId, game = GAME_URL) {
+  return `${game}#spectate=${matchId}`;
+}
+
+/**
+ * "Watch in game" on a match's page, or null: offered to a browser holding a
+ * seat in a match the game will let be watched, for the screen the table shares.
+ */
+export function watchHref(match, entry, game = GAME_URL) {
+  return entry && watchable(match) ? watchLink(match.match_id, game) : null;
 }
 
 /** "Open in game" for a seat this browser holds: always the full seat link. */
@@ -445,6 +475,9 @@ async function renderDetail(node, matchId, mine) {
   const yours = el("div", { class: "yours-slot" });
   const button = entry ? openButton(match, entry) : null;
   if (button) yours.append(button);
+  // The whole board and nobody's orders, for a screen the table shares.
+  const watch = watchHref(match, entry);
+  if (watch) yours.append(el("a", { class: "btn", href: watch, text: "Watch in game" }));
   node.append(yours);
 
   const open = match.finished ? [] : match.unclaimed || [];

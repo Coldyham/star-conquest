@@ -40,8 +40,9 @@ so `Watcher` counts them itself, turn by turn, from `actuary.launches`.
 `--logs` replays recorded games instead: the replays a posted score made public
 (read with the board's publishable key) or the local games/ dir. On every turn
 the person played by hand, each bot seat next to them predicts their launches,
-and a fifth predictor joins the four: **knower**, its blind plan for a human
-seat (`knower._blind`), read as certain.
+and the bots knower could stand in for a person join the four, each its plan
+for the person's seat read as certain (`GUESSES`): **knower** (its blind plan,
+`knower._blind`, what it plays now), **marshal** and **actuary** (at its default stop).
 """
 
 from __future__ import annotations
@@ -414,12 +415,20 @@ def _borders(state, pid: int, rival: int) -> bool:
                for s in systems.values() if s.owner_id == pid for n in s.neighbors)
 
 
-def _knower_guess(state, rival: int) -> dict[tuple[int, int, int], tuple[float, float]]:
-    """What knower expects a person to launch: its own blind plan for their seat
-    (`knower._surrogate` hands a human seat `_blind`), taken as certain."""
-    knower = sys.modules["sc_model_knower"]
+# The bots knower could stand in for a person, each read as certain: "knower" is
+# its blind plan (`knower._blind`), the rest a roster bot at its default params.
+GUESSES = ("knower", "marshal", "actuary")
+
+
+def _bot_guess(state, rival: int, name: str) -> dict[tuple[int, int, int], tuple[float, float]]:
+    """What ``name`` would launch from a person's seat, taken as certain."""
+    from starconquest.model import AiParams
+    probe = copy.deepcopy(state)
+    probe.players[rival].ai_params = AiParams()
+    probe.players[rival].ai_strategy = name
+    fn = sys.modules["sc_model_knower"]._blind if name == "knower" else ai.strategy_fn(name)
     out: dict[tuple[int, int, int], int] = defaultdict(int)
-    for o in knower._blind(copy.deepcopy(state), rival) or []:
+    for o in fn(probe, rival) or []:
         if state.systems[o.source_id].owner_id == rival and o.ships > 0:
             out[(rival, o.source_id, o.dest_id)] += o.ships
     return {k: (1.0, float(v)) for k, v in out.items()}
@@ -442,16 +451,17 @@ def score_log(log: replay.GameLog):
             return
         owner_before = {sid: s.owner_id for sid, s in state.systems.items()}
         actual = {human: [o for o in log.orders_for(i) if o.owner_id == human]}
-        guess = None
+        guesses = None
         for pid in sorted(state.players):
             if (pid == human or state.players[pid].is_neutral or state.is_defeated(pid)
                     or not _borders(state, pid, human)):
                 continue
             first_contact.setdefault(pid, i)
             preds = _predictions(state, pid, watcher, rival=human)
-            if guess is None:
-                guess = _knower_guess(state, human)
-            preds["knower"] = {k: guess.get(k, (0.0, 0.0)) for k in preds["none"]}
+            if guesses is None:
+                guesses = {name: _bot_guess(state, human, name) for name in GUESSES}
+            for name, guess in guesses.items():
+                preds[name] = {k: guess.get(k, (0.0, 0.0)) for k in preds["none"]}
             _score(sums, preds, _came(actual, owner_before, pid), label_of,
                    _bucket(i - first_contact[pid]))
 
@@ -464,7 +474,7 @@ def score_log(log: replay.GameLog):
 
 
 def report_humans(games) -> None:
-    predictors = (*PREDICTORS, "knower")
+    predictors = (*PREDICTORS, *GUESSES)
     for label, group in (("all maps", games),
                          (f"{SMALL_MAP} systems or fewer", [g for g in games if g["cell"] == "small"]),
                          (f"more than {SMALL_MAP}", [g for g in games if g["cell"] == "large"])):
@@ -477,17 +487,23 @@ def report_humans(games) -> None:
         for metric, fmt in (("brier", "{:>9.4f}"), ("mse", "{:>9.1f}"),
                             ("waste", "{:>9.2f}"), ("miss", "{:>9.2f}")):
             print(f"  {metric:<8}" + "".join(fmt.format(rs[p][metric]) for p in predictors))
-        print("  warm-up, brier prior / learner / knower, since first contact:")
+        warm = ("prior", "learner", *GUESSES)
+        print(f"  warm-up, brier {' / '.join(warm)}, since first contact:")
         for lo, _hi in WARMUP:
             b = _bucket(lo)
-            r = {p: _rates(_total(group, p, None, b)) for p in ("prior", "learner", "knower")}
-            print(f"    {b:>6}  {r['prior']['brier']:.4f} / {r['learner']['brier']:.4f} / "
-                  f"{r['knower']['brier']:.4f}   ({r['learner']['pairs']:.0f} pairs)")
+            r = {p: _rates(_total(group, p, None, b)) for p in warm}
+            print(f"    {b:>6}  " + " / ".join(f"{r[p]['brier']:.4f}" for p in warm)
+                  + f"   ({r['learner']['pairs']:.0f} pairs)")
         print("  learner minus each, 95% interval over games (negative is better):")
         for metric in ("brier", "mse"):
             print(f"    {metric:<6}" + "  ".join(
                 _interval(base, *_diff_ci(group, "learner", base, metric), metric)
                 for base in ("none", "all", "prior", "knower")))
+        print("  each guess minus knower's, 95% interval over games (negative is better):")
+        for metric in ("brier", "mse"):
+            print(f"    {metric:<6}" + "  ".join(
+                _interval(name, *_diff_ci(group, name, "knower", metric), metric)
+                for name in GUESSES if name != "knower"))
 
 
 def _describe(models, bot_of):
@@ -696,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown cells: {', '.join(unknown)}", file=sys.stderr)
         return 2
     _init()
-    missing = [b for b in args.bots if b not in ai.STRATEGIES]
+    missing = [b for b in args.bots if not ai.known(b)]
     if missing or "sc_model_actuary" not in sys.modules:
         print(f"not loaded: {', '.join(missing) or 'models/actuary.py'}", file=sys.stderr)
         return 2

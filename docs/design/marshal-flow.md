@@ -237,6 +237,12 @@ Weights showed no significant difference from each other in three independent
 tables; 0.5 was the pre-registered choice and reads numerically highest in all
 three, so it shipped.
 
+> **Revisited (2026-10-17): 0.65 shipped.** Against actuary a higher weight is
+> worth about 4 points (0.65: +3.8 on 2,400 fresh cell-seeds, z +9.1; 0.75 read
+> +4.4 to +4.7 in the screen), at a point or so either way against marshal and
+> knower, though against marshal it draws more (-1.2 with a timeout scored as a
+> loss). See "Screening against the roster" in [`marshal-joint.md`](marshal-joint.md).
+
 ### C. `FAST_GUARD_WEIGHT` — a guard across a 1-turn lane is a sunk cost, not a deterrent
 
 `_max_adjacent_enemy` sized the frontier guard off the largest adjacent rival
@@ -730,7 +736,20 @@ Shipped with the two-turn cap: `FEED = 1.0`, `FEED_FRONT = True`,
 `FEED_MAX_TURNS = 2`. `FEED_LOCAL` was deleted rather than kept at zero. The
 constants are in `models/marshal.py` after `RIVAL_REFLOOD_MIN_TURNS`.
 
-### Not yet measured: no lone trickles into a rival
+> **Revisited (2026-10-17): `FEED` 3.0 and `FEED_MAX_TURNS` 3 shipped.** The
+> three-turn cap was measured here at `FEED` 1.0 only, where it is null. The two
+> are complements: in a factorial against marshal, knower and actuary, three turns
+> is worth nothing at `FEED` 1.0 and about a point at 2.0, and `FEED` itself rises
+> to about 3 and is flat to 6, where nearly every front facing a rival counts as
+> short. Shipped with a pour floor and `RELIEF_AWARE` 0.65; see "Screening against
+> the roster" in [`marshal-joint.md`](marshal-joint.md).
+>
+> **Revisited (2026-10-19): `FEED_MAX_TURNS` 0, on every board.** Level with the
+> cap against the roster, and with `SPARE_TARGET` 57.7% on beats and 5.3% sooner
+> against the weak bots. See "marshal: sparing the target and feeding on every
+> board" in [`win-turns.md`](win-turns.md).
+
+### Measured null (2026-10-12): no lone trickles into a rival
 
 40% of marshal's failed attack landings are one or two ships landing alone
 (the person's: 33% of a much smaller number). Of 340 failures in the 42
@@ -744,6 +763,18 @@ rival re-flood measured 45.1% at `DEFENDER_ADVANTAGE 1.5` (see "Phase 3b
 re-flooding" above), because the trickle was supplying the jitter cushion
 `_enemy_margin` leaves out; if it reads the same way there, gate it off at high
 advantage rather than drop it, since that setting is rarely played.
+
+Built as `TRICKLE_GATE` (Phase 3b skips a rival target that Phase 3 sent no wave
+to this turn and that has none of ours landing on the same turn). Against stock
+marshal, 200 seeds: 50.9%, seed pairs +62/-48 (z +1.33). Then 300 fresh seeds
+in four cells including 3 ly/turn: 1074-1074, exactly 50.0%. Deleted. See
+[`seat-play.md`](seat-play.md), "What was built from these games".
+
+The person's side of it, from the public replays: marshal's strikes on a
+person's system that was empty (0-2 ships) at launch were captured 9 times in
+21, against 19 in 25 on a bot's. A person refills an emptied system and a bot
+does not. See "Strikes on a system emptied at launch" in
+[`seat-play.md`](seat-play.md).
 
 ## Holding a capture before the counter (2026-10-12): two arms, both deleted
 

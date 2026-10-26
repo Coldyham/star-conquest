@@ -121,11 +121,64 @@ def test_a_second_lane_makes_the_rule_a_split_and_cancel_undoes_it():
 def test_trying_the_forward_tab_and_going_back_restores_the_other_lanes():
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 70}, 3)
+    ui.forward_set_on[0] = state.turn
     _forward(state, ui, 0, 2)
     assert ui.auto_forward[0].shares == {1: 35, 2: 35}
     ui.set_forward_mode(state, False)
     assert ui.auto_forward[0] == ForwardRule({1: 70}, 3)
     assert [(o.dest_id, o.ships) for o in ui.pending] == [(2, 12)]
+
+
+def test_a_lane_added_on_a_later_turn_replaces_the_rule():
+    state, ui = _hub(), _ui()
+    _forward(state, ui, 0, 1)
+    ui.close_send()
+    _forward(state, ui, 0, 2)
+    ui.step_hold(2)
+    ui.close_send()
+    state.turn += 1
+    _forward(state, ui, 0, 3)
+    assert ui.auto_forward[0] == ForwardRule({3: 100}, 0)
+    ui.close_send()
+    _forward(state, ui, 0, 1)  # ...and a further lane that turn splits again
+    assert ui.auto_forward[0].shares == {3: 50, 1: 50}
+
+
+def test_cancelling_a_replacing_lane_puts_the_old_rule_back():
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 50, 2: 50}, 3)
+    _forward(state, ui, 0, 3)
+    assert ui.auto_forward[0] == ForwardRule({3: 100}, 0)
+    ui.cancel_send()
+    assert ui.auto_forward[0] == ForwardRule({1: 50, 2: 50}, 3)
+    assert not ui.forwarded_this_turn(state, 0)
+    _forward(state, ui, 0, 3)
+    ui.set_forward_mode(state, False)  # the Send tab puts it back too
+    assert ui.auto_forward[0] == ForwardRule({1: 50, 2: 50}, 3)
+
+
+def test_cancelling_a_second_lane_keeps_the_replacing_first():
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 100}, 0)
+    _forward(state, ui, 0, 2)
+    ui.begin_send(state, 3, forward=True)  # straight on to another neighbour
+    assert ui.auto_forward[0].shares == {2: 50, 3: 50}
+    ui.cancel_send()
+    assert ui.auto_forward[0].shares == {2: 100}
+
+
+def test_a_rule_set_up_this_turn_opens_the_popup_on_forward():
+    state, ui = _hub(), _ui()
+    assert not ui.opens_on_forward(state, 0)
+    ui.auto_forward[0] = ForwardRule({1: 100}, 0)  # from an earlier turn
+    assert not ui.opens_on_forward(state, 0)
+    _forward(state, ui, 0, 2)
+    ui.close_send()
+    assert ui.opens_on_forward(state, 0)
+    state.turn += 1
+    assert not ui.opens_on_forward(state, 0)
+    state.systems[0].ships = 0
+    assert ui.opens_on_forward(state, 0)
 
 
 def test_a_third_lane_splits_three_ways():

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import hashlib
 import itertools
 import json
@@ -39,12 +40,28 @@ MODES = ("random", "symmetric")
 # a model file must never be named this.
 RANDOM_STRATEGY = "random"
 
-# The bots a seat left to `RANDOM_STRATEGY` is dealt from. The pick indexes this
-# by length and position, so adding, removing or reordering a name re-deals
-# nearly every random seat on every map ever shared: edit it only on purpose
-# (`docs/design/core.md`, "A seat left to the seed").
-RANDOM_POOL: tuple[str, ...] = (
-    "knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus",
+# Every pool a seat left to `RANDOM_STRATEGY` has been dealt from, oldest first,
+# and the seed says which (`pool_for`): seed // `POOL_ERA` names its pool,
+# counting from 1, and every seed below the second pool's era deals from the
+# first, which is every seed rolled or typed before the pools were numbered. A
+# seed rolled now lands in the newest pool's era (`roll_seed`).
+#
+# Append-only. The pick indexes a pool by length and position, so editing one
+# that has shipped (adding, removing or reordering a bot) re-deals nearly every
+# random seat in its era. To change what a random seat deals, append a pool:
+# only seeds rolled from then on deal from it, and every map ever shared keeps
+# dealing what it dealt (`docs/design/core.md`, "A seat left to the seed").
+#
+# An entry is a strategy, which keeps the seat's own aux, or a profile
+# ``name:stop``, which deals the stop too (`resolve_profile`). The first pool
+# names bots since folded into a family; they still play (`ai.LEGACY`).
+POOL_ERA = 10_000_000
+RANDOM_POOLS: tuple[tuple[str, ...], ...] = (
+    ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+    # Every stop of every family, a seat's own aux never carried.
+    ("knower:0", "knower:1", "knower:2", "knower:3",
+     "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
+     "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),
 )
 
 # Bumped by every `fresh_rng()` call so two rolls in the same clock tick differ.
@@ -121,10 +138,18 @@ ADV_FOG = (
 )
 
 
+# The lowest value a roll may land on, where it sits above the slider's own floor:
+# a setting fine to choose by hand but not to be dealt. Sight 0 shows only your
+# own systems, so every send goes into a "?" you cannot price.
+ROLL_FLOORS = {"fog_sight": 1}
+
+
 def randomise_knobs(target, specs, rng: random.Random) -> None:
     """Set every knob in ``specs`` on ``target`` to a random in-bounds value,
-    snapped to its step and clamped the way the menu's sliders are."""
+    snapped to its step and clamped the way the menu's sliders are, never below
+    its `ROLL_FLOORS` entry."""
     for _key, _label, attr, lo, hi, step, is_int in specs:
+        lo = max(lo, ROLL_FLOORS.get(attr, lo))
         snapped = round(rng.uniform(lo, hi) / step) * step
         snapped = max(lo, min(hi, snapped))
         setattr(target, attr, round(snapped) if is_int else round(snapped, 4))
@@ -308,6 +333,14 @@ class Settings:
     def min_nodes(self) -> int:
         """Fewest systems this player count allows (mapgen enforces the same floor)."""
         return self.players + 3
+
+    def system_count(self) -> int:
+        """How many systems this setup's map has. ``nodes`` is only what was asked
+        for: a generated symmetric map builds whole sectors around it
+        (``mapgen.symmetric_size``). Shown wherever the setup's size is."""
+        if self.layout_inert():
+            return self.nodes
+        return mapgen.symmetric_size(self.nodes, self.players, self.layout)
 
     def seat_params(self, seat: int) -> AiParams:
         """The AiParams for a 1-based seat id (defaults if out of range)."""
@@ -563,9 +596,14 @@ def _trim_trailing(items: list, default) -> list:
 
     Only the tail can go: these lists are positional (indexed by seat-1), and
     `from_dict` pads a short one back out with defaults.
+
+    Default-valued means JSON-identical, not ``==``: a seat whose int ``aux`` of
+    1 equals the float default is a different setup to ``challenge_key``, and
+    `from_dict` would pad it back as the float.
     """
+    blank = json.dumps(default, sort_keys=True)
     end = len(items)
-    while end > 0 and items[end - 1] == default:
+    while end > 0 and json.dumps(items[end - 1], sort_keys=True) == blank:
         end -= 1
     return items[:end]
 
@@ -630,6 +668,13 @@ def _challenge_from_dict(d) -> Challenge | None:
     return out if out.turns > 0 else None
 
 
+def fog_off(settings: Settings) -> bool:
+    """True when both fog ranges sit at max — every seat sees the whole board.
+    The menu's "Fog of war" checkbox is the inverse of this, derived live from the
+    sliders so editing them on the Advanced tab flips the checkbox automatically."""
+    return settings.fog_sight >= config.FOG_MAX_HOPS and settings.fog_scout >= config.FOG_MAX_HOPS
+
+
 def resolve_seed(settings: Settings) -> int:
     """The concrete seed to generate with: the chosen one, or a fresh random."""
     return settings.seed if settings.seed is not None else random_seed()
@@ -656,8 +701,32 @@ def fresh_rng() -> random.Random:
 
 
 def random_seed() -> int:
-    """A fresh, unpredictable map seed."""
-    return fresh_rng().randrange(config.SEED_MAX)
+    """A fresh, unpredictable map seed, in the newest pool's era (`roll_seed`)."""
+    return roll_seed(fresh_rng())
+
+
+def roll_seed(rng: random.Random) -> int:
+    """A seed drawn from ``rng`` in the newest pool's era, so a seat it leaves to
+    chance deals from the newest of ``RANDOM_POOLS``. The first pool's era starts
+    at 0, so while it is the only one a seed rolls as it always did."""
+    newest = len(RANDOM_POOLS)
+    return (newest * POOL_ERA if newest > 1 else 0) + rng.randrange(config.SEED_MAX)
+
+
+def pool_for(seed: int) -> tuple[str, ...]:
+    """The pool a seat this seed leaves to chance is dealt from: the one its era
+    names (seed // `POOL_ERA`, counting from 1), the first for any seed below the
+    second's era, and the newest for a seed from an era this build has no pool
+    for yet (a stale cached build, which `tools/verify_scores.py` sets aside)."""
+    era = max(1, min(seed // POOL_ERA, len(RANDOM_POOLS)))
+    return RANDOM_POOLS[era - 1]
+
+
+def seed_top() -> int:
+    """The largest seed whose era has a pool. A seed typed past it would deal
+    from today's newest pool and then from whichever is appended for its era, so
+    the menu's seed field stops here."""
+    return (len(RANDOM_POOLS) + 1) * POOL_ERA - 1
 
 
 def apply_globals(settings: Settings) -> None:
@@ -693,18 +762,27 @@ def setup_warnings(settings: Settings, people: set[int] | None = None) -> list[s
     if people is None:
         people = set() if settings.autoplay else {1}
     by_strategy: dict[str, list[int]] = {}
+    bots = settings
     for seat in range(1, settings.players + 1):
         if seat in people:
             continue
         name = settings.seat_strategy(seat)
+        if name == RANDOM_STRATEGY and settings.seed is None:
+            continue
+        stop = settings.seat_params(seat).aux
         if name == RANDOM_STRATEGY:
-            if settings.seed is None:
-                continue
-            name = resolve_strategy(name, settings.seed, seat)
-        by_strategy.setdefault(name, []).append(seat)
+            name, stop = resolve_profile(name, stop, settings.seed, seat)
+        family, stop = ai.canonical(name, stop)
+        if (family, stop) != (settings.seat_strategy(seat), settings.seat_params(seat).aux):
+            # A dealt profile or a legacy name: the hook reads the seat as it plays.
+            if bots is settings:
+                bots = copy.deepcopy(settings)
+            bots.ai_strategy[seat - 1] = family
+            bots.ai[seat - 1] = replace(bots.ai[seat - 1], aux=stop)
+        by_strategy.setdefault(family, []).append(seat)
     lines: list[str] = []
     for name, seats in by_strategy.items():
-        lines.extend(ai.setup_warning(name, settings, seats, people=sorted(people)))
+        lines.extend(ai.setup_warning(name, bots, seats, people=sorted(people)))
     return lines
 
 
@@ -720,14 +798,27 @@ def resolve_strategy(name: str, seed: int, pid: int) -> str:
     engine's stream untouched, gives each seat an independent pick, and still
     reproduces exactly: the same setup and seed always face the same opponents.
 
-    The pool is ``RANDOM_POOL``, never what happens to be registered, so every
-    build deals a seed the same bots whatever its ``models/`` holds. A pick that
-    is not registered here plays as the heuristic, which is the degradation
-    ``ai.decide`` already applies to an unrecognised strategy name.
+    The pool is the one the seed's era names (``pool_for``), never what happens
+    to be registered, so every build deals a seed the same bots whatever its
+    ``models/`` holds, and appending a pool deals no seed from an earlier era
+    differently. A pick that is not registered here plays as the heuristic,
+    which is the degradation ``ai.decide`` already applies to an unrecognised
+    strategy name.
     """
+    return resolve_profile(name, 0.0, seed, pid)[0]
+
+
+def resolve_profile(name: str, aux: float, seed: int, pid: int) -> tuple[str, float]:
+    """``(strategy, aux)`` for a seat set to ``name`` at ``aux``: as it is,
+    unless it is ``RANDOM_STRATEGY``, in which case a pool entry is drawn as in
+    `resolve_strategy`. An entry ``name:stop`` deals its stop; a bare name keeps
+    the seat's own ``aux``."""
     if name != RANDOM_STRATEGY:
-        return name
-    return RANDOM_POOL[random.Random(f"{seed}:strategy:{pid}").randrange(len(RANDOM_POOL))]
+        return name, aux
+    pool = pool_for(seed)
+    pick = pool[random.Random(f"{seed}:strategy:{pid}").randrange(len(pool))]
+    strategy, _, stop = pick.partition(":")
+    return strategy, float(stop) if stop else aux
 
 
 def build_state(settings: Settings, seed: int) -> GameState:
@@ -755,8 +846,10 @@ def build_state(settings: Settings, seed: int) -> GameState:
         state = mapgen.generate(seed, settings.mode, settings.nodes, settings.players, settings.layout)
     for player in state.players.values():
         if not player.is_neutral:
-            player.ai_strategy = resolve_strategy(settings.seat_strategy(player.id), seed, player.id)
-            player.ai_params = replace(settings.seat_params(player.id))
+            params = settings.seat_params(player.id)
+            player.ai_strategy, aux = resolve_profile(settings.seat_strategy(player.id), params.aux,
+                                                      seed, player.id)
+            player.ai_params = replace(params, aux=aux)
         if settings.autoplay:
             player.is_human = False
     return state

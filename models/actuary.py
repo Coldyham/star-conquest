@@ -27,13 +27,59 @@ moves.
     candidate pays. Defence, evacuation, strikes and logistics are not written
     anywhere; they are what the margin chooses.
 
-The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Opening*) picks how the seat
-plays until it first borders a rival. *Planned*, the default, treats the
-land-grab as a one-player puzzle: it takes the neutrals nearer us than any rival,
-and scores a dozen expansion plans by the ships and income they would hold when a
-rival could first strike. It plays the first turn of the best plan, and the
-ledger takes over at contact, or from the first turn when our side of the map is
-too small to plan. *Greedy* is the ledger from the first turn.
+The seat's ``ai_params.aux`` knob (``AUX_LABEL``: *Style*) has four stops.
+
+  * *Greedy* pulls its ships to every front alike: a ship on a system touching
+    anything not ours is worth 1 + `FRONT_BONUS`, falling by `FRONT_DECAY` per
+    turn of travel back.
+  * *Field*, the default, pulls them to where the balance of force is closest
+    (`_Ledger._field`). Every garrison, and every fleet in flight at the system
+    it will land on, projects its ships over what it could reach, keeping
+    `FIELD_DECAY` of them per median lane out to `FIELD_REACH` lanes. A system's
+    stake, `TAIL_TURNS` of its income plus a rival garrison on it, counts for
+    exp(-x^2), x the gap between our influence and the rivals' over
+    `CONTEST_WIDTH` of their sum; our interior has none. A ship at one of our
+    systems is worth 1 + `FRONT_BONUS` times the contested stake within its
+    reach, decayed the same way, as a share of the most any system has. A front
+    nobody contests stops holding a stack, and the ships go where a few more of
+    them tip a system. Where the median lane is `SLOW_LANE` turns or more the
+    pull is half the field and half Greedy's front. Once the front has settled
+    (a rival garrison next to us holds `BACKYARD_MATURE` turns of our income), a
+    system next to a neutral that no rival borders pulls as a front
+    (`BACKYARD`), so it gathers the ships to take it rather than feeding a
+    stalemate (`_Ledger._backyard`).
+  * *Learning* is Field reading each rival's habits into the risk term
+    (`_learned_shortfall`, docs/design/learning.md). It remembers what it has
+    seen, so it is the one stop an oracle must model rather than run.
+  * *Hunt* guards only against the strikes a rival would launch, and looks a few
+    turns ahead (docs/design/hunter.md):
+
+      - **Edge risk.** The threat next door is only a strike a rival launches by
+        actuary's own rule: one system next door, or several whose lanes take
+        the same time, that beats what we hold on landing *on the worst roll*,
+        launched now or on any later turn of the horizon (`_edge_risk`).
+        actuary's launches meet that rule 98-100% of the time, so a garrison
+        above it is safe from actuary, and the ships it would keep go to the
+        front. The shortfall share costs `EDGE_RISK_WEIGHT` of the stake.
+      - **Gathering, on fast boards.** Where the median lane is at most
+        `EDGE_GATHER_LANE` turns, a rival system next door also counts the
+        rival garrisons beside it that could have joined it by the launch turn.
+      - **Softer strikes, on slow boards.** Where the median lane is at least
+        `CAPTURE_LANE` turns, a strike on a rival-held system is priced at the
+        nominal roll (`CAPTURE_SWING`): actuary guards only to it next door.
+      - Relief a little heavier (`HUNT_REINFORCE_WEIGHT`), none from fleets in
+        flight (`HUNT_RELIEF_IN_FLIGHT`), and on slow lanes Greedy's front
+        alone (`HUNT_SLOW_FRONT`).
+      - **Look-ahead.** The plan and the ledger at other postures are each
+        played `LOOK_PLIES` turns on a private board with its own dice, every
+        rival on Hunt's plain plan, and the best final ledger wins (`_look`).
+        Bounded by work (`LOOK_WORK`), so it runs on boards up to about 40
+        systems and plays the same on any machine.
+
+    It runs no other bot's code and keeps no memory, so it is its own stand-in.
+
+A stored value past Hunt reads as Learning (``AUX_OVER``): Hunt is reached only
+by its own value.
 
 Contract: ``decide(state, pid) -> list[Order]``. Reads the state, never mutates
 it, and draws nothing from ``state.rng``: every tie breaks on system id.
@@ -42,14 +88,16 @@ Measurements behind the constants: docs/design/actuary.md.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import heapq
-import itertools
 import math
+import random
+import time
 from collections import Counter, OrderedDict, defaultdict
 from typing import NamedTuple
 
-from starconquest import combat, config
+from starconquest import combat, config, engine
 from starconquest.model import Order
 
 # --- tunables -------------------------------------------------------------- #
@@ -63,9 +111,17 @@ FRONT_DECAY = 0.5           # ...falling by this factor per turn of travel back
 RISK_WEIGHT = 0.6           # share of a system's worth lost to a full shortfall
 REINFORCE_WEIGHT = 0.3      # share of a rival's adjacent ships assumed to relieve
                             # a system we strike, if they can land in time
+RELIEF_IN_FLIGHT = 0.3      # ...and of a rival's fleet landing next door that
+                            # could turn round and land in time
 MIN_GAIN = 1e-9             # a candidate must move the ledger by more than this; any
                             # floor costs, most in the slow regime ("The 2026-10 sweep")
 MAX_COMMITS = 64            # an iteration bound on the greedy
+SELF_RELIEF = 0.8           # share of our own neighbouring garrisons counted as
+                            # able to relieve a system the risk term reads (see
+                            # "A front stack pins the whole side" in actuary.md)
+SELF_RELIEF_REACTS = True   # ...counting a neighbour only if its lane is shorter than
+                            # the shortest rival lane into the system, so relief
+                            # launched after the strike is seen still lands first
 
 # What one decide costs (`decide_ms`): 75th-percentile CPU ms on native CPython,
 # fitted to a grid of 18-120 systems, 3-18 ly/turn and 2-5 seats (see "Cost, and
@@ -73,18 +129,75 @@ MAX_COMMITS = 64            # an iteration bound on the greedy
 # speed barely move it, so only the system count is in the fit. Refitted for
 # MIN_GAIN 0, which commits more launches on big maps ("What it costs").
 COST_REF_NODES = 40
-COST_DECIDE_MS = 6.4
+COST_DECIDE_MS = 8.3
 COST_NODES_EXP = 0.77
 
-# --- the opening ------------------------------------------------------------ #
-GREEDY, PLANNED, LEARNING = 0, 1, 2   # the Style knob's stops; anything unreadable is PLANNED
-OPENING_CLOCK_SCALE = 2.0       # the contact clock, as a multiple of the earliest strike
-OPENING_INCOME_CLOCKS = 2.0     # income at contact is worth this many clocks of it, in ships
-OPENING_CLOCK_MAX = 60          # an iteration bound on the plan
-OPENING_MIN_SIDE = 7            # a side (held + region) smaller than this is left to the ledger
-OPENING_ORDERS = ("value", "near", "cheap")
-OPENING_SENDS = ("lean", "mass")
-OPENING_SKIPS = (True, False)
+# --- the Style knob ---------------------------------------------------------- #
+GREEDY, FIELD, LEARNING, HUNT = 0, 1, 2, 3  # the Style knob's stops; anything
+                                            # unreadable is FIELD
+
+# --- the field (Style: Field and Learning; "The field" in docs/design/actuary.md)
+FIELD_DECAY = 0.45          # influence kept per median lane of travel
+FIELD_REACH = 3.0           # ...counted out to this many median lanes
+CONTEST_WIDTH = 0.5         # the gap, as a share of both sides' influence, at
+                            # which a system's stake falls to 1/e
+SLOW_LANE = 5               # a median lane this many turns or more is slow: there
+                            # the pull is half the field and half Greedy's front
+                            # ("Slow lanes: half the front" in docs/design/field.md)
+BACKYARD = 1.0              # a system of ours next to a neutral no rival borders pulls
+                            # at least 1 + this x FRONT_BONUS while taking it would pay,
+                            # so it gathers the ships to take it; 0 = off...
+BACKYARD_MATURE = 15.0      # ...once the front has settled: a rival garrison next to
+                            # us holds this many turns of our income ("Backyard
+                            # neutrals" in docs/design/field.md)
+
+# --- Style: Hunt (docs/design/hunter.md); every switch off is Field ---------- #
+EDGE_RISK = True            # price a threat as actuary launches one: a source next door,
+                            # or several landing on the same turn, that wins the worst
+                            # roll (tools/hunt_predict.py: recall 0.98-1.00)...
+EDGE_LOOK = 40              # ...launched this turn or up to this many turns later (1
+                            # measured -10 pts: a front thins faster than it refills)...
+EDGE_RISK_WEIGHT = 1.0      # ...a full shortfall costing this share of the stake (2.5
+                            # and the fast-board 1.5 measured worse)
+EDGE_SWING = 0.0            # >0: the swing a rival's strike must clear in place of the
+                            # worst roll's (1.0 = the nominal roll); 1.0 and 1.1 were
+                            # within noise against four bots
+EDGE_GATHER_LANE = 2        # on a board whose median lane is at most this many turns, a
+                            # rival system next door also counts, by launch turn k, the
+                            # rival garrisons beside it that could have joined it by
+                            # then (18:18 +8.2 pts; on every board -3.2); 0 = never
+CAPTURE_SWING = 1.0         # >0: the swing our strike on a rival-held system is priced
+                            # at (1.0 = it wins the nominal roll) in place of the worst
+                            # roll: actuary guards only to the nominal roll next door...
+CAPTURE_LANE = 6            # ...on a board whose median lane is at least this many turns
+                            # (13:3 +7.8 pts; on 7:6 it cost 7-13); 0 = every board
+HUNT_REINFORCE_WEIGHT = 0.45  # `REINFORCE_WEIGHT` at Hunt (0.45-0.7 is a plateau, ~+2
+                              # pts against actuary)...
+HUNT_RELIEF_IN_FLIGHT = 0.0   # ...`RELIEF_IN_FLIGHT` (0 is Hunt as measured)...
+HUNT_SLOW_FRONT = 1.0       # ...and Greedy's front's share of the pull on slow lanes
+                            # (Field 0.5; 1, the front alone, measured +6.9 pts over
+                            # the field, 0.5 null and 0 -1.9: on slow boards the
+                            # look-ahead wants the front)
+
+LOOKAHEAD = True            # roll each candidate plan forward and keep the best
+LOOK_PLIES = 6              # turns each candidate is played on before it is scored
+LOOK_WEIGHTS = (0.4, 2.5)   # candidate postures besides ours: edge risk weight times these...
+LOOK_CAPTURE = True         # ...and our plan with the nominal-roll strike on every board
+LOOK_DECIDED = 1e6          # a rollout that ends the game scores this, won or lost
+LOOK_WORK = 4000            # work per decide: a rollout ply costs systems ** 1.3 x seats
+                            # (how a ledger decide grows); a line that would pass it is not
+                            # rolled. Work, not time, so a seat plays the same on any machine
+LOOK_BUDGET_S = 1.0         # a catastrophe guard on the wall clock, as knower's: never the
+                            # budget that decides. The base plan is rolled first, so running
+                            # out of either only ever falls back to the plain plan
+BUDGET_SCALE = 1.0          # `ai.set_budget_scale` multiplies LOOK_BUDGET_S by this
+
+# What a Hunt decide costs (`decide_ms`), fitted as above against actuary over the
+# same grid (tools/hunt_cost.py; docs/design/hunter.md, "What it costs"): the plain
+# ledger, and COST_LOOK_MS per unit of the work the look-ahead is allowed.
+HUNT_COST_DECIDE_MS = 10.2
+HUNT_COST_NODES_EXP = 1.28
+COST_LOOK_MS = 0.025
 
 # --- reading the rivals (Style: Learning) ------------------------------------ #
 LEARN_REACH = 8.0           # a rival garrison next door strikes whole at min(1, this times
@@ -118,67 +231,98 @@ PRIOR_STRIKE = (
 )
 
 # What the AI tab's generic aux slider is called when this bot holds the seat (read
-# by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Planned.
+# by `ai.aux_spec`/`ai.aux_names`; see models/README.md). The default 1.0 is Field.
+# ``AUX_OVER`` is the stop a stored value past the top reads as (`ai.aux_over`).
 AUX_LABEL = "Style"
-AUX_RANGE = (GREEDY, LEARNING, 1)
+AUX_RANGE = (GREEDY, HUNT, 1)
 AUX_INT = True
-AUX_NAMES = ("Greedy", "Planned", "Learning")
+AUX_NAMES = ("Greedy", "Field", "Learning", "Hunt")
+AUX_OVER = LEARNING
 
 
 def decide(state, pid):
     if not any(s.owner_id == pid for s in state.systems.values()):
         return []
     stop = _stop_of(state.players[pid])
+    if stop == HUNT:
+        return _look(state, pid) if LOOKAHEAD else _Ledger(state, pid, field=True, hunt=True).plan()
     # Learning reads every board into its memory, the opening's included, so the
     # model of each rival is warm by contact.
     curves = _curves(state) if stop == LEARNING else None
-    if stop != GREEDY:
-        orders = opening(state, pid)
-        if orders is not None:
-            return orders
-    return _Ledger(state, pid, curves).plan()
+    return _Ledger(state, pid, curves, field=stop != GREEDY).plan()
 
 
 def _stop_of(player) -> int:
-    """This seat's Style stop. Anything at or past a stop is that stop, and
-    anything unreadable is the default, so a hand-edited token cannot take the
-    bot down."""
+    """This seat's Style stop. Anything at or past a stop is that stop, past Hunt
+    is Learning (``AUX_OVER``), and anything unreadable is the default, so a
+    hand-edited token cannot take the bot down."""
+    return _params_stop(getattr(player, "ai_params", None))
+
+
+def _params_stop(params) -> int:
     try:
-        aux = float(player.ai_params.aux)
+        aux = float(params.aux)
     except Exception:                     # noqa: BLE001
-        return PLANNED
+        return FIELD
+    if aux > HUNT:
+        return AUX_OVER
+    if aux >= HUNT:
+        return HUNT
     if aux >= LEARNING:
         return LEARNING
-    return PLANNED if aux >= PLANNED else GREEDY
-
-
-def _opening_of(player) -> int:
-    """Whether this seat plans its opening: Planned and Learning both do."""
-    return GREEDY if _stop_of(player) == GREEDY else PLANNED
+    return FIELD if aux >= FIELD else GREEDY
 
 
 def is_oracle_seat(player) -> bool:
     """A Learning seat decides from the boards it has seen, so an oracle has to
-    model it rather than run it. Greedy and Planned read only the board."""
+    model it rather than run it. Greedy and Field read only the board."""
     return _stop_of(player) == LEARNING
+
+
+def stand_in_params(player):
+    """The params an oracle runs a Learning seat at instead: Field, the same bot
+    with no memory. Greedy, Field and Hunt are their own."""
+    params = copy.copy(player.ai_params)
+    params.aux = float(FIELD) if _stop_of(player) == LEARNING else params.aux
+    return params
 
 
 def decide_ms(settings, seat) -> float:
     """Typical CPU ms of one decide on this setup (`ai.decide_ms`). knower runs a
     rival bot's decide on every turn it looks ahead, so this is what lets its
     menu warning count us. knower never runs a Learning seat (`is_oracle_seat`),
-    so this prices Greedy and Planned."""
+    but runs Field in its place (`stand_in_params`), so this prices Greedy, Field
+    and Hunt."""
     drawn = getattr(settings, "custom_map", None)
-    nodes = len(drawn.nodes) if drawn is not None else settings.nodes
-    return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
+    nodes = max(1, len(drawn.nodes) if drawn is not None else settings.nodes)
+    seat_params = getattr(settings, "seat_params", None)
+    if seat_params is not None and _params_stop(seat_params(seat)) == HUNT:
+        plain = HUNT_COST_DECIDE_MS * (nodes / COST_REF_NODES) ** HUNT_COST_NODES_EXP
+        return plain + COST_LOOK_MS * _look_work(nodes, max(2, settings.players))
+    return COST_DECIDE_MS * (nodes / COST_REF_NODES) ** COST_NODES_EXP
+
+
+def _look_work(systems: int, seats: int) -> float:
+    """The work units one Hunt look-ahead decide spends on this board: whole
+    lines, up to one per posture, while they fit LOOK_WORK, and none unless two
+    do."""
+    if not LOOKAHEAD:
+        return 0.0
+    line = LOOK_PLIES * seats * systems ** 1.3
+    lines = min(1 + len(LOOK_WEIGHTS) + (1 if LOOK_CAPTURE and CAPTURE_SWING > 0 else 0),
+                int(LOOK_WORK // line))
+    return lines * line if lines >= 2 else 0.0
 
 
 class _Ledger:
     """The projection and its value, with candidate launches tried against it."""
 
-    def __init__(self, state, pid, curves=None):
+    def __init__(self, state, pid, curves=None, field=False, hunt=False, weight=None,
+                 capture=None):
         self.state, self.pid = state, pid
         self.curves = curves        # Learning: each rival's strike curve on a player
+        self.hunt = hunt            # Hunt's switches; ``weight`` and ``capture`` are
+                                    # its look-ahead's postures
         sysmap = state.systems
         self.ids = sorted(sysmap)
         # The two edges are adv * swing and swing / adv, so both halves come back
@@ -190,6 +334,19 @@ class _Ledger:
         longest = max((state.travel_turns(a, b) for a in self.ids
                        for b in sysmap[a].neighbors), default=1)
         self.horizon = max(2, min(HORIZON_MAX, longest + HORIZON_PAD))
+        self.reinforce = HUNT_REINFORCE_WEIGHT if hunt else REINFORCE_WEIGHT
+        self.relief_in_flight = HUNT_RELIEF_IN_FLIGHT if hunt else RELIEF_IN_FLIGHT
+        self.capture, self.gather, self.edge_weight = 0.0, False, EDGE_RISK_WEIGHT
+        if hunt:
+            lanes = sorted(state.travel_turns(a, b) for a in self.ids
+                           for b in sysmap[a].neighbors if a < b)
+            median = (lanes[len(lanes) // 2] + lanes[(len(lanes) - 1) // 2]) / 2 if lanes else 0
+            self.capture = CAPTURE_SWING if CAPTURE_SWING > 0 and median >= CAPTURE_LANE else 0.0
+            if capture is not None:
+                self.capture = capture
+            if weight is not None:
+                self.edge_weight = weight
+            self.gather = EDGE_GATHER_LANE > 0 and median <= EDGE_GATHER_LANE
         self.travel = {a: {b: state.travel_turns(a, b) for b in sorted(sysmap[a].neighbors)}
                        for a in self.ids}
         self.income = {sid: (1.0 / sysmap[sid].production if sysmap[sid].production > 0 else 0.0)
@@ -203,10 +360,12 @@ class _Ledger:
             slot[f.owner_id] = slot.get(f.owner_id, 0) + f.ships
 
         self.garrison = {sid: sysmap[sid].ships for sid in self.ids}
-        self.front_value = self._front_values()
+        self.front_value = self._pull() if field else self._front_values()
         self.relief = self._relief()
         self.lines = {sid: self._project(sid, self.garrison[sid], self.arrivals[sid])
                       for sid in self.ids}
+        if field:
+            self.front_value = self._backyard(self.front_value)
         self.worth = {sid: self._worth(sid, self.lines[sid]) for sid in self.ids}
         self.risk = {sid: self._risk(sid) for sid in self.ids}
         self.orders: list[Order] = []
@@ -232,7 +391,7 @@ class _Ledger:
             if best is None:
                 break
             self._commit(best)
-        return self.orders
+        return _merged(self.orders)
 
     def _reach(self, sid):
         """``sid``, its neighbours and theirs: what a launch touching ``sid`` reads
@@ -317,6 +476,8 @@ class _Ledger:
         was where it stood, and the source can only lose by it. (A garrison that
         will be attacked is never idle: by the square law a bigger stack keeps
         more than the ships added to it.)"""
+        if SELF_RELIEF > 0 and any(self.risk[n] for x in (src, dst) for n in self.travel[x]):
+            return False        # moving them changes the relief a neighbour counts on
         return (self.front_value[dst] <= self.front_value[src]
                 and self._quiet(src) and self._quiet(dst))
 
@@ -407,7 +568,8 @@ class _Ledger:
         exposed = set(touched)
         rivals = self.rivals
         for sid in touched:
-            if any(o in rivals for o in self.lines[sid][0]) or any(o in rivals for o in lines[sid][0]):
+            if any(o in rivals for o in self.lines[sid][0]) or any(o in rivals for o in lines[sid][0]) \
+                    or (SELF_RELIEF > 0 and self.pid in self.lines[sid][0]):
                 exposed.update(self.travel[sid])
         for sid in exposed:
             gain -= self._risk(sid, lines) - self.risk[sid]
@@ -447,12 +609,15 @@ class _Ledger:
         all, at min(1, `LEARN_REACH` times the rival's learned chance of striking
         at the ratio of it to our garrison then), and takes the expected
         shortfall, so thinning ours raises the threat it sees again.
+        Hunt prices only the strikes a rival would launch (`_edge_risk`).
         ``lines`` overrides some timelines (a launch being priced)."""
         lines = lines or {}
         owners, ships = lines.get(sid) or self.lines[sid]
         pid, H = self.pid, self.horizon
         if pid not in owners:
             return 0.0
+        if self.hunt and EDGE_RISK:
+            return self._edge_risk(sid, owners, ships, lines)
         worst = 0.0
         for rival in self.rivals:
             curve = self.curves.get(rival) if self.curves is not None else None
@@ -471,16 +636,89 @@ class _Ledger:
                         reach[t] += n_ships[t - d]
             if reach is None:
                 continue
+            if SELF_RELIEF > 0:
+                quickest = min(d for nbr, d in self.travel[sid].items()
+                               if rival in (lines.get(nbr) or self.lines[nbr])[0])
+                own = self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
+            else:
+                own = None
             for t in range(1, H + 1):
                 if owners[t] != pid or reach[t] <= 0:
                     continue
                 need = reach[t] / self.advantage
-                if need > ships[t]:
-                    worst = max(worst, (need - ships[t]) / need)
+                held = ships[t] + (own[t] if own else 0.0)
+                if need > held:
+                    worst = max(worst, (need - held) / need)
         if worst <= 0.0:
             return 0.0
         stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
         return RISK_WEIGHT * worst * stake
+
+    def _edge_risk(self, sid, owners, ships, lines):
+        """Hunt's risk: the shortfall share against the strongest strike a rival
+        would launch by actuary's rule: launched at turn k <= EDGE_LOOK from one
+        system next door, or several whose lanes take the same time, only if it
+        beats what we hold on landing on the worst roll. Our garrisons next door
+        count as relief (SELF_RELIEF) only if they land before it."""
+        pid, H = self.pid, self.horizon
+        edge = self.advantage * (EDGE_SWING if EDGE_SWING > 0 else self.swing)
+        travel, base = self.travel, self.lines
+        near = [(nbr, d) + (lines.get(nbr) or base[nbr]) for nbr, d in travel[sid].items()]
+        last_k = min(EDGE_LOOK, H - 1)
+        relief: dict = {}                 # quickest rival lane -> our relief per turn
+        worst = 0.0
+        for rival in self.rivals:
+            theirs = [x for x in near if rival in x[2]]     # systems it ever holds
+            if not theirs:
+                continue
+            for k in range(0, last_k + 1):
+                by_d: dict[int, int] = {}
+                for nbr, d, n_owners, n_ships in theirs:
+                    if k + d > H:
+                        continue
+                    if n_owners[k] == rival and n_ships[k] > 0:
+                        gathered = n_ships[k]
+                        if self.gather and k > 0:
+                            for far, e in travel[nbr].items():
+                                if far == sid or e > k:
+                                    continue
+                                f_owners, f_ships = lines.get(far) or base[far]
+                                if f_owners[0] == rival:
+                                    gathered += f_ships[0]
+                        by_d[d] = by_d.get(d, 0) + gathered
+                if not by_d:
+                    continue
+                own = None
+                if SELF_RELIEF > 0:
+                    quickest = min(by_d) if SELF_RELIEF_REACTS else None
+                    own = relief.get(quickest)
+                    if own is None:
+                        own = relief[quickest] = self._own_relief(sid, lines, quickest)
+                for d, sent in by_d.items():
+                    t = k + d
+                    if owners[t] != pid:
+                        continue
+                    held = ships[t] + (own[t] if own else 0.0)
+                    if sent > held * edge and sent > held:
+                        worst = max(worst, 1.0 - held * edge / sent)
+        if worst <= 0.0:
+            return 0.0
+        stake = ships[H] * self.front_value[sid] + 2 * TAIL_TURNS * self.income[sid]
+        return self.edge_weight * worst * stake
+
+    def _own_relief(self, sid, lines, under=None):
+        """Per turn, ``SELF_RELIEF`` of what our garrisons next door could have
+        landed on ``sid`` by then."""
+        H, pid = self.horizon, self.pid
+        own = [0.0] * (H + 1)
+        for nbr, d in self.travel[sid].items():
+            if under is not None and d >= under:
+                continue
+            n_owners, n_ships = lines.get(nbr) or self.lines[nbr]
+            for t in range(d, H + 1):
+                if n_owners[t - d] == pid:
+                    own[t] += SELF_RELIEF * n_ships[t - d]
+        return own
 
     def _learned_shortfall(self, sid, owners, ships, rival, curve, lines):
         """The worst turn's expected shortfall share against ``rival``, with each
@@ -493,11 +731,16 @@ class _Ledger:
             if rival not in n_owners:
                 continue
             sources.append((d, n_owners, n_ships))
+        own = None
+        if SELF_RELIEF > 0 and sources:
+            quickest = min(d for d, _, _ in sources)
+            own = self._own_relief(sid, lines, quickest if SELF_RELIEF_REACTS else None)
         worst = 0.0
         for t in range(1, H + 1):
             if owners[t] != pid:
                 continue
             held = max(ships[t] * config.DEFENDER_ADVANTAGE, 0.5)
+            stands = ships[t] + (own[t] if own else 0.0)
             items = []
             for d, n_owners, n_ships in sources:
                 if t >= d and n_owners[t - d] == rival and n_ships[t - d] > 0:
@@ -505,7 +748,7 @@ class _Ledger:
                     p = min(1.0, LEARN_REACH * curve[_ratio_bin(n / held)])
                     if p > 0.0:
                         items.append((n, p))
-            if not items or sum(n for n, _ in items) / self.advantage <= ships[t]:
+            if not items or sum(n for n, _ in items) / self.advantage <= stands:
                 continue
             sums = {0: 1.0}
             for n, p in items:
@@ -518,8 +761,8 @@ class _Ledger:
             expected = 0.0
             for total, q in sums.items():
                 need = total / self.advantage
-                if need > ships[t]:
-                    expected += q * (need - ships[t]) / need
+                if need > stands:
+                    expected += q * (need - stands) / need
             worst = max(worst, expected)
         return worst
 
@@ -565,7 +808,9 @@ class _Ledger:
             forces[who] = forces.get(who, 0) + n
         if owner not in (0, self.pid) and self.pid in landing:
             # A rival we strike may be relieved before we land.
-            forces[owner] += int(REINFORCE_WEIGHT * self.relief[sid].get(t, 0))
+            by_t, flying = self.relief[sid]
+            forces[owner] += int(self.reinforce * by_t.get(t, 0)
+                                 + self.relief_in_flight * flying.get(t, 0))
         sides = [(o, n) for o, n in forces.items() if n > 0]
         if not sides:
             return 0, 0
@@ -597,7 +842,7 @@ class _Ledger:
         if ao == pid:
             if bo == defender and an <= bn:
                 return b
-            b_eff *= swing
+            b_eff *= self.capture if self.capture > 0 and bo in self.rivals else swing
         elif bo == pid:
             a_eff *= swing
         if a_eff > b_eff:
@@ -639,21 +884,184 @@ class _Ledger:
                     heapq.heappush(heap, (nd, nbr))
         return {sid: 1.0 + FRONT_BONUS * FRONT_DECAY ** dist.get(sid, 99) for sid in self.ids}
 
+    def _pull(self):
+        """The pull at Field, Learning and Hunt: the field, or on a board whose
+        median lane is `SLOW_LANE` turns or more, the mean of the field and
+        Greedy's front (at Hunt, the two mixed by `HUNT_SLOW_FRONT`)."""
+        lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
+        field = self._field()
+        if not lanes or SLOW_LANE <= 0 or lanes[len(lanes) // 2] < SLOW_LANE:
+            return field
+        front = self._front_values()
+        if self.hunt:
+            return {sid: (1 - HUNT_SLOW_FRONT) * field[sid] + HUNT_SLOW_FRONT * front[sid]
+                    for sid in self.ids}
+        return {sid: 0.5 * (field[sid] + front[sid]) for sid in self.ids}
+
+    def _backyard(self, pull):
+        """``pull`` with at least 1 + `BACKYARD` x `FRONT_BONUS` on each system of
+        ours next to a neutral in our backyard, once the front has settled.
+
+        A backyard neutral borders us and no rival, no rival fleet is flying to it,
+        our projection does not already take it, and taking it would pay
+        (`_pays_to_take`). Our influence swamps it, so the field gives it no stake,
+        and a system next to it sends every ship it builds to the front and never
+        holds enough to take it. The front has settled when a rival garrison next
+        to us holds `BACKYARD_MATURE` turns of our income: stacks that size grow
+        in step, a few more ships do not tip them, and income decides the
+        stalemate. Before that the front needs every ship, and before contact the
+        field's pull is the opening. Hunt is left as it is."""
+        if BACKYARD <= 0 or self.hunt:
+            return pull
+        sysmap, pid = self.state.systems, self.pid
+        rivals = set(self.rivals)
+        ours = [sid for sid in self.ids if sysmap[sid].owner_id == pid]
+        facing = [sysmap[n].ships for sid in ours for n in sysmap[sid].neighbors
+                  if sysmap[n].owner_id in rivals]
+        if not facing or max(facing) < BACKYARD_MATURE * sum(self.income[sid] for sid in ours):
+            return pull
+        flying = {f.dest_id for f in self.state.fleets if f.owner_id in rivals}
+        floor = 1.0 + FRONT_BONUS * BACKYARD
+        out = dict(pull)
+        for sid in self.ids:
+            node = sysmap[sid]
+            if node.owner_id != 0 or sid in flying or self.lines[sid][0][self.horizon] == pid:
+                continue
+            owners = {sysmap[n].owner_id for n in node.neighbors}
+            if pid not in owners or owners & rivals or not self._pays_to_take(sid, floor):
+                continue
+            for n in node.neighbors:
+                if sysmap[n].owner_id == pid:
+                    out[n] = max(out[n], floor)
+        return out
+
+    def _pays_to_take(self, sid, value):
+        """Whether taking the neutral ``sid`` from a system whose ships are worth
+        ``value`` each raises the ledger: its income for `TAIL_TURNS` and the
+        survivors at a capture's worth, against the fewest ships that win it."""
+        garrison = self.state.systems[sid].ships
+        for need in range(garrison + 1, 4 * garrison + 8):
+            won, left = self._fight((self.pid, need), (0, garrison), defender=0)
+            if won == self.pid:
+                return (TAIL_TURNS * self.income[sid] + (1.0 + FRONT_BONUS) * left
+                        > value * need)
+        return False
+
+    def _field(self):
+        """The pull on a ship at each system, 1 to 1 + `FRONT_BONUS`: see the
+        module docstring. Reads the board as it stands; the greedy then prices
+        every launch against these values without recomputing them."""
+        sysmap, pid = self.state.systems, self.pid
+        rivals = set(self.rivals)
+        lanes = sorted(d for a in self.ids for b, d in self.travel[a].items() if a < b)
+        unit = float(lanes[len(lanes) // 2]) if lanes else 1.0
+        near = {sid: self._within(sid, FIELD_REACH * unit, unit) for sid in self.ids}
+
+        mine, foe = defaultdict(float), defaultdict(float)
+        for w in self.ids:
+            node = sysmap[w]
+            side = mine if node.owner_id == pid else foe if node.owner_id in rivals else None
+            if side is None or node.ships <= 0:
+                continue
+            for s, d in near[w].items():
+                side[s] += node.ships * FIELD_DECAY ** d
+        for f in self.state.fleets:
+            side = mine if f.owner_id == pid else foe if f.owner_id in rivals else None
+            if side is None:
+                continue
+            for s, d in near[f.dest_id].items():
+                side[s] += f.ships * FIELD_DECAY ** (d + f.turns_remaining / unit)
+
+        stake = {}
+        for s in self.ids:
+            node = sysmap[s]
+            if node.owner_id == pid and all(sysmap[n].owner_id == pid for n in node.neighbors):
+                continue                    # our interior: nothing to contest
+            standing = node.ships if node.owner_id in rivals else 0
+            x = (mine[s] - foe[s]) / (CONTEST_WIDTH * max(1.0, mine[s] + foe[s]))
+            stake[s] = (TAIL_TURNS * self.income[s] + standing) * math.exp(-x * x)
+
+        pull = {}
+        for w in self.ids:
+            if sysmap[w].owner_id == pid:
+                pull[w] = sum(stake[s] * FIELD_DECAY ** near[w][s] for s in stake if s in near[w])
+        top = max(pull.values(), default=0.0)
+        return {sid: (1.0 + FRONT_BONUS * pull[sid] / top if top > 0 else 1.0)
+                if sid in pull else 1.0 + FRONT_BONUS
+                for sid in self.ids}
+
+    def _within(self, src, radius, unit):
+        """Median lanes from ``src`` to every system within ``radius`` turns."""
+        dist = {src: 0}
+        heap = [(0, src)]
+        while heap:
+            d, sid = heapq.heappop(heap)
+            if d > dist[sid]:
+                continue
+            for nbr, t in self.travel[sid].items():
+                nd = d + t
+                if nd <= radius and nd < dist.get(nbr, math.inf):
+                    dist[nbr] = nd
+                    heapq.heappush(heap, (nd, nbr))
+        return {sid: d / unit for sid, d in dist.items()}
+
     def _relief(self):
-        """relief[sid][t]: ships the holder of ``sid`` has next door that could land
-        there by turn t, launching no sooner than next turn."""
+        """relief[sid][t]: ships the holder of ``sid`` could land there by turn t,
+        launching no sooner than next turn, as (from garrisons next door, from
+        fleets landing next door) so each can carry its own weight."""
         sysmap = self.state.systems
         out = {}
         for sid in self.ids:
             owner = sysmap[sid].owner_id
-            by_t = {}
+            by_t, flying = {}, {}
             if owner not in (0, self.pid):
                 for nbr, d in self.travel[sid].items():
                     if sysmap[nbr].owner_id == owner:
                         for t in range(d + 1, self.horizon + 1):
                             by_t[t] = by_t.get(t, 0) + sysmap[nbr].ships
-            out[sid] = by_t
+                if self.relief_in_flight > 0:
+                    for t0, ships in self._relief_in_flight(sid, owner):
+                        for t in range(t0, self.horizon + 1):
+                            flying[t] = flying.get(t, 0) + ships
+            out[sid] = (by_t, flying)
         return out
+
+    def _relief_in_flight(self, sid, owner):
+        """(turn, ships) for each of ``owner``'s pools landing next door to
+        ``sid`` that could take its landing system if it must and come back: a
+        pool landing on turn r relaunches then and reaches ``sid`` at r + d. A
+        neighbour ``owner`` does not hold costs the pool its fight there, priced
+        by `_fight` against its garrison now."""
+        sysmap = self.state.systems
+        pools = defaultdict(int)
+        for f in self.state.fleets:
+            if f.owner_id == owner and f.dest_id != sid and f.dest_id in self.travel[sid]:
+                pools[(f.dest_id, max(1, f.turns_remaining))] += f.ships
+        out = []
+        for (nbr, r), ships in sorted(pools.items()):
+            t0 = r + self.travel[sid][nbr]
+            if t0 > self.horizon:
+                continue
+            held = sysmap[nbr]
+            if held.owner_id != owner:
+                won, ships = self._fight((owner, ships), (held.owner_id, held.ships),
+                                         defender=held.owner_id)
+                if won != owner:
+                    continue
+            out.append((t0, ships))
+        return out
+
+
+def _merged(orders):
+    """``orders`` with every launch down one lane summed into the first: the greedy
+    commits a lane in pieces (half, then what is left), which are one fleet
+    either way (the engine merges them too, so this is for whoever reads the plan)."""
+    out: dict[tuple[int, int], Order] = {}
+    for o in orders:
+        prev = out.get((o.source_id, o.dest_id))
+        out[(o.source_id, o.dest_id)] = o if prev is None else Order(
+            o.owner_id, o.source_id, o.dest_id, prev.ships + o.ships)
+    return list(out.values())
 
 
 def _with(arrivals, t, owner, ships):
@@ -663,6 +1071,136 @@ def _with(arrivals, t, owner, ships):
     slot[owner] = slot.get(owner, 0) + ships
     out[t] = slot
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Hunt's look-ahead
+#
+# Our candidate plans are Hunt's own and the same ledger at other postures.
+# Each is played on a private board for LOOK_PLIES turns, every seat after the
+# first ply (and every rival from the first) playing Hunt's plain plan from its
+# own seat: no other bot's code is run, so this is a self-model, not an oracle.
+# The copy rolls its own dice (`dice_salt` + ":hunter-rollout"), so no line
+# foresees the game's. Every line rolls the same dice, so a score gap is the
+# plan's, not luck's. The score is the ledger's value of the final board from
+# our seat, which already projects every fleet still flying.
+# --------------------------------------------------------------------------- #
+def _look(state, pid):
+    deadline = time.perf_counter() + LOOK_BUDGET_S * BUDGET_SCALE
+    seats = sum(1 for p in state.players.values() if not p.is_neutral and p.alive)
+    line = LOOK_PLIES * seats * len(state.systems) ** 1.3     # the work one line costs
+    if 2 * line > LOOK_WORK:
+        return _hunt(state, pid).plan()   # not two lines' worth: nothing to compare
+    plans, seen = [], set()
+    for weight, capture in _postures():
+        orders = _hunt(state, pid, weight, capture).plan()
+        key = tuple(sorted((o.source_id, o.dest_id, o.ships) for o in orders))
+        if key not in seen:
+            seen.add(key)
+            plans.append(orders)
+        if time.perf_counter() > deadline:
+            break
+    if len(plans) == 1:
+        return plans[0]
+    # Every rival decides its first turn from this same board in every line, so
+    # its orders there are worked out once, not once per line.
+    first = {q: _hunt(state, q).plan() for q, p in state.players.items()
+             if q != pid and not p.is_neutral and any(x.owner_id == q for x in state.systems.values())}
+    lines = []
+    for i, orders in enumerate(plans):
+        if (i + 1) * line > LOOK_WORK and i > 0:
+            break                         # the next line would pass the work budget
+        lines.append(_HuntLine(state, pid, orders, first))
+    best, best_score = plans[0], None
+    for ln in lines:
+        score = ln.play(LOOK_PLIES, deadline)
+        if score is None:
+            break                         # out of time mid-line: keep the best scored
+        if best_score is None or score > best_score:
+            best, best_score = ln.orders, score
+    return best
+
+
+def _hunt(state, pid, weight=None, capture=None):
+    """Hunt's plain ledger for ``pid``, at a posture of the look-ahead's."""
+    return _Ledger(state, pid, field=True, hunt=True, weight=weight, capture=capture)
+
+
+def _postures():
+    yield None, None
+    for factor in LOOK_WEIGHTS:
+        yield EDGE_RISK_WEIGHT * factor, None
+    if LOOK_CAPTURE and CAPTURE_SWING > 0:
+        yield None, CAPTURE_SWING
+
+
+class _HuntLine:
+    """One candidate played forward on a private board, a few turns at a time."""
+
+    def __init__(self, state, pid, orders, first_orders=None):
+        self.board, self.pid, self.orders = _clone(state), pid, orders
+        self.first_orders, self.plies = first_orders, 0
+
+    def _decide(self, s, q):
+        if self.plies == 0:
+            if q == self.pid:
+                return self.orders
+            if self.first_orders is not None:
+                return self.first_orders.get(q, [])
+        if not any(x.owner_id == q for x in s.systems.values()):
+            return []
+        return _hunt(s, q).plan()
+
+    def play(self, upto, deadline=math.inf):
+        """The line's score once it has played ``upto`` turns in all, or ``None``
+        if the clock ran out first (checked before each, so an overrun is one ply)."""
+        board, pid = self.board, self.pid
+        while self.plies < upto and board.winner is None:
+            if time.perf_counter() > deadline:
+                return None
+            engine.end_turn(board, decide=self._decide)
+            self.plies += 1
+        if board.winner is not None:
+            return LOOK_DECIDED if board.winner == pid else -LOOK_DECIDED
+        if not any(x.owner_id == pid for x in board.systems.values()):
+            return -LOOK_DECIDED
+        return sum(_hunt(board, pid).worth.values())
+
+
+def _rollout(state, pid, orders, deadline=math.inf, first_orders=None):
+    """The score of ``orders`` after LOOK_PLIES turns, or ``None`` if the clock ran
+    out before the last of them."""
+    return _HuntLine(state, pid, orders, first_orders).play(LOOK_PLIES, deadline)
+
+
+def _clone(state):
+    """A private board: every mutable container rebuilt (as knower's `_clone`),
+    its own rng, every seat driven by `decide`, and its own dice."""
+    clone = copy.copy(state)
+    clone.systems = {sid: copy.copy(s) for sid, s in state.systems.items()}
+    for s in clone.systems.values():
+        s.neighbors = list(s.neighbors)
+    clone.fleets = [copy.copy(f) for f in state.fleets]
+    clone.players = {q: copy.copy(p) for q, p in state.players.items()}
+    for p in clone.players.values():
+        p.ai_params = copy.copy(p.ai_params)
+        p.is_human = False
+    clone.adjacency = {sid: dict(n) for sid, n in state.adjacency.items()}
+    clone.rng = random.Random(0)
+    clone.dice_salt = f"{state.dice_salt}:hunter-rollout"
+    return clone
+
+
+def configure(overrides: dict) -> None:
+    """Set module constants by name, for the bench's variants (tools/hunt_bench.py)."""
+    g = globals()
+    for name, value in overrides.items():
+        if name not in g:
+            raise KeyError(name)
+        if isinstance(g[name], tuple):
+            g[name] = tuple(value) if isinstance(value, (tuple, list)) else (value,)
+        else:
+            g[name] = type(g[name])(value) if isinstance(g[name], (int, float, bool)) else value
 
 
 # --------------------------------------------------------------------------- #
@@ -986,226 +1524,3 @@ def strike_curve(model: Model, kind: int, pressed: int) -> list[float]:
         rates.append(hit / total)
         weights.append(total)
     return _monotone(rates, weights)
-
-
-# --------------------------------------------------------------------------- #
-# The planned opening (Opening: Planned)
-# --------------------------------------------------------------------------- #
-def opening(state, pid):
-    """This turn's orders under the planned opening until `_Opening.over`, else
-    ``None`` (and the ledger plays). Measurements behind it:
-    "The planned opening" in docs/design/actuary.md."""
-    plan = _Opening(state, pid)
-    if plan.over():
-        return None
-    return plan.orders()
-
-
-class _Opening:
-    """The land-grab as a one-player puzzle. The region is the neutrals strictly
-    nearer us than any rival, in lane turns. The clock is the earliest turn a
-    rival's ships could land on our side, times `OPENING_CLOCK_SCALE`. Each
-    policy is scored by ships held at the clock plus the income rate there,
-    weighted by `OPENING_INCOME_CLOCKS` clocks of it."""
-
-    def __init__(self, state, pid):
-        self.state, self.pid = state, pid
-        sysmap = state.systems
-        self.rivals = {p.id for p in state.players.values()
-                       if not p.is_neutral and p.id != pid and p.alive}
-        self.owned = sorted(sid for sid, s in sysmap.items() if s.owner_id == pid)
-        self.attack = combat.edge_attacking(TUNED_SWING)
-        self.advantage = math.sqrt(self.attack / combat.edge_defending(TUNED_SWING))
-        self.travel = {a: {b: state.travel_turns(a, b) for b in sorted(sysmap[a].neighbors)}
-                       for a in sysmap}
-        self.ours = self._dijkstra({sid: 0 for sid in self.owned})
-        self.theirs = self._dijkstra(
-            {sid: 0 for sid, s in sysmap.items() if s.owner_id in self.rivals})
-        self.region = {sid for sid, s in sysmap.items() if s.owner_id == 0
-                       and self.ours.get(sid, math.inf) < self.theirs.get(sid, math.inf)}
-        self.clock = self._clock()
-        self.weight = OPENING_INCOME_CLOCKS * self.clock
-
-    def _dijkstra(self, starts):
-        dist = dict(starts)
-        heap = [(t, sid) for sid, t in starts.items()]
-        heapq.heapify(heap)
-        while heap:
-            t, sid = heapq.heappop(heap)
-            if t > dist[sid]:
-                continue
-            for nbr, turns in self.travel[sid].items():
-                if t + turns < dist.get(nbr, math.inf):
-                    dist[nbr] = t + turns
-                    heapq.heappush(heap, (t + turns, nbr))
-        return dist
-
-    def _clock(self):
-        """The earliest turn a rival's ships could land on a system on our side."""
-        best = min((max(self.ours.get(a, math.inf), self.theirs.get(a, math.inf))
-                    for a in set(self.owned) | self.region), default=math.inf)
-        if math.isinf(best):
-            return OPENING_CLOCK_MAX
-        return max(1, min(OPENING_CLOCK_MAX, round(OPENING_CLOCK_SCALE * best)))
-
-    def over(self):
-        """Bordering a live rival, a rival fleet heading for us, or our side of
-        the map (what we hold plus the region) under `OPENING_MIN_SIDE`."""
-        sysmap = self.state.systems
-        for sid in self.owned:
-            if any(sysmap[n].owner_id in self.rivals for n in self.travel[sid]):
-                return True
-        if any(f.owner_id in self.rivals and f.dest_id in self.owned for f in self.state.fleets):
-            return True
-        return not self.region or len(self.owned) + len(self.region) < OPENING_MIN_SIDE
-
-    def orders(self):
-        best, best_score = [], -math.inf
-        for policy in itertools.product(OPENING_ORDERS, OPENING_SENDS, OPENING_SKIPS):
-            sim = _OpeningSim(self, policy)
-            score = sim.run()
-            if score > best_score:
-                best, best_score = sim.first, score
-        return best
-
-    def need(self, garrison):
-        """Ships that take ``garrison`` at the worst roll; at least one more."""
-        return max(math.floor(garrison) + 1, math.floor(self.attack * garrison) + 1)
-
-    def survivors(self, ships, garrison):
-        enemy = garrison * self.advantage
-        return math.sqrt(max(0.0, ships * ships - enemy * enemy))
-
-
-class _OpeningSim:
-    """Our side of the map played forward under one policy, nobody else moving.
-    Ships and production are continuous; captures are at the nominal roll, while
-    a launch is sized for the worst one.
-
-    A policy is (which neutral first: most valuable, nearest or cheapest; send just
-    enough or everything; skip a capture that does not pay, or not). A system with
-    nothing to take sends its ships one hop towards the nearest of ours that has."""
-
-    def __init__(self, plan, policy):
-        self.plan = plan
-        self.order, self.send, self.skip = policy
-        sysmap = plan.state.systems
-        self.ships = {sid: float(sysmap[sid].ships) for sid in plan.owned}
-        self.garrison = {sid: float(sysmap[sid].ships) for sid in plan.region}
-        self.income = {sid: (1.0 / s.production if s.production > 0 else 0.0)
-                       for sid, s in sysmap.items()}
-        self.fleets = [(f.turns_remaining, f.dest_id, float(f.ships))
-                       for f in plan.state.fleets if f.owner_id == plan.pid]
-        self.first: list[Order] = []
-        self.t = 0
-        self._feed_to = None
-
-    def run(self):
-        while self.t < self.plan.clock:
-            self._decide()
-            self._advance()
-        held = sum(self.ships.values()) + sum(s for _, _, s in self.fleets)
-        rate = sum(self.income[sid] for sid in self.ships)
-        return held + self.plan.weight * rate
-
-    def _launch(self, src, dst, ships):
-        if ships <= 0:
-            return
-        self.ships[src] -= ships
-        self.fleets.append((self.plan.travel[src][dst], dst, float(ships)))
-        if self.t == 0:
-            self.first.append(Order(self.plan.pid, src, dst, int(ships)))
-
-    def _pending(self, dst):
-        return sum(s for _, d, s in self.fleets if d == dst)
-
-    def _decide(self):
-        travel = self.plan.travel
-        feed = self._feed()
-        for src in sorted(self.ships):
-            avail = math.floor(self.ships[src])
-            targets = [n for n in travel[src] if n in self.garrison]
-            if not targets:
-                nxt = feed.get(src)
-                if nxt is not None and avail > 0:
-                    self._launch(src, nxt, avail)
-                continue
-            for dst in self._rank(src, targets):
-                if avail <= 0:
-                    break
-                need = self.plan.need(self.garrison[dst]) - self._pending(dst)
-                if need <= 0:
-                    continue
-                if need > avail:
-                    if self.send == "mass":
-                        break
-                    continue
-                if self.skip and self._worth(src, dst, need) <= 0:
-                    continue
-                ships = avail if self.send == "mass" else math.ceil(need)
-                self._launch(src, dst, ships)
-                avail -= ships
-
-    def _worth(self, src, dst, ships):
-        land = self.t + self.plan.travel[src][dst]
-        lost = ships - self.plan.survivors(ships, self.garrison[dst])
-        income = self.income[dst]
-        return income * max(0, self.plan.clock - land) + self.plan.weight * income - lost
-
-    def _rank(self, src, targets):
-        travel = self.plan.travel[src]
-        if self.order == "near":
-            key = lambda n: (travel[n], -self.income[n], n)
-        elif self.order == "cheap":
-            key = lambda n: (self.garrison[n], travel[n], n)
-        else:
-            key = lambda n: (-self._worth(src, n, self.plan.need(self.garrison[n])), n)
-        return sorted(targets, key=key)
-
-    def _feed(self):
-        """For each of our systems with nothing to take, its next hop towards the
-        nearest of ours that has. Rebuilt only when what we own changes."""
-        key = (frozenset(self.ships), frozenset(self.garrison))
-        if self._feed_to is not None and self._feed_to[0] == key:
-            return self._feed_to[1]
-        travel = self.plan.travel
-        front = [sid for sid in self.ships if any(n in self.garrison for n in travel[sid])]
-        dist = {sid: 0 for sid in front}
-        hop: dict[int, int] = {}
-        heap = [(0, sid) for sid in sorted(front)]
-        heapq.heapify(heap)
-        while heap:
-            t, sid = heapq.heappop(heap)
-            if t > dist[sid]:
-                continue
-            for nbr, turns in travel[sid].items():
-                if nbr in self.ships and t + turns < dist.get(nbr, math.inf):
-                    dist[nbr] = t + turns
-                    hop[nbr] = sid
-                    heapq.heappush(heap, (t + turns, nbr))
-        self._feed_to = (key, hop)
-        return hop
-
-    def _advance(self):
-        for sid in self.ships:
-            self.ships[sid] += self.income[sid]
-        landed, flying = {}, []
-        for turns, dst, ships in self.fleets:
-            if turns <= 1:
-                landed[dst] = landed.get(dst, 0.0) + ships
-            else:
-                flying.append((turns - 1, dst, ships))
-        self.fleets = flying
-        for dst, ships in sorted(landed.items()):
-            if dst in self.ships:
-                self.ships[dst] += ships
-            elif dst in self.garrison:
-                left = self.plan.survivors(ships, self.garrison[dst])
-                if left > 0:
-                    del self.garrison[dst]
-                    self.ships[dst] = left
-                else:
-                    held = self.garrison[dst] * self.plan.advantage
-                    self.garrison[dst] = math.sqrt(max(0.0, held * held - ships * ships)) \
-                        / self.plan.advantage
-        self.t += 1

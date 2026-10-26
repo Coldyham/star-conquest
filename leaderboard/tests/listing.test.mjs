@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  cleanQuery, filtersFromParams, isFiltered, listQuery, MAX_EXCLUDED, pickRandom, RANDOM_POOL,
-  randomPoolQuery, searchClause, SORTS, urlFor,
+  cleanQuery, familyQueries, filtersFromParams, isFiltered, listQuery, MAX_EXCLUDED, pickRandom, RANDOM_POOL,
+  randomPoolQuery, searchClause, SORTS, urlFor, viewKind,
 } from "../js/listing.mjs";
 
 const parse = (qs) => filtersFromParams(new URLSearchParams(qs));
@@ -92,6 +92,15 @@ test("systems and best turns sort on their own columns, turns fewest first", () 
     "nodes.desc.nullslast,last_activity.desc.nullslast,config_key");
 });
 
+test("difficulty sorts easiest first on the share of bots that lose, averaged when grouped", () => {
+  const order = (qs) => listQuery(parse(qs)).query.split("&order=")[1];
+  assert.equal(order("sort=difficulty"), "difficulty.asc.nullslast,last_activity.desc.nullslast,game_key");
+  assert.equal(order("sort=difficulty&dir=desc"), "difficulty.desc.nullslast,last_activity.desc.nullslast,game_key");
+  assert.equal(order("group=config&sort=difficulty"),
+    "avg_difficulty.asc.nullslast,last_activity.desc.nullslast,config_key");
+  assert.match(listQuery(parse("")).query, /select=[^&]*\bbot_wins,bot_runs,difficulty\b/);
+});
+
 test("dir flips only the sorted column, and its default stays out of the URL", () => {
   const order = (qs) => listQuery(parse(qs)).query.split("&order=")[1];
   assert.equal(order("dir=asc"), "last_activity.asc.nullslast,game_key");
@@ -149,4 +158,22 @@ test("a random pick is uniform over the pool and null from an empty one", () => 
   assert.equal(pickRandom(rows, () => 0.5), "c");
   assert.equal(pickRandom(rows, () => 0.9999), "d");
   assert.equal(pickRandom([], () => 0.5), null);
+});
+
+test("by family is a third grouping, kept in the URL, and only above one config's list", () => {
+  assert.equal(urlFor(parse("group=family&players=2")), "index.html?group=family&players=2");
+  assert.equal(viewKind(parse("group=family")), "family");
+  assert.equal(viewKind(parse("group=family&config=abc")), "game");
+  assert.equal(viewKind(parse("group=nonsense")), "game");
+  assert.equal(isFiltered(parse("group=family")), false);
+  assert.deepEqual(SORTS.family.map((s) => s.value), ["recent"]);
+});
+
+test("by family reads every config, and the grouped view's filter only to mark matches", () => {
+  assert.deepEqual(familyQueries(parse("group=family")),
+    { all: "config_summary?select=*&order=config_key.asc", match: null });
+  const { all, match } = familyQueries(parse("group=family&fog=on&players=2&contested=1"));
+  assert.equal(all, "config_summary?select=*&order=config_key.asc");
+  assert.equal(match, "config_summary?select=config_key&players=eq.2&fog=is.true" +
+    "&order=last_activity.desc.nullslast,config_key");
 });

@@ -7,8 +7,9 @@ versioning. `CLAUDE.md` states the rules under "Challenge links carry a score to
 beat". The bot-side measurements behind the bot column (`replay_aux`,
 `BUDGET_SCALE`, the seat-flag incident) are in [`bots.md`](bots.md),
 "Replaying a bot for the leaderboard". The site's own setup is in
-`leaderboard/README.md`. Related: [`core.md`](core.md) (challenge keys, the
-replay log). Index: [`../README.md`](../README.md).
+`leaderboard/README.md`, and why each table and view in `schema.sql` is shaped
+as it is in [`schema.md`](schema.md). Related: [`core.md`](core.md) (challenge
+keys, the replay log). Index: [`../README.md`](../README.md).
 
 ## Bot replays (`tools/bot_replay.py`)
 
@@ -177,6 +178,45 @@ fast the runner was that day. Where one is used, the count lands in
 `bot_scores.bot_timeouts` and the page marks the row rather than presenting it as
 reproducible alongside the others.
 
+### Estimated difficulty
+
+The column already says, per map, which bots took it from the human's seat, so the
+share that *didn't* is a difficulty estimate at no extra compute
+(`game_summary.difficulty`, the "Difficulty (estimated)" sort and an Easy / Medium /
+Hard / Very hard badge). It is for a new player looking for a ramp. They should not
+need to know what the bot names mean or start on the latest fogged marshal map.
+That is why it carries a plain word rather than "3 of 7 bots win", which goes in
+the tooltip instead.
+
+On the live board (2026-10-13, 137 maps, all 7 bots on each) maps spread out
+rather than lumping at the ends: 0 to 7 bots winning covers 18, 31, 36, 26, 13,
+9, 3 and 1 maps. The estimate follows the opponents. Maps against heuristic alone
+average 4.2 bots winning, heuristic and rusherplus 4.6. Maps against knower,
+marshal and thinker average 1.4, and actuary and marshal 1.2. It reads close to a
+ladder: when two bots split on a map, the weaker one is the winner about 10% of
+the time.
+
+It is a **share, not a count**, so a newly added bot that has not reached every
+map yet doesn't move the maps it has reached. It is **one game per bot**, so one
+bot's difference is dice. And it measures the map *against the bots*: people have
+won nearly every map that no bot wins. A config averages its maps' shares.
+
+The levels (`format.mjs`'s `DIFFICULTY_LEVELS`) follow the roster's classes
+rather than even steps. The oracle pair (knower at Search, actuary at
+Learning) is the top. Next come marshal and plain actuary (only marshal is
+replayed), then a gap to thinker, a similar gap to claudebot, and heuristic and
+rusherplus at the bottom ("Where marshal stands" in [`marshal.md`](marshal.md)).
+So on 7 bots, Hard was 1-2 winning, Medium 3-4 and Easy 5+. That made the live
+board 13 Easy, 39 Medium, 67 Hard and 18 Very hard. Tiering on the weakest
+class that won instead agrees on 119 of 137 maps. The rest are one weaker bot
+winning against the trend, which a count is less swayed by.
+
+Re-cut on 2026-10-18 for eight bots, with council in the column. council
+joins the top class, so Hard is 1-3 winning (council, knower at Search, actuary
+at Learning), Medium 4-5 (marshal and thinker too) and Easy 6+, at shares of
+0.55 and 0.25. Those cuts read the same counts on seven runs, so a map the
+newest bot has not reached yet is not moved a level by the gap.
+
 ## Checked scores (`share.py`, `tools/verify_scores.py`)
 
 The board's other pure-function-of-the-inputs job, and the answer to the oldest
@@ -243,14 +283,16 @@ moves. Grouping one person's games across sessions would need a durable client
 id — a tracking identifier by any other name, and it buys nothing here.
 
 Rows are append-only like the rest of the board, so a game that checkpoints
-repeatedly lands several times and the *longest* row is the current one
-(`verify_scores.best_logs`); `--prune` clears what it supersedes, using the one
+repeatedly lands several times. A score is judged on the upload that verifies,
+not the longest, since anyone can upload under a public `match_id`
+(`verify_scores.judge`, `score_checks.log_id`; see
+[`schema.md`](schema.md), "game_logs"). `--prune` clears the rest, using the one
 delete path the public does not have.
 
 **A rules change had never actually moved `RULES_VERSION` until the production/
 combat reorder, so "the engine outran an old replay" had never been a real case
 to handle — only a documented possibility.** The verifier already had the right
-shape for it (`outdated` versus `mismatch`, decided *after* the replay so a
+shape for it (an `outdated` flag on a `mismatch`, decided *after* the replay so a
 change that leaves most games alone does not flag them anyway), but nothing
 outside `tools/verify_scores.py` ever asked the question: the game's own
 `main.open_replay`/`resume_game` and `tools/position_suite.local_logs` would
@@ -351,8 +393,8 @@ and one press. `open_replay` marks the `Ui` (`Ui.watched`), `Ui.can_post` is the
 one predicate render draws both buttons from and main fires both actions from,
 and it also stops a watched game being filed as a personal best or checkpointed
 back up under its original `match_id` — where, rows being keyed by that id and
-the longest winning, our continuation would replace the very replay their score
-is checked against.
+the longest winning until their score is checked, our continuation would replace
+the very replay their score is checked against.
 
 It is a lock on the button, not a proof of authorship, and deliberately so:
 rewinding a watched replay to a turn from its end and playing that turn out
@@ -399,19 +441,20 @@ nothing. `bot_replay.replay_rev` is the same statement in code: `engine_rev` min
 hand. `engine.RULES_VERSION` is bumped in the same commit as a change to the phase
 order, to how a fight resolves or how a map is drawn from a seed, and every log
 carries the version it was played under. When a replay then fails to reproduce its
-score, `verify_scores` reports `outdated` rather than `mismatch` — unverifiable,
+score, `verify_scores` reports a `mismatch` flagged `outdated` — unverifiable,
 not wrong. The check happens *after* the replay, so the many old games a bump does
 not actually disturb keep verifying on their own merits; only the ones it broke
 are set aside, and set aside rather than accused.
 
-**The random pool is the other axis, and it gets the same verdict.** A seat left
-to chance is dealt from `settings.RANDOM_POOL` and the log records what it was
-dealt (`GameLog.strategies`; `docs/design/core.md`, "A seat left to the seed").
-A score whose numbers reproduce but whose rival seats faced bots other than the
-ones its setup deals today is `outdated`: played honestly, by a build from before
-the pool was fixed or before an edit to it, against a lineup the map's other
-scores did not face. It stays counted, without the verified tick. `outdated`
-rather than `mismatch` because an edit to the pool would otherwise drop every
+**The random pool is the other axis, and it gets the same flag.** A seat left
+to chance is dealt from the pool its seed's era names (`settings.pool_for`)
+and the log records what it was dealt (`GameLog.strategies`;
+`docs/design/core.md`, "A seat left to the seed"). A score whose numbers
+reproduce but whose rival seats faced bots other than the ones its setup deals
+today is `verified` and `outdated`: played honestly, by a build from before the
+pool was fixed or a stale one that did not know its seed's era, against a lineup
+the map's other scores did not face. It stays counted and keeps the verified
+tick. Not a `mismatch`, because an edit to the pool would otherwise drop every
 honest earlier score on a random map, and a tampered lineup gains nothing a
 tampered score would not. `settings` is in `replay_rev`, so a pool edit makes
 `--stale` re-decide. A log that records no lineup is judged on its numbers.
@@ -561,18 +604,19 @@ and the fork-preview risk is held by the "Require approval" policy.
 ### The pages are templates
 
 Every page carried an identical copy of the head and the menu, so adding a page
-or a menu entry meant editing all of them, and the privacy link went into nine
-footers by hand. Each page is now a Jinja2 template extending
-`leaderboard/templates/base.html`, rendered by `tools/render_board.py` inside
-`build_web.sh`. A page sets `title`, `description`, `main_class` and `script`,
-and fills `main` and `footer`; the footer's flavour text stays per page and the
-shared links come from the base.
+or a menu entry meant editing all of them, and the privacy link went into
+every footer by hand. Each page is now a Jinja2 template
+extending `leaderboard/templates/base.html`, rendered by
+`tools/render_board.py` inside `build_web.sh`. A page sets `title`,
+`description`, `main_class` and `script` (a list for more than one module), and
+fills `main`, `before_main` and `footer`; the footer's flavour text stays per
+page, and a page with no `footer` block has no footer.
 
 - **At build time, because Netlify serves files.** There is no server to render
   on, so the include runs either before deploy or in the browser. The build
   already runs Python (`tools/pwa/inject.py`), and what reaches a visitor is the
   same complete HTML as before, menu and all, with no script needed to show it.
-  Converting changed no rendered byte except two footers.
+  Converting changed no rendered byte.
 - **Decided against: a JS include** (an empty `<header>` a module fills on
   load). It kept "no build step", but the menu would vanish when the script
   failed and could pop in a frame late, and the markup would live in JS strings.
@@ -591,9 +635,13 @@ shared links come from the base.
   Monday-to-Monday UTC week, scores that strictly beat somebody else's record
   (`crown_steals`); a tie never steals, the earliest holder keeps it, as
   `game_summary` credits. Both read `counted_scores`, the one place the rule
-  lives: every score but a `mismatch` replay counts, since the game uploads a
-  log once with no retry and an offline or hand-pasted score could otherwise
-  never count. Nothing is stored, so moderation recomputes them for free.
+  lives, and so does `game_summary`'s best (the card's record, "Bot leads",
+  the average best turns) and the map page's "Play this map" target: a `verified` score counts, an unchecked or `missing` one that names a
+  replay counts for its first 24 hours, one posted before 2026-10-15 counts
+  unless it is a `mismatch` under current rules, and only the first post of a
+  match, or of a game however it is re-uploaded, counts (reasons:
+  [`schema.md`](schema.md), "counted_scores and the crowns").
+  Nothing is stored, so moderation recomputes them for free.
   `js/crowns.mjs` only orders rows; `tests/test_crowns_sql.py` runs the SQL
   against a real Postgres when `SC_TEST_PG` is set.
 - **The weekly campaign stores its map and derives its state.**
@@ -604,7 +652,9 @@ shared links come from the base.
   of at most `config.STANDARD_MAX_NODES` systems (`FAMILY_MAX_NODES`: one
   120-system test game was enough to put big maps in a week, and a big map is
   a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
-  `settings.randomise_knobs`; a symmetric node whose config names no `layout`
+  `settings.randomise_knobs` — the menu's dice, so never below a
+  `settings.ROLL_FLOORS` entry (sight 0 is opt-in only), and a played config
+  below one is never a node either; a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
   nodes `mapgen.peripheral_starts` picks. A *cut node* (`cut_nodes`: one whose
   loss splits the field, so a single par-tight score there walls off what lies
@@ -663,6 +713,15 @@ shared links come from the base.
     an embargo honours this one with no JS of its own. It cannot be stamped on
     the row instead: a node's seed is fresh, so its `games` row is created
     mid-week by whoever posts first, and `games` is append-only after that.
+  - **Once it lifts, the map page names who was ahead at that moment.**
+    `game.mjs`'s `liftNote` and the row's *Led at reveal* mark: the best
+    counted score posted by then (`standings.mjs`'s `leaderAt`), and who has
+    beaten it since, if anyone. The moment is the later of the stored reveal
+    and the end of the last campaign week the map was a node of
+    (`embargoLiftedAt`), read off the `campaign_games` row the page already
+    fetches rather than added to `game_embargoes`, which reads live weeks only
+    so `game_summary` never scans every past campaign. Counted by today's
+    verdicts, so a score whose replay later fails its check was never ahead.
 
 ## The grace period
 
@@ -936,7 +995,8 @@ The best-score rule settles a collision with what already exists.
   only funnel that pushes them into `config`. The replayed seat gets default
   `AiParams` (slot 0 is the human's) except for `aux`, the bot-defined knob —
   `bot_replay.replay_aux` puts each bot at the top of its own slider there
-  (`knower` on Oracle: Search, `actuary` on Style: Learning) and the value in force is stored on the row; opponents keep
+  (`knower` on Oracle: Council, `actuary` on Style: Hunt), one row per family
+  ([`bot-families.md`](bot-families.md)), and the value in force is stored on the row; opponents keep
   theirs. **The seat it takes over is handed over outright** (`sim._hand_over` clears
   `is_human`, sets the strategy and params; plain `engine.end_turn(state,
   decide=decide)` then drives every seat, the replayed one included, just as

@@ -4,6 +4,7 @@
 // usernames and Challenge.by are free text typed by strangers, so they must never
 // be parsed as markup.
 
+import { profileLabel, profiles, stopName } from "./bots.mjs";
 import { configTitle, fogLabel, hasFog } from "./setup.mjs";
 import { compareScores } from "./standings.mjs";
 
@@ -40,9 +41,44 @@ export function mapSummary(game) {
   return [
     mode,
     `${game.players} players`,
-    `${game.nodes} systems`,
+    `${systemCount(game)} systems`,
     `seed ${game.seed ?? "random"}`,
   ].join(" · ");
+}
+
+const SYMMETRIC_LAYOUTS = ["hub", "ring", "wheel", "core"];
+
+/** Python's round(): halves go to the even neighbour, where Math.round goes up. */
+function roundHalfEven(x) {
+  const down = Math.floor(x);
+  const frac = x - down;
+  if (frac !== 0.5) return Math.round(x);
+  return down % 2 === 0 ? down : down + 1;
+}
+
+/**
+ * How many systems the game's `mapgen.symmetric_size` builds for a symmetric
+ * map asked for `nodes`: whole sectors of at least two, plus any shared systems.
+ * Pinned against the game by leaderboard/tests/fixtures/symmetric-sizes.json.
+ */
+export function symmetricSize(nodes, players, layout) {
+  const shape = SYMMETRIC_LAYOUTS.includes(layout) ? layout : "hub";
+  const seats = Math.max(2, players);
+  const shared = shape === "hub" || shape === "wheel" ? 1 : shape === "core" ? seats : 0;
+  return seats * Math.max(2, roundHalfEven((nodes - shared) / seats)) + shared;
+}
+
+/**
+ * A row's real system count, as `Settings.system_count` gives it: `nodes` is
+ * what was asked for, which a generated symmetric map rounds to whole sectors.
+ * Reads `layout` and `custom_map` off the row or its `settings_json`; with
+ * neither to hand, a symmetric map is taken to be the hub it was before layouts.
+ */
+export function systemCount(game) {
+  const settings = game.settings_json || {};
+  const custom = game.custom_map ?? settings.custom_map;
+  if (game.mode !== "symmetric" || custom || typeof game.nodes !== "number") return game.nodes;
+  return symmetricSize(game.nodes, game.players, game.layout ?? settings.layout);
 }
 
 /**
@@ -202,16 +238,25 @@ export function fogBadge(game, group = "game") {
 }
 
 /**
- * One chip per opponent strategy (game_summary.bots), each linking to the main
- * list filtered to that bot — omitted entirely when every seat is the built-in
- * heuristic, since that's the common case and would otherwise repeat on every
- * card. Strategy names come from models/*.py drop-ins, so textContent only.
+ * One chip per opponent (game_summary.bots, through `profiles`), linking to the
+ * main list filtered to that bot — omitted entirely when every seat is the
+ * built-in heuristic, since that's the common case and would otherwise repeat on
+ * every card. A bot off its default stop is a two-part chip, "knower · council":
+ * the family half finds every stop of it, the stop half that stop alone. Strategy
+ * names come from models/*.py drop-ins, so textContent only.
  */
 export function botChips(game) {
-  const bots = game.bots || [];
-  if (bots.length === 1 && bots[0] === "heuristic") return [];
-  return bots.map((bot) =>
-    el("a", { class: "chip", href: `index.html?bot=${encodeURIComponent(bot)}`, text: bot }));
+  const shown = profiles(game.bots);
+  if (shown.length === 1 && shown[0] === "heuristic") return [];
+  const link = (bot, text, cls = null) =>
+    el("a", { class: cls, href: `index.html?bot=${encodeURIComponent(bot)}`, text });
+  return shown.map((profile) => {
+    const family = profile.split(":")[0];
+    const stop = stopName(profile);
+    if (!stop) return link(family, family, "chip");
+    return el("span", { class: "chip pair", title: profileLabel(profile) },
+      [link(family, family), " · ", link(profile, stop.toLowerCase())]);
+  });
 }
 
 /**
@@ -229,6 +274,43 @@ export function leaderCredit(game) {
   // missing count as the one leading name.
   const others = Math.max(0, Number(game.best_holders || 1) - 1);
   return others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
+}
+
+// The share of bots that lose a map (game_summary.difficulty) at or below which
+// each word applies, easiest first. Cut along the roster's classes, so on the
+// 7-bot roster, one per family at its top stop: Hard is a map only the top two
+// (knower at Council, actuary at Hunt) take, 1-2 winning; Medium is one marshal,
+// evolved and thinker take too, 3-5; Easy is one heuristic or rusherplus take
+// too, 6+; Very hard is none. The same counts hold on 6 bots, while a new bot is
+// still being replayed onto the maps the other six have reached.
+const DIFFICULTY_LEVELS = [
+  { most: 0.2, text: "Easy", cls: "easy" },
+  { most: 0.6, text: "Medium", cls: "medium" },
+  { most: 0.999, text: "Hard", cls: "hard" },
+  { most: 1, text: "Very hard", cls: "very-hard" },
+];
+
+/** The word for a difficulty share, or null for a map no bot has run on yet. */
+export function difficultyLevel(difficulty) {
+  if (difficulty === null || difficulty === undefined || difficulty === "") return null;
+  const share = Number(difficulty);
+  return DIFFICULTY_LEVELS.find((level) => share <= level.most) || DIFFICULTY_LEVELS.at(-1);
+}
+
+/**
+ * "Easy" … "Very hard": the estimated difficulty, from how many of the board's
+ * bots took the map from the human's seat (game_summary.bot_wins/bot_runs). A
+ * config card passes its average (config_summary.avg_difficulty) and no counts.
+ * Not a link, like .bot-lead: it states an estimate, the sort is the way to use it.
+ */
+export function difficultyBadge(game, difficulty = game.difficulty) {
+  const level = difficultyLevel(difficulty);
+  if (!level) return null;
+  const title = game.bot_runs
+    ? `Estimated difficulty: ${game.bot_wins} of ${game.bot_runs} bots won this map from your seat.`
+    : `Estimated difficulty: on average ${Math.round((1 - Number(difficulty)) * 100)}% of the bots ` +
+      "won this setup's maps from your seat.";
+  return el("span", { class: `badge difficulty ${level.cls}`, title, text: level.text });
 }
 
 /**

@@ -4,14 +4,16 @@ import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, el, fogBadge,
-  embargoNote, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, difficultyBadge, el,
+  embargoNote, fogBadge, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
-import { bestBot, botOrder, botWatchKind, displayOrder, humanVsBots } from "./standings.mjs";
+import {
+  bestBot, botOrder, botWatchKind, compareScores, displayOrder, embargoLiftedAt, humanVsBots, leaderAt,
+} from "./standings.mjs";
 
 const heading = document.getElementById("setup");
 const tagsTarget = document.getElementById("setup-tags");
@@ -30,11 +32,13 @@ const sortKey = params.get("sort") === "lost" ? "lost" : "turns";
  * link's `by` field rather than to a poster, which names nobody to look up.
  */
 function nameCell(score) {
-  const posted = ((score.users && score.users.name) || "").trim();
+  const posted = postedName(score);
   return posted
     ? el("a", { class: "nm", href: userHref([posted]), text: posted })
     : el("span", { class: "nm", text: credit(score) });
 }
+
+const postedName = (score) => ((score.users && score.users.name) || "").trim();
 
 /**
  * Did the worker replay this score's log and get the same result? The embed is
@@ -54,7 +58,7 @@ function verifiedMark() {
   });
 }
 
-function scoreRow(score, rank, replays) {
+function scoreRow(score, rank, replays, lift) {
   const version = replays.get(score.match_id);
   const watchable = version === CURRENT_RULES_VERSION;
   const outdated = version !== undefined && !watchable;
@@ -65,6 +69,7 @@ function scoreRow(score, rank, replays) {
     el("span", { class: "who" }, [
       nameCell(score),
       ...(isVerified(score) ? [verifiedMark()] : []),
+      ...(lift && lift.score === score ? [revealMark(lift.at)] : []),
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
     // Watch (or its outdated-replay note) rides *inside* the result cell rather
@@ -77,6 +82,35 @@ function scoreRow(score, rank, replays) {
       ...(outdated ? [outdatedNote()] : []),
     ]),
     el("span", { class: "when", title: relativeTime(score.submitted_at), text: shortTime(score.submitted_at) }),
+  ]);
+}
+
+/**
+ * The score that held the record when the map's embargo lifted (`liftNote`).
+ */
+function revealMark(at) {
+  return el("span", {
+    class: "at-reveal",
+    title: `Ahead when the embargo lifted, ${relativeTime(at)}`,
+    text: "Led at reveal",
+  });
+}
+
+/**
+ * Who was ahead when the embargo lifted, and whether they still are — the
+ * result the embargo was a deadline for, which the full list alone would bury
+ * once someone has watched the replays and beaten it. Null on a map that never
+ * had an embargo, or had nothing counted by the time it lifted.
+ */
+function liftNote(lift, leader) {
+  if (!lift) return null;
+  const name = (score) => postedName(score) || credit(score);
+  const beaten = leader && compareScores(leader, lift.score) < 0;
+  return el("p", { class: "lede" }, [
+    `When the embargo lifted ${relativeTime(lift.at)}, `,
+    el("strong", { text: name(lift.score) }),
+    ` was ahead — ${lift.score.turns} turns. `,
+    beaten ? `Beaten since by ${name(leader)} — ${leader.turns} turns.` : "Still the record.",
   ]);
 }
 
@@ -372,19 +406,22 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note) {
   ].filter(Boolean).join(" · ");
   clear(sortTarget);
 
-  const lede = game.score_count
+  const ranked = game.best_turns != null;
+  const lede = ranked
     ? el("p", { class: "lede" }, [
         "Currently ahead: ",
         el("strong", { text: leaderCredit(game) }),
         ` — ${game.best_turns} turns. `,
         "Every other score, and every replay, stays hidden until the embargo lifts.",
       ])
-    : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
+    : game.score_count
+      ? el("p", { class: "lede", text: "No verified score yet. Every score, and every replay, stays hidden until the embargo lifts." })
+      : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
   const link = await freshPlayLink(game);
   clear(target).append(lede, ...mapActions(link, campaign, await note));
 
-  const best = game.score_count ? { turns: game.best_turns, lost: game.best_lost } : null;
+  const best = ranked ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);
 }
 
@@ -449,7 +486,8 @@ async function load() {
     const note = campaignNote(nodes[0], campaign);
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(
-      ...[configBadge(game), fogBadge(game), campaignBadge(campaign)].filter(Boolean), ...botChips(game));
+      ...[difficultyBadge(game), configBadge(game), fogBadge(game), campaignBadge(campaign)].filter(Boolean),
+      ...botChips(game));
 
     const embargo = embargoNote(game.embargo_until);
     if (embargo) {
@@ -457,36 +495,50 @@ async function load() {
       return;
     }
 
-    const scores = await select(
-      `scores?select=turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name),score_checks(verdict)` +
-        `&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
-    );
+    const [scores, counted] = await Promise.all([
+      select(
+        `scores?select=id,turns,lost,hand,by_name,submitted_at,raw_token,match_id,users(name),` +
+          `score_checks(verdict)&game_key=${eq(gameKey)}&order=turns.asc,lost.asc,submitted_at.asc`,
+      ),
+      select(`counted_scores?select=id&game_key=${eq(gameKey)}`),
+    ]);
+    const countedIds = new Set(counted.map((row) => row.id));
 
     subtitle.textContent = scores.length
       ? `${scores.length} ${scores.length === 1 ? "score" : "scores"} posted · first seen ${relativeTime(game.first_seen_at)}`
       : "No scores posted yet.";
     clear(sortTarget).append(sortToggle());
 
-    // The server order above (turns then lost then earliest submission) is
-    // exactly how the turns-leader is found, regardless of which ranking is
-    // on screen — "Play this map" always hands back that target, since the
-    // game itself compares turns first. A map with no scores yet (registered
-    // as a bare setup, never played through to a challenge) has no such token
-    // to reuse, so it falls back to the setup itself.
-    const link = scores.length ? playLink(scores[0].raw_token) : await freshPlayLink(game);
+    // The turns-leader is the first counted score in the server order above
+    // (turns then lost then earliest submission), game_summary's best,
+    // regardless of which ranking is on screen — "Play this map" always hands
+    // back that target, since the game itself compares turns first. A score
+    // that doesn't count for a crown isn't a target either. A map with no
+    // counted score (a bare setup, or nothing verified) has no such token to
+    // reuse, so it falls back to the setup itself.
+    const leader = scores.find((score) => countedIds.has(score.id)) || null;
+    const link = leader ? playLink(leader.raw_token) : await freshPlayLink(game);
+
+    // An embargo that has lifted: the stored reveal date, or the end of the
+    // campaign week this map was a node of (game_embargoes forgets a week once
+    // it is over, so it is read off the node instead).
+    const liftedAt = embargoLiftedAt(game.embargo_until, nodes.length ? nodes[0].week_start : null);
+    const ahead = liftedAt ? leaderAt(scores, countedIds, liftedAt) : null;
+    const lift = ahead ? { score: ahead, at: liftedAt } : null;
 
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
     const replays = await replayVersions(scores);
     clear(target).append(
-      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays))),
+      ...[liftNote(lift, leader)].filter(Boolean),
+      el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays, lift))),
       ...mapActions(link, campaign, await note),
     );
 
     // After the human table, and off the same fetch: the bots are context for
-    // the board above, not a board of their own. `scores[0]` is the turns-leader
+    // the board above, not a board of their own. `leader` is the turns-leader
     // whatever ranking is on screen, which is the one the verdict compares.
-    await renderBots(bots, scores.length ? scores[0] : null, game.settings_json);
+    await renderBots(bots, leader, game.settings_json);
   } catch (err) {
     target.classList.remove("loading");
     showError(target, err.message);

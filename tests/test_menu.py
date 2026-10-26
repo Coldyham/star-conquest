@@ -16,7 +16,7 @@ import pygame
 
 from starconquest import ai, combat, config, mapgen, menu
 from starconquest.menu import MenuState
-from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings
+from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, seed_top
 
 
 def _setup():
@@ -600,7 +600,8 @@ def test_combat_knobs_are_gone_from_advanced():
 # about what counts as chrome or one of them starts policing the other's buttons.
 _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "filename_field", "get_link", "browse_configs", "seed_field",
-           "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc"}
+           "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc",
+           "tutorial"}
 
 
 def test_the_node_stepper_takes_big_steps_past_a_standard_board():
@@ -612,6 +613,26 @@ def test_the_node_stepper_takes_big_steps_past_a_standard_board():
     # an off-grid count (a hand-edited token) rejoins the grid either way
     assert menu._node_step(big + 3, up=True) == big + step
     assert menu._node_step(big + 3, up=False) == big
+
+
+def test_the_node_stepper_moves_a_symmetric_map_between_sizes_it_can_build():
+    settings = Settings.defaults()
+    settings.mode, settings.layout, settings.players, settings.nodes = "symmetric", "core", 6, 10
+    assert settings.system_count() == 18          # what the row shows, not the 10 asked
+    menu._step_systems(settings, up=True)
+    assert (settings.nodes, settings.system_count()) == (24, 24)
+    menu._step_systems(settings, up=False)
+    assert (settings.nodes, settings.system_count()) == (18, 18)
+    menu._step_systems(settings, up=False)        # nothing smaller at six seats
+    assert (settings.nodes, settings.system_count()) == (18, 18)
+    for _ in range(100):
+        menu._step_systems(settings, up=True)
+    assert settings.nodes <= config.MAX_NODES
+    assert mapgen.symmetric_size(settings.nodes, 6, "core") == settings.system_count()
+    # a random map builds exactly what it is asked for, one system at a time
+    settings.mode, settings.nodes = "random", 10
+    menu._step_systems(settings, up=True)
+    assert settings.nodes == settings.system_count() == 11
 
 
 def test_the_lane_readout_describes_the_setup_being_shown():
@@ -910,6 +931,61 @@ def test_ai_tab_aux_slider_is_labelled_by_the_seat_strategy():
         pygame.quit()
 
 
+def test_choosing_another_strategy_starts_it_at_its_default_stop():
+    """An aux carried from the last strategy would mean something else to the
+    next (knower's old depth slider left 12s that would read as a top stop)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('knower')}")
+        assert settings.ai[1].aux == 12.0, "re-picking the same strategy changes nothing"
+        _click_key(screen, ms, settings, "strategy")
+        _click_key(screen, ms, settings, f"strategy_opt_{ms.strategies.index('actuary')}")
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("actuary", config.AI_AUX)
+    finally:
+        pygame.quit()
+
+
+def test_a_legacy_seat_shows_its_family_and_stop_until_its_stop_is_edited(monkeypatch):
+    """A seat stored as a bot since folded into a family (`ai.LEGACY`) keeps
+    its name, so its link's key never moves, and reads as the family at its
+    stop; a value past a knob's top shows the stop it plays (`ai.aux_over`)."""
+    screen, ms, settings = _setup()
+    ms.tab = "ai"
+    ai.load_models()
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, text, *a, **k):
+        drawn.append(text)
+        return real(surface, font, text, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    try:
+        _click_key(screen, ms, settings, "seat_2")
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert "knower · Council" in drawn
+        assert drawn[drawn.index("Oracle") + 1] == "Council"
+        assert settings.ai_strategy[1] == "council", "drawing never rewrites the seat"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "knower", 12.0
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert drawn[drawn.index("Oracle") + 1] == "Search"
+
+        settings.ai_strategy[1], settings.ai[1].aux = "council", 1.0
+        _drag_slider(screen, ms, settings, "ai_aux", 0.0)
+        assert (settings.ai_strategy[1], settings.ai[1].aux) == ("knower", 0)
+    finally:
+        pygame.quit()
+
+
 class _FakeSoftKeyboard:
     """Stand-in for the browser's hidden DOM field (see softkeyboard.py): holds a
     value, knows whether it has focus, and can be 'dismissed' like a Done key."""
@@ -970,7 +1046,13 @@ def test_pump_reads_soft_keyboard_text_and_filters_it(monkeypatch):
 
         fake.text = "9" * (menu._SEED_MAX_LEN + 4)
         menu.pump(ms, settings)
-        assert len(ms.seed_text) == menu._SEED_MAX_LEN
+        assert len(ms.seed_text) == menu._SEED_MAX_LEN - 1, "no seed from an era with no pool"
+        assert settings.seed == int("9" * (menu._SEED_MAX_LEN - 1))
+
+        top = str(seed_top())
+        fake.text = top + "1"
+        menu.pump(ms, settings)
+        assert ms.seed_text == top and settings.seed == seed_top()
 
         fake.gone = True                         # the keyboard's Done key
         menu.pump(ms, settings)
@@ -1143,6 +1225,23 @@ def test_share_replays_toggles_the_stored_preference(monkeypatch, tmp_path):
         pygame.quit()
 
 
+def test_ironman_toggles_the_stored_preference(monkeypatch, tmp_path):
+    """Off until switched on, and like the other local rows it never touches the
+    setup, so it cannot move `challenge_key()`."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        before = Settings.from_dict(settings.to_dict())
+        assert menu.webstore.ironman() is False
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is True
+        _click_key(screen, ms, settings, "ironman")
+        assert menu.webstore.ironman() is False
+        assert settings.to_dict() == before.to_dict()
+    finally:
+        pygame.quit()
+
+
 def test_a_refused_opt_in_says_so_rather_than_failing_silently(monkeypatch, tmp_path):
     monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "no" / "kv.json")
     screen, ms, settings = _setup()
@@ -1230,7 +1329,7 @@ def test_a_custom_map_hides_the_controls_it_decides():
             assert key not in ms.rects, key
         # ...and the rows that still mean something are untouched.
         for key in ("seed_field", "autoplay", "fog_of_war", "share_games",
-                    "animate_turns"):
+                    "animate_turns", "ironman"):
             assert key in ms.rects, key
     finally:
         pygame.quit()
@@ -1497,5 +1596,142 @@ def test_play_by_post_asks_on_confirm_with_the_roster_as_the_people(monkeypatch)
         assert ms.confirm_slow and asked == [{1, 2, 4}]
         assert _click_key(screen, ms, settings, "slow_go") == "play_by_post"
         assert ms.pbp_roster == {1, 2, 4}   # what main opens the match with
+    finally:
+        pygame.quit()
+
+
+def _tutorial_rows(ms):
+    return sorted(k for k in ms.rects if k.startswith("stage_"))
+
+
+def test_tutorial_lists_its_stages_and_opens_only_the_first(monkeypatch, tmp_path):
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        assert _click_key(screen, ms, settings, "tutorial") is None
+        assert ms.tutorial_open
+        menu.draw(screen, ms, settings)
+        g = menu.gauntlet.find(ms.gauntlets, "tutorial")
+        assert _tutorial_rows(ms) == [f"stage_{g.stages[0].id}"], "the rest are locked"
+        canvas = screen.get_rect().inflate(10_000, 10_000)
+        assert all(canvas.contains(r) for r in ms.rects.values())
+        assert _keydown(ms, settings, pygame.K_ESCAPE) is None
+        assert not ms.tutorial_open
+    finally:
+        pygame.quit()
+
+
+def test_picking_a_stage_stashes_your_setup_and_leaving_restores_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        settings.players, settings.seed = 5, 4242
+        mine = settings.to_dict()
+        _click_key(screen, ms, settings, "tutorial")
+        menu.draw(screen, ms, settings)
+        g = menu.gauntlet.find(ms.gauntlets, "tutorial")
+        first = g.stages[0]
+        action = _click_key(screen, ms, settings, f"stage_{first.id}")
+        assert action == "start"
+        assert ms.stage_at == ("tutorial", first.id) and not ms.tutorial_open
+        assert settings.to_dict() == menu.gauntlet.stage_settings(first).to_dict()
+        assert menu.active_stage(ms, settings) == (g, first)
+
+        # winning it opens the next, which loads over the first without
+        # re-stashing: the stash is still your own setup
+        keys = settings.challenge_keys()
+        menu.webstore.record_best(keys[0], 30, 2, *keys[1:])
+        found = menu.next_stage(ms, settings)
+        assert found is not None and found[1] == g.stages[1]
+        assert ms.stash == mine
+
+        menu.draw(screen, ms, settings)       # the banner draws for a live stage
+        settings.garrison_base += 1           # one knob moved: no longer the stage
+        assert menu.active_stage(ms, settings) is None
+        menu.draw(screen, ms, settings)       # ...and warns rather than locking
+        settings.garrison_base -= 1
+
+        _click_key(screen, ms, settings, "tutorial")
+        menu.draw(screen, ms, settings)
+        assert len(_tutorial_rows(ms)) == 2
+        _click_key(screen, ms, settings, "tutorial_leave")
+        assert ms.stage_at is None and ms.stash is None
+        assert settings.to_dict() == mine
+    finally:
+        pygame.quit()
+
+
+def test_leaving_after_editing_a_stage_keeps_the_edit(monkeypatch, tmp_path):
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "tutorial")
+        menu.draw(screen, ms, settings)
+        _click_key(screen, ms, settings, _tutorial_rows(ms)[0])
+        settings.nodes += 2
+        edited = settings.to_dict()
+        _click_key(screen, ms, settings, "tutorial")
+        _click_key(screen, ms, settings, "tutorial_leave")
+        assert settings.to_dict() == edited
+    finally:
+        pygame.quit()
+
+
+def test_a_challenge_link_is_never_a_stage(monkeypatch, tmp_path):
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "tutorial")
+        menu.draw(screen, ms, settings)
+        _click_key(screen, ms, settings, _tutorial_rows(ms)[0])
+        settings.challenge = Challenge(turns=9, lost=1, key=settings.challenge_key())
+        assert menu.active_stage(ms, settings) is None
+    finally:
+        pygame.quit()
+
+
+def test_a_stage_row_wins_over_the_widget_under_the_veil(monkeypatch, tmp_path):
+    """The menu's own rects stay recorded under the modal; a press on a stage
+    row that also lies over one of them is still the stage's."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "tutorial")
+        menu.draw(screen, ms, settings)
+        row = ms.rects[_tutorial_rows(ms)[0]]
+        under = next((r for k, r in ms.rects.items()
+                      if not k.startswith(menu._TUTORIAL_KEYS) and r.colliderect(row)), None)
+        assert under is not None, "the test needs a widget under the first row"
+        pos = row.clip(under).center
+        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1)
+        assert menu.handle_event(ev, ms, settings) == "start"
+    finally:
+        pygame.quit()
+
+
+def test_the_stage_list_says_where_progress_lives_on_the_web(monkeypatch, tmp_path):
+    """Bests are `localStorage` on the web: kept across a reload, gone with the
+    site's data. The list says so there, and fits; desktop has nothing to say."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, s, *a, **k):
+        drawn.append(s)
+        return real(surface, font, s, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    screen, ms, settings = _setup()
+    try:
+        for web in (False, True):
+            monkeypatch.setattr(menu, "is_web", lambda web=web: web)
+            ms.tutorial_open = False
+            _click_key(screen, ms, settings, "tutorial")
+            drawn.clear()
+            menu.draw(screen, ms, settings)
+            assert (menu._PROGRESS_NOTE in drawn) == web
+            canvas = pygame.Rect(0, 0, config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+            assert all(canvas.contains(r) for k, r in ms.rects.items()
+                       if k.startswith(menu._TUTORIAL_KEYS))
     finally:
         pygame.quit()

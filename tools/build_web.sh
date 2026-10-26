@@ -23,7 +23,8 @@ find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || 
 
 # --width/--height set the canvas framebuffer size: render at a high native
 # resolution so text/edges stay crisp instead of the browser upscaling pygbag's
-# 1280x720 default. Must match config.WEB_FB_W/WEB_FB_H (set_mode uses those).
+# 1280x720 default. Must match config.WEB_FB_W/WEB_FB_H, the boot size; the game
+# then reshapes the canvas to the viewport itself (main.web_framebuffer).
 # --ume_block 0 drops pygbag's "Ready to start! Please click/touch page" gate. It
 # waits for a tap so the browser will allow sound, and the game plays none; with
 # the board on the same site, it was one more stop on every trip back to the game.

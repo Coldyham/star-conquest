@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import json
+from pathlib import Path
 
 import pygame
 
@@ -23,6 +25,8 @@ from starconquest import (
     config,
     engine,
     fog,
+    gauntlet,
+    gauntletgen,
     mapgen,
     mapmaker,
     menu,
@@ -32,6 +36,7 @@ from starconquest import (
     replay,
     share,
     softkeyboard,
+    stats,
     turnfilm,
     viewstate,
     webstore,
@@ -41,7 +46,8 @@ from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.model import GameState, Order
 from starconquest.replay import GameLog
-from starconquest.settings import Challenge, Settings, build_state, resolve_seed
+from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_globals, build_state,
+                                   fog_off, random_seed, resolve_seed)
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
@@ -49,6 +55,10 @@ PLAY_MS = 350      # delay between turns while play/pause (P) is running
 # ...and while fast-forwarding: no wait at all, so the loop resolves a turn every
 # frame (config.FPS turns/second) instead of one per delay above.
 FAST_FORWARD_MS = 0
+# Web only: how often the loop re-reads the browser viewport to refit the canvas.
+# A poll rather than an event because pygbag swallows the page's resize itself
+# (it only restyles the canvas), and throttled because every read crosses into JS.
+WEB_VIEWPORT_POLL_MS = 250
 
 
 def build_view(state: GameState) -> WorldView:
@@ -101,6 +111,11 @@ def _apply_shared_link(settings: Settings) -> None:
         settings.copy_from(Settings.from_token(token))
     except ValueError:
         return          # stale or hand-edited link: keep the CLI/default config
+    if settings.challenge is not None and not settings.challenge.matches(settings):
+        # The setup and its score arrived together, so a key that no longer
+        # matches is an outdated checksum, not an edit: re-stamp it, or the menu
+        # asks to "change the challenge setup" on the very first click.
+        settings.challenge.key = settings.challenge_key()
     # Remember the *setup* only. Storing a challenge would make its score-to-beat
     # banner reappear on every later launch, long after the link was opened — the
     # target belongs to the session you opened it in.
@@ -116,7 +131,12 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     the games where a person sits somewhere else: a play-by-post client holds one
     seat, and which one is decided by the link they opened.
     """
-    ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay)
+    ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay,
+            ironman=webstore.ironman())
+    ui.seat_bots = seat_bot_labels(state)
+    if settings is not None:
+        ui.random_seats = frozenset(pid for pid in state.players if not state.players[pid].is_neutral
+                                    and settings.seat_strategy(pid) == RANDOM_STRATEGY)
     challenge = settings.challenge if settings is not None else None
     if challenge is not None and challenge.matches(settings):
         # Carry the target onto the Ui as plain numbers so the win overlay can say
@@ -130,13 +150,34 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     return ui
 
 
+def seat_bot_labels(state: GameState) -> dict[int, str]:
+    """``{pid: "Knower · Search"}`` for every seat: the bot it is set to play
+    (a legacy name read as its family), and the stop its knob sits on when the
+    knob names stops and the stop is not just the family's own name. Capitalised rather than title-cased, as `render`'s win
+    line does, so a drop-in keeps the shape its author gave its filename."""
+    labels: dict[int, str] = {}
+    for p in state.non_neutral_players():
+        if not p.ai_strategy:
+            continue
+        family, aux = ai.canonical(p.ai_strategy, p.ai_params.aux)
+        name = family[:1].upper() + family[1:]
+        stop = ai.aux_stop_name(family, aux)
+        # a stop that only repeats the family ("Thinker · Thinker") says nothing
+        labels[p.id] = f"{name} · {stop}" if stop and stop.lower() != family.lower() else name
+    return labels
+
+
 def _accumulate_fog(state: GameState, human_id: int, seen: set[int],
                     intel: dict[int, tuple[int, int, float]]) -> set[int]:
     """Fold one board's sighting into a running `seen` set and rival `intel`, and
     return the systems currently in full view. Mutates `seen`/`intel` in place so
     the same helper serves both the live turn loop and replaying a resumed game.
     """
-    if state.is_defeated(human_id):
+    if human_id == pbp.SPECTATOR or state.is_defeated(human_id):
+        # A spectator holds no seat to see *from* (`pbp.SPECTATOR` is neutral's
+        # id), and is only let in on a match with fog off, where every seat sees
+        # the whole board anyway (`pbp.Match.watchable`).
+        #
         # Knocked out: there is no territory left to observe *from*, so `fog.observe`
         # returns nothing and every remembered system falls back to a grey "?" — the
         # whole map, when fog was off. A defeated player is a spectator with nothing
@@ -168,13 +209,43 @@ def refresh_fog(state: GameState, ui: Ui) -> None:
     ui.visible = _accumulate_fog(state, ui.human_id, ui.seen, ui.player_intel)
 
 
-def _begin_game(settings: Settings) -> tuple[GameState, Ui, GameLog, int]:
+def _begin_game(settings: Settings, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None = None
+                ) -> tuple[GameState, Ui, GameLog, int]:
     """Roll the seed and open a fresh match — the single start path, shared by the
     menu's Start Game and the map creator's Play so the two cannot drift apart."""
     ai.load_models()   # pick up files added since launch / named by a loaded config
     seed = resolve_seed(settings)
-    state, ui, log = start_game(settings, seed, settings.autoplay)
+    state, ui, log = start_game(settings, seed, settings.autoplay, stage)
     return state, ui, log, seed
+
+
+def _briefing_again() -> str:
+    return "Tap here to read the briefing again" if config.touch_ui else "B: read the briefing again"
+
+
+def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
+             briefing: bool = True) -> None:
+    """Copy a gauntlet stage onto ``ui`` as plain values, so render never sees a
+    `Gauntlet`. ``stage`` is what `menu.active_stage` found for the setup being
+    played: None for an ordinary match, which leaves every stage field blank.
+    A Retry or a rewind keeps the stage but not the briefing, which was read
+    the first time round (B or the hint brings it back). Whether an earlier best
+    already meets the target is read now, so the win overlay can tell this
+    game's result from the stage's."""
+    if stage is None:
+        return
+    g, s = stage
+    ui.stage_label = f"{g.name} {g.position(s.id)}/{len(g.stages)} · {s.title}"
+    ui.stage_target = s.target
+    ui.stage_met_before = gauntlet.met(s, gauntlet.best(s))
+    ui.stage_title = s.title
+    ui.briefing = s.briefing
+    ui.briefing_open = briefing and bool(s.briefing)
+    # A stage with no hint of its own (a generated one, or one made on the board
+    # with the hint left blank) still needs a line in the panel to tap back to
+    # its briefing.
+    ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
+    ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
@@ -202,10 +273,14 @@ def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:
     ui.campaign_start = campaign.stamp(watch.status)
 
 
-def start_game(settings: Settings, seed: int, autoplay: bool) -> tuple[GameState, Ui, GameLog]:
+def start_game(settings: Settings, seed: int, autoplay: bool,
+               stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None = None
+               ) -> tuple[GameState, Ui, GameLog]:
     """Build a fresh match and open a replay log to record it into."""
     state = build_state(settings, seed)
-    return state, new_ui(state, autoplay, settings), replay.new_log(settings, seed, state)
+    ui = new_ui(state, autoplay, settings)
+    stage_ui(ui, stage)
+    return state, ui, replay.new_log(settings, seed, state)
 
 
 def resume_game(log: GameLog, settings: Settings, seat: int = 1) -> tuple[GameState, Ui]:
@@ -397,6 +472,128 @@ WATCH_UNREADABLE_MSG = "That replay downloaded but wouldn't open"
 WATCH_OUTDATED_MSG = "That replay was recorded under older rules and can't be shown exactly anymore"
 
 
+# A `#g=<id>` launch URL opens a gauntlet built on the board's gauntlet page
+# (`gauntlet.LINK_FRAGMENT`); `#gauntlet=<payload>` carries the whole file. Both
+# end on the menu's Tutorial list with that gauntlet picked.
+GAUNTLET_OPENING_MSG = "Opening gauntlet..."
+GAUNTLET_UNREACHABLE_MSG = "Couldn't fetch that gauntlet from the leaderboard"
+GAUNTLET_MISSING_MSG = "That gauntlet isn't on the leaderboard any more"
+GAUNTLET_UNREADABLE_MSG = "That gauntlet downloaded but wouldn't open"
+
+
+def gauntlet_request() -> tuple[str | None, dict | None]:
+    """``(id, None)`` for a ``#g=<id>`` launch URL, ``(None, file)`` for an
+    inline ``#gauntlet=`` one, else ``(None, None)``. Web only, like every other
+    fragment read."""
+    fragment = webstore.url_token()
+    return gauntlet.link_id(fragment), gauntlet.inline_data(fragment)
+
+
+def open_linked_gauntlet(menu_state: MenuState, settings: Settings,
+                         gid: str | None, data: dict | None) -> pbp.Request | None:
+    """Act on a gauntlet link at launch: open one already in hand, or start the
+    fetch and answer it for the loop to poll. A stored gauntlet never changes,
+    so one kept from an earlier visit opens straight away, offline included."""
+    if data is not None:
+        g = gauntlet.remember(data)
+        if g is not None:
+            menu.open_gauntlet(menu_state, settings, g.id)
+        return None
+    if gid is None:
+        return None
+    if any(g.id == gid for g in gauntlet.remembered()):
+        menu.open_gauntlet(menu_state, settings, gid)
+        return None
+    pending = gauntlet.fetch(gid)
+    if pending is None:
+        print(f"cannot fetch gauntlet {gid!r}: no endpoint is configured")
+        menu.set_status(menu_state, GAUNTLET_UNREACHABLE_MSG, False)
+    else:
+        menu.set_status(menu_state, GAUNTLET_OPENING_MSG, True)
+    return pending
+
+
+def land_gauntlet(menu_state: MenuState, settings: Settings, state: str, body: str) -> None:
+    """The gauntlet fetch answered: keep it and open the list, or say why not."""
+    data = gauntlet.from_reply(body) if state == pbp.OK else None
+    g = gauntlet.remember(data) if data is not None else None
+    if g is not None:
+        menu.set_status(menu_state, "", True)
+        menu.open_gauntlet(menu_state, settings, g.id)
+        return
+    print(f"gauntlet fetch ended in state {state!r}: {body[:120]!r}")
+    menu.set_status(menu_state,
+                    GAUNTLET_MISSING_MSG if state == pbp.MISSING
+                    else GAUNTLET_UNREADABLE_MSG if state == pbp.OK
+                    else GAUNTLET_UNREACHABLE_MSG, False)
+
+
+# A `#gauntlet-spec=` launch URL, built on the board's gauntlet page, generates a
+# gauntlet here (`gauntletgen`): every probe game played a slice per menu frame,
+# then the result kept and opened on the Tutorial list, as a `#g=` one is.
+GAUNTLET_GEN_MSG = "Generating a gauntlet: {pct:.0%} (games {done} of at most {total})"
+GAUNTLET_GEN_REFUSED_MSG = "Can't generate that gauntlet: {why}"
+GAUNTLET_GEN_EMPTY_MSG = "No generated map was won by any test bot: try a looser setup"
+# How long the generator may hold a menu frame. A probe turn is a few ms for
+# most bots, so this keeps the menu answering while it works.
+GAUNTLET_GEN_BUDGET_S = 0.03
+
+
+def spec_request(path: str) -> str:
+    """The launch's spec fragment: the address bar's on the web, or a
+    ``--gauntlet-spec`` file's contents on desktop."""
+    if not path:
+        return webstore.url_token()
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        print(f"--gauntlet-spec {path!r}: {err}")
+        return ""
+    return gauntletgen.spec_fragment(data) if isinstance(data, dict) else ""
+
+
+def start_generation(menu_state: MenuState, fragment: str) -> gauntletgen.Job | None:
+    """Start generating from a ``#gauntlet-spec=`` fragment, or None when the
+    fragment is not one (or the spec can never deal, which the status says)."""
+    data = gauntletgen.spec_from_fragment(fragment)
+    if data is None:
+        return None
+    ai.load_models()
+    try:
+        job = gauntletgen.job_from_link(data, random_seed())
+    except ValueError as err:
+        menu.set_status(menu_state, GAUNTLET_GEN_REFUSED_MSG.format(why=err), False)
+        return None
+    menu.set_status(menu_state, GAUNTLET_GEN_MSG.format(pct=0.0, done=0, total=job.total), True)
+    return job
+
+
+def pump_generation(menu_state: MenuState, settings: Settings,
+                    job: gauntletgen.Job) -> gauntletgen.Job | None:
+    """Play the generator on for one frame's budget; once done, keep the
+    gauntlet and open the Tutorial list on it. Returns the job while it runs.
+
+    A probe game goes through ``build_state``, which pushes its setup's knobs
+    into ``config``; the menu's own setup is pushed back after every slice, so
+    nothing the menu draws reads a probe's balance."""
+    try:
+        job.step(GAUNTLET_GEN_BUDGET_S)
+    finally:
+        apply_globals(settings)
+    if not job.done:
+        menu.set_status(menu_state, GAUNTLET_GEN_MSG.format(
+            pct=job.progress(), done=len(job.rows), total=job.total), True)
+        return job
+    data = job.result()
+    g = gauntlet.remember(data) if data is not None else None
+    if g is None:
+        menu.set_status(menu_state, GAUNTLET_GEN_EMPTY_MSG, False)
+        return None
+    menu.set_status(menu_state, f"Generated {g.name}: {len(g.stages)} stages", True)
+    menu.open_gauntlet(menu_state, settings, g.id)
+    return None
+
+
 def replay_request() -> str:
     """The match id in a ``#log=<id>`` launch URL, or ``""``.
 
@@ -418,6 +615,31 @@ def _decode_log(blob: str) -> GameLog | None:
     except ValueError:
         return None
     return log if log.turn_count else None
+
+
+def is_log_path(wanted: str) -> bool:
+    """True when a ``--watch`` argument names a file rather than a match id."""
+    return wanted.endswith(".json") or Path(wanted).expanduser().is_file()
+
+
+def read_game_log(raw: str) -> GameLog:
+    """The saved match a command-line flag names (``ValueError`` if it isn't one)."""
+    try:
+        log = replay.load(Path(raw).expanduser())
+    except OSError as exc:
+        raise ValueError(f"can't read {raw}: {exc.strerror or exc}") from exc
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError(f"{raw} is not a game log") from exc
+    if not log.settings:
+        raise ValueError(f"{raw} is not a game log")
+    return log
+
+
+def log_settings(log: GameLog) -> Settings:
+    """The setup ``log`` was played on, its seed included and its score to beat left out."""
+    settings = Settings.from_dict(log.settings).without_challenge()
+    settings.seed = log.seed
+    return settings
 
 
 def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] | None:
@@ -483,6 +705,7 @@ PBP_OPENING_MSG = "Opening the match..."
 PBP_LAPSED_MSG = "The deadline passed — filing the missing turns"
 PBP_UNOPENED_MSG = "Couldn't open a match — is the board reachable?"
 PBP_BAD_LOG_MSG = "The match's record doesn't match its orders — can't play it on"
+PBP_FOGGED_MSG = "That match has fog of war on, so it can't be spectated"
 
 # What the endpoint's own refusals mean from this side of the wire. Keyed by the
 # exact `error` string `pbp.mjs` sends; anything not here is relayed with a
@@ -523,6 +746,23 @@ def pbp_idle_floor(idle_ms: int) -> int:
     return min(idle_ms // PBP_IDLE_SHARE, PBP_IDLE_MAX_MS)
 
 
+# A spectator's screen is one nobody touches by design (a TV across the room), so
+# the idle floor above, which keys on input, would slow it from the start. It
+# keys on the match instead: while a turn has resolved or a seat has submitted
+# within the last half hour, it reads at the ordinary cadence and steps the
+# moment the last seat is in. Past that the table has gone quiet (or the tab was
+# left open on a match that runs for days) and it drops to the idle ceiling, a
+# twelfth of the reads. Any input brings it straight back, as it does for a player.
+PBP_SPECTATOR_QUIET_MS = 30 * 60_000
+
+
+def pbp_spectator_floor(quiet_ms: int, idle_ms: int) -> int:
+    """The soonest a spectator's next read may go: none while the match moved, or
+    the screen was touched, within ``PBP_SPECTATOR_QUIET_MS``; else the idle
+    ceiling."""
+    return 0 if min(quiet_ms, idle_ms) < PBP_SPECTATOR_QUIET_MS else PBP_IDLE_MAX_MS
+
+
 def pbp_poll_delay(failures: int) -> int:
     """How long to wait before the next read, after ``failures`` in a row.
 
@@ -541,6 +781,17 @@ def pbp_request() -> tuple[str, str] | None:
     equivalent, exactly as ``--watch`` is for ``#log=``.
     """
     return pbp.parse_link(webstore.url_token())
+
+
+def pbp_spectate_request() -> str | None:
+    """The match id a ``#spectate=<match>`` launch URL carries. ``--spectate``
+    is the desktop equivalent."""
+    return pbp.parse_spectate_link(webstore.url_token())
+
+
+def pbp_unwatchable(match: pbp.Match) -> str:
+    """Why a spectator link may not open ``match``, or "" when it may."""
+    return "" if match.watchable else PBP_FOGGED_MSG
 
 
 def pbp_adopt(match: pbp.Match, seat: pbp.Seat, ui: Ui) -> None:
@@ -579,8 +830,11 @@ def open_match(match: pbp.Match, seat: pbp.Seat, settings: Settings
     if log is None:
         return None
     state, ui = resume_game(log, settings, seat.seat)
-    ui.auto_forward = pbp.remembered_rules(match.match_id)
-    ui.prune_forward(state)
+    # A spectator holds no rules; any this device keeps for the match are a
+    # seat's, and stay where they are for when that seat is opened here again.
+    if not seat.spectating:
+        ui.auto_forward = pbp.remembered_rules(match.match_id)
+        ui.prune_forward(state)
     pbp.seat_people(state, match.seats)
     pbp_adopt(match, seat, ui)
     return state, ui, log
@@ -714,6 +968,13 @@ def pbp_seat_links(match_id: str, tokens: dict[int, str]) -> list[tuple[int, str
             for seat, token in sorted(tokens.items())]
 
 
+def pbp_spectate_link(match_id: str) -> str:
+    """The spectator link to ``match_id``: a full URL on the web, the bare
+    fragment off it, as ``pbp_seat_links`` does for a seat."""
+    fragment = pbp.spectate_fragment(match_id)
+    return webstore.link_url(fragment) or fragment
+
+
 def pbp_links(match_id: str, tokens: dict[int, str]) -> list[str]:
     """One line per seat: whose it is, and the link that seats them."""
     return [f"{config.player_name(seat)}: {link}"
@@ -838,6 +1099,18 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     # changes rather than as a position already arrived at.
     ui.history_turn = 0 if ui.watched else ui.history_max
     ui.history_reveal = state.winner is not None
+    # The end-of-game graphs: read once off the boards just built, and open by
+    # default on a finished game, where they are the summary the review is for.
+    ui.held_turn = None   # held marks are read afresh for this review
+    ui.history_chart = stats.chart(history_states)
+    if not ui.history_reveal:
+        # mid-game, a rival is charted only for the turns the top bar showed it
+        known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
+        ui.history_chart = stats.masked(ui.history_chart, known)
+    ui.history_graph = ui.history_reveal
+    ui.graph_full = False
+    ui.graph_hidden = set()
+    ui.dragging_graph = False
     return history_states, history_fog, history_events, live_fog
 
 
@@ -1012,7 +1285,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         record_best(settings, state, ui)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
-    if ui.in_pbp:
+    if ui.in_pbp and not ui.spectating:
         # A shared match's log goes up without our rules, so this device keeps its
         # own copy — the one a solo game gets from `log.record_turn` above.
         pbp.remember_rules(ui.pbp_match, ui.auto_forward)
@@ -1103,6 +1376,24 @@ def land_film(state: GameState, ui: Ui) -> None:
     if ui.deferred_view_snap:
         ui.deferred_view_snap = False
         ui.reset_view(state)
+
+
+def hold_history_marks(ui: Ui, history_states: list[GameState],
+                       history_fog: list, history_events: list) -> None:
+    """Hold the marks of the history turn on screen (`Ui.hold_marks`): its
+    fights' costs and finished hulls, read off the turn's events against the
+    board it started from, for what could be seen across it (everything, once
+    review is revealed)."""
+    i = ui.history_turn
+    if i <= 0 or i >= len(history_events) or i >= len(history_states):
+        ui.hold_marks(i, history_states[0], [], set())
+        return
+    board = history_states[i - 1]
+    if ui.history_reveal:
+        visible = set(board.systems)
+    else:
+        visible = set(history_fog[i - 1][0]) | set(history_fog[i][0])
+    ui.hold_marks(i, board, history_events[i], visible)
 
 
 def _next_history_film(ui: Ui, history_states: list[GameState],
@@ -1202,6 +1493,40 @@ def ui_scale_for(size: tuple[int, int], touch: bool, pct: int) -> float:
     return fit * config.TOUCH_UI_SCALE if touch else fit * pct / 100
 
 
+def web_framebuffer(css_w: int, css_h: int, dpr: float) -> tuple[int, int]:
+    """The canvas framebuffer for a canvas shown at ``css_w`` x ``css_h``.
+
+    The box's own shape, at its device resolution (so nothing is scaled and
+    text stays crisp) but never more pixels than ``WEB_FB_W`` x ``WEB_FB_H``,
+    which bounds the per-frame draw cost on a big high-DPI screen. pygbag fits
+    the canvas to the page keeping the framebuffer's aspect, so a fixed 16:9
+    surface was letterboxed in any other window and never reflowed at all; this
+    one fills it, and a resize or a rotation changes the surface size the main
+    loop already reflows on.
+    """
+    budget = (config.WEB_FB_W * config.WEB_FB_H / (css_w * css_h)) ** 0.5
+    k = min(max(dpr, 1.0), budget)
+    return max(1, round(css_w * k)), max(1, round(css_h * k))
+
+
+def fit_web_canvas() -> bool:
+    """Web only: resize the framebuffer to the browser viewport if it has moved.
+
+    Returns True if it changed. The new surface is picked up by the loop's reflow.
+    The canvas's on-screen box is ours, not pygbag's (``webstore.viewport``), so
+    nothing else needs telling.
+    """
+    view = webstore.viewport()
+    if view is None:
+        return False
+    size = web_framebuffer(*view)
+    screen = pygame.display.get_surface()
+    if screen is not None and screen.get_size() == size:
+        return False
+    pygame.display.set_mode(size)
+    return True
+
+
 def ui_size_key(event, pct: int) -> int | None:
     """The UI size a Ctrl +/−/0 press asks for, or None if ``event`` isn't one."""
     if not event.mod & pygame.KMOD_CTRL:
@@ -1224,12 +1549,21 @@ async def main() -> None:
     ap.add_argument("--players", type=int, default=config.DEFAULT_PLAYERS)
     ap.add_argument("--nodes", type=int, default=config.DEFAULT_NODES)
     ap.add_argument("--autoplay", action="store_true", help="AI plays all seats")
-    ap.add_argument("--watch", default="", metavar="MATCH_ID",
-                    help="download a posted replay and open it in history review "
-                         "(the desktop equivalent of a #log=<id> link)")
+    ap.add_argument("--watch", default="", metavar="MATCH_ID|FILE",
+                    help="open a replay in history review: a posted match id (the "
+                         "desktop equivalent of a #log=<id> link) or a saved games/ file")
+    ap.add_argument("--settings-from", default="", metavar="FILE",
+                    help="pre-fill the menu with a saved games/ file's setup and seed "
+                         "(replaces the map flags above)")
     ap.add_argument("--match", default="", metavar="MATCH:TOKEN",
                     help="open a play-by-post seat (the desktop equivalent of a "
                          "#pbp=<match>:<token> link)")
+    ap.add_argument("--spectate", default="", metavar="MATCH",
+                    help="watch a play-by-post match from no seat (the desktop "
+                         "equivalent of a #spectate=<match> link)")
+    ap.add_argument("--gauntlet-spec", default="", metavar="SPEC.json",
+                    help="generate a gauntlet from a spec file (the desktop equivalent "
+                         "of a #gauntlet-spec= link)")
     ap.add_argument("--no-menu", action="store_true",
                     help="skip the setup menu and start straight away with these args")
     # On Android the launcher may pass argv the parser doesn't recognise, and a
@@ -1238,6 +1572,12 @@ async def main() -> None:
     args = ap.parse_args([] if paths.is_android() else None)
 
     settings = Settings.from_args(args)
+    if args.settings_from:
+        try:
+            settings.copy_from(log_settings(read_game_log(args.settings_from)))
+        except ValueError as exc:
+            ap.error(str(exc))
+        settings.autoplay = settings.autoplay or args.autoplay
     _apply_shared_link(settings)   # web only: pre-fill from a #<token> in the URL
     ai.load_models()          # register any drop-in models/ strategies up front
 
@@ -1247,9 +1587,12 @@ async def main() -> None:
         # size can misbehave on mobile. The loop reads the actual size below.
         pygame.display.set_mode((0, 0))
     elif paths.is_web():
-        # Match pygbag's canvas framebuffer exactly so nothing is clipped; the
-        # browser scales this surface to fill the window/phone.
+        # Start at pygbag's own canvas size (the build's --width/--height), then
+        # take the viewport's shape: a framebuffer of any other aspect is
+        # letterboxed by pygbag rather than filling the window (see
+        # `web_framebuffer`). The loop keeps refitting it as the page resizes.
         pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        fit_web_canvas()
         # The canvas can land squashed to the wrong aspect ratio on first paint
         # (pygbag's own resize handler is what fits it, and that only runs on a
         # genuine `resize` event, never proactively) — nudge it once, after
@@ -1300,7 +1643,16 @@ async def main() -> None:
     # per frame, so waiting on a round trip here would freeze the canvas before
     # anything had been drawn.
     wanted = args.watch.strip() or replay_request()
-    pending_replay = share.fetch_log(wanted) if wanted else None
+    if wanted and is_log_path(wanted):
+        try:
+            local = read_game_log(wanted)
+        except ValueError as exc:
+            ap.error(str(exc))
+        if not local.turn_count:
+            ap.error(f"{wanted} has no turns to watch")
+        pending_replay = share.Download.ready(local.encoded())
+    else:
+        pending_replay = share.fetch_log(wanted) if wanted else None
     if wanted and pending_replay is None:
         print(f"cannot fetch replay {wanted!r}: no endpoint, or not a match id")
         menu.set_status(menu_state, WATCH_UNREACHABLE_MSG, False)
@@ -1324,6 +1676,7 @@ async def main() -> None:
     # instead of quietly rewriting the first.
     pbp_make: pbp.Request | None = None
     pbp_making = ""
+    pbp_watchable = False         # ...and whether its setup can be spectated
     pbp_accum = 0
     pbp_wait = PBP_POLL_MS        # how long `pbp_accum` runs before the next read
     pbp_failures = 0              # reads in a row that came back with no match
@@ -1332,6 +1685,8 @@ async def main() -> None:
     pbp_stale = False             # our resolve was refused: rebuild on the next read
     pbp_last: pbp.Match | None = None   # the latest read, which a brief merges into
     pbp_idle = 0                  # ms since the last input, which stretches the wait
+    pbp_quiet = 0                 # ms since the match last moved (a spectator's floor)
+    pbp_moved: tuple | None = None   # (turn, seats waited on) when it last moved
     # Every other seat's link, from a match *we* just created — handed to `Ui`
     # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
     # opens on the very first frame of the match rather than a status line that
@@ -1357,10 +1712,41 @@ async def main() -> None:
     elif args.match.strip() and invite is None:
         print(f"--match {args.match.strip()!r} is not a seat link")
         menu.set_status(menu_state, PBP_REFUSED_MSG, False)
+    # A `#spectate=<match>` link (or --spectate) watches one from no seat: the same
+    # read as a seat's, with nothing to identify and nothing ever written.
+    watching = (pbp.parse_spectate_link(pbp.SPECTATE_FRAGMENT + args.spectate.strip())
+                if args.spectate.strip() else pbp_spectate_request())
+    if watching is not None and pending_replay is None and invite is None:
+        pbp_seat = pbp.spectator(watching)
+        pbp_poll = pbp.fetch_state(watching)
+        if pbp_poll is None:
+            print(f"cannot watch match {watching!r}: no endpoint is configured")
+            menu.set_status(menu_state, PBP_UNREACHABLE_MSG, False)
+            pbp_seat = None
+        else:
+            invite = (watching, "")
+            menu.set_status(menu_state, "Opening match...", True)
+    elif args.spectate.strip() and watching is None:
+        print(f"--spectate {args.spectate.strip()!r} is not a match id")
+        menu.set_status(menu_state, PBP_MISSING_MSG, False)
+
+    # A `#g=<id>` or `#gauntlet=` link opens a gauntlet on the menu's Tutorial
+    # list. One fragment per launch, so it never meets the two above.
+    pending_gauntlet: pbp.Request | None = None
+    linked_gauntlet = False
+    if not args.no_menu and pending_replay is None and invite is None:
+        gid, inline = gauntlet_request()
+        linked_gauntlet = gid is not None or inline is not None
+        pending_gauntlet = open_linked_gauntlet(menu_state, settings, gid, inline)
+
+    gen_job: gauntletgen.Job | None = None
+    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
+        gen_job = start_generation(menu_state, spec_request(args.gauntlet_spec))
+        linked_gauntlet = gen_job is not None
 
     # If the last saved match was left unfinished, offer to resume it on the menu.
     resume_prompt: GameLog | None = None
-    if not args.no_menu and pending_replay is None and invite is None:
+    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         candidate = replay.latest_log()
         if candidate is not None and not candidate.finished and candidate.turn_count > 0:
             resume_prompt = candidate
@@ -1383,12 +1769,18 @@ async def main() -> None:
     # real input event; already "spent" (never fires) off the web build, so nothing
     # here needs its own is_web() check.
     resize_kicked = not paths.is_web()
+    viewport_accum = 0
     while running:
         # Capped, not raw: the frame that resolves a turn can run far longer than
         # a frame, and handing that whole stretch to the film it just started
         # would teleport the glide rather than advance it (`config.MAX_FRAME_MS`).
         dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
         pbp_idle += dt
+        if pending_gauntlet is not None:
+            gstate, gbody = pending_gauntlet.poll()
+            if gstate != pbp.PENDING:
+                pending_gauntlet = None
+                land_gauntlet(menu_state, settings, gstate, gbody)
         if pending_replay is not None:
             status, body = pending_replay.poll()
             if status != share.PENDING:
@@ -1461,6 +1853,9 @@ async def main() -> None:
                     pbp_poll = pbp.fetch_state(pbp_seat.match_id)
                     resume_prompt = None
                     pending_invite_links = pbp_seat_links(pbp_making, tokens)
+                    if pbp_watchable:
+                        pending_invite_links.append(
+                            (viewstate.SPECTATE_ROW, pbp_spectate_link(pbp_making)))
                     menu.set_status(menu_state, "Match created — copy each seat's link", True)
         if pbp_ident is not None and invite is not None:
             status, body = pbp_ident.poll()
@@ -1535,6 +1930,11 @@ async def main() -> None:
                           f"this build plays v{engine.RULES_VERSION}")
                     menu.set_status(menu_state, PBP_OUTDATED_MSG, False)
                     invite, pbp_seat = None, None
+                elif opening and pbp_seat.spectating and pbp_unwatchable(match):
+                    # Checked on the way in, from what the endpoint says about
+                    # the match, rather than trusted from the link.
+                    menu.set_status(menu_state, pbp_unwatchable(match), False)
+                    invite, pbp_seat = None, None
                 elif opening and (opened := open_match(match, pbp_seat,
                                                        settings)) is None:
                     menu.set_status(menu_state, PBP_BAD_LOG_MSG, False)
@@ -1554,7 +1954,13 @@ async def main() -> None:
                     pbp_read_line = ""
                     pbp_adopt(match, pbp_seat, ui)
                     verdict = pbp_verdict(match, state, pbp_stale)
-                    if verdict == PBP_WAIT and match.lapsed and pbp_write is None:
+                    if pbp_seat.spectating and verdict == PBP_RESOLVE:
+                        # Resolving writes the log every seat will be held to,
+                        # which takes a seat's token. A spectator waits for one
+                        # of the players' clients to do it, then steps.
+                        verdict = PBP_WAIT
+                    if (verdict == PBP_WAIT and match.lapsed and pbp_write is None
+                            and not pbp_seat.spectating):   # ...nor files a lapse
                         # The clock has run out on somebody. Filing their turn is
                         # what keeps a match from stopping dead because one person
                         # stopped answering; it does not resolve anything, so the
@@ -1619,12 +2025,19 @@ async def main() -> None:
             pbp_seat, pbp_poll, pbp_write, pbp_ident = None, None, None, None
             pbp_failures, pbp_wait, pbp_read_line = 0, PBP_POLL_MS, ""
             pbp_resolving = pbp_stale = False
-            pbp_last = None
+            pbp_last, pbp_moved, pbp_quiet = None, None, 0
         elif (ui is not None and pbp_seat is not None and pbp_poll is None
                 and pbp_ident is None and pbp_write is None and state is not None
                 and state.winner is None):
             pbp_accum += dt
-            if pbp_accum >= max(pbp_wait, pbp_idle_floor(pbp_idle)):
+            # A turn resolving or a seat submitting is the match moving, which
+            # is what keeps a spectator's reads quick (`pbp_spectator_floor`).
+            moved = (state.turn, ui.pbp_waiting)
+            pbp_quiet = 0 if moved != pbp_moved else pbp_quiet + dt
+            pbp_moved = moved
+            idle_floor = (pbp_spectator_floor(pbp_quiet, pbp_idle) if ui.spectating
+                          else pbp_idle_floor(pbp_idle))
+            if pbp_accum >= max(pbp_wait, idle_floor):
                 pbp_accum = 0
                 # A brief is only asked for when the board stands where our last
                 # read did; a board ahead of it (our own resolve) or a stale one
@@ -1633,6 +2046,13 @@ async def main() -> None:
                         and pbp_last.turn == state.turn else None)
                 pbp_poll = pbp.fetch_state(ui.pbp_match, have)
 
+        # Web: the surface only changes size when we resize it, so follow the page
+        # (not while F11's fullscreen mode owns it).
+        if paths.is_web() and not fullscreen:
+            viewport_accum += dt
+            if viewport_accum >= WEB_VIEWPORT_POLL_MS:
+                viewport_accum = 0
+                fit_web_canvas()
         # Reflow to fill the window whenever its size, or the UI size, changes.
         screen = pygame.display.get_surface()
         scale = ui_scale_for(screen.get_size(), touch, menu_state.ui_size)
@@ -1710,6 +2130,7 @@ async def main() -> None:
                     stamped = ui.campaign_start   # the same match, so the same start
                     state, ui = apply_rewind(log, settings, ui.history_turn)
                     ui.campaign_start = stamped
+                    stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     confirm_rewind = False
                     auto_accum = 0
@@ -1767,7 +2188,8 @@ async def main() -> None:
             if scene == "menu":
                 action = menu.handle_event(event, menu_state, settings)
                 if action == "start":
-                    state, ui, log, current_seed = _begin_game(settings)
+                    state, ui, log, current_seed = _begin_game(
+                        settings, menu.active_stage(menu_state, settings))
                     stamp_campaign(ui, menu_state.campaign_watch)
                     scene = "game"
                     auto_accum = 0
@@ -1784,6 +2206,7 @@ async def main() -> None:
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
                             menu_state.pbp_deadline_hours, menu_state.pbp_public,
                             menu_state.pbp_title, menu_state.pbp_name)
+                        pbp_watchable = fog_off(settings)
                         if pbp_make is None:
                             menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
                         else:
@@ -1839,7 +2262,8 @@ async def main() -> None:
                     # advances when the last seat submits, not when anybody
                     # presses a key. So this sends ours and waits (`input` already
                     # declines a second press while we are waiting).
-                    if pbp_seat is not None and pbp_write is None:
+                    if (pbp_seat is not None and not pbp_seat.spectating
+                            and pbp_write is None):
                         pbp_write = pbp_send(state, ui, pbp_seat)
                         # A read already in flight was asked before our orders
                         # existed, and landing after them it would put us back on
@@ -1862,10 +2286,19 @@ async def main() -> None:
             elif action == "toggle_fast_forward":
                 toggle_fast_forward(state, ui)   # spectating only; else a no-op
                 auto_accum = play_accum = 0
-            elif action == "restart":
+            elif action == "restart" and not ui.in_stage:
                 current_seed += 1
                 state, ui, log = start_game(settings, current_seed,
                                             carry_autoplay(ui))
+            elif action == "next_stage" and ui.offers_next_stage(state):
+                # The stage after this one, briefing and all. The menu's setup
+                # becomes that stage's, so going back to the menu lands on it.
+                found = menu.next_stage(menu_state, settings)
+                if found is not None:
+                    state, ui, log, current_seed = _begin_game(settings, found)
+                    stamp_campaign(ui, menu_state.campaign_watch)
+                    history_states, history_fog, history_events, live_fog = [], [], [], None
+                    auto_accum = 0
             elif action == "retry":
                 # Replay this exact match from the opening position: fork the
                 # log at turn 0 so the completed record stays intact, then
@@ -1882,6 +2315,7 @@ async def main() -> None:
                 state, ui = resume_game(log, settings)
                 if not was_watched:
                     stamp_campaign(ui, menu_state.campaign_watch)
+                    stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                 history_states, history_fog, history_events, live_fog = [], [], [], None
                 auto_accum = 0
             elif action == "toggle_route":
@@ -1898,13 +2332,17 @@ async def main() -> None:
                     # (the live board is untouched while reviewing, so no recompute).
                     ui.history = False
                     ui.dragging_scrubber = False
+                    ui.dragging_graph = False
+                    ui.history_chart = None
+                    ui.history_graph = ui.graph_full = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended
+                    ui.view.settle(config.LIVE_ROOM)   # back inside live play's (tighter) room
                     history_states, history_fog, history_events = [], [], []
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
                         live_fog = None
-                elif log is not None and log.turn_count > 0:
+                elif log is not None and log.turn_count > 0 and ui.can_review(state):
                     ui.clear_fading_marks()   # entering fresh: nothing from live play carries in
                     history_states, history_fog, history_events, entered = open_history(state, ui, log)
                     if entered is not None:
@@ -1927,6 +2365,7 @@ async def main() -> None:
                     state, ui = resume_game(log, settings)
                     if not was_watched:
                         stamp_campaign(ui, menu_state.campaign_watch)
+                        stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     auto_accum = 0
                 else:
@@ -2037,6 +2476,8 @@ async def main() -> None:
             # Soft-keyboard typing arrives outside the SDL event queue, so the
             # menu needs a per-frame poll as well as its event handler.
             menu.pump(menu_state, settings)
+            if gen_job is not None:
+                gen_job = pump_generation(menu_state, settings, gen_job)
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)
@@ -2066,6 +2507,8 @@ async def main() -> None:
                     ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
                 else:
                     ui.visible, ui.seen, ui.player_intel = history_fog[i]
+                if reel is None:
+                    hold_history_marks(ui, history_states, history_fog, history_events)
                 render.draw(screen, view_state, ui)
             else:
                 # Live play, and the same substitution: `resolve_turn` has already
@@ -2131,8 +2574,8 @@ def run() -> None:
     except KeyboardInterrupt:
         pygame.quit()
     except BaseException as exc:
-        if isinstance(exc, SystemExit) and exc.code in (0, None):
-            raise                 # a clean exit is not a crash
+        if isinstance(exc, SystemExit):
+            raise                 # a clean exit or a usage error is not a crash
         import traceback
         traceback.print_exc()     # -> terminal on desktop, browser console on web
         if not paths.is_web():

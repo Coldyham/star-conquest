@@ -1,0 +1,520 @@
+{
+  "_comment": "A gauntlet built by js/gauntlet-build.mjs from three real game links (tokens.json), stored as /api/gauntlet stores it, plus the same body as an inline #gauntlet= payload. Read by leaderboard/tests/gauntlet-build.test.mjs and tests/test_gauntlet.py. Regenerate: UPDATE_FIXTURES=1 node --test leaderboard/tests/gauntlet-build.test.mjs",
+  "draft": {
+    "name": "Fixture  run: three maps",
+    "stages": [
+      {
+        "title": "Warm  up",
+        "briefing": [
+          "Take every system.",
+          "  ",
+          "Neutrals   first."
+        ],
+        "hint": "Neutrals first.",
+        "settings": {
+          "mode": "random",
+          "players": 3,
+          "nodes": 18,
+          "seed": 42
+        },
+        "target": {
+          "turns": 14,
+          "lost": 3
+        }
+      },
+      {
+        "title": "",
+        "briefing": [],
+        "hint": "",
+        "settings": {
+          "mode": "symmetric",
+          "players": 4,
+          "nodes": 28,
+          "seed": 99991,
+          "ship_speed_growth_pct": 4,
+          "combat_jitter": 0.25,
+          "defender_advantage": 1.5,
+          "ai": [
+            {
+              "reserve_fraction": 0.25,
+              "reserve_floor": 2,
+              "expand_margin": 1.3,
+              "attack_margin": 1.5,
+              "reinforce_margin": 2,
+              "aux": 1
+            },
+            {
+              "reserve_fraction": 0.25,
+              "reserve_floor": 2,
+              "expand_margin": 1.3,
+              "attack_margin": 1.5,
+              "reinforce_margin": 2,
+              "aux": 2
+            }
+          ],
+          "ai_strategy": [
+            "heuristic",
+            "marshal"
+          ]
+        },
+        "target": {
+          "turns": 31,
+          "lost": 12,
+          "bot": "thinker",
+          "beat": true
+        }
+      },
+      {
+        "title": "Hand-made — café",
+        "briefing": [
+          "Ünïcode counts by code point."
+        ],
+        "hint": "Last one.",
+        "settings": {
+          "mode": "random",
+          "players": 3,
+          "nodes": 14,
+          "seed": 2024,
+          "custom_map": {
+            "v": 1,
+            "n": [
+              [
+                844,
+                120,
+                3,
+                12,
+                3
+              ],
+              [
+                401,
+                596,
+                4,
+                7,
+                0
+              ],
+              [
+                169,
+                694,
+                3,
+                7,
+                0
+              ],
+              [
+                764,
+                530,
+                4,
+                7,
+                0
+              ],
+              [
+                474,
+                378,
+                3,
+                8,
+                0
+              ],
+              [
+                551,
+                785,
+                4,
+                8,
+                0
+              ],
+              [
+                161,
+                476,
+                3,
+                12,
+                2
+              ],
+              [
+                343,
+                764,
+                4,
+                7,
+                0
+              ],
+              [
+                620,
+                613,
+                5,
+                4,
+                0
+              ],
+              [
+                896,
+                875,
+                3,
+                12,
+                1
+              ],
+              [
+                579,
+                132,
+                4,
+                7,
+                0
+              ],
+              [
+                654,
+                477,
+                5,
+                6,
+                0
+              ],
+              [
+                101,
+                857,
+                2,
+                9,
+                0
+              ],
+              [
+                461,
+                212,
+                2,
+                10,
+                0
+              ]
+            ],
+            "l": [
+              [
+                0,
+                10
+              ],
+              [
+                1,
+                2
+              ],
+              [
+                1,
+                4
+              ],
+              [
+                1,
+                5
+              ],
+              [
+                1,
+                7
+              ],
+              [
+                1,
+                8
+              ],
+              [
+                2,
+                6
+              ],
+              [
+                2,
+                7
+              ],
+              [
+                2,
+                12
+              ],
+              [
+                3,
+                8
+              ],
+              [
+                3,
+                11
+              ],
+              [
+                4,
+                11
+              ],
+              [
+                4,
+                13
+              ],
+              [
+                5,
+                7
+              ],
+              [
+                5,
+                8
+              ],
+              [
+                5,
+                9
+              ],
+              [
+                8,
+                11
+              ],
+              [
+                10,
+                13
+              ]
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "id": "fixture-run-three-b20a155e2c59",
+  "body": {
+    "id": "fixture-run-three-b20a155e2c59",
+    "name": "Fixture run: three maps",
+    "stages": [
+      {
+        "id": 0,
+        "title": "Warm up",
+        "briefing": [
+          "Take every system.",
+          "Neutrals first."
+        ],
+        "hint": "Neutrals first.",
+        "settings": {
+          "mode": "random",
+          "players": 3,
+          "nodes": 18,
+          "seed": 42
+        },
+        "target": {
+          "turns": 14,
+          "lost": 3
+        }
+      },
+      {
+        "id": 1,
+        "title": "",
+        "briefing": [],
+        "hint": "",
+        "settings": {
+          "mode": "symmetric",
+          "players": 4,
+          "nodes": 28,
+          "seed": 99991,
+          "ship_speed_growth_pct": 4,
+          "combat_jitter": 0.25,
+          "defender_advantage": 1.5,
+          "ai": [
+            {
+              "reserve_fraction": 0.25,
+              "reserve_floor": 2,
+              "expand_margin": 1.3,
+              "attack_margin": 1.5,
+              "reinforce_margin": 2,
+              "aux": 1
+            },
+            {
+              "reserve_fraction": 0.25,
+              "reserve_floor": 2,
+              "expand_margin": 1.3,
+              "attack_margin": 1.5,
+              "reinforce_margin": 2,
+              "aux": 2
+            }
+          ],
+          "ai_strategy": [
+            "heuristic",
+            "marshal"
+          ]
+        },
+        "target": {
+          "turns": 31,
+          "lost": 12,
+          "bot": "thinker",
+          "beat": true
+        }
+      },
+      {
+        "id": 2,
+        "title": "Hand-made — café",
+        "briefing": [
+          "Ünïcode counts by code point."
+        ],
+        "hint": "Last one.",
+        "settings": {
+          "mode": "random",
+          "players": 3,
+          "nodes": 14,
+          "seed": 2024,
+          "custom_map": {
+            "v": 1,
+            "n": [
+              [
+                844,
+                120,
+                3,
+                12,
+                3
+              ],
+              [
+                401,
+                596,
+                4,
+                7,
+                0
+              ],
+              [
+                169,
+                694,
+                3,
+                7,
+                0
+              ],
+              [
+                764,
+                530,
+                4,
+                7,
+                0
+              ],
+              [
+                474,
+                378,
+                3,
+                8,
+                0
+              ],
+              [
+                551,
+                785,
+                4,
+                8,
+                0
+              ],
+              [
+                161,
+                476,
+                3,
+                12,
+                2
+              ],
+              [
+                343,
+                764,
+                4,
+                7,
+                0
+              ],
+              [
+                620,
+                613,
+                5,
+                4,
+                0
+              ],
+              [
+                896,
+                875,
+                3,
+                12,
+                1
+              ],
+              [
+                579,
+                132,
+                4,
+                7,
+                0
+              ],
+              [
+                654,
+                477,
+                5,
+                6,
+                0
+              ],
+              [
+                101,
+                857,
+                2,
+                9,
+                0
+              ],
+              [
+                461,
+                212,
+                2,
+                10,
+                0
+              ]
+            ],
+            "l": [
+              [
+                0,
+                10
+              ],
+              [
+                1,
+                2
+              ],
+              [
+                1,
+                4
+              ],
+              [
+                1,
+                5
+              ],
+              [
+                1,
+                7
+              ],
+              [
+                1,
+                8
+              ],
+              [
+                2,
+                6
+              ],
+              [
+                2,
+                7
+              ],
+              [
+                2,
+                12
+              ],
+              [
+                3,
+                8
+              ],
+              [
+                3,
+                11
+              ],
+              [
+                4,
+                11
+              ],
+              [
+                4,
+                13
+              ],
+              [
+                5,
+                7
+              ],
+              [
+                5,
+                8
+              ],
+              [
+                5,
+                9
+              ],
+              [
+                8,
+                11
+              ],
+              [
+                10,
+                13
+              ]
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "inline": "eNq9UkuO4zgMvYrBNatgyZJ_BxjMotGrBnoRGIZiM4m6YtmQ6OoKCgH6ELOcC8xqDlE3mZMMpHSS_q1mMRsKFPnIR_K9gh2hhZ194dXTg1_dAx880cNW5kZoTXLQDSA4MxG08NslL_Ora7OUmE1mCYAQ2OwpQLt5TRVzBLZ8jJiPxk_ZugDC1lvaWbeHdgMfzBNl9Ez-lIVTYJoeAeE9rezNMWQ76wM_QodwsI6h_SmCEIjZun2A9hWmeYydvHHjPAHCcjQn8gHaAsHNY-Ql6gihEVolzwhs_J44Ynn1LsYVwnEODG1xPuNlCHEf4nv2d16_JhJO00Ts7fAtF3XjIm9cmqZpBEI42KUPC9HY7_38mQ_9MnBCDPO0Ndx_sszkoc0fpUYYaUduJN-b8dm4uHhoxaNGMDYdwFMg_0z9zpuB7eyuuNv_cZ49tBKBXhbjxn4yfm9dLFIgGGYzPH3zl5DW7WY_0O1bIpj1BVoRl_V_NpTnLg7aB_aGaX-KYjrQ6m3gtO_J-HAwR-h-deVCXK8sJMJ2jifkg3VP5OOFyTC07Fe6SUDeJfC7cePDZEbK_vnyRzaY3dtfP2j67U_39vcwj5QN8-o4ZNtTltxltu47Ob8zgbPZ0X8RsrqKR-YyKmQNPE_9ZJZY4Dmp1kG72dRKoZA5FigkFh1uVC5QNyUqrDDvcCPKBstGYfHVr0qFushvcVUpLKoaC6yTr7XAqtaovvqiFKiq8tJAdrgpVIGxyLVAKXMsRYEREv26KbGu9AUgYsWqQVHIO0ArVFWFGstLh1xgrSuU2FwYlQJlbIYix7zrEI5x0hxFyk4kBKpkdbJVsnWHG4llslWyIvFNgQJF5KJuT9yVTnk6JWhsIvlLXOQxoTufz935X4RylqA"
+}

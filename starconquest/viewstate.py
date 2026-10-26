@@ -6,10 +6,14 @@ stays pure. Shared by input.py (mutates it) and render.py (reads it).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
-from . import config, model, turnfilm
+from . import config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
+
+if TYPE_CHECKING:
+    from .gauntlet import Target
 
 # interaction modes
 IDLE = "idle"  # nothing selected
@@ -22,6 +26,10 @@ CHOOSING = "choosing"
 # or discards in one go, because it writes many rules at once and can overwrite
 # existing ones — too much to undo click-by-click the way a single send is.
 ROUTING = "routing"
+
+# The invite overlay's row for the spectator link (`Ui.pbp_invite`): not a seat,
+# so outside 1..6, and not 0, which `pbp_copy_seat` uses for "no row".
+SPECTATE_ROW = -1
 
 
 @dataclass(frozen=True)
@@ -44,8 +52,7 @@ class FadingFight:
     high_id: int | None
     at: float
     burst_color: tuple[int, int, int]
-    cost: int
-    victor: int | None
+    losses: tuple[tuple[int, int], ...]   # (owner, ships lost), in resolution order
 
 
 @dataclass(frozen=True)
@@ -57,6 +64,46 @@ class FadingHull:
     node_id: int
     hulls: int
     owner_id: int
+
+
+def read_marks(board: GameState, events: list[turnfilm.Event], sees, age_ms: float = 0.0
+               ) -> tuple[list[FadingFight], list[FadingHull]]:
+    """The marks a turn's ``events`` earn, read once: a fight's losses and a
+    finished hull, for whatever ``sees(sid)`` allows. ``board`` gives a hull's
+    owner, so it should be one from before the turn's fights (production comes
+    first). A second fight or hull at the same system supersedes the first, so
+    one place never carries two of a kind. Shared by the fading marks a film
+    leaves (`Ui.archive_marks`) and history's held ones (`Ui.hold_marks`).
+    """
+    fights: list[FadingFight] = []
+    hulls: list[FadingHull] = []
+    for event in events:
+        if isinstance(event, turnfilm.Clashed):
+            if not sees(event.low_id) and not sees(event.high_id):
+                continue
+            fights.append(FadingFight(
+                age_ms=age_ms, node_id=None, low_id=event.low_id, high_id=event.high_id,
+                at=event.at, burst_color=config.COLOR_TEXT,
+                losses=event.losses))
+        elif isinstance(event, turnfilm.Landed):
+            # `steps` is empty for a reinforcement or an unopposed landing —
+            # neither is a fight, so neither earns a mark.
+            if not event.steps or not sees(event.node_id):
+                continue
+            color = (config.COLOR_TEXT if event.owner_id == event.was_owner
+                     else config.player_color(event.owner_id))
+            fights = [f for f in fights if f.node_id != event.node_id]
+            fights.append(FadingFight(
+                age_ms=age_ms, node_id=event.node_id, low_id=None, high_id=None,
+                at=0.0, burst_color=color, losses=event.losses))
+        elif isinstance(event, turnfilm.Produced):
+            for sid, n in event.hulls:
+                if not sees(sid):   # a rival's yard is not ours to report
+                    continue
+                hulls = [h for h in hulls if h.node_id != sid]
+                hulls.append(FadingHull(age_ms=age_ms, node_id=sid, hulls=n,
+                                        owner_id=board.systems[sid].owner_id))
+    return fights, hulls
 
 
 def _clip_to_play(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
@@ -73,7 +120,7 @@ class Ui:
     view: WorldView
     human_id: int = 1
     mode: str = IDLE
-    selected: int | None = None  # source system id
+    selected: int | None = None  # any system, to read about; a send's source when ours (`source`)
     hover: int | None = None  # system under the cursor
     dest: int | None = None  # chosen destination system id
     chosen: int = 0  # ships the active one-shot send commits
@@ -97,6 +144,14 @@ class Ui:
     # (`forward_this_turn`, expanded by main.auto_forward_orders).
     auto_forward: dict[int, ForwardRule] = field(default_factory=dict)
     sel_forward: int | None = None  # source id of the rule being edited, if any
+    # source_id -> the turn a lane was last added to its rule from the popup (or
+    # a route confirmed through it). A rule set up this turn opens the popup on its
+    # Forward tab and a further lane splits it; one from an earlier turn is
+    # replaced outright by the next lane added (see `toggle_forward`).
+    forward_set_on: dict[int, int] = field(default_factory=dict)
+    # The rule a fresh compose replaced, kept so Cancel or the Send tab can put
+    # it back as it was: (source, rule). None when nothing was replaced.
+    forward_replaced: tuple[int, ForwardRule] | None = None
     # Route mode (see ROUTING above) has two sub-modes, both of which end in one
     # `route_plan` the player confirms. They differ only in how `model.flow_field`
     # is seeded, so everything downstream of the plan is shared.
@@ -174,6 +229,30 @@ class Ui:
     history_max: int = 0
     history_reveal: bool = False
     dragging_scrubber: bool = False
+    # End-of-game graphs over the reviewed map (`render._draw_history_graph`),
+    # docked over the map's lower part or, with `graph_full`, filling the whole
+    # space between the bars; the scrubber stays either way. `history_chart` is
+    # read off the history boards once, on entering review (`stats.chart`), and
+    # dropped on leaving it; `graph_metric` indexes `stats.METRICS`;
+    # `graph_hidden` is the seats whose lines the legend has switched off. Open
+    # by default on a finished game. `dragging_graph` is a held drag across the
+    # plot, which scrubs the turn like the track does.
+    history_chart: stats.Chart | None = None
+    # Which bot drives each seat, for the top bar's hover tooltip and the graph
+    # legend: ``{pid: "Knower · Search"}``, worked out once by `main.new_ui`
+    # (render imports no `ai` to name a stop with). `random_seats` were left to
+    # `settings.RANDOM_STRATEGY` and read "Random" until `bots_revealed`.
+    seat_bots: dict[int, str] = field(default_factory=dict)
+    random_seats: frozenset[int] = frozenset()
+    # The scoreboard entry under the pointer (or last tapped), and the entries'
+    # hit-rects as ``(pid, rect)``, rebuilt by render each frame.
+    score_hover: int | None = None
+    score_rects: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
+    history_graph: bool = False
+    graph_full: bool = False
+    graph_metric: int = 0
+    graph_hidden: set[int] = field(default_factory=set)
+    dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
     # being replayed and `film_ms` where in it we are — the read-only half, so a
     # frame stays a pure function of GameState + Ui + time. `film_ms` is advanced by
@@ -210,6 +289,11 @@ class Ui:
     # the moment that film is replaced.
     fading_fights: list[FadingFight] = field(default_factory=list)
     fading_hulls: list[FadingHull] = field(default_factory=list)
+    # History review's held marks: the turn on screen's, fixed rather than
+    # fading (`hold_marks`); `held_turn` is the turn they were read for.
+    held_fights: list[FadingFight] = field(default_factory=list)
+    held_hulls: list[FadingHull] = field(default_factory=list)
+    held_turn: int | None = None
     end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
     # autoplay drives turns itself); tested by input, like end_turn_rect.
@@ -277,6 +361,16 @@ class Ui:
     # once a match has a long history.
     history_prev_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     history_next_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The graphs' hit-rects: the bar's Graphs toggle, the ^/v fullscreen caret,
+    # the plot (click or drag to seek a turn), one tab per `stats.METRICS`
+    # entry, one legend row per seat as ``(pid, rect)`` (click to show or hide
+    # its line), and Show all.
+    graph_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    graph_full_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    graph_plot_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    graph_tab_rects: list[tuple[int, int, int, int]] = field(default_factory=list)
+    graph_trace_rects: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
+    graph_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Game-over overlay buttons (touch-reachable equivalents of the T/R/M keys),
     # rebuilt by render each frame and tested by input like the rects above.
     # `retry_button_rect` replays the very same match from the opening position
@@ -312,8 +406,9 @@ class Ui:
     # "a modal listing the seats with a Copy button each" rather than a status
     # line over a clipboard blob nobody thought to check (`main.pbp_seat_links`
     # fills it in, only on the creation path — following someone else's link
-    # never sets it). `(seat, link)` pairs; empty means there is nothing to show,
-    # which is what render/input gate the overlay's presence on.
+    # never sets it). `(seat, link)` pairs, plus `(SPECTATE_ROW, link)` when the
+    # match takes spectators; empty means there is nothing to show, which is
+    # what render/input gate the overlay's presence on.
     pbp_invite: tuple[tuple[int, str], ...] = ()
     pbp_invite_rects: dict[int, tuple[int, int, int, int]] = field(default_factory=dict)
     pbp_invite_close_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -321,6 +416,10 @@ class Ui:
     pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
     challenge_target: tuple[int, int] | None = None
     challenge_by: str = ""
+    # Ironman mode (`webstore.ironman`), stamped by `main.new_ui` when the match
+    # starts so neither render nor input reads the store once a frame. It only
+    # takes History away while the game is undecided — see `can_review`.
+    ironman: bool = False
     # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
     # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown
@@ -330,6 +429,31 @@ class Ui:
     # (`campaign.stamp`), carried onto a posted score as `Challenge.campaign`.
     # Blank for a match nobody looked up, or one resumed from a save.
     campaign_start: str = ""
+    # A gauntlet stage (the tutorial's, say) this match is playing, as plain
+    # values `main` copies off the stage when the match starts, so render never
+    # sees a `Gauntlet`. `stage_label` ("Tutorial 3/10 · Defender's edge") is None
+    # for an ordinary match, and is what every other stage control is gated on.
+    # The briefing card is up over the board while `briefing_open`; any press
+    # closes it and the hint line in the side panel (`stage_hint_rect`) opens it
+    # again. `has_next_stage` puts Next stage where New map was on the win
+    # overlay: a stage's seed is pinned, so a new map would leave the stage.
+    # `stage_target` is the stage's `gauntlet.Target` (a plain value), and
+    # `stage_met_before` whether a best filed before this match already meets it.
+    stage_label: str | None = None
+    stage_title: str = ""
+    briefing: tuple[str, ...] = ()
+    briefing_open: bool = False
+    stage_hint: str | None = None
+    has_next_stage: bool = False
+    stage_target: Target | None = None
+    stage_met_before: bool = False
+    next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The system whose star info card (`starlore`) is up over the board, or None.
+    # The i button beside a selected system's name in the side panel
+    # (`lore_button_rect`) and the I key open it; any press closes it.
+    lore_sid: int | None = None
+    lore_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
@@ -417,41 +541,35 @@ class Ui:
         what fog does afterward, rather than blinking out mid-fade the moment the
         next turn's own `film_visible` happens to differ.
         """
-        for event in events:
-            if isinstance(event, turnfilm.Clashed):
-                if not self.sees(event.low_id) and not self.sees(event.high_id):
-                    continue
-                self.fading_fights.append(FadingFight(
-                    age_ms=0.0, node_id=None, low_id=event.low_id, high_id=event.high_id,
-                    at=event.at, burst_color=config.COLOR_TEXT,
-                    cost=event.cost, victor=event.victor))
-            elif isinstance(event, turnfilm.Landed):
-                # `steps` is empty for a reinforcement or an unopposed landing —
-                # neither is a fight, so neither earns a mark.
-                if not event.steps or not self.sees(event.node_id):
-                    continue
-                color = (config.COLOR_TEXT if event.owner_id == event.was_owner
-                         else config.player_color(event.owner_id))
-                # A second fight at the same system supersedes the first. Turns
-                # chain straight into each other, so the previous one's mark can
-                # still be fading here, and two bursts with two costs stacked on
-                # one node read as a garbled number rather than as two fights.
-                self.fading_fights = [f for f in self.fading_fights
-                                      if f.node_id != event.node_id]
-                self.fading_fights.append(FadingFight(
-                    age_ms=0.0, node_id=event.node_id, low_id=None, high_id=None,
-                    at=0.0, burst_color=color, cost=event.cost, victor=event.victor))
-            elif isinstance(event, turnfilm.Produced):
-                for sid, hulls in event.hulls:
-                    if not self.sees(sid):   # a rival's yard is not ours to report
-                        continue
-                    # ...and the same for a yard finishing a hull two turns
-                    # running: one `+N`, not a pile of them.
-                    self.fading_hulls = [h for h in self.fading_hulls
-                                         if h.node_id != sid]
-                    self.fading_hulls.append(FadingHull(
-                        age_ms=0.0, node_id=sid, hulls=hulls,
-                        owner_id=board.systems[sid].owner_id))
+        fights, hulls = read_marks(board, events, self.sees)
+        # A second fight (or hull) at the same system supersedes the first.
+        # Turns chain straight into each other, so the previous one's mark can
+        # still be fading here, and two bursts with two costs stacked on one
+        # node read as a garbled number rather than as two fights.
+        taken = {f.node_id for f in fights if f.node_id is not None}
+        self.fading_fights = [f for f in self.fading_fights if f.node_id not in taken] + fights
+        built = {h.node_id for h in hulls}
+        self.fading_hulls = [h for h in self.fading_hulls if h.node_id not in built] + hulls
+
+    def hold_marks(self, turn: int, board: GameState, events: list[turnfilm.Event],
+                   visible: set[int]) -> None:
+        """History review: the marks of the turn on screen, held there rather
+        than fading, so a fight can be found without stepping back and forth.
+        ``board`` is the turn's starting board and ``visible`` what could be
+        seen across it (its start and end, as a film's `sees`). Read once per
+        turn (``turn`` keys it). Drawn while no film runs (`shown_marks`)."""
+        if self.held_turn == turn:
+            return
+        self.held_turn = turn
+        settled = float(config.FILM_FLASH_MS)   # a burst done popping in, not yet fading
+        self.held_fights, self.held_hulls = read_marks(board, events, visible.__contains__, settled)
+
+    def shown_marks(self) -> tuple[list[FadingFight], list[FadingHull]]:
+        """The marks the map draws: in history with no film running, the held
+        marks of the turn on screen; otherwise the fading ones a film left."""
+        if self.history and self.film is None:
+            return self.held_fights, self.held_hulls
+        return self.fading_fights, self.fading_hulls
 
     def age_fading_marks(self, dt: float) -> None:
         """Advance every fading mark's clock and drop whatever has fully
@@ -494,7 +612,62 @@ class Ui:
             points = [s.pos for sid, s in state.systems.items() if sid in self.seen]
         self.view.fit_to(points)
 
+    def graph_seats(self) -> tuple[int, ...]:
+        """The seats the graphs' legend offers: every seat once review is
+        revealed (a finished game), else ours and each rival the top bar has
+        shown at some turn — mid-game the chart is `stats.masked` to the turns
+        each was in sight, so a never-sighted rival has no curve to offer."""
+        chart = self.history_chart
+        if chart is None:
+            return ()
+        if self.history_reveal:
+            return chart.seats
+        return tuple(pid for pid in chart.seats if pid == self.human_id or chart.sighted(pid))
+
+    def bots_revealed(self, state: GameState) -> bool:
+        """May a random seat's bot be named? Only once the game is decided — on
+        the board itself, or in review of a finished game, whose boards are all
+        undecided but one. A knocked-out spectator still waits: the bot is half
+        of what the remaining seats are playing against."""
+        return state.winner is not None or (self.history and self.history_reveal)
+
+    def bot_label(self, state: GameState, pid: int) -> str | None:
+        """What drives ``pid`` as the HUD names it, or None for neutral and for a
+        seat a person holds (on this board: one claimed later still read as a bot
+        on the turns before). A random seat reads "Random" until
+        `bots_revealed`, then its bot with "(random)" after it."""
+        player = state.players.get(pid)
+        if player is None or player.is_neutral or player.is_human:
+            return None
+        bot = self.seat_bots.get(pid)
+        if pid in self.random_seats:
+            if not self.bots_revealed(state):
+                return "Random"
+            return f"{bot} (random)" if bot else "Random"
+        return bot
+
+    def graph_traces(self) -> tuple[int, ...]:
+        """The seats whose lines the graphs draw: offered and not hidden."""
+        return tuple(pid for pid in self.graph_seats() if pid not in self.graph_hidden)
+
+    def toggle_trace(self, pid: int) -> None:
+        """Show or hide ``pid``'s line on the graphs."""
+        if pid in self.graph_hidden:
+            self.graph_hidden.discard(pid)
+        elif pid in self.graph_seats():
+            self.graph_hidden.add(pid)
+
     # -- spectating --------------------------------------------------------- #
+    def can_review(self, state: GameState) -> bool:
+        """Is History (and so rewind) available?
+
+        It needs a recorded turn to scrub through, and under ironman it waits for
+        the game to be decided: reviewing is where a bad turn gets rewound. Render
+        gates the footer button on this and main gates entering on it, so the H
+        key and the button can never disagree.
+        """
+        return state.turn > 0 and not (self.ironman and state.winner is None)
+
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?
 
@@ -510,6 +683,17 @@ class Ui:
     def in_pbp(self) -> bool:
         """Whether this is a shared match rather than a game of our own."""
         return bool(self.pbp_match)
+
+    @property
+    def spectating(self) -> bool:
+        """Whether we are watching a shared match from no seat at all.
+
+        A spectator sits at neutral's id (``pbp.SPECTATOR``), which no person
+        holds, so nothing on the board is ours: input takes no orders, the End
+        Turn block says so instead, and the whole board is in view
+        (``main._accumulate_fog``).
+        """
+        return self.in_pbp and self.human_id == 0
 
     def awaiting_others(self, state: GameState) -> bool:
         """Whether to hold the board and say we are waiting.
@@ -550,9 +734,37 @@ class Ui:
         return (state.winner == self.human_id and self.hand_turns > 0
                 and not self.watched and not self.in_pbp)
 
+    @property
+    def in_stage(self) -> bool:
+        return self.stage_label is not None
+
+    def met_target(self, state: GameState) -> bool:
+        """Does this win meet the stage's target (any win, with none)?"""
+        if self.stage_target is None:
+            return True
+        return self.stage_target.met((state.turn, state.players[self.human_id].ships_lost))
+
+    def stage_cleared(self, state: GameState) -> bool:
+        """Is the stage cleared once this win is filed? `main.record_best` files
+        it on the same `can_post` gate, and a stage is cleared by a best that
+        meets its target (`gauntlet.cleared`): this game's, or an earlier one."""
+        return self.can_post(state) and (self.stage_met_before or self.met_target(state))
+
+    def offers_next_stage(self, state: GameState) -> bool:
+        """Is Next stage on the win overlay? Only for a win that leaves the stage
+        cleared (`stage_cleared`), so the button never leads to a stage the list
+        would still show locked."""
+        return self.in_stage and self.has_next_stage and self.stage_cleared(state)
+
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:
-        """Ships already promised out of a system by queued (not yet run) orders."""
+        """Ships already promised out of a system by queued (not yet run) orders.
+
+        Nothing while reviewing history: the queue is for the live board, and
+        taking it off a past board's garrison would show counts that never were
+        (sending all 20 out of a system now read as -18 on a turn it held 2)."""
+        if self.history:
+            return 0
         return sum(o.ships for o in self.pending if o.source_id == sid)
 
     def available(self, state: GameState, sid: int) -> int:
@@ -638,6 +850,7 @@ class Ui:
         self.dest = dest
         self.mode = CHOOSING
         self.forward_armed = False
+        self.forward_replaced = None  # a replace by an earlier compose is committed
         self.editing_existing = False  # this popup created its own subject
         self.chosen = max(0, avail)
         self.popup_pos = None  # fresh target -> auto-place the popup
@@ -730,23 +943,44 @@ class Ui:
     def send_half(self, state: GameState) -> None:
         self.set_send_count(state, self._active_cap(state) // 2)
 
+    def forwarded_this_turn(self, state: GameState, sid: int) -> bool:
+        """Was ``sid``'s standing rule set up this turn? Such a rule opens the
+        popup on its Forward tab, and a lane added to it splits it."""
+        return sid in self.auto_forward and self.forward_set_on.get(sid) == state.turn
+
+    def opens_on_forward(self, state: GameState, sid: int) -> bool:
+        """Should a send composed from ``sid`` open on the Forward tab? When it
+        has no ships to send now (forwarding future production is the only useful
+        action), or when it already forwards by a rule set up this turn."""
+        return self.available(state, sid) == 0 or self.forwarded_this_turn(state, sid)
+
     def toggle_forward(self, state: GameState) -> None:
         """Flip the active send between a one-shot order (sized by `chosen`) and
-        a lane of the source's standing rule. Arming adds the lane with
-        `model.shares_with` — the only lane gets 100%, a second makes it 50/50 —
-        and disarming takes it back out with `model.shares_without`, so trying the
-        Forward tab and leaving it puts the other lanes back as they were."""
+        a lane of the source's standing rule.
+
+        Arming onto a rule set up this turn adds the lane with `model.shares_with`
+        (a second makes it 50/50); arming onto one from an earlier turn replaces it
+        with this lane alone at 100%, hold 0, keeping the old rule aside. Disarming
+        undoes either — `model.shares_without`, or the old rule put back — so trying
+        the Forward tab and leaving it leaves the system as it was."""
         if self.mode != CHOOSING or self.selected is None or self.dest is None:
             return
         self.forward_armed = not self.forward_armed
+        sid = self.selected
         if self.forward_armed:
             if self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
                 del self.pending[self.sel_order]
             self.sel_order = None
-            rule = self.auto_forward.setdefault(self.selected, ForwardRule())
-            rule.shares = model.shares_with(rule.shares, self.dest)
+            old = self.auto_forward.get(sid)
+            if old is not None and not self.forwarded_this_turn(state, sid):
+                self.forward_replaced = (sid, old)
+                self.auto_forward[sid] = ForwardRule({self.dest: 100})
+            else:
+                rule = self.auto_forward.setdefault(sid, ForwardRule())
+                rule.shares = model.shares_with(rule.shares, self.dest)
+            self.forward_set_on[sid] = state.turn
         else:
-            self._drop_lane(self.selected, self.dest)
+            self._unarm_lane(sid, self.dest)
             cap = self._active_cap(state)
             if cap > 0:
                 self.chosen = max(1, min(cap, self.chosen))
@@ -777,6 +1011,16 @@ class Ui:
             for dest in [d for d in self.auto_forward[sid].shares if self.lane_is_hostile(state, d)]:
                 self._drop_lane(sid, dest)
 
+    def _unarm_lane(self, sid: int, dest: int) -> None:
+        """Undo arming the composed lane: put back a rule it replaced, else take
+        the lane back out of the rule it joined."""
+        if self.forward_replaced is not None and self.forward_replaced[0] == sid:
+            self.auto_forward[sid] = self.forward_replaced[1]
+            self.forward_set_on.pop(sid, None)  # the old rule predates this turn
+            self.forward_replaced = None
+        else:
+            self._drop_lane(sid, dest)
+
     def _drop_lane(self, sid: int, dest: int) -> None:
         """Take one lane out of ``sid``'s rule, handing its share to the others, and
         drop the rule with its last lane."""
@@ -792,7 +1036,7 @@ class Ui:
         tab that is the one lane being edited; the system's other lanes stay."""
         if self.forward_armed:
             if self.selected is not None and self.dest is not None:
-                self._drop_lane(self.selected, self.dest)
+                self._unarm_lane(self.selected, self.dest)
         elif self.sel_order is not None and 0 <= self.sel_order < len(self.pending):
             del self.pending[self.sel_order]
         self._close_send()
@@ -813,6 +1057,7 @@ class Ui:
             return
         self.sel_order = None
         self.forward_armed = False
+        self.forward_replaced = None
         self.dest = None
         self.chosen = 0
         self.popup_pos = None
@@ -834,6 +1079,7 @@ class Ui:
             state.winner is None
             and not state.is_defeated(self.human_id)
             and not self.autoplay
+            and not self.spectating
         )
 
     def begin_route(self) -> None:
@@ -1175,9 +1421,17 @@ class Ui:
                 self.clear_forward(sid)
         for src, rule in plan.items():
             self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold)
+            self.forward_set_on[src] = state.turn
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
+    def source(self, state: GameState) -> int | None:
+        """The selected system when it is ours to send from, else None. Any system
+        can be selected, to read about it in the side panel; only ours sends."""
+        if self.selected in state.systems and state.systems[self.selected].owner_id == self.human_id:
+            return self.selected
+        return None
+
     def reset_selection(self) -> None:
         """Drop all selection/composition state. Committed orders/rules survive
         (they live in `pending`/`auto_forward`), so this only closes the popup."""
@@ -1187,6 +1441,7 @@ class Ui:
         self.chosen = 0
         self.sel_order = None
         self.forward_armed = False
+        self.forward_replaced = None
         self.editing_existing = False
         self.popup_pos = None
         self.dragging_popup = False
@@ -1283,6 +1538,7 @@ class Ui:
     def clear_forward(self, sid: int) -> None:
         """Remove the standing auto-forward rule out of a system, if any."""
         self.auto_forward.pop(sid, None)
+        self.forward_set_on.pop(sid, None)
         if self.sel_forward == sid:
             self.sel_forward = None
 

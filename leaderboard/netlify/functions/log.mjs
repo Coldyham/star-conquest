@@ -90,9 +90,9 @@ const WINDOW_MS = 60 * 60 * 1000;
 const MAX_PER_WINDOW = 30;
 const seen = new Map();
 
-export function rateLimited(key, now = Date.now(), store = seen) {
+export function rateLimited(key, now = Date.now(), store = seen, max = MAX_PER_WINDOW) {
   const fresh = (store.get(key) || []).filter((at) => now - at < WINDOW_MS);
-  if (fresh.length >= MAX_PER_WINDOW) {
+  if (fresh.length >= max) {
     store.set(key, fresh);
     return true;
   }

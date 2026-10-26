@@ -132,7 +132,13 @@ a { color: var(--cyan); }
 .actions { display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem; }
 .actions .btn { text-align: center; }
 
-/* Every page's own links (Play, All maps, Shared matches, Enter score, plus a
+/* Play stays out of the menu, beside it: the site root opens the board, so a
+ * first visit lands here, and the game (and its Tutorial button) must be one
+ * tap away rather than behind a dropdown or a challenge link. It wears `.play`,
+ * the board's gold door back into the game. */
+.bar-end { display: flex; align-items: center; gap: 0.75rem; }
+
+/* Every page's other links (All maps, Shared matches, Enter score, plus a
  * runtime "My scores") collapse into one `<details>` menu rather than a row of
  * buttons — a row grows with every feature that earns its own page, and on a
  * phone it wrapped onto a second line under the brand. Native <details> needs
@@ -329,6 +335,9 @@ h1::after {
 .badge:hover { background: #240a1a; }
 .chip { color: var(--dim); }
 .chip:hover { color: var(--cyan); border-color: var(--cyan); }
+/* A bot off its default stop: "knower · council", each half its own filter. */
+.chip.pair a { color: inherit; text-decoration: none; }
+.chip.pair a:hover { color: var(--cyan); }
 
 /* No human score beats this map's best bot yet — cyan for "machine", the same
  * convention .score.bot uses on a map's own page. Not a link: it states a
@@ -336,6 +345,86 @@ h1::after {
 .badge.bot-lead { border-color: var(--cyan); color: var(--cyan); cursor: help; }
 .badge.bot-lead:hover { background: #08232a; }
 .badge.bot-lead.tied { border-style: dashed; }
+
+/* The estimated difficulty (format.mjs's difficultyBadge), in ski-piste
+ * colours: green, blue, red, black. Black is a filled badge with a light
+ * outline, since a black outline vanishes on the board. Not a link, same as
+ * .bot-lead. */
+.badge.difficulty { cursor: help; }
+.badge.difficulty.easy { border-color: var(--green); color: var(--green); }
+.badge.difficulty.medium { border-color: #4f8dff; color: #4f8dff; }
+.badge.difficulty.hard { border-color: var(--bad); color: var(--bad); }
+.badge.difficulty.very-hard { border-color: var(--ink); color: var(--ink); background: #000; }
+.badge.difficulty:hover { background: transparent; }
+.badge.difficulty.very-hard:hover { background: #000; }
+
+/* A setup's pace (home.mjs's paceBadge): an estimate, so dashed, and in the
+ * dim ink — it describes the setup rather than ranking it. Not a link. */
+.badge.pace { border-color: var(--dim); border-style: dashed; color: var(--ink); cursor: help; }
+.badge.pace:hover { background: transparent; }
+
+/* "By family" (home.mjs's familyCard): one card per family, a row per config
+ * indented by its depth in the tree, with a rail down the indent. Edit chips
+ * say what changed from the parent, coloured by kind of change. */
+.card.family { padding: 0; }
+.card.family:hover { background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%); }
+.family-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding: 0.9rem 1.1rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+.family-head .card-meta { margin-top: 0; }
+.family-name {
+  font-family: var(--pixel);
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: var(--cyan);
+}
+.family-member {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.7rem 1.1rem 0.7rem calc(1.1rem + var(--depth, 0) * 1.4rem);
+  background-image: repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 1.4rem);
+  background-size: calc(var(--depth, 0) * 1.4rem) 100%;
+  background-position: 1.1rem 0;
+  background-repeat: no-repeat;
+}
+.family-member + .family-member { border-top: 1px dashed #1c1838; }
+.family-member.dim { opacity: 0.4; }
+.family-member-main { min-width: 0; display: grid; gap: 0.35rem; }
+.family-member-main .card-tags { margin-top: 0.1rem; }
+.family-link { display: grid; color: var(--ink); text-decoration: none; }
+.family-link:hover .setup { color: var(--cyan); }
+.family-link .credit { margin-top: 0; font-size: 0.8rem; }
+.family-maps {
+  flex: 0 0 auto;
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  line-height: 1.9;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+.edits { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.3rem; }
+.edit {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid currentColor;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.edit-size { color: var(--cyan); }
+.edit-tempo { color: var(--gold); }
+.edit-shape { color: var(--magenta); }
+.edit-rules { color: var(--green); }
+.edit-fog { color: #b18cff; }
+.edit-bots { color: var(--ink); }
+.edit-rescale { color: var(--bg); background: var(--gold); border-color: var(--gold); }
 
 /* This map's replays are still embargoed (games.embargo_until) — gold for
  * "wait", the same tone .play already uses for the door back into the game.
@@ -357,6 +446,21 @@ h1::after {
 /* This browser's player has a score here (their best, from me.mjs's name). */
 .badge.mine { border-color: var(--green); color: var(--green); cursor: help; }
 .badge.mine:hover { background: #0a2412; }
+
+/* A title read out by a tap (js/tip.mjs): touch screens show no hover
+ * tooltip, so a tap on a titled badge that isn't a link opens this instead. */
+.tip {
+  position: absolute;
+  z-index: 50;
+  max-width: min(20rem, calc(100vw - 16px));
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--cyan);
+  background: var(--cabinet);
+  color: var(--ink);
+  font: 0.8rem/1.45 var(--mono);
+  box-shadow: 0 3px 0 #1b2036;
+  pointer-events: none;
+}
 
 /* -- the main list's search, sort and filters (js/home.mjs's controls) ------ */
 .list-controls {
@@ -406,6 +510,14 @@ h1::after {
   text-decoration: none;
 }
 .filters .clear:hover { color: var(--bad); }
+/* How many the filtered list holds, under the controls. */
+.match-count {
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  margin: 0 0 1.25rem;
+}
 
 .config-head:empty { display: none; }
 /* Title on the left, the way to play it on the right — the button sits on the
@@ -556,6 +668,7 @@ h1::after {
 
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
+.bar-end .play { margin-top: 0; }   /* the header's Play, beside the menu */
 .map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 
 /* game.html on a live campaign node: the campaign panel's lines (js/campaign.mjs's
@@ -854,6 +967,8 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   /* Stacked, the menu button sits at the left, so the panel hangs from its left
    * edge; pinned right, it would grow off the screen. */
   .menu > .actions { left: 0; right: auto; }
+  /* ...and Menu leads, so it keeps the screen's edge as it does on desktop. */
+  .bar-end { flex-direction: row-reverse; }
   .brand { font-size: 1.05rem; }
   main { padding-top: 1.5rem; }
   h1 { font-size: 1.15rem; }
@@ -969,6 +1084,16 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 /* A score whose replay the worker checked (score_checks.verdict = 'verified'). */
 .verified { margin-left: 0.35em; color: var(--green); cursor: help; }
 
+/* The score that was ahead when the map's embargo lifted (game.mjs's revealMark). */
+.at-reveal {
+  margin-left: 0.6em;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  cursor: help;
+  border-bottom: 1px dotted currentColor;
+  white-space: nowrap;
+}
+
 /* -- the weekly campaign (campaign.html) --------------------------------- */
 .campaign-status { margin: 0 0 1rem; color: var(--dim); }
 .campaign-map svg { display: block; width: 100%; height: auto; }
@@ -1011,20 +1136,57 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .notice strong { color: var(--green); }
 .notice .updated { color: var(--dim); font-size: 0.9em; }
 
+/* -- the Badges panel (user.html) ----------------------------------------- */
+/* Earned badges in gold; locked ones dimmed but still readable, since the hint
+ * on a locked badge is the point: it says what to try next. */
+.badges-panel { margin: 2rem 0 1rem; }
+.medals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.4rem 1.5rem;
+}
+.medal-group-title {
+  margin: 0.8rem 0 0.4rem;
+  font-family: var(--pixel);
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.medal-list { margin: 0; padding: 0; list-style: none; }
+.medal {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-top: 1px dashed rgba(42, 35, 80, 0.9);
+}
+.medal-mark { flex: none; width: 1.2em; text-align: center; }
+.medal-text { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.medal-title { font-family: var(--pixel); font-size: 0.7rem; line-height: 1.8; text-transform: uppercase; }
+.medal-how { color: var(--dim); font-size: 0.85rem; }
+.medal.got .medal-mark, .medal.got .medal-title { color: var(--gold); }
+.medal.locked { opacity: 0.6; }
+.medal.unknown { opacity: 0.4; }
+
 /* -- the Playstyle panel (user.html) -------------------------------------- */
 /* A native <details>, closed by default; the heading is its summary, with our
  * own marker since the browsers' differ. */
 .playstyle-panel { margin: 2.5rem 0 1.5rem; }
-.playstyle-panel > summary { cursor: pointer; list-style: none; }
-.playstyle-panel > summary::-webkit-details-marker { display: none; }
-.playstyle-panel > summary .section-title { display: inline; margin: 0; }
-.playstyle-panel > summary .section-title::before {
+.playstyle-panel > summary, .badges-fold > summary { cursor: pointer; list-style: none; }
+.playstyle-panel > summary::-webkit-details-marker,
+.badges-fold > summary::-webkit-details-marker { display: none; }
+.playstyle-panel > summary .section-title,
+.badges-fold > summary .section-title { display: inline; margin: 0; }
+.playstyle-panel > summary .section-title::before,
+.badges-fold > summary .section-title::before {
   content: "▸ ";
   display: inline-block;
   width: 1.2em;
 }
-.playstyle-panel[open] > summary .section-title::before { content: "▾ "; }
-.playstyle-panel[open] > summary { margin-bottom: 0.6rem; }
+.playstyle-panel[open] > summary .section-title::before,
+.badges-fold[open] > summary .section-title::before { content: "▾ "; }
+.playstyle-panel[open] > summary, .badges-fold[open] > summary { margin-bottom: 0.6rem; }
 .playstyle-note { margin: 0 0 0.8rem; color: var(--dim); }
 .playstyle-wrap { overflow-x: auto; margin: 0 0 2rem; }
 .playstyle {
@@ -1060,3 +1222,103 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   .playstyle tbody th { width: 42%; }
   .playstyle td { white-space: normal; font-size: 0.85rem; }
 }
+
+/* -- the gauntlet builder (gauntlet.html) ----------------------------------- */
+/* Free text the author writes and a player reads: shown as typed, not in the
+ * form's shouting capitals. */
+.gauntlet-form input.plain, .gauntlet-form textarea.plain {
+  text-transform: none;
+  font-family: var(--mono);
+  letter-spacing: 0;
+  word-break: normal;
+}
+.gauntlet-form textarea.plain[id$="-link"] { word-break: break-all; }
+.gauntlet-form label.check {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  text-transform: none;
+}
+.gauntlet-form .count {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-align: right;
+}
+.gauntlet-form .count.over { color: var(--bad); }
+.stages { display: flex; flex-direction: column; gap: 1.25rem; margin: 1.5rem 0 1rem; }
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.5rem 1rem 1rem;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--panel) 0%, #090c1c 100%);
+}
+.stage legend {
+  padding: 0 0.5rem;
+  color: var(--gold);
+  font-family: var(--pixel);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+.gauntlet-form .row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.5rem; }
+.stage-tools { justify-content: flex-end; margin-top: 0; }
+.stage-summary { margin: 0.25rem 0 0; color: var(--green); font-size: 0.85rem; }
+.stage-summary.bad { color: var(--bad); }
+.stage-summary .warn { color: var(--gold); }
+.stage-summary a { color: var(--magenta); }
+.gauntlet-form .result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  padding: 0 1rem 1rem;
+  border: 1px solid var(--green);
+}
+.gauntlet-form #problem { color: var(--gold); }
+.gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
+
+/* -- the generate form (gauntlet.html) --------------------------------------- */
+.gen { margin: 1.5rem 0; }
+.gen summary { cursor: pointer; color: var(--gold); }
+.gen .row input[type="number"] { width: 6rem; }
+.gen-bots { border: 1px solid var(--line); padding: 0.5rem 1rem; margin: 0.5rem 0; }
+.gen-bots legend { padding: 0 0.5rem; color: var(--gold); }
+.gen-bots #gen-opponents { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+/* The generate form's sliders: tabs and headings fold away; each knob is two
+   range inputs over one track, only their thumbs taking a press. */
+.gen-tab, .gen-group { border: 1px solid var(--line); padding: 0.25rem 0.75rem; margin: 0.5rem 0; }
+.gen-group { border-style: dashed; }
+.gen-tab > summary, .gen-group > summary { cursor: pointer; color: var(--gold); padding: 0.25rem 0; }
+.gen-group > summary { color: var(--dim); }
+.gen .count { color: var(--dim); font-size: 0.9em; }
+.gen .knob { margin: 0.5rem 0; }
+.gen .knob select { width: 100%; }
+.gen .knob-head { display: flex; justify-content: space-between; gap: 1rem; }
+.gen .knob-head .readout { color: var(--gold); white-space: nowrap; }
+.gen .dual { position: relative; height: 2.25rem; }
+.gen .dual .track, .gen .dual .fill {
+  position: absolute; top: 50%; height: 4px; transform: translateY(-50%); border-radius: 2px;
+}
+.gen .dual .track { left: 0; right: 0; background: var(--line); }
+.gen .dual .fill { background: var(--gold); }
+.gen .dual input[type="range"] {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0;
+  background: none; pointer-events: none; -webkit-appearance: none; appearance: none;
+}
+.gen .dual input[type="range"]::-webkit-slider-runnable-track { background: none; }
+.gen .dual input[type="range"]::-moz-range-track { background: none; }
+.gen .dual input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto; -webkit-appearance: none; appearance: none; width: 1.5rem; height: 1.5rem;
+  border-radius: 50%; background: var(--gold); border: 2px solid #0b0a1a; cursor: pointer;
+}
+.gen .dual input[type="range"]::-moz-range-thumb {
+  pointer-events: auto; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: var(--gold); border: 2px solid #0b0a1a; cursor: pointer;
+}
+.gen .dual input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
+.gen .dual input[type="range"]:disabled::-moz-range-thumb { background: var(--dim); }
+.gen-group > .mini { margin: 0.25rem 0 0.5rem; }

@@ -29,7 +29,8 @@ DEFAULT_OUT = ROOT / "web" / "board"
 
 PAGES = (
     "index.html", "game.html", "submit.html", "user.html", "pbp.html",
-    "crowns.html", "campaign.html", "account.html", "privacy.html",
+    "crowns.html", "campaign.html", "gauntlet.html", "gauntlets.html",
+    "account.html", "privacy.html",
 )
 STATIC_FILES = ("favicon.png",)
 STATIC_DIRS = ("css", "js", "fonts")

@@ -25,6 +25,7 @@ from . import paths
 from .paths import (
     WEB_ANIMATE_TURNS_KEY,
     WEB_BESTS_KEY,
+    WEB_IRONMAN_KEY,
     WEB_PBP_NAME_KEY,
     WEB_SHARE_GAMES_KEY,
     WEB_SHARED_SETTINGS_KEY,
@@ -136,6 +137,18 @@ def set_animate_turns(on: bool) -> bool:
     """Store the preference. False if the store refused it, which the menu says out
     loud rather than letting a setting quietly forget itself."""
     return set(WEB_ANIMATE_TURNS_KEY, "1" if on else "0")
+
+
+def ironman() -> bool:
+    """Whether the player has ironman mode on: no History button while a game is
+    undecided, so no rewinding a turn that went badly. Honour-based (nothing is
+    recorded or posted about it) and off unless switched on, like `share_games`."""
+    return get(WEB_IRONMAN_KEY) == "1"
+
+
+def set_ironman(on: bool) -> bool:
+    """Store the preference. False if the store refused it."""
+    return set(WEB_IRONMAN_KEY, "1" if on else "")
 
 
 # The sizes the UI-size control steps through, as percentages of the fitted scale.
@@ -390,6 +403,49 @@ def trigger_resize() -> bool:
         return True
     except Exception:
         return False
+
+
+# The canvas fills the page; the framebuffer is then sized from its measured box.
+_CANVAS_STYLE = {"position": "fixed", "left": "0", "top": "0", "right": "0",
+                 "bottom": "0", "margin": "0", "width": "100%", "height": "100%"}
+
+
+def viewport() -> tuple[int, int, float] | None:
+    """Web only: the canvas's on-screen size in CSS pixels, and the device pixel ratio.
+
+    What ``main.web_framebuffer`` sizes the framebuffer from. The game manages the
+    canvas itself: pygbag's own fit keeps the framebuffer's aspect, so it would
+    letterbox (or, racing a resize, stretch) any other shape. Each call tells
+    pygbag to keep its hands off (``user_canvas_managed``), styles the canvas to
+    fill the page, and *measures* the box that results, so the framebuffer always
+    has the shape it is shown at whatever the page's viewport meta says.
+    None off the web or if the DOM can't be read; the caller keeps its size.
+    """
+    if not is_web():
+        return None
+    import platform as _platform
+
+    try:
+        win = _platform.window
+        canvas = win.canvas
+    except Exception:
+        return None
+    try:
+        win.python.config.user_canvas_managed = 1
+    except Exception:
+        pass
+    try:
+        for prop, value in _CANVAS_STYLE.items():
+            setattr(canvas.style, prop, value)
+    except Exception:
+        pass
+    try:
+        rect = canvas.getBoundingClientRect()
+        w, h = int(rect.width), int(rect.height)
+        dpr = float(win.devicePixelRatio or 1.0)
+    except Exception:
+        return None
+    return (w, h, dpr) if w > 0 and h > 0 else None
 
 
 def url_token() -> str:

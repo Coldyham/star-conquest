@@ -3,8 +3,9 @@
 `models/knower.py` is the oracle bot. It predicts every rival by running that
 rival's real `decide`, then searches over candidate openings. This file covers
 why the oracle is possible, what it buys, the depth search and its horizon
-(Oracle: Off / Predict / Search), the borrowed candidates, and the cost of a
-decide, which drives the slow-setup warning. Roster-wide rules (margins,
+(Oracle: Off / Predict / Search), the borrowed candidates, the cost of a
+decide, which drives the slow-setup warning, and what Search does with a
+garrison a borrowed opening leaves to die. Roster-wide rules (margins,
 measurement method, leaderboard replays at `replay_aux`) are in
 [`bots.md`](bots.md). marshal's results against knower are in
 [`marshal.md`](marshal.md), "Where marshal stands". Index:
@@ -128,12 +129,19 @@ What it says:
 
 ## Built, measured, removed
 
-- **Pricing three-way pile-ups.** The oracle knows who else lands on a node this
-  turn, so knower can fold the pile-up with the jitter pinned against it and
-  demand enough mass to survive it. 71% vs 72% head-to-head over 200 games, and
-  33 vs 35 wins in a 3-player free-for-all: a wash, if anything worse. It makes
-  knower skip attacks it cannot overpay for, and this game rewards the leaner
-  strike (the same finding that set thinker's margins).
+- **Pricing three-way pile-ups (2026-08-05).** The oracle knows who else lands
+  on a node this turn, so knower can fold the pile-up with the jitter pinned
+  against it and demand enough mass to survive it. 71% vs 72% head-to-head over
+  200 games, and 33 vs 35 wins in a 3-player free-for-all: a wash, if anything
+  worse. It makes knower skip attacks it cannot overpay for, and this game
+  rewards the leaner strike (the same finding that set thinker's margins). This
+  was the attack side only, measured on the one-turn knower (before the depth
+  search) and **under the old pile-up rule**, where the garrison queued by size
+  among the attackers. Since 2026-09-10 the attackers fold among themselves and
+  the survivor faces the garrison last, so this result says nothing about the
+  current rule. Re-measured under it, with the defensive side too, in *Pile-ups
+  under the garrison-fights-last rule* (2026-10-21): null at Predict, Search
+  and Council.
 - **Striking perishable targets first.** A vacated garrison refills, so ordering
   targets by how much of theirs is leaving looks obviously right. It changes
   nothing: 118-45 vs 119-45 over 200 games, 35 vs 36 in the free-for-all.
@@ -217,7 +225,8 @@ At 40-80 games a cell, treat anything within ~10 points as unresolved.
 ## Borrowed candidates (`EXTERNAL_CANDIDATES`)
 
 Four now: rusherplus, heuristic, marshal, claudebot (see the search above for what
-the last two bought). How often each wins E's search, over every decision of the
+the last two bought); Council borrows actuary and evolved after them
+(`COUNCIL_CANDIDATES`). How often each wins E's search, over every decision of the
 games above (the land-grab included, so the default share is inflated — see below):
 
     6 ly    default 54%  rusherplus 12%  marshal 11%  timid 9%  heuristic 8%  claudebot 5%
@@ -264,7 +273,144 @@ still listed in `POSTURE_VARIANTS`, outside the width.
 
 actuary was measured as a fifth candidate (10.4% of contested picks, its move
 distinct from the default 91% of the time) but is not in the list; see
-[`actuary.md`](actuary.md), "As one of knower's borrowed candidates".
+[`actuary.md`](actuary.md), "As one of knower's borrowed candidates". What it is
+worth in games, beside evolved's, is in "evolved as a borrowed candidate (2026-10-19)".
+
+## evolved as a borrowed candidate (2026-10-19)
+
+"Borrowed candidates" credits a candidate with the moves it proposes that
+knower's four phases cannot express, not with its strength: rusherplus ranks
+last on the ladder and wins more contested searches than any other borrowed
+bot. evolved tests that claim from the other side. It ranks third of six, and it
+plays unlike the roster ([`evolved.md`](evolved.md), "Where it stands": its
+nearest bot is 0.35 away in duels, where every roster bot but rusherplus has one
+within 0.12-0.23).
+
+**How it was measured** (`tools/candidate_bench.py`). evolved at Look-ahead Off,
+`("evolved", 0.0)`, appended after every other borrowed opening (after actuary
+at Council) for one seat, which played knower at the same stop on every seating
+of each map. A seat whose candidate proposes nothing plays bit-identically to
+knower at both stops (`tests/test_candidate_bench.py`), so the null is exactly
+the fair share and every point off it is the candidate's. At Council the
+candidate's line is played on by evolved, as every borrowed candidate's is.
+Look-ahead Off because the plain policy answers in well under a millisecond,
+while the look-ahead's 50 ms wall-clock guard would make knower's plan depend on the
+clock, and at Council every rolled turn of evolved's line would pay 8-34 ms for
+it. Guards lifted, the six `evo_bench` cells, 50 seeds a cell. The screen's block
+lies inside the seeds evolved was trained and selected on (2,000,000 to
+5,400,000; [`evolved.md`](evolved.md), "Measuring it"), and the other two lie
+outside it. Main moved knower's Search ("A doomed garrison leaves whole") and
+marshal while this ran, so the last block was played on the tree after them
+(`play_rev` a5f404b5).
+
+Points above the fair share, z over seeds:
+
+| Cell | Search, screen 4,400,000 | Search, 7,100,000 | Search after `_flee`, 7,200,000 | Council, screen 4,400,000 | Council after `_flee`, 7,200,000 |
+| --- | --- | --- | --- | --- | --- |
+| random:7:6:2 | +14.0 (3.46) | +5.0 (1.15) | 0.0 | +4.0 (0.85) | +5.0 (1.15) |
+| random:11:6:3 | 0.0 | −2.0 (−0.57) | +4.0 (1.52) | +3.3 (1.00) | +6.0 (1.84) |
+| random:13:3:2 | +5.0 (1.09) | +6.0 (1.43) | +1.0 (0.24) | +11.0 (2.85) | +8.0 (1.66) |
+| random:18:6:2 | +13.0 (3.07) | +12.0 (3.06) | +5.0 (1.09) | +1.0 (0.23) | +8.0 (1.53) |
+| random:24:3:2 | +8.0 (2.06) | +10.0 (2.33) | +10.0 (3.50) | +9.0 (2.27) | +7.0 (1.48) |
+| random:18:18:2 | +17.0 (3.84) | +11.0 (2.85) | +14.0 (3.69) | +3.0 (0.72) | +4.0 (0.94) |
+| **Pooled, 300 seeds** | **+9.5 (5.61)** | **+7.0 (4.23)** | **+5.7 (3.68)** | **+5.2 (3.13)** | **+6.3 (3.49)** |
+
+One cell in 30 reads below zero, by two points. Search's gain is smaller after
+`_flee` (+7.0 on the block before it, +5.7 after), but on different maps, so the
+tree and the maps are not separated. Council's held.
+
+**How often it is picked**, on contested decisions in the block after `_flee`:
+
+    Search    default 54.7%  rusherplus 15.2%  marshal 8.9%  heuristic 7.2%
+              evolved 6.4%   timid 3.9%        thinker:0 3.8%
+    Council   actuary 30.1%  marshal 23.6%  default 15.7%  evolved 12.7%
+              rusherplus 7.9%  thinker:0 4.1%  heuristic 3.5%  timid 2.4%
+
+evolved's opening differs from the default's on 77% of them, and from every
+earlier line's on 62% (Search) and 57% (Council). At Search a new opening of
+evolved's scored level with the pick on another 17% (38% in the opening) and
+lost on list order, since the last candidate loses every tie: its share is a
+floor. At Council its line is picked more often (12.7%) than it changes the move
+(10.3%). The rest are the opening the search would have played without it,
+which evolved's play-on scored higher.
+
+**What it adds.** Over 140 contested decisions where Search picked evolved's line
+and the move changed (three duel cells, the screen's tree), evolved's opening
+sent 58% of the garrison against 39% for the opening it displaced: 5.6 ships to
+our own systems against 2.8, and 2.1 at rivals against 2.8. Its move kinds
+there are its usual mix (a reinforce in 90%, a strike in 51%, pool and stagger
+in 1% between them). So what knower takes from it is its flow of ships to the
+front, not its rarer moves.
+
+**Against the roster** (Search, the same block after `_flee`; knower with
+evolved and without, each against marshal and actuary on the same seeds and
+seatings, paired by seed):
+
+| Cell | Against marshal | Against actuary |
+| --- | --- | --- |
+| random:7:6:2 | 83.0% → 90.0% (+7.0) | 65.5% → 63.5% (−2.0) |
+| random:11:6:3 | 80.7% → 77.3% (−3.3) | 54.7% → 52.7% (−2.0) |
+| random:13:3:2 | 80.5% → 84.5% (+4.0) | 60.5% → 67.0% (+6.5) |
+| random:18:6:2 | 80.0% → 93.0% (+13.0) | 60.0% → 64.0% (+4.0) |
+| random:24:3:2 | 73.5% → 82.5% (+9.0) | 60.0% → 64.0% (+4.0) |
+| random:18:18:2 | 97.5% → 97.0% (−0.5) | 79.0% → 85.0% (+6.0) |
+| **Pooled, 300 seeds** | **+4.9 (z +3.50)** | **+2.8 (z +1.51)** |
+
+The gain holds against marshal and leans the same way against actuary, both
+below the head-to-head +5.7. The three-seat cell leans worse against both (−3.3,
+−2.0), where evolved is weakest on its own ([`evolved.md`](evolved.md), "Why
+multi-seat is short").
+
+**actuary in its place** (Search, the same block after `_flee`): +13.4 points
+pooled (z +8.69), every cell positive (+6.0, +16.7, +8.0, +17.0, +21.0, +12.0 in
+the order above), picked on 10.7% of contested decisions, its opening new on
+68% of them. The strongest bot is worth more than twice the distinct one at
+Search, and most of all in three seats (+16.7 against evolved's +4.0). evolved
+is not a substitute for actuary but an addition: at Council, which borrows
+actuary already, it still adds +6.3, the first extra opening there to measure
+well above the +1 that more postures, actuary at Greedy and a hold opening each
+gave ([`council.md`](council.md), "Built, measured, dropped"). Council borrows
+actuary at Field; Hunt in Field's place gains about as much (+6.8), at three to
+nine times a decide ([`council.md`](council.md), "actuary at Hunt in
+Field's place").
+
+**What it costs** (`--time`: CPU ms of a decide on the same positions with the
+candidate and without, every tenth turn of knower-only games on the same block,
+one process, guards lifted, load average about 1). Medians, and the ratio of the
+totals:
+
+| Cell | Search, + evolved | Search, + actuary | Council, + evolved |
+| --- | --- | --- | --- |
+| random:7:6:2 | 15.0 → 17.3 (×1.17) | 14.1 → 17.6 (×1.24) | 23.7 → 29.7 (×1.16) |
+| random:11:6:3 | 19.3 → 22.6 (×1.18) | 19.3 → 25.0 (×1.23) | 30.8 → 35.7 (×1.17) |
+| random:13:3:2 | 28.9 → 34.3 (×1.18) | 27.6 → 35.0 (×1.26) | 69.8 → 80.0 (×1.13) |
+| random:18:6:2 | 18.8 → 23.3 (×1.22) | 17.7 → 23.7 (×1.30) | 32.1 → 37.7 (×1.19) |
+| random:24:3:2 | 47.5 → 55.1 (×1.19) | 45.0 → 59.9 (×1.32) | 109.9 → 120.9 (×1.11) |
+| random:18:18:2 | 11.1 → 13.4 (×1.18) | 11.6 → 14.8 (×1.34) | 21.0 → 24.8 (×1.16) |
+
+evolved costs what one more line costs, a sixth at Search (seven lines for six)
+and a seventh at Council: its plain policy adds next to nothing. actuary's
+ledger adds about a tenth on top of its line.
+
+**evolved is borrowed at Council since 2026-10-20; Search is unchanged.** evolved
+buys +5.7 points head to head at Search (+4.9 against marshal, +2.8 against
+actuary) and +6.3 at Council, for about a sixth more a decide. It joined
+`COUNCIL_CANDIDATES` after actuary, where the bench appended it, so Council plays
+exactly as measured. Search keeps its six lines and its cost. actuary buys +13.4
+at Search for about a quarter more and is not borrowed there either.
+
+What shipping changed:
+
+- **Council's warning.** A Council ply is priced at `COST_VS_KNOWER` times
+  Search's, scaled by Council's lines (`_council_lines`) over the seven that
+  factor was measured with (`COST_COUNCIL_LINES`): ×8/7 for evolved's line,
+  against the ×1.11-1.19 measured above. `ply_ms` was fitted with Search's six
+  lines and does not read `_lines()`, so a candidate added at Search would need
+  the same.
+- **The bot column.** It replays knower at the top of its slider, Council, so
+  knower's rows, and any with a Council seat in them, are out of date until
+  `tools/bot_replay.py --stale` reruns them. `engine_rev` moves for every row.
+- **The traps.** The strikes `tests/council_traps.py` pins did not move.
 
 ## How far to look: the longest lane, plus a cushion
 
@@ -463,3 +609,291 @@ ply: 299 ms loaded, 159 ms quiet). The warning fitted to it fired on 40-system
 maps. Run one job at a time and record `os.getloadavg()` beside the numbers. The
 ratio grid ran three at a time, which is safe for a ratio only because both
 searches were timed back to back on the same position under the same load.
+
+## Seats it cannot run: stand-ins and people
+
+knower cannot run two kinds of seat: one that predicts (it would recurse) and a
+person's (there is no code). Until 2026-10-16 both were modelled with `_blind`,
+knower's own plan with the oracle off, and neither was trusted. That is right for
+another knower, since Off is the nearest version of it that does not predict. It is
+wrong for actuary at Learning, the one other oracle seat on the roster: `_blind`
+guessed at an actuary with a thinker-strength plan.
+
+**The stand-in.** A predicting module may export `stand_in_params(player)`, the
+params of its nearest version that does not predict (actuary's: Field for a
+Learning seat, Planned before 2026-10-18; knower's: Off). `_stand_in` runs that module's own `decide` at
+those params on the probe, swapping the seat's params in and back out
+(`_run`), in the one-turn forecast and in Search rollouts alike
+(`_rollout_decide`). Params that still answer `is_oracle_seat`, `None` or a
+raise fall back to `_blind`. knower's own seats keep `_blind`, which is the same
+thing for them. A stand-in is trusted (`TRUST_STAND_INS`), a `_blind` fallback
+never. `_rivals` counts an oracle seat at its bot's `decide_ms` when the module
+has the hook; it already did for actuary, which has no module-level flag, so the
+setup warning priced the Learning seat correctly before knower ran it.
+
+**What it changed**, knower against actuary-Learning, fresh seeds 10001-10200
+(Search 10001-10100), both seatings, 6 ly/turn, paired by game. Learning's win
+share:
+
+                         blind      stand-in,    stand-in,
+                                    untrusted    trusted
+    Predict  18          96.0%      95.8%        90.5%
+             40          93.2%      92.0%        82.0%
+    Search   18          78.5%      52.5%        46.0%
+             40          79.5%      55.0%        47.0%
+
+- **Predict gains only from trust.** Untrusted, pooled +23 / -17 (z +0.95):
+  the stand-in can only add threat, and knower already kept thinker's guard
+  against the seat. Trusted against untrusted: +74 / -13 (z +6.54). The ~20
+  points [`learner.md`](learner.md) puts on the flag ("As a bot") were knower
+  believing an exact read of Planned (it won 20% / 32% against an unflagged
+  Planned there), and a trusted stand-in gives back a third to a half of that.
+- **Search gains from the rollouts.** Untrusted already moves Search +107 / -6
+  (z +9.50): rolled turns now play the seat as actuary rather than thinker, so
+  each line is priced against something like the real opponent. Trusted, against
+  an untrusted run repeated at the same load: +67 / -29 (z +3.88). The two
+  untrusted runs, identical code, differ by +34 / -43 (z -1.03), which is the
+  wall-clock noise in a Search pairing.
+- **The free-for-all** (knower, actuary-Learning, marshal, seeds 11001-11100,
+  every rotation, 300 games): Predict knower 9% -> 11%, actuary 70% -> 66%,
+  marshal 20% -> 23%, timeouts 9 -> 6. Search (34 seeds, 102 games): knower
+  22% -> 53%, actuary 65% -> 36%, marshal 14% -> 11%, timeouts 0 -> 2. The
+  after arm ran partly beside other work, which slows Search, so the gain is not
+  flattered by load.
+
+Trusting a stand-in believes that a Learning seat which vacates a system under
+Planned vacates it for real. It is wrong exactly where the memory moves a launch,
+which on these numbers is rare enough to pay. A module could name params far from
+how it plays and be believed. A module can also leave the hook out and keep the
+flag's protection. That is the same choice a module had before, now visible as one
+function.
+
+**People stay on `_blind`.** Two alternatives, both measured and both rejected:
+
+- *A stronger bot.* marshal and actuary at Planned both beat knower at Off, but
+  as forecasts of a person they are worse than its blind plan
+  ([`learner.md`](learner.md), "Predicting people"): Brier +0.021 and +0.025
+  over 176 posted games, both clear of zero.
+- *Assume they hold.* The blind guess has a Brier of 0.180 against 0.107 for "no
+  launches", and in play its only job is the phantom launches it adds to the board
+  knower defends. `_garrison` already prices a person's systems as if they
+  hold, and `_pessimistic_owners` keeps the standing guard. Dropping the guess
+  (built as `GUESS_HUMAN`, removed) was tested against bots, with the bot's seat
+  flagged a person to knower only, at Predict, seeds 12001-12200, both seatings:
+  against marshal 14.2% -> 14.2% (18 systems), 15.0% -> 12.0% (40); against
+  actuary at Planned 4.5% -> 2.5%, 5.8% -> 2.2%. Pooled +35 / -69, z -3.33. A bot
+  is nearer knower's blind plan than a person is, so this test favours the guess
+  and does not settle it for people. It is the only test of play there is, and it
+  says the phantoms catch more than the guard they waste.
+
+## A doomed garrison leaves whole (2026-10-19)
+
+Reported from play: knower at Search sometimes leaves a few ships on a system a
+wave is about to overrun, and they die for nothing. Search plays whichever
+opening wins its rollouts, and a borrowed opening keeps its author's habits.
+heuristic never evacuates: it launches only the surplus over
+`AI_RESERVE_FLOOR`/`AI_RESERVE_FRACTION` and keeps the reserve home whatever is
+coming. The other borrowed bots hold a garrison in some positions where
+knower's own Phase 2 would leave. The square law makes that a pure loss: a
+garrison far smaller than the wave kills almost nothing, and the rounding can
+make it nothing (3 against 20 leaves round(√391) = 20).
+
+**What it costs.** 72 games per stop (7:6:2, 11:6:3 and 18:6:2, against
+heuristic, rusherplus, thinker and marshal, seeds 8,000,000 + 6), counting every
+fight that took one of knower's garrisons, by the attackers it killed over its
+size at the fight:
+
+| A game | Search | Council |
+| --- | --- | --- |
+| Ships lost | 42.3 | 29.5 |
+| … in fights that killed under half the garrison | 2.40 | 0.90 |
+| … of those, ships there when knower decided, which could have left | 0.65 | 0.31 |
+| … the same, in fights that killed under the whole garrison | 0.90 | 0.74 |
+
+Most ships that die in a lopsided fight could not have left that turn. They were
+built there that turn (production comes before combat), or they are our own
+fleets landing as the system falls. The habit reported is the rest, about 1.5%
+of Search's losses.
+
+**The rule** (`_flee`, `FLEE_BELOW` 0.5), run on the opening Search chose:
+
+- It looks at every system of ours where hostile ships land this turn. Only
+  certain arrivals count: fleets already flying, and the launches of seats the
+  oracle reads exactly. A person's predicted strike never counts (defence only:
+  a guess may raise a guard, never empty a system).
+- The garrison at the fight is what the opening leaves, plus this turn's
+  production, plus our fleets landing there.
+- It acts only if the wave beats the garrison even at the garrison's best roll
+  (`combat.preview_fight`'s worst corner for the attacker). Several attackers
+  are folded strongest first, as a pile-up resolves.
+- It acts only if, at the nominal roll, the garrison kills fewer than
+  `FLEE_BELOW` of its own number. Kills are judged at the nominal roll and the
+  loss at the best one. Judged at the best roll, a 3-ship remnant facing 7
+  "kills 2" and stays, though it really kills 1.
+- Then what the opening left there leaves. It joins the biggest fleet the
+  opening already sends from that system, or else takes `_evacuate`'s route: a
+  capture in reach (the attacker's emptied home included), else the friend next
+  door with the biggest garrison. A cornered garrison stays. Our own launches
+  that would land there this turn stay home.
+
+With it, the ships that could have left and died anyway fell from 47 to 0 over
+Search's 72 games, and from 22 to 1 over Council's.
+
+**Where it pays.** Not mostly in ships. Over 24 Search games against marshal
+and thinker it fired 45 times. 34 were retreats (50 ships). In 11, a garrison of
+about 7 that a borrowed opening had left to die stepped into the attacker's
+home, emptied to launch the wave, and 8 of those took it. None joined a
+departing fleet: against these bots the habit is mostly a whole garrison a
+borrowed opening holds, not a reserve kept back from an evacuation.
+
+**Measured** with `tools/win_turns.py --quick` against heuristic, rusherplus,
+thinker and marshal, paired against the tree before it:
+
+| Stop | Seeds | Pairs | Beats | z | Turns | Ships lost a game |
+| --- | --- | --- | --- | --- | --- | --- |
+| Search | 7,000,000 + 25 | 700 | 53.5% | +3.4 | −0.6% | −1.23 (z −1.8) |
+| Search | 7,100,000 + 40 | 1,120 | 51.2% | +1.5 | +0.1% | −0.35 (z −0.7) |
+| Council | 7,000,000 + 25 | 700 | 50.8% | +1.0 | +0.3% | −0.39 (z −0.9) |
+
+On the 153 posted maps, Council with the rule beat Council without it on 24,
+was level on 96 and worse on 33 (47.1%, z −1.2). On maps with a knower rival at
+Search the rival changed too. Council against knower:2 is confounded the same
+way, since both seats are this module: 50.6%, −2.9 points won.
+
+Search's fresh block is smaller than its screen: the marshal cells that carried
+the screen (61%, 56%, 58%) came back at 51%, 50% and 49%. Both blocks lean the
+same way, and together they come to about 52% over 1,820 pairs. **Shipped on
+Search.** **Not on Council**, for three reasons. Its judge, ranking lines
+played on by the bots that proposed them, already picks openings knowing the
+garrison dies
+([`council.md`](council.md), "Stripped frontiers are trades, not mistakes").
+Half as many of its ships die this way. And it measured null against bots and
+leaned worse on the posted maps.
+
+**Open.**
+
+- `FLEE_BELOW` 1.0, leaving fights that would trade below even. It would reach
+  about 0.25 more ships a game on Search. Untested.
+- Our own fleets landing into a falling system, the larger share of the dead.
+  The rule keeps home only this turn's launches that land with the wave. Relief
+  sent on an earlier turn cannot be recalled, so the check belongs where it is
+  launched. knower's Phase 1 makes that check for its own plan, and a borrowed
+  opening does not. Unmeasured.
+
+## Pile-ups under the garrison-fights-last rule (2026-10-21)
+
+The 2026-08-05 measurement in *Built, measured, removed* was taken under the old
+pile-up rule, on the one-turn knower, and priced only the attack. Since
+2026-09-10 a pile-up's attackers fold among themselves, strongest first, and the
+survivor faces the garrison last (`combat.resolve_arrival`). knower's planner
+predates that in two places, and `tools/pileup_bench.py` changes each one, for
+the seat under test only:
+
+- **defend.** Phase 1 sums every hostile fleet landing on one of our systems
+  on a turn (`_enemy_arrivals`). The arm folds each turn's owners against each
+  other first (`_fold`, as `_flee` already does), so a system two rivals strike
+  together is priced at the remnant it will face and held, not abandoned. This
+  is the oracle form of marshal's 2026-09-11 re-tune
+  ([`marshal-pricing.md`](marshal-pricing.md), "Re-tuned for
+  production-before-combat and the garrison-fights-last pile-up").
+- **attack.** Phase 3 prices a strike off the target's own defence
+  (`_required`) and ignores a third seat landing there the same turn. The arm
+  asks for enough to win that fold at the jitter's worst roll and still have the
+  garrison's price left: the old measurement, re-run under the rule.
+
+**How it was measured.** Two posted configs at fresh seeds from 8,100,000:
+`8631540e085666d9` (five seats, 31 systems, 3 ly/turn, speed growth 0.15,
+jitter 0.08, defender advantage 1.05) and `2f484ae051214d3f` (four seats, 23
+systems, 8 ly/turn). Two line-ups, so the oracle's two situations read apart:
+*sole*, every rival a bot knower runs exactly (actuary at Field, marshal,
+rusherplus, heuristic), and *rivals*, two of them oracle seats it can only
+model by their stand-ins (knower at Predict, actuary at Learning); the
+four-seat config takes the first three of each. The seat under test turns
+through every seat with the seed, and every arm plays each seed on the same
+seating. The wrappers are keyed by pid, so a rival knower predicting the seat
+under test runs the arm for it, as it would if the arm shipped. Guards lifted.
+Each arm is paired with stock as `tools/win_turns.py` pairs two arms (*beats*,
+Δwon, Δturns over the games both won), since Council wins 85-95% of these
+fields. Predict ran 1,000 seeds a group; Search was stopped at about 84 and
+Council run to 85, at 20-120 s a game.
+
+Each stop's four groups pooled:
+
+| | pairs | defend: beats | Δwon | attack: beats | Δwon | Δturns |
+| --- | --- | --- | --- | --- | --- | --- |
+| Predict | 4,000 | 50.0% (z +0.27) | +0.1 pt | 50.1% (z +0.27) | +0.1 pt | +0.2% |
+| Search | 336 | 51.3% (z +1.04) | -1.2 pt | 48.2% (z -0.91) | -2.4 pt (z -1.16) | +0.7% |
+| Council | 340 | 50.7% (z +0.82) | 0.0 pt | 52.5% (z +1.34) | +1.2 pt (z +1.64) | +0.4% |
+
+Stock won 8-14% at Predict, 40-71% at Search and 85-95% at Council. No group
+of the 24 reads past z 2.2 either way. The two that pass 2 are attack readings
+of opposite sign in the same line-up: at Search, -8.4 pt on the five-seat
+config against *rivals* (z -2.16, 2 games gained and 9 lost); at Council, +2.4
+pt on each config against *rivals* (2 gained, none lost, each). *sole* and
+*rivals* read alike.
+
+**What this says.**
+
+- **The defensive fold almost never decides anything.** It changes the threat
+  on 1.3-2.8% of Phase 1 calls and the result of 4% of Predict games. Two
+  rivals landing on one of our systems on the same turn is rare even with five
+  seats, and when it happens the summed price mostly leads to the same move.
+  Under Search and Council `_flee` already folds the certain arrivals.
+- **The attack fold is still a wash under the new rule.** Overpaying for a
+  third seat's same-turn strike changes about 1% of Phase 3 prices and moves a
+  fifth to a half of the games, in both directions. It is the old result:
+  knower skips strikes it cannot overpay for, and the leaner strike does as
+  well.
+- **Not built:** the opposite use of the same knowledge, striking a turn
+  *after* a rival lands to take the remnant (marshal's `REMNANT`, gated to a
+  duel), and a person's guessed launch folded as uncertain (no person in the
+  bench).
+
+## Baiting in a free-for-all (2026-10-21)
+
+Baiting means leaving a system weak so that two rivals strike it together and
+fight each other first. A pile-up folds its attackers among themselves and the
+survivor meets the garrison last. Turns resolve simultaneously, so a rival sees
+a garrison thinned this turn only on the next one, and only a look-ahead can
+price the move. marshal's blind version, a wall between two rivals left thin
+with no forecast, measured nothing ([`marshal.md`](marshal.md), "Multiplayer
+tactics: four quick checks"). Search can price it properly, because its
+rollouts play every rival it can run with that rival's own code.
+
+**The arm.** `tools/bait_bench.py` adds openings to the Search of the seat
+under test (`_candidates`). A wall is a system of ours bordering two or more
+rivals. For each wall, up to two of them by the rival ships next door, the
+opening is the default plan with whatever garrison it leaves on the wall moved
+to the nearest friendly neighbour that is not a wall too. The search keeps the
+default unless a bait line's rollout scores better, so the arm is stock
+wherever no line wins.
+
+**How it was measured.** It used the two posted configs of `pileup_bench.py`:
+five seats at 31 systems and 3 ly/turn, and four at 23 and 8 ly/turn. There
+were two fields. *Spread* is rusherplus, heuristic, marshal and thinker.
+*Strong* is marshal, actuary at Field, knower at Predict and marshal. A
+four-seat game takes the first three. The seat under test turns with the seed,
+seeds 8,400,000-8,400,199 were played by both arms on the same seating, and
+guards were lifted. Pairing is `pileup_bench`'s.
+
+| config, field | stock won | bait won | beats | Δwon | Δturns (both won) | place | picked |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4 seats, spread | 91.0% | 90.5% | 51.7% (z +0.70) | -0.5 pt | +0.9% | -0.02 | 1.35% |
+| 4 seats, strong | 58.0% | 60.0% | 51.7% (z +0.68) | +2.0 pt (z +0.76) | -1.3% | +0.05 | 1.95% |
+| 5 seats, spread | 81.0% | 83.0% | 54.2% (z +1.42) | +2.0 pt (z +1.16) | -2.5% (z -2.16) | +0.10 | 1.78% |
+| 5 seats, strong | 32.5% | 38.0% | 53.2% (z +1.43) | +5.5 pt (z +1.93) | -1.9% | +0.19 (z +1.91) | 2.15% |
+| pooled, 800 pairs | | | 52.8% (z +2.12) | +2.25 pt (z +2.07) | | | |
+
+*Picked* is the share of the seat's searches that chose a bait line. One was
+offered in 12-17% of them, and none raised an error. Cost per game is
+unchanged.
+
+**What this says.** It is a lean, not yet a result. It grows where the idea
+says it should, with more seats and stronger rivals: the five-seat strong
+field gained 22 games and lost 11. But the seeds are the screening seeds and
+the pooled z is about 2. Before anything ships it needs a confirmation on
+fresh seeds, with the rule set before any of its games, aimed at five seats.
+It also needs Council read separately, since Council adds actuary and evolved
+openings and judges lines differently. Not built yet: thinning a wall rather
+than emptying it, and baiting at a system bordering one rival that a second
+can reach.

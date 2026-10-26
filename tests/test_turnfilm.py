@@ -150,7 +150,7 @@ def test_without_linger_combat_is_instant_with_no_trailing_hold():
 def test_a_clash_rides_inside_the_move_beat_where_it_happened():
     advanced = turnfilm.Advanced(((0, 4),))
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.25, at=0.4, a=0, b=1,
-                             a_ships=5, b_ships=3, survivor=0, survivor_owner=1,
+                             a_ships=5, b_ships=3, a_owner=1, b_owner=2, survivor=0, survivor_owner=1,
                              survivors=4, dead=(1,))
     film = turnfilm.film([advanced, clash])
     move = film.beats[0]
@@ -165,7 +165,7 @@ def test_a_clash_with_no_move_beat_still_gets_shown():
     """Defensive: clashes are attached to a move beat, so they must not vanish if
     there somehow isn't one."""
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.5, at=0.5, a=0, b=1,
-                             a_ships=1, b_ships=1, survivor=None,
+                             a_ships=1, b_ships=1, a_owner=1, b_owner=2, survivor=None,
                              survivor_owner=None, survivors=0, dead=(0, 1))
     film = turnfilm.film([clash])
     assert clash in [e for _, e in film.cues]
@@ -378,6 +378,21 @@ def test_a_pile_up_rides_in_the_landed_event():
     assert len(landed[0].steps) == 2      # three sides -> two engagements
 
 
+def test_a_topped_up_fleet_films_as_one():
+    """A second order down a lane launched this turn re-sends that fleet's
+    `Launched` with its new total, which the film applies in place."""
+    s = make_state([(0, 1, 10, 100), (1, 1, 0, 100), (2, 2, 5, 100)],
+                   [(0, 1, 3), (1, 2, 5)], human=1)
+    before = turnfilm.copy_board(s)
+    events: list[turnfilm.Event] = []
+    engine.end_turn(s, human_orders=[engine.Order(1, 0, 1, 4), engine.Order(1, 0, 1, 3)],
+                    on_event=events.append)
+    launched = [e for e in events if isinstance(e, turnfilm.Launched)]
+    assert [(e.fleet, e.ships, e.source_ships) for e in launched] == [(0, 4, 6), (0, 7, 3)]
+    turnfilm.Reel(before, turnfilm.film(events)).run()
+    assert _digest(before) == _digest(s)
+
+
 def test_a_film_of_nothing_but_instants_does_not_play():
     """Production alone leaves nothing to watch: its lead has no movement to
     borrow from, so the whole turn is one instant and the board should jump as it
@@ -516,7 +531,7 @@ def test_a_pile_ups_sides_and_losses_survive_the_per_owner_pooling():
     assert landed.cost < landed.destroyed
 
 
-def test_the_label_is_the_victors_loss_not_the_wiped_out_garrisons():
+def test_the_victors_loss_is_its_own_not_summed_with_the_garrisons():
     """The complaint this replaced: 9 ships taking a 6-ship system read "−8",
     which is almost all the defender's garrison — visible anyway as the count on
     the node — and buried the 2 the attacker actually paid."""
@@ -530,6 +545,7 @@ def test_the_label_is_the_victors_loss_not_the_wiped_out_garrisons():
     assert (landed.owner_id, landed.ships) == (2, 7)   # sqrt(81 - 36) rounds to 7
     assert landed.destroyed == 8                        # 6 of them the garrison's
     assert (landed.cost, landed.victor) == (2, 2)
+    assert landed.losses == ((0, 6), (2, 2))   # the beaten garrison, then the victor
 
 
 def test_a_landing_that_did_not_fight_cost_nothing():
@@ -540,6 +556,7 @@ def test_a_landing_that_did_not_fight_cost_nothing():
     assert landed.sides == ()
     assert landed.destroyed == landed.cost == 0
     assert landed.victor is None
+    assert landed.losses == ()
 
 
 def test_annihilation_charges_everyone_and_labels_nobody():
@@ -547,10 +564,11 @@ def test_annihilation_charges_everyone_and_labels_nobody():
     Every ship is charged, and there is no victor whose attrition the label could
     be — so it says nothing, which is what the emptied board shows anyway."""
     clash = turnfilm.Clashed(low_id=0, high_id=1, when=0.5, at=0.5, a=0, b=1,
-                             a_ships=7, b_ships=7, survivor=None,
+                             a_ships=7, b_ships=7, a_owner=1, b_owner=2, survivor=None,
                              survivor_owner=None, survivors=0, dead=(0, 1))
     assert clash.destroyed == 14
     assert clash.cost == 0 and clash.victor is None
+    assert clash.losses == ((1, 7), (2, 7))
 
     fold = turnfilm.Fold(attacker=2, attacker_ships=6, defender=1,
                          defender_ships=6, winner=0, survivors=0)
@@ -558,6 +576,7 @@ def test_annihilation_charges_everyone_and_labels_nobody():
                              owner_id=0, ships=0, prod_progress=0, steps=(fold,))
     assert landed.destroyed == 12
     assert landed.cost == 0 and landed.victor is None
+    assert landed.losses == ((2, 6), (1, 6))
 
 
 def test_a_clash_charges_the_fleet_that_flew_on_for_what_it_lost():
@@ -577,6 +596,7 @@ def test_a_clash_charges_the_fleet_that_flew_on_for_what_it_lost():
     assert clash.cost == 12 - clash.survivors
     assert clash.cost == s.players[1].ships_lost
     assert clash.destroyed == clash.cost + 5
+    assert clash.losses == ((2, 5), (1, clash.cost))   # the beaten fleet first
 
 
 # --------------------------------------------------------------------------- #
@@ -623,3 +643,22 @@ def test_a_turn_that_only_produced_still_does_not_play():
     beat is an instant whose lead has nothing to borrow here, so a quiet turn
     resolves at once instead of costing time for a couple of ships appearing."""
     assert not turnfilm.film([_produced(0)]).plays
+
+
+def test_a_pile_up_charges_each_side_in_the_order_the_fold_beat_it():
+    """Two attackers fold first, then the survivor takes on the garrison: each
+    beaten side loses all it brought, listed as it fell, and the holder last."""
+    folds = (turnfilm.Fold(attacker=2, attacker_ships=10, defender=3,
+                           defender_ships=4, winner=2, survivors=8),
+             turnfilm.Fold(attacker=2, attacker_ships=8, defender=1,
+                           defender_ships=5, winner=2, survivors=6))
+    landed = turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=5,
+                             owner_id=2, ships=6, prod_progress=0, steps=folds)
+    assert landed.losses == ((3, 4), (1, 5), (2, 4))
+    assert sum(n for _, n in landed.losses) == landed.destroyed
+
+    held = turnfilm.Landed(node_id=0, fleets=(), was_owner=1, was_ships=5,
+                           owner_id=1, ships=5, prod_progress=0,
+                           steps=(turnfilm.Fold(attacker=2, attacker_ships=3, defender=1,
+                                                defender_ships=5, winner=1, survivors=5),))
+    assert held.losses == ((2, 3),)   # a defender that lost nothing writes nothing

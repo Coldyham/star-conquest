@@ -3,7 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { botLeadBadge, botProfile, competitionRanks, embargoNote, leaderCredit } from "../js/format.mjs";
+import { readFileSync } from "node:fs";
+
+import {
+  botLeadBadge, botProfile, competitionRanks, difficultyBadge, difficultyLevel, embargoNote, leaderCredit,
+  mapSummary, symmetricSize,
+} from "../js/format.mjs";
 
 const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString();
 
@@ -116,4 +121,50 @@ test("a bot ahead of the board's best leads, a dead heat is a tie, and a beaten 
   assert.equal(botLeadBadge(game(20, 2)), null);
   assert.equal(botLeadBadge(game(19, 9)), null);
   assert.equal(botLeadBadge({ ...game(20, 3), bot_name: null }), null);
+});
+
+const SIZES = JSON.parse(readFileSync(new URL("./fixtures/symmetric-sizes.json", import.meta.url)));
+
+test("a symmetric map's size matches the game's for every layout, seat count and request", () => {
+  for (const [layout, rows] of Object.entries(SIZES)) {
+    for (const [players, sizes] of Object.entries(rows)) {
+      sizes.forEach((size, i) => {
+        assert.equal(symmetricSize(i + 1, Number(players), layout), size, `${layout} ${players}p ${i + 1}`);
+      });
+    }
+  }
+});
+
+test("a map's summary names the systems it has, not the number asked for", () => {
+  const core = { mode: "symmetric", players: 6, nodes: 10, seed: 603346, settings_json: { layout: "core" } };
+  assert.equal(mapSummary(core), "Symmetric · 6 players · 18 systems · seed 603346");
+  // a row with no layout to hand was made before layouts: the hub
+  assert.equal(mapSummary({ mode: "symmetric", players: 6, nodes: 10, seed: 1 }),
+    "Symmetric · 6 players · 13 systems · seed 1");
+  assert.equal(mapSummary({ mode: "random", players: 6, nodes: 10, seed: 1 }),
+    "Random · 6 players · 10 systems · seed 1");
+  const drawn = { ...core, settings_json: { layout: "core", custom_map: { nodes: [] } } };
+  assert.equal(mapSummary(drawn), "Symmetric · 6 players · 10 systems · seed 603346");
+});
+
+test("the difficulty word follows how many of the bots won, out of however many ran", () => {
+  globalThis.document ??= {
+    createElement: () => ({ setAttribute() {}, append() {} }),
+    createTextNode: (text) => text,
+  };
+  const word = (wins, runs) => difficultyLevel(Math.round((1 - wins / runs) * 1000) / 1000).text;
+  assert.deepEqual([7, 6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 7)),
+    ["Easy", "Easy", "Medium", "Medium", "Medium", "Hard", "Hard", "Very hard"]);
+  // While a new bot is still being replayed, six runs read the same counts.
+  assert.deepEqual([6, 5, 4, 3, 2, 1, 0].map((wins) => word(wins, 6)),
+    ["Easy", "Easy", "Medium", "Medium", "Hard", "Hard", "Very hard"]);
+  // PostgREST may hand a numeric over as a string.
+  assert.equal(difficultyLevel("1.000").text, "Very hard");
+  assert.equal(difficultyLevel(null), null);
+  const badge = difficultyBadge({ bot_wins: 2, bot_runs: 7, difficulty: 0.714 });
+  assert.equal(badge.textContent, "Hard");
+  assert.match(badge.className, /\bdifficulty\b.*\bhard\b/);
+  assert.equal(difficultyBadge({ bot_wins: 0, bot_runs: 0, difficulty: null }), null);
+  // A config card passes its average and has no counts of its own.
+  assert.equal(difficultyBadge({ avg_difficulty: 0.5 }, 0.5).textContent, "Medium");
 });

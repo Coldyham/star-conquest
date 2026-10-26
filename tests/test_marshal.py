@@ -45,9 +45,10 @@ def _restore_globals(ma):
     """Several tests tune module constants; none of them may leak."""
     names = ("FRONTIER_GUARD", "COMMIT_SURPLUS", "RESERVE_PINCER",
              "CONSOLIDATE", "AVOID_ABANDONED", "RISK_PARITY",
-             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "FAST_GUARD_WEIGHT",
+             "FLOW_AVOIDS_ABANDONED", "RELIEF_AWARE", "RELIEF_IN_FLIGHT", "FAST_GUARD_WEIGHT",
              "DENY_SWAP", "DENY_SWAP_SURPLUS_ONLY", "DENY_SWAP_MIN_TURNS",
-             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS")
+             "RIVAL_REFLOOD_MIN_TURNS", "HOLD_FOLLOW", "REMNANT", "REMNANT_MAX_PLAYERS",
+             "SPARE_TARGET", "FEED_MAX_TURNS")
     before = {n: getattr(ma, n) for n in names}
     jitter = config.COMBAT_JITTER
     advantage = config.DEFENDER_ADVANTAGE
@@ -243,7 +244,7 @@ def test_the_enemy_margin_is_the_advantage_and_nothing_else(ma):
         assert not hasattr(ma, name), f"{name} is dead — delete it, don't strand it"
 
     config.DEFENDER_ADVANTAGE = 1.0
-    assert ma._neutral_margin() == pytest.approx(1.3)     # NEUTRAL_MARGIN, untouched
+    assert ma._neutral_margin() == pytest.approx(ma.NEUTRAL_MARGIN)
 
 
 # --------------------------------------------------------------------------- #
@@ -256,6 +257,7 @@ def test_an_evacuated_system_is_priced_against_the_fleet_taking_it(ma):
     into a node that would be held by 12 ships by the time it arrived — losing the
     strike and leaving its own system empty for the counter.
     """
+    ma.RELIEF_AWARE = 0.0  # isolate this from the calm-neighbour relief price
     state = _board({1: (1, 9, 4), 2: (1, 0, 3), 3: (2, 6, 4), 4: (3, 9, 4)},
                    [(2, 1, 1), (2, 3, 2), (2, 4, 1)])
     state.fleets.append(Fleet(owner_id=3, source_id=4, dest_id=2, ships=12,
@@ -558,9 +560,9 @@ def test_commitment_does_not_re_flood_an_already_covered_target(ma):
     every turn, for as long as the original wave is still in transit.
     """
     state = _board({1: (2, 32, 3), 2: (0, 6, 3)}, [(1, 2, 3)])
-    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=10,
                               turns_total=3, turns_remaining=2))
-    assert ma._required(state, 2, state.systems[2], 3) <= 8, \
+    assert ma._required(state, 2, state.systems[2], 3) <= 10, \
         "test board's existing wave should already cover the target"
 
     orders = [o for o in ai.decide(state, 2) if o.dest_id == 2]
@@ -584,9 +586,9 @@ def test_a_settled_dead_end_frontier_flows_its_surplus_onward(ma):
     config.COMBAT_JITTER = 0.10
     state = _board({1: (2, 40, 3), 2: (0, 6, 3), 3: (2, 5, 3), 4: (3, 50, 3)},
                    [(1, 2, 3), (1, 3, 1), (3, 4, 1)])
-    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=10,
                               turns_total=3, turns_remaining=2))
-    assert ma._required(state, 2, state.systems[2], 3) <= 8, \
+    assert ma._required(state, 2, state.systems[2], 3) <= 10, \
         "test board's existing wave should already cover the neutral"
 
     totals = _totals(ai.decide(state, 2))
@@ -608,7 +610,7 @@ def _dead_end_branch(cover_both=True):
                     3: (2, 5, 3), 4: (3, 50, 3), 7: (0, 9, 1)},
                    [(1, 2, 3), (5, 2, 3), (1, 6, 2), (1, 3, 1), (5, 3, 1),
                     (3, 4, 1), (2, 7, 2)])
-    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=8,
+    state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=2, ships=10,
                               turns_total=3, turns_remaining=2))
     if cover_both:
         state.fleets.append(Fleet(owner_id=2, source_id=1, dest_id=6, ships=8,
@@ -622,7 +624,7 @@ def test_a_multi_system_dead_end_flows_every_surplus_onward(ma):
     count as dead ends, so both surpluses go to 3, the system facing a rival.
     A neutral past the branch (7) touches none of ours and changes nothing."""
     state = _dead_end_branch()
-    assert ma._required(state, 2, state.systems[2], 3) <= 8
+    assert ma._required(state, 2, state.systems[2], 3) <= 10
     assert ma._required(state, 2, state.systems[6], 2) <= 8
 
     totals = _totals(ai.decide(state, 2))
@@ -941,6 +943,48 @@ def test_relief_capacity_ignores_a_neighbour_too_far_to_help(ma):
     assert ma._relief_capacity(state, target, warning=1) == 6
 
 
+def _bait_state(neighbour=(0, 5, 3), sent=11):
+    """T (rival, 1) emptied onto N: the rival's ``sent`` ships land on N next
+    turn, and the lane back to T is 2 turns. Our 12 at S are 3 turns from T."""
+    state = _board({20: (2, 1, 3), 21: neighbour, 22: (1, 12, 3)},
+                   [(20, 21, 2), (22, 20, 3)], seats=2, seat=1)
+    state.fleets.append(Fleet(owner_id=2, source_id=20, dest_id=21, ships=sent,
+                              turns_total=2, turns_remaining=1))
+    return state
+
+
+def test_relief_in_flight_counts_a_fleet_that_can_turn_round_in_time(ma):
+    """Landing in 1 and 2 turns back is 3: in time for a 3-turn strike
+    (warning 2), too late for a 2-turn one."""
+    state = _bait_state(neighbour=(0, 8, 3))
+    target = state.systems[20]
+    expected = combat.preview_fight(11, 8, config.COMBAT_JITTER,
+                                    config.DEFENDER_ADVANTAGE).best.attacker_survivors
+    assert 0 < expected < 11
+    assert ma._relief_in_flight(state, target, warning=2) == expected
+    assert ma._relief_in_flight(state, target, warning=1) == 0
+
+
+def test_relief_in_flight_needs_to_win_where_it_lands(ma):
+    state = _bait_state(neighbour=(0, 20, 3), sent=5)
+    assert ma._relief_in_flight(state, state.systems[20], warning=2) == 0
+
+
+def test_relief_in_flight_counts_in_full_onto_its_own_system(ma):
+    state = _bait_state(neighbour=(2, 0, 3))
+    assert ma._relief_in_flight(state, state.systems[20], warning=2) == 11
+
+
+def test_relief_in_flight_prices_the_strike_by_weight(ma):
+    state = _bait_state()
+    target = state.systems[20]
+    ma.RELIEF_IN_FLIGHT = 0.0
+    base = ma._required(state, 1, target, dist=3)
+    ma.RELIEF_IN_FLIGHT = 1.0
+    full = ma._required(state, 1, target, dist=3)
+    assert full - base >= ma._relief_in_flight(state, target, warning=2)
+
+
 def _guard_state(lane_turns):
     return _board({30: (1, 5, 3), 31: (2, 20, 3)}, [(30, 31, lane_turns)], seat=1)
 
@@ -969,3 +1013,61 @@ def test_fast_guard_weight_half_scales_the_one_turn_rival(ma):
     state = _guard_state(lane_turns=1)
     ma.FAST_GUARD_WEIGHT = 0.5
     assert ma._max_adjacent_enemy(state, 1, state.systems[30]) == 10.0
+
+
+# --------------------------------------------------------------------------- #
+# Is the guard a pool? — docs/design/marshal.md, Step 0
+# --------------------------------------------------------------------------- #
+def _triangle(prod, launched):
+    """Rival 1's 10-ship stack at one end of a 4-lane; our 2 at the other, our
+    corner 3 on two 3-lanes. Both of ours hold the 0.55 guard, 6 each."""
+    state = _board({1: (1, 0 if launched else 10, 0), 2: (2, 6, prod), 3: (2, 6, 0)},
+                   [(1, 2, 4), (2, 3, 3), (1, 3, 3)], seats=2)
+    if launched:
+        state.fleets.append(Fleet(owner_id=1, source_id=1, dest_id=2, ships=10,
+                                  turns_total=4, turns_remaining=3))
+    return state
+
+
+def test_a_launch_releases_the_corner_guard_into_relief(ma):
+    """The stack's launch takes its garrison off the board, so the corner's guard
+    falls to 0 at the next decide and Phase 1 sends what that frees. Two guards
+    are 1.1 of the stack against a 1.22 ask: the pair holds only where the 4-end's
+    production over the 3 turns left closes the gap. ``SPARE_TARGET`` is off:
+    with it the unlaunched stack is struck (next test)."""
+    ma.FRONTIER_GUARD = 0.55            # ceil(0.55 * 10) == 6: the board's arithmetic
+    ma.SPARE_TARGET = False
+    for prod in (0, 1, 2, 3):
+        assert ai.decide(_triangle(prod, launched=False), 2) == [], "guard not held"
+    # Production closes the gap: the corner's whole released guard goes in.
+    for prod in (2, 3):                 # (0 + 3) // prod == 1 built by the strike
+        sends = {(o.source_id, o.dest_id): o.ships
+                 for o in ai.decide(_triangle(prod, launched=True), 2)}
+        assert sends == {(3, 2): 6}, (prod, sends)
+    # It doesn't: nothing relieves, and both guards counter-strike the empty home.
+    sends = {(o.source_id, o.dest_id): o.ships
+             for o in ai.decide(_triangle(0, launched=True), 2)}
+    assert sends == {(2, 1): 6, (3, 1): 6}, sends
+
+
+def test_two_guards_against_one_stack_strike_it(ma):
+    """Each corner keeps 6 against the same 10-ship stack, and together they
+    are 12 against its price of 11. With ``SPARE_TARGET`` a strike on the stack
+    spends the guard kept against it: the 4-lane corner launches the far wave
+    now (11 less the 6 the 3-lane corner sends next turn), and without it the
+    guards hold and nothing moves."""
+    assert ma.SPARE_TARGET
+    for prod in (0, 3):
+        sends = {(o.source_id, o.dest_id): o.ships
+                 for o in ai.decide(_triangle(prod, launched=False), 2)}
+        assert sends == {(2, 1): 5}, (prod, sends)
+    ma.SPARE_TARGET = False
+    assert ai.decide(_triangle(0, launched=False), 2) == []
+
+
+def test_spare_target_keeps_the_guard_against_another_stack(ma):
+    """Only the part of the guard the target itself called for is released: a
+    second, larger rival stack next door still holds the source at its guard."""
+    state = _board({1: (1, 10, 0), 2: (2, 12, 0), 4: (1, 20, 0)},
+                   [(1, 2, 3), (2, 4, 3)], seats=2)
+    assert ai.decide(state, 2) == []          # 12 - ceil(0.55 * 20) = 1 to spend

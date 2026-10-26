@@ -396,3 +396,47 @@ def test_delete_campaign_wants_a_monday(week):
 def test_delete_campaign_refuses_a_week_that_has_none():
     with pytest.raises(admin.Refused):
         admin.plan_delete_campaign(FakeApi([]), "2026-10-05")
+
+
+GAUNTLET = "hard-mode-0123456789ab"
+
+
+def _gauntlet_row(**over):
+    row = {"gauntlet_id": GAUNTLET, "by_name": "Ada", "wants_listing": True, "listed": False,
+           "body": {"id": GAUNTLET, "name": "Hard mode", "stages": [{"id": 0}, {"id": 1}]}}
+    return {**row, **over}
+
+
+def test_listing_a_gauntlet_sets_only_its_flag_and_keeps_the_row_on_the_audit_row():
+    api = FakeApi([("gauntlets", f"gauntlet_id=eq.{GAUNTLET}", [_gauntlet_row()])])
+    plan = admin.plan_list_gauntlet(api, GAUNTLET, True)
+    assert plan.detail["gauntlet"]["body"]["name"] == "Hard mode"
+    admin.apply(api, plan, yes=True, reason="asked")
+    assert api.writes[0][:2] == ("insert", "admin_actions")
+    assert api.writes[1:] == [("update", "gauntlets", f"gauntlet_id=eq.{GAUNTLET}", {"listed": True})]
+
+
+def test_a_gauntlet_already_in_the_state_asked_for_is_nothing_to_do():
+    api = FakeApi([("gauntlets", "", [_gauntlet_row(listed=True)])])
+    admin.apply(api, admin.plan_list_gauntlet(api, GAUNTLET, True), yes=True, reason="")
+    assert api.writes == []
+
+
+def test_listing_one_its_author_did_not_ask_for_says_so():
+    api = FakeApi([("gauntlets", "", [_gauntlet_row(wants_listing=False)])])
+    assert "did not ask" in admin.plan_list_gauntlet(api, GAUNTLET, True).summary[0]
+
+
+def test_deleting_a_gauntlet_removes_only_its_row():
+    api = FakeApi([("gauntlets", "", [_gauntlet_row()])])
+    admin.apply(api, admin.plan_delete_gauntlet(api, GAUNTLET), yes=True, reason="spam")
+    assert api.writes[1:] == [("delete", "gauntlets", f"gauntlet_id=eq.{GAUNTLET}")]
+
+
+@pytest.mark.parametrize("bad", ["", "Hard-Mode-0123456789ab", "x-0123", "a-0123456789ab&x=1"])
+def test_a_gauntlet_id_of_the_wrong_shape_is_refused_before_any_query(bad):
+    api = FakeApi([("gauntlets", "", [_gauntlet_row()])])
+    with pytest.raises(admin.Refused, match="not a gauntlet id"):
+        admin.plan_delete_gauntlet(api, bad)
+    with pytest.raises(admin.Refused, match="no such gauntlet"):
+        admin.plan_delete_gauntlet(FakeApi([]), GAUNTLET)

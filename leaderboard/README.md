@@ -21,12 +21,14 @@ root `netlify.toml` bundles
 |---|---|
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
-| [`user.html?u=…`](user.html) | one player's card — see below |
+| [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`account.html`](account.html) | sign in with Google and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
 | [`privacy.html`](privacy.html) | the privacy notice: what the site and Supabase Auth store, why, and how to have it removed. Update it with any change to what is collected, sign-in included |
+| [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
+| [`gauntlet.html`](gauntlet.html) | make a gauntlet: one game link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Gauntlets list. `gauntlet.html#<id>` opens a saved one to remix. Its generate form builds a `/game/#gauntlet-spec=` link instead: the game deals the maps, plays test bots on them and orders them by difficulty; each Advanced and Combat slider is a min/max pair (`js/gauntlet-spec.mjs`) |
 
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
@@ -183,6 +185,18 @@ links treat a campaign node exactly like a map embargoed by hand. It has to be
 derived, since a node's `games` row doesn't exist until someone first posts on
 it, and nothing on the board may update that row afterwards.
 
+**Once an embargo lifts, the map page says who was ahead when it did**: a line
+over the score list ("When the embargo lifted 5 days ago, alice was ahead — 28
+turns. Beaten since by bo — 22 turns.", or "Still the record.") and a *Led at
+reveal* mark on that score's row. That is the result the deadline was for, and
+the one the full list buries once somebody has watched the replays and beaten
+it. The leader at that moment is the best counted score posted by then, by
+today's verdicts (`standings.mjs`'s `leaderAt`). The moment itself is the later
+of `games.embargo_until` and the end of the last campaign week the map was a
+node of (`embargoLiftedAt`), worked out on the map page from the node it
+already fetches: `game_embargoes` forgets a week once it is over, so the home
+page never scans every past campaign.
+
 ## Same setup, different seed
 
 Every game with a `game_key` still gets its own row and its own board — a seed is
@@ -202,6 +216,17 @@ one setup, which is where its "Name this setup" form and its own game board live
 There's no bot dropdown any more: a bot chip on a card *is* the filter, linking to
 `index.html?bot=…` — clicking one narrows either list, by-game or by-config, to
 setups/maps that included that opponent.
+
+Above both sits **By family** (`?group=family`): configs linked into trees,
+each config's parent being the nearest older config at most a few edits away,
+with chips saying what changed (a slider, fog, the mode, a new opponent, a
+"Rescaled" systems-and-speed change that kept the lanes the same length). It is
+computed on the page from every config at once (`js/families.mjs`), so nothing
+about a family is stored. It reads `config_summary.first_seen`, and on a board
+not yet re-pasted derives the same thing from `game_summary`. Every card, on all
+three views, also carries a **pace** chip (`Standard · ~3t`): the median lane
+in turns, estimated from systems and ship speed. See
+`docs/design/setup-families.md`.
 
 A config's page offers **Play a new seed**: the same setup handed back to the
 game with its seed emptied, so the game rolls a fresh map from it
@@ -298,6 +323,13 @@ making a visitor open the map to find out nobody has beaten it yet. `game_summar
 lateral join on `bot_scores` mirroring the one already used for the human best
 score) carry what the badge needs without a second per-game query;
 `js/format.mjs`'s `botLeadBadge` decides whether to show it.
+
+The same rows give every map an estimated difficulty: the share of bots that
+didn't take it (`game_summary.difficulty`, from `bot_wins`/`bot_runs`;
+`config_summary.avg_difficulty` for a setup). The main list sorts on it as
+"Difficulty (estimated)", easiest first, and `format.mjs`'s `difficultyBadge` shows
+it as Easy / Medium / Hard / Very hard on cards and the map page. See
+`docs/design/leaderboard.md`, "Estimated difficulty".
 
 ### Watching a bot's replay
 
@@ -446,8 +478,9 @@ moves. Grouping one person's games would need a durable client id, which is a
 tracking identifier by any other name.
 
 Uploads are append-only like everything else here, so a game that checkpoints
-repeatedly leaves several rows and the longest is the current one;
-`tools/verify_scores.py --prune` clears the rest.
+repeatedly leaves several rows. A score is judged on the upload that verifies,
+never just the longest, because anyone can upload under a match id once a score
+makes it public. `tools/verify_scores.py --prune` clears the rest.
 
 ### Watching one back
 
@@ -492,8 +525,10 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    picks the change up without touching a row. If a page 404s on a new table or
    view right after pasting, PostgREST's schema cache hasn't caught up yet; the
    file's own final statement (`notify pgrst, 'reload schema';`) normally makes
-   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is the other script
-   here, run only when two keys need merging (see above).
+   that a non-issue. [`fold-game-key.sql`](fold-game-key.sql) is another script
+   here, run only when two keys need merging (see above);
+   [`fold-bots.sql`](fold-bots.sql), run once, folds the bot column onto one row
+   per family (`docs/design/bot-families.md`).
 3. **Fill in [`js/config.mjs`](js/config.mjs)** with that URL and the project's
    *publishable* key (`sb_publishable_…`; the older `anon` JWT is under Supabase's
    "Legacy API keys" tab and works too). That key belongs in git — it is designed
@@ -540,11 +575,13 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    declared not-a-secret in the root [`netlify.toml`](../netlify.toml)
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
-   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp` and
-   `/api/campaign` on its own origin (`paths.LEADERBOARD_*_PATH`). The last one
-   (`campaign.mjs`) needs no key: it reads the same public campaign rows
-   campaign.html does, with the publishable key, and runs `js/campaign.mjs` on
-   them.
+   deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp`,
+   `/api/campaign` and `/api/gauntlet` on its own origin
+   (`paths.LEADERBOARD_*_PATH`). `campaign.mjs` needs no key: it reads the same
+   public campaign rows campaign.html does, with the publishable key, and runs
+   `js/campaign.mjs` on them. `gauntlet.mjs` is the only writer of the
+   `gauntlets` table and the way an unlisted one is read, by id; it checks a
+   gauntlet with `js/gauntlet-build.mjs`, as the page does before Save.
 
 7. **Optional — let players claim names.** Without this, every name stays
    free text, as it always was. To turn it on:
@@ -692,6 +729,17 @@ are exported rather than buried in the handler), and that `replay.mjs` reads
 through the `public_replays` view, refuses a malformed id before it reaches a
 query string, and answers "unpublished" and "missing" identically.
 
+`tests/gauntlet-build.test.mjs` covers what a gauntlet may be (`checkBody`, the
+limits, the id) and the page's draft, and `tests/gauntlet-handler.test.mjs` drives
+`gauntlet.mjs` over a stub PostgREST. `tests/fixtures/gauntlet.json` is a
+gauntlet built from three real links, which `tests/test_gauntlet.py` reads with
+the game's own `Gauntlet.from_dict`; regenerate it with
+`UPDATE_FIXTURES=1 node --test tests/gauntlet-build.test.mjs`.
+`tests/gauntlet-spec.test.mjs` covers the generate form's spec and link;
+`tests/fixtures/gauntlet-spec.json` is a link it built, which
+`tests/test_gauntletgen.py` decodes and deals from (regenerate with
+`UPDATE_FIXTURES=1 node --test tests/gauntlet-spec.test.mjs`).
+
 `tests/standings.test.mjs` covers the player card's maths the same way — placings,
 best-of-several attempts, who leads a comparison, and the card's own totals — which
 is why that logic sits in a module with no DOM or fetch in it. It also covers the
@@ -718,10 +766,11 @@ own record is just an improvement. Steals count in the week they were posted,
 Monday 00:00 UTC to the next; `?week=` browses back.
 
 All of it is three views in `schema.sql`, with nothing stored: `counted_scores`
-is the eligibility rule (every score except a replay the worker found to be a
-`mismatch` — the game uploads a log once with no retry, so an offline or
-hand-pasted score can never become `verified`, and requiring that would shut
-those ways of playing out), `crown_holders` and `crown_steals` read it. Deleting
+is the eligibility rule (a verified score; one still waiting on its replay, for
+its first 24 hours; anything posted before 2026-10-15 but a mismatch; and only
+the first score posted for a match, or for the same game re-uploaded under
+another match),
+`crown_holders` and `crown_steals` read it. Deleting
 a score recomputes both. `js/crowns.mjs` only counts and orders the rows (its
 maths is `tests/crowns.test.mjs`); the map page marks a verified score with a ✓.
 It is as cheesable as any identity here — a second name can make a map
@@ -771,6 +820,43 @@ row, linking back to that node on the campaign page. Tests: `tests/test_campaign
 generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 `tests/test_crowns_sql.py` for the view.
 
+## Badges
+
+A player card for one name (`user.html?u=…`) opens with its badges: one-off
+milestones, most of them pointing at a part of the game the player hasn't tried
+yet. A locked badge stays on the card with what earns it, which is the point.
+
+| Group | Badges |
+|---|---|
+| The board | a win posted · the first win on a map · a win on a map somebody else opened · a crown stolen · the most steals in a finished week (a tie shares it) |
+| Campaign | a home claimed · the most field nodes when a week closes |
+| Gauntlets | a win on the tutorial's last stage · a win on the last stage of a listed gauntlet · a gauntlet saved under this name |
+| Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
+| Bots | a win with each `LADDER_ORDER` bot in a seat |
+| Play-by-post | a turn played in a match · a match won |
+
+**Derived, never stored**, like crowns and the campaign. Wins count only through
+`counted_scores`, so a score that is deleted or found to be a mismatch takes its
+badges with it. The rules are [`js/badges.mjs`](js/badges.mjs) (no DOM, no
+fetch; `tests/badges.test.mjs`); the reads and the drawing are
+[`js/badges-card.mjs`](js/badges-card.mjs). A comparison shows none.
+
+- **The tutorial** leaves no trace on the board but a win on its last stage, which
+  the board can only know by key: `TUTORIAL_FINAL_KEYS` is that stage's
+  `challenge_keys()`, pinned by `tests/test_leaderboard_sync.py`. A Settings
+  field that moves it gets the new key added, never swapped in.
+- **A listed gauntlet** is matched by its last stage's setup (`setupIdentity`),
+  never a key, since the board can't compute one.
+- **Two counts come from the functions**, since their tables are closed to the
+  public: `/api/pbp?action=record&name=` answers `{played, won}` and
+  `/api/gauntlet?by=` answers `{made}`. Counts only, so a private match or an
+  unlisted gauntlet never leaks an id. When either can't be reached its badges
+  show greyed as unknown rather than locked. The gauntlet page signs a new draft
+  with the name this browser posts under, so the Architect badge finds it.
+- **A name is not an identity** here any more than anywhere else: a badge
+  belongs to whoever posts under the name, and a seat's play-by-post name is the
+  one typed when it was claimed.
+
 ## Known limitations, accepted on purpose
 
 - **A score with no replay behind it is unverifiable.** The token format is
@@ -778,7 +864,10 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
   real one is. What answers that is the replay the game now uploads when you post
   (see "Checked scores" above) — but only for scores that carry one. Anything
   posted by hand, or before that existed, checks as `missing`: unverified rather
-  than suspect, and shown as such.
+  than suspect, and shown as such. From 2026-10-15 such a score holds no crown,
+  moves no campaign node, and is neither a map's record (`game_summary`'s best,
+  the card's headline, "Bot leads") nor its "Play this map" target once its
+  first 24 hours are out. It still appears in the map's list, without a ✓.
 - **An unclaimed name is not an identity.** Names are keyed by name, so two
   people typing the same unclaimed name share a row, and so share a player card.
   Anyone can post under a name nobody has claimed. Claiming one (see "Claimed

@@ -49,6 +49,41 @@ export function displayOrder(scores, key) {
   return [...scores].sort((a, b) => compare(a, b) || time(a.submitted_at) - time(b.submitted_at));
 }
 
+const DAY_MS = 86400000;
+
+/**
+ * When a map's embargo lifted, as an ISO timestamp: the later of its stored
+ * reveal date (`game_summary.embargo_until`, which once nothing is in force is
+ * `games.embargo_until` alone) and the end of the last campaign week it was a
+ * node of (`campaign_games.week_start`, a "YYYY-MM-DD" Monday; the week ends
+ * seven days on, as `game_embargoes` counts). Null while either is still to
+ * come, or when the map never had one. Worked out here rather than in
+ * `game_embargoes`, which reads live weeks only so the home page never scans
+ * every past campaign.
+ */
+export function embargoLiftedAt(embargoUntil, weekStartDay, now = Date.now()) {
+  const ends = [];
+  if (embargoUntil) ends.push(Date.parse(embargoUntil));
+  if (weekStartDay) ends.push(Date.parse(`${weekStartDay}T00:00:00Z`) + 7 * DAY_MS);
+  const valid = ends.filter((t) => Number.isFinite(t));
+  if (!valid.length) return null;
+  const lifted = Math.max(...valid);
+  return lifted <= now ? new Date(lifted).toISOString() : null;
+}
+
+/**
+ * The score that was ahead at `when`: the best of the counted ones posted by
+ * then (fewest turns, then fewest lost, then earliest), the record
+ * `game_summary` would have credited. Counted by today's verdicts, so a score
+ * whose replay has since failed its check was never really ahead. Null when
+ * nothing counted had been posted yet.
+ */
+export function leaderAt(scores, countedIds, when) {
+  const cutoff = Date.parse(when);
+  const before = scores.filter((s) => countedIds.has(s.id) && time(s.submitted_at) <= cutoff);
+  return displayOrder(before, "turns")[0] || null;
+}
+
 /**
  * One row per map the roster has played, carrying each member's *best* score on
  * it — repeat attempts are counted but only the best one is placed, since that is
@@ -156,9 +191,10 @@ export function tally(rows, roster) {
 /**
  * The measured full-roster ladder (docs/design/marshal.md "Full roster ladder" in
  * the Python repo, mirrored here since JS can't import it), strongest to
- * weakest. Keep in sync with `starconquest/ai.py`'s `LADDER_ORDER`.
+ * weakest, one entry per family. Keep in sync with `starconquest/ai.py`'s
+ * `LADDER_ORDER`.
  */
-export const LADDER_ORDER = ["knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"];
+export const LADDER_ORDER = ["knower", "actuary", "marshal", "evolved", "thinker", "heuristic", "rusherplus"];
 
 /** Ladder order first, any bot missing from it (a fresh drop-in) alphabetical after. */
 function byLadderOrder(a, b) {

@@ -100,7 +100,7 @@ async function load() {
     ]);
     const keys = [...new Set(steals.map((steal) => steal.game_key))];
     const games = keys.length
-      ? await select(`games?select=game_key,mode,players,nodes,seed&game_key=${inList(keys)}`)
+      ? await select(`games?select=game_key,mode,players,nodes,seed,settings_json&game_key=${inList(keys)}`)
       : [];
     drawStandings(crownTable(holders, steals));
     drawFeed(steals, new Map(games.map((game) => [game.game_key, game])));

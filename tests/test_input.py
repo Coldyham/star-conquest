@@ -7,18 +7,20 @@ actually resolves through the engine.
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
+import pytest
 
 from starconquest import main
 from starconquest import config, engine, mapgen, replay, turnfilm
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
-from starconquest.model import Fleet, ForwardRule
+from starconquest.model import Fleet, ForwardRule, Order
 from starconquest.settings import Challenge, Settings
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
@@ -497,12 +499,22 @@ def test_drag_from_empty_source_arms_forward():
 # --------------------------------------------------------------------------- #
 # Selection edge cases and top-level keys
 # --------------------------------------------------------------------------- #
-def test_cannot_select_foreign_system():
+def test_a_foreign_system_is_selected_to_read_about_but_sends_nothing():
     state, ui = _setup()
     try:
         enemy = next(s.id for s in state.systems.values() if s.owner_id not in (0, 1))
         _click(state, ui, enemy)
-        assert ui.mode == IDLE and ui.selected is None
+        assert ui.mode == SELECTED and ui.selected == enemy
+        assert ui.source(state) is None
+
+        nbr = state.systems[enemy].neighbors[0]
+        _click(state, ui, nbr)
+        assert ui.mode == SELECTED and ui.selected == nbr, "a neighbour is selected, not sent to"
+        assert not ui.pending and not ui.auto_forward
+
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        _click(state, ui, home)
+        assert ui.selected == home and ui.source(state) == home
     finally:
         pygame.quit()
 
@@ -515,6 +527,26 @@ def test_can_select_owned_system_with_zero_available_ships():
 
         _click(state, ui, home)
         assert ui.mode == SELECTED and ui.selected == home
+    finally:
+        pygame.quit()
+
+
+def test_queued_sends_are_not_taken_off_a_history_board():
+    """A send queued this turn is promised out of the live garrison only: review
+    shows a past board's counts as they were, never minus the queue (the bug was
+    sending 20 of 20 and the system reading -18 on a turn it held 2)."""
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        state.systems[home].ships = 20
+        dest = next(s.id for s in state.systems.values() if state.are_adjacent(home, s.id))
+        ui.pending.append(Order(1, home, dest, 20))
+        assert ui.available(state, home) == 0
+        ui.history = True
+        state.systems[home].ships = 2   # the board being reviewed
+        assert ui.available(state, home) == 2
+        ui.history = False
+        assert ui.committed(home) == 20  # the queue itself is untouched
     finally:
         pygame.quit()
 
@@ -1067,6 +1099,22 @@ def test_shared_link_is_remembered_without_its_challenge(monkeypatch):
     remembered = Settings.from_token(stored[main.paths.WEB_SHARED_SETTINGS_KEY])
     assert remembered.challenge is None
     assert remembered.seed == 4821 and remembered.nodes == 18
+
+
+def test_shared_link_with_an_outdated_key_opens_as_its_challenge(monkeypatch):
+    """A key no build recomputes for the setup it came with is re-stamped on
+    load, so the menu doesn't read the untouched setup as edited."""
+    challenged = Settings(seed=4821, nodes=18, players=3)
+    challenged.challenge = Challenge(turns=137, lost=412, key="0123456789abcdef")
+    monkeypatch.setattr(main.paths, "is_web", lambda: True)
+    monkeypatch.setattr(main.webstore, "url_token", lambda: challenged.to_token())
+    monkeypatch.setattr(main.webstore, "get", lambda key: "")
+    monkeypatch.setattr(main.webstore, "set", lambda key, value: True)
+
+    settings = Settings.defaults()
+    main._apply_shared_link(settings)
+    assert settings.challenge is not None and settings.challenge.matches(settings)
+    assert (settings.challenge.turns, settings.challenge.lost) == (137, 412)
 
 
 def test_share_challenge_prefers_the_clipboard_and_stores_nothing(monkeypatch):
@@ -1697,6 +1745,139 @@ def test_a_log_fragment_is_read_as_a_replay_request(monkeypatch):
     assert main.replay_request() == ""
 
 
+# --------------------------------------------------------------------------- #
+# Opening a gauntlet link (`#g=<id>`, `#gauntlet=<payload>`)
+# --------------------------------------------------------------------------- #
+def _linked_gauntlet(gid="hard-mode-0123456789ab"):
+    return {"id": gid, "name": "Hard mode",
+            "stages": [{"id": 0, "title": "One", "settings": Settings(players=2, nodes=8, seed=3).to_dict()}]}
+
+
+@pytest.fixture
+def _gauntlet_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(main.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    return main.MenuState()
+
+
+def test_a_gauntlet_fragment_is_read_as_a_gauntlet_request(monkeypatch):
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "g=hard-mode-0123456789ab")
+    assert main.gauntlet_request() == ("hard-mode-0123456789ab", None)
+    monkeypatch.setattr(main.webstore, "url_token", lambda: main.gauntlet.link_fragment(_linked_gauntlet()))
+    assert main.gauntlet_request() == (None, _linked_gauntlet())
+    monkeypatch.setattr(main.webstore, "url_token", lambda: "log=00112233445566ff")
+    assert main.gauntlet_request() == (None, None)
+
+
+def test_an_inline_gauntlet_opens_the_tutorial_list_on_it(_gauntlet_store):
+    ms = _gauntlet_store
+    assert main.open_linked_gauntlet(ms, Settings(), None, _linked_gauntlet()) is None
+    assert ms.tutorial_open
+    assert ms.gauntlets[ms.gauntlet_pick].id == "hard-mode-0123456789ab"
+
+
+def test_a_gauntlet_already_kept_opens_without_asking_the_board(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    main.gauntlet.remember(_linked_gauntlet())
+    monkeypatch.setattr(main.gauntlet, "fetch", lambda gid: pytest.fail("fetched a kept gauntlet"))
+    assert main.open_linked_gauntlet(ms, Settings(), "hard-mode-0123456789ab", None) is None
+    assert ms.tutorial_open and ms.gauntlets[ms.gauntlet_pick].id == "hard-mode-0123456789ab"
+
+
+def test_a_fetched_gauntlet_is_kept_and_opened(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    monkeypatch.setattr(main.gauntlet, "fetch", lambda gid: "pending")
+    assert main.open_linked_gauntlet(ms, Settings(), "hard-mode-0123456789ab", None) == "pending"
+    assert ms.status == main.GAUNTLET_OPENING_MSG and not ms.tutorial_open
+    reply = json.dumps({"id": "hard-mode-0123456789ab", "gauntlet": _linked_gauntlet()})
+    main.land_gauntlet(ms, Settings(), main.pbp.OK, reply)
+    assert ms.tutorial_open and ms.gauntlets[ms.gauntlet_pick].id == "hard-mode-0123456789ab"
+    assert [g.id for g in main.gauntlet.remembered()] == ["hard-mode-0123456789ab"]
+
+
+@pytest.mark.parametrize("state,body,msg", [
+    ("missing", '{"error": "no such gauntlet"}', "GAUNTLET_MISSING_MSG"),
+    ("error", "", "GAUNTLET_UNREACHABLE_MSG"),
+    ("ok", "<html>", "GAUNTLET_UNREADABLE_MSG"),
+])
+def test_a_gauntlet_that_cannot_be_had_says_why(_gauntlet_store, state, body, msg):
+    ms = _gauntlet_store
+    main.land_gauntlet(ms, Settings(), state, body)
+    assert ms.status == getattr(main, msg) and not ms.status_ok
+    assert not ms.tutorial_open and main.gauntlet.remembered() == []
+
+
+def test_no_board_means_the_gauntlet_link_says_so(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    monkeypatch.setattr(main.gauntlet.webstore, "leaderboard_url", lambda path: "")
+    assert main.open_linked_gauntlet(ms, Settings(), "hard-mode-0123456789ab", None) is None
+    assert ms.status == main.GAUNTLET_UNREACHABLE_MSG
+
+
+# --------------------------------------------------------------------------- #
+# Generating a gauntlet from a spec link (`#gauntlet-spec=`)
+# --------------------------------------------------------------------------- #
+_SPEC = {"stages": 2, "seed": 9, "candidates": 1, "rules": {"players": {"fix": 2}, "systems": {"range": [8, 10]}},
+         "opponents": ["rusherplus", "heuristic"]}
+
+
+def test_a_spec_link_generates_a_frame_at_a_time_then_opens_the_list(_gauntlet_store, monkeypatch):
+    ms, settings = _gauntlet_store, Settings(home_production=5)
+    assert main.start_generation(ms, "g=hard-mode-0123456789ab") is None
+    job = main.start_generation(ms, main.gauntletgen.spec_fragment(_SPEC))
+    assert job is not None and ms.status.startswith("Generating a gauntlet: 0%")
+    monkeypatch.setattr(main, "GAUNTLET_GEN_BUDGET_S", 0.0)
+    frames = 0
+    while job is not None:
+        job = main.pump_generation(ms, settings, job)
+        frames += 1
+        # A probe's setup never leaks into what the menu draws.
+        assert main.config.HOME_PRODUCTION == 5
+    assert frames > 1 and ms.tutorial_open and ms.status_ok
+    picked = ms.gauntlets[ms.gauntlet_pick]
+    assert picked.id.startswith("gen-") and ms.status == f"Generated {picked.name}: {len(picked.stages)} stages"
+    assert [g.id for g in main.gauntlet.remembered()] == [picked.id]
+
+
+def test_a_spec_link_that_can_never_deal_says_why(_gauntlet_store):
+    ms = _gauntlet_store
+    frag = main.gauntletgen.spec_fragment({"opponents": []})
+    assert main.start_generation(ms, frag) is None
+    assert ms.status == "Can't generate that gauntlet: no opponents are allowed" and not ms.status_ok
+
+
+def test_copy_link_sends_a_kept_gauntlet_as_a_whole_file(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    copied = []
+    monkeypatch.setattr(main.menu, "is_web", lambda: True)
+    monkeypatch.setattr(main.webstore, "link_url", lambda token: f"https://x/game/#{token}")
+    monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
+    main.gauntlet.remember(_linked_gauntlet())
+    main.menu.open_gauntlet(ms, Settings(), "hard-mode-0123456789ab")
+    g = ms.gauntlets[ms.gauntlet_pick]
+    assert main.menu._shareable(ms, g)
+    assert not main.menu._shareable(ms, main.gauntlet.builtin()[0])
+    main.menu._copy_gauntlet(ms, g)
+    token = copied[0].split("#", 1)[1]
+    assert main.gauntlet.inline_data(token) == _linked_gauntlet() and ms.status_ok
+
+
+def test_the_list_button_says_tutorial_until_there_is_another_gauntlet(_gauntlet_store, monkeypatch):
+    monkeypatch.setattr(main.gauntlet, "user_dir", lambda: main.webstore._file_path().parent / "none")
+    assert main.menu._gauntlets_label(main.MenuState()) == "Tutorial"
+    main.gauntlet.remember(_linked_gauntlet())
+    assert main.menu._gauntlets_label(main.MenuState()) == "Gauntlets"
+
+
+def test_leaving_a_gauntlet_that_is_not_the_tutorial_says_gauntlet(_gauntlet_store):
+    ms = _gauntlet_store
+    ms.stage_at = ("tutorial", 0)
+    assert main.menu._tutorial_labels(ms)[0] == "Leave tutorial"
+    ms.stage_at = ("hard-mode-0123456789ab", 0)
+    assert main.menu._tutorial_labels(ms)[0] == "Leave gauntlet"
+    main.menu._leave_gauntlet(ms, Settings())
+    assert "gauntlet" in ms.status and "tutorial" not in ms.status
+
+
 def _watchable_log(tmp_path, monkeypatch, turns=6):
     monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
     state, ui = _setup()
@@ -1759,6 +1940,58 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
         assert live is not None          # the live fog is stashed for the way out
     finally:
         pygame.quit()
+
+
+def test_a_saved_game_file_opens_as_a_watched_replay(tmp_path, monkeypatch):
+    """`--watch games/game_X.json` takes the downloaded path from the poll on, so
+    a local file gets the same review, the same watched mark and the same fork."""
+    from starconquest import share
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        assert log.path is not None and log.path.is_file()
+        assert main.is_log_path(str(log.path))
+        assert not main.is_log_path("00112233445566ff")
+        status, body = share.Download.ready(main.read_game_log(str(log.path)).encoded()).poll()
+        assert status == share.OK
+        opened = main.open_replay(body, Settings())
+        assert opened is not None
+        state, ui, restored = opened
+        assert restored.match_id == log.match_id
+        assert state.turn == log.turn_count
+        assert ui.watched is True
+    finally:
+        pygame.quit()
+
+
+def test_settings_from_a_saved_game_reproduce_its_map(tmp_path, monkeypatch):
+    """`--settings-from` hands the menu the log's setup with its concrete seed (the
+    stored settings say `seed: null`), and never the score to beat it carried."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        challenged = Settings.from_dict(log.settings)
+        challenged.challenge = Challenge(turns=9, lost=3)
+        log.settings = dict(challenged.to_dict(), seed=None)
+        log.save()
+        settings = main.log_settings(main.read_game_log(str(log.path)))
+        assert settings.seed == log.seed
+        assert settings.nodes == 18 and settings.players == 3
+        assert settings.challenge is None
+    finally:
+        pygame.quit()
+
+
+def test_a_file_that_is_not_a_game_log_is_refused(tmp_path):
+    """A typo, a saved setup and junk all fail with a message, never a traceback."""
+    setup = tmp_path / "setup.json"
+    Settings(nodes=20).save(setup)
+    junk = tmp_path / "junk.json"
+    junk.write_text("[1, 2, 3]")
+    for raw in (str(tmp_path / "missing.json"), str(setup), str(junk)):
+        try:
+            main.read_game_log(raw)
+        except ValueError:
+            continue
+        raise AssertionError(f"{raw} was read as a game log")
 
 
 def test_reviewing_our_own_game_still_opens_where_we_are(tmp_path, monkeypatch):
@@ -2507,3 +2740,216 @@ def test_clicking_a_splits_other_lane_on_the_map_opens_that_lane():
         assert (ui.selected, ui.dest) == (home, b)
     finally:
         pygame.quit()
+
+
+# --------------------------------------------------------------------------- #
+# Web canvas: the framebuffer follows the browser viewport
+# --------------------------------------------------------------------------- #
+def test_the_web_framebuffer_takes_the_viewports_shape():
+    """pygbag letterboxes a framebuffer into the page keeping its aspect, so a fixed
+    16:9 one never filled any other window; the canvas takes the viewport's shape
+    at device resolution instead, held to the WEB_FB pixel budget."""
+    budget = config.WEB_FB_W * config.WEB_FB_H
+    assert main.web_framebuffer(1920, 1080, 1.0) == (1920, 1080)     # native, unscaled
+    assert main.web_framebuffer(844, 390, 3.0) == (2532, 1170)       # landscape phone
+    w, h = main.web_framebuffer(390, 844, 3.0)                       # ...rotated
+    assert h > w and abs(w / h - 390 / 844) < 0.01
+    w, h = main.web_framebuffer(1920, 1080, 2.0)                     # 4K: capped
+    assert (w, h) == (config.WEB_FB_W, config.WEB_FB_H)
+    w, h = main.web_framebuffer(1600, 1200, 2.0)                     # 4:3, capped
+    assert abs(w / h - 4 / 3) < 0.01 and w * h <= budget * 1.01
+    assert main.web_framebuffer(640, 480, 0.5) == (640, 480)         # dpr floored at 1
+
+
+def test_a_browser_resize_reshapes_the_surface(monkeypatch):
+    """The surface only changes size when the game resizes it, so a browser resize
+    must come through `fit_web_canvas` for the loop's reflow to see anything."""
+    pygame.init()
+    try:
+        pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
+        view = [(1600, 1200, 1.0)]
+        monkeypatch.setattr(main.webstore, "viewport", lambda: view[0])
+
+        assert main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (1600, 1200)
+        assert not main.fit_web_canvas(), "an unchanged viewport must not set_mode again"
+
+        view[0] = (900, 1600, 1.0)                    # rotated to portrait
+        assert main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (900, 1600)
+
+        view[0] = None                                # DOM unreadable: keep what we have
+        assert not main.fit_web_canvas()
+        assert pygame.display.get_surface().get_size() == (900, 1600)
+    finally:
+        pygame.quit()
+
+
+def test_the_game_owns_the_canvas_box_it_measures(monkeypatch):
+    """pygbag's own fit keeps the framebuffer's aspect, so left in charge it
+    letterboxes or, racing a resize, stretches the picture. `viewport` takes the
+    canvas over, makes it fill the page, and reports the box it is *shown* at."""
+    import sys
+    import types
+    from starconquest import webstore
+
+    style = types.SimpleNamespace()
+    canvas = types.SimpleNamespace(
+        style=style,
+        getBoundingClientRect=lambda: types.SimpleNamespace(width=844.6, height=390.2))
+    window = types.SimpleNamespace(
+        canvas=canvas, devicePixelRatio=3,
+        python=types.SimpleNamespace(config=types.SimpleNamespace(user_canvas_managed=0)))
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    monkeypatch.setitem(sys.modules, "platform", types.SimpleNamespace(window=window))
+
+    assert webstore.viewport() == (844, 390, 3.0)
+    assert window.python.config.user_canvas_managed == 1
+    assert (style.position, style.width, style.height) == ("fixed", "100%", "100%")
+
+    canvas.getBoundingClientRect = lambda: types.SimpleNamespace(width=0, height=0)
+    assert webstore.viewport() is None, "a canvas not laid out yet has no size to fit"
+
+
+def _stage(ui, next_stage=True):
+    ui.stage_label = "Tutorial 2/10 · Supply lines"
+    ui.stage_title = "Supply lines"
+    ui.briefing = ("Read me.",)
+    ui.briefing_open = True
+    ui.stage_hint = "A hint."
+    ui.has_next_stage = next_stage
+
+
+def test_any_press_puts_the_briefing_away_and_is_spent_doing_so():
+    state, ui = _setup()
+    _stage(ui)
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    assert _click(state, ui, home) is None
+    assert not ui.briefing_open
+    assert ui.selected is None, "the press that closed the card selected nothing"
+
+    ui.briefing_open = True
+    ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, unicode="\r")
+    assert game_input.handle_event(ev, state, ui) is None, "Enter closes the card, not the turn"
+    assert not ui.briefing_open
+
+    ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_b, unicode="b")
+    assert game_input.handle_event(ev, state, ui) is None
+    assert ui.briefing_open, "B brings it back"
+
+
+def test_the_stage_hint_brings_the_briefing_back():
+    state, ui = _setup()
+    _stage(ui)
+    ui.briefing_open = False
+    ui.stage_hint_rect = (10, 10, 100, 40)
+    assert _click_pos(state, ui, (50, 30)) is None
+    assert ui.briefing_open
+
+
+def test_the_lore_button_opens_the_selected_systems_star_card():
+    state, ui = _setup()
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    ui.mode, ui.selected = SELECTED, home
+    ui.lore_button_rect = (10, 10, 30, 30)
+    assert _click_pos(state, ui, (20, 20)) is None
+    assert ui.lore_sid == home
+    assert ui.selected == home, "opening the card keeps the selection"
+
+
+def test_any_press_puts_the_star_card_away_and_is_spent_doing_so():
+    state, ui = _setup()
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    ui.lore_sid = home
+    assert _click(state, ui, home) is None
+    assert ui.lore_sid is None
+    assert ui.selected is None, "the press that closed the card selected nothing"
+
+    ui.lore_sid = home
+    ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, unicode="\r")
+    assert game_input.handle_event(ev, state, ui) is None, "Enter closes the card, not the turn"
+    assert ui.lore_sid is None
+
+
+def test_i_opens_the_star_card_for_the_selected_or_hovered_system():
+    state, ui = _setup()
+    i = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_i, unicode="i")
+    assert game_input.handle_event(i, state, ui) is None
+    assert ui.lore_sid is None, "nothing in focus"
+
+    enemy = next(s.id for s in state.systems.values() if s.owner_id == 2)
+    ui.hover = enemy
+    game_input.handle_event(i, state, ui)
+    assert ui.lore_sid == enemy
+    ui.lore_sid = None
+
+    home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+    ui.mode, ui.selected = SELECTED, home
+    game_input.handle_event(i, state, ui)
+    assert ui.lore_sid == home, "the selection wins over a hover"
+    ui.lore_sid = None
+
+    state.systems[home].name = "Not In The Catalogue"
+    game_input.handle_event(i, state, ui)
+    assert ui.lore_sid is None
+
+
+def test_n_is_next_stage_in_a_stage_and_never_a_new_map():
+    state, ui = _setup()
+    _stage(ui)
+    ui.briefing_open = False
+    n = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_n, unicode="n")
+    assert game_input.handle_event(n, state, ui) is None, "live: a stage's seed is pinned"
+
+    state.winner, ui.hand_turns = 1, 12
+    assert game_input.handle_event(n, state, ui) == "next_stage"
+    ui.next_stage_rect = (10, 10, 100, 40)
+    assert _click_pos(state, ui, (50, 30)) == "next_stage"
+
+    ui.has_next_stage = False          # the last stage: nowhere on to
+    assert game_input.handle_event(n, state, ui) is None
+    ui.has_next_stage, ui.hand_turns = True, 0   # an autoplayed win cleared nothing
+    assert game_input.handle_event(n, state, ui) is None
+
+    ui.stage_label = None              # an ordinary match keeps New map
+    assert game_input.handle_event(n, state, ui) == "restart"
+
+
+def test_start_game_copies_a_stage_onto_the_ui_as_plain_values(tmp_path, monkeypatch):
+    from starconquest import gauntlet
+
+    monkeypatch.setattr(main.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    pygame.init()
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    g = gauntlet.builtin()[0]
+    first, last = g.stages[0], g.stages[-1]
+    cfg = gauntlet.stage_settings(first)
+    _state, ui, _log = main.start_game(cfg, cfg.seed, False, (g, first))
+    assert ui.stage_label == f"{g.name} 1/{len(g.stages)} · {first.title}"
+    assert ui.briefing == first.briefing and ui.briefing_open
+    assert ui.stage_hint == first.hint and ui.has_next_stage
+
+    main.stage_ui(ui, (g, last), briefing=False)    # a Retry: no card again
+    assert not ui.briefing_open and not ui.has_next_stage
+
+    _state, plain, _log = main.start_game(cfg, cfg.seed, False)
+    assert plain.stage_label is None and not plain.in_stage
+
+
+def test_a_stage_with_no_hint_still_has_a_line_back_to_its_briefing(monkeypatch):
+    # A generated stage has none of its own: the panel's line is the only way
+    # back to the card on a phone.
+    import dataclasses
+    from starconquest import gauntlet
+
+    g = gauntlet.builtin()[0]
+    bare = dataclasses.replace(g.stages[0], hint="")
+    ui = Ui(view=WorldView((0, 0, 100, 100), config.play_rect()))
+    monkeypatch.setattr(config, "touch_ui", True)
+    main.stage_ui(ui, (g, bare))
+    assert ui.stage_hint and "briefing" in ui.stage_hint and "B:" not in ui.stage_hint
+    monkeypatch.setattr(config, "touch_ui", False)
+    main.stage_ui(ui, (g, bare))
+    assert ui.stage_hint.startswith("B:")
+    main.stage_ui(ui, (g, dataclasses.replace(bare, briefing=())))
+    assert ui.stage_hint is None

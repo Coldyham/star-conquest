@@ -1,5 +1,6 @@
 """The home page's filter columns on `game_summary` (leaderboard/schema.sql)
-against a real Postgres: `contenders`, `bot_leads` and `fog`.
+against a real Postgres: `contenders`, `bot_leads`, `fog` and the difficulty
+estimate.
 
 Opt-in, like test_crowns_sql: set ``SC_TEST_PG``.
 """
@@ -31,7 +32,7 @@ def board():
     # solo: one player twice. pair: two players, but bob's score is a mismatch.
     # duel: two counted players. fog/scout: fog on via either range. Bots: on
     # `pair` a bot ties the human best, on `duel` a bot loses to it, on `solo`
-    # only a losing (won = false) bot row exists.
+    # only a losing (won = false) bot row exists; a second, losing bot on `pair`.
     _psql("""
       insert into users (name) values ('alice'), ('bob');
       insert into games (game_key, mode, players, nodes, seed, settings_json)
@@ -50,7 +51,11 @@ def board():
       insert into bot_scores (game_key, bot, turns, lost, won, engine_rev) values
         ('pair', 'marshal', 20, 0, true, 'e'),
         ('duel', 'marshal', 26, 0, true, 'e'),
+        ('pair', 'heuristic', 50, 1, false, 'e'),
         ('solo', 'marshal', 99, 0, false, 'e');
+      -- Posted now, so past any legacy cutoff: a score counts once verified.
+      insert into score_checks (score_id, verdict)
+        select id, 'verified' from scores where id not in (select score_id from score_checks);
     """, DB)
     yield DB
     _psql(f"drop database if exists {DB}")
@@ -73,9 +78,9 @@ def test_contenders_counts_players_the_crowns_count(board):
 
 
 def test_a_bot_leads_until_a_human_strictly_beats_it(board):
-    """game_summary.best counts every score (a mismatch included), as the
-    card's headline does; a tie is still the bot's, and a losing bot row leads
-    nothing."""
+    """game_summary.best is the best counted score, as the card's headline is
+    (on `pair`, alice's 30 rather than bob's mismatched 20); a tie is still the
+    bot's, and a losing bot row leads nothing."""
     assert _column(board, "bot_leads") == {
         "duel": "f", "fog": "f", "pair": "t", "scout": "f", "solo": "f"}
 
@@ -88,7 +93,20 @@ def test_fog_is_on_when_either_range_is_stored(board):
 
 
 def test_a_config_sorts_on_its_maps_average_best(board):
-    """config_summary.avg_best_turns averages each map's own best (solo 28,
-    pair 20, duel 25), not every score posted on the setup."""
+    """config_summary.avg_best_turns averages each map's own best counted score
+    (solo 28, pair 30 with bob's mismatch left out, duel 25), not every score
+    posted on the setup."""
     rows = _psql("select avg_best_turns from config_summary order by avg_best_turns", board)
-    assert rows.splitlines() == ["24.3", "30.0", "30.0"]
+    assert rows.splitlines() == ["27.7", "30.0", "30.0"]
+
+
+def test_difficulty_is_the_share_of_bots_that_lost(board):
+    """Out of the bots that ran on the map, null where none has; a config
+    averages its maps' (solo, pair and duel share one setup)."""
+    assert _column(board, "bot_wins || '/' || bot_runs") == {
+        "duel": "1/1", "fog": "0/0", "pair": "1/2", "scout": "0/0", "solo": "0/1"}
+    assert _column(board, "difficulty") == {
+        "duel": "0.000", "fog": "", "pair": "0.500", "scout": "", "solo": "1.000"}
+    rows = _psql("select coalesce(avg_difficulty::text, 'null') from config_summary"
+                 " order by avg_difficulty", board)
+    assert rows.splitlines() == ["0.500", "null", "null"]

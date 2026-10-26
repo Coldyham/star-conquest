@@ -64,7 +64,7 @@ from .paths import (
     WEB_PBP_STATE_KEY,
     is_web,
 )
-from .settings import Settings, build_state
+from .settings import Settings, build_state, fog_off
 
 # A seat token as the endpoint mints one: 128 bits as hex.
 TOKEN_CHARS = 32
@@ -79,6 +79,11 @@ TITLE_MAX = 60
 # would put one back. The first miss only holds (see ``lapse_orders``), so what
 # this really sets is how long a match waits before it is allowed to keep moving.
 DEADLINE_HOURS = 48
+
+# The seat a spectator sits at: neutral's id, which no person can hold. It owns
+# no token, so every write refuses it (``Seat.valid``) and nothing here can file
+# a spectator's orders, a lapse or a resolve.
+SPECTATOR = 0
 
 
 def endpoint(action: str) -> str:
@@ -115,6 +120,16 @@ class Seat:
         return (bool(replay._MATCH_ID_RE.match(self.match_id))
                 and 1 <= self.seat <= 6 and valid_token(self.token))
 
+    @property
+    def spectating(self) -> bool:
+        """Whether this is a spectator's view rather than a seat (``spectator``)."""
+        return self.seat == SPECTATOR
+
+
+def spectator(match_id: str) -> Seat:
+    """The seat a spectator link opens: the match, no seat in it and no token."""
+    return Seat(match_id, SPECTATOR, "")
+
 
 # --------------------------------------------------------------------------- #
 # The link
@@ -143,6 +158,26 @@ def parse_link(token_text: str) -> tuple[str, str] | None:
 def link_fragment(match_id: str, token: str) -> str:
     """The fragment to hand a player, for the link that seats them."""
     return f"{PBP_FRAGMENT}{match_id}:{token}"
+
+
+# `#spectate=<match id>`: the whole board and nobody's orders, for a screen the
+# whole table can see. A fragment of its own rather than a seat link without its
+# token, so a seat link that lost its token on the way is refused as one,
+# rather than quietly opening as somebody's spectator view.
+SPECTATE_FRAGMENT = "spectate="
+
+
+def parse_spectate_link(token_text: str) -> str | None:
+    """The match id out of a ``#spectate=…`` fragment, or None."""
+    if not token_text.startswith(SPECTATE_FRAGMENT):
+        return None
+    match_id = token_text[len(SPECTATE_FRAGMENT):]
+    return match_id if replay._MATCH_ID_RE.match(match_id) else None
+
+
+def spectate_fragment(match_id: str) -> str:
+    """The fragment to hand a spectator: the match id, and nothing that writes."""
+    return f"{SPECTATE_FRAGMENT}{match_id}"
 
 
 # --------------------------------------------------------------------------- #
@@ -253,6 +288,19 @@ class Match:
     turn_opened_at: str = ""
     title: str = ""
     names: dict[int, str] = field(default_factory=dict)
+
+    @property
+    def watchable(self) -> bool:
+        """Whether a spectator link may open this match.
+
+        Only with fog off. A spectator sees the whole board, so on a fogged map
+        the shared screen would show every player what none of them should see.
+        With fog off it shows nothing a seat does not already see. Fog is
+        convenience rather than secrecy here (any client could rebuild the
+        board), so this is about not putting it on the wall, not about stopping
+        anyone.
+        """
+        return fog_off(self.settings)
 
     @property
     def waiting(self) -> list[int]:

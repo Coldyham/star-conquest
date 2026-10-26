@@ -27,6 +27,7 @@ from starconquest import (
     matchnames,
     model,
     render,
+    starlore,
     starnames,
     turnfilm,
 )
@@ -221,40 +222,49 @@ def test_the_win_message_names_the_bot_that_won():
     """"Verdant (Knower) wins!" — which bot took the board is the one thing the
     overlay could say and didn't, and it is unreadable from the map."""
     state = mapgen.generate_random(1, num_nodes=18, num_players=4)
+    ui = _make_ui(state)
     state.players[3].is_human = False
     state.players[3].ai_strategy = "knower"
     state.winner = 3
-    assert render._winner_label(state) == "Verdant (Knower)"
+    assert render._winner_label(state, ui) == "Verdant (Knower)"
 
     # A drop-in keeps its own capitalisation rather than being title-cased.
     state.players[3].ai_strategy = "claudeBot"
-    assert render._winner_label(state) == "Verdant (ClaudeBot)"
+    assert render._winner_label(state, ui) == "Verdant (ClaudeBot)"
+
+    # Given the label the rest of the HUD uses, the win line says the same.
+    ui.seat_bots = {3: "Knower · Predict"}
+    assert render._winner_label(state, ui) == "Verdant (Knower · Predict)"
 
     # A human seat is credited to the person, not to whatever it was set to —
     # including one claimed part-way through (`engine.claim_seat`).
     state.players[3].is_human = True
-    assert render._winner_label(state) == "Verdant"
+    assert render._winner_label(state, ui) == "Verdant"
 
     state.winner = 0                      # the draw branch names nobody
-    assert render._winner_label(state) == "Neutral"
+    assert render._winner_label(state, ui) == "Neutral"
 
 
 def test_a_seat_left_to_the_seed_is_revealed_by_the_win_message():
     """`settings.RANDOM_STRATEGY` resolves on `Player`, never on `Settings`, so
-    the overlay reads the bot that actually played rather than the placeholder.
-    Revealing it at game over is the payoff, and costs nothing: there is no turn
-    left to play with the knowledge."""
+    the overlay reads the bot that actually played rather than the placeholder,
+    and says it was dealt at random. Revealing it at game over is the payoff,
+    and costs nothing: there is no turn left to play with the knowledge."""
+    from starconquest import main
     from starconquest.settings import RANDOM_STRATEGY, Settings, build_state
 
+    ai.load_models()   # a random seat is dealt from the roster `models/` registers
     saved = {const: getattr(config, const) for _, const in settings_mod._GLOBAL_KNOBS}
     try:
         cfg = Settings(players=3, nodes=18)
         cfg.ai_strategy[1] = RANDOM_STRATEGY          # seat 2
         state = build_state(cfg, 5)
+        ui = _make_ui(state)
+        ui.seat_bots = main.seat_bot_labels(state)
+        ui.random_seats = frozenset({2})
         state.winner = 2
-        label = render._winner_label(state)
-        assert label.startswith("Crimson (")
-        assert RANDOM_STRATEGY not in label.lower()
+        label = render._winner_label(state, ui)
+        assert label == f"Crimson ({ui.seat_bots[2]}, random)"
         assert state.players[2].ai_strategy in ai.available_strategies()
     finally:
         for const, val in saved.items():
@@ -779,6 +789,60 @@ def test_fast_forward_button_only_exists_while_spectating():
         pygame.quit()
 
 
+def test_ironman_hides_history_until_the_game_is_decided():
+    """The footer offers History exactly when ``Ui.can_review`` does: under ironman
+    not while the game is undecided (even once knocked out — rewinding is the
+    point of hiding it), and again once there is a winner."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        state.turn = 3
+        ui = _make_ui(state)
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] > 0
+
+        ui.ironman = True
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] == 0
+        state.players[1].alive = False
+        render.draw(screen, state, ui)
+        assert ui.history_button_rect[2] == 0, "a spectator could still rewind"
+
+        state.winner = 2
+        assert ui.can_review(state)
+    finally:
+        pygame.quit()
+
+
+def test_top_bar_shows_our_ships_lost():
+    """The tie-break, in view all game rather than only on the win overlay."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        drawn: list[str] = []
+        real = render._text
+
+        def spy(surface, font, text, *args, **kwargs):
+            drawn.append(text)
+            return real(surface, font, text, *args, **kwargs)
+
+        render._text = spy
+        try:
+            state.players[1].ships_lost = 17
+            state.players[2].ships_lost = 5
+            render.draw(screen, state, ui)
+        finally:
+            render._text = real
+        assert "17 lost" in drawn and "5 lost" not in drawn
+    finally:
+        pygame.quit()
+
+
 def test_touch_build_drops_keyboard_only_text():
     """A phone has no keyboard, so the '(Esc)' suffixes and the shortcut lines in
     the help panel are dropped there — they were also what overflowed the labels."""
@@ -841,16 +905,192 @@ def test_help_text_fits_the_empty_panel_whole():
             y = config.HUD_TOP_H + config.PANEL_PAD
             font = render._fonts()["small"]
             width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
-            for history in (False, True):
-                text = render._legend_text(history)
-                drawn = render._panel_legend(screen, 0, y, bottom, history=history)
+            for history, spectating in ((False, False), (True, False), (False, True)):
+                text = render._legend_text(history, spectating)
+                drawn = render._panel_legend(screen, 0, y, bottom, history=history,
+                                             spectating=spectating)
                 lines = render._wrap(font, text, width)
                 room = (bottom - y - render._row_h("normal")) // render._row_h()
+                scene = "history" if history else "spectator" if spectating else "live"
                 assert room >= len(lines), (
-                    f"{'history' if history else 'live'} legend needs {len(lines)} "
+                    f"{scene} legend needs {len(lines)} "
                     f"rows, panel holds {room}"
                 )
                 assert drawn <= bottom
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_every_star_card_fits_whole():
+    """Every catalogue entry's info card holds its whole origin, its source and
+    the close line on the map, at all three geometries: the card is cut silently
+    when it doesn't, so a cut entry would be lore nobody reads the end of."""
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            for name, lore in starlore.LORE.items():
+                assert render._card_layout(*render._lore_card(lore)).fits, f"{name} runs off its card"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_the_lore_button_sits_beside_a_selected_systems_name():
+    """Drawn for the selected system only, inside the panel, and the card it opens
+    stays on the map; a system the catalogue has no entry for gets no button."""
+    pygame.init()
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            ui = _make_ui(state)
+            home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+            ui.hover = home
+            render.draw(screen, state, ui)
+            assert ui.lore_button_rect == (0, 0, 0, 0), "a hover is not a selection"
+
+            ui.mode, ui.selected = SELECTED, home
+            render.draw(screen, state, ui)
+            panel = pygame.Rect(config.SCREEN_W - config.HUD_RIGHT_W, 0, config.HUD_RIGHT_W, config.SCREEN_H)
+            assert ui.lore_button_rect[2] > 0
+            assert panel.contains(pygame.Rect(*ui.lore_button_rect))
+
+            ui.lore_sid = home
+            render.draw(screen, state, ui)
+
+            state.systems[home].name = "Not In The Catalogue"
+            render.draw(screen, state, ui)
+            assert ui.lore_button_rect == (0, 0, 0, 0)
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_a_stage_hint_fits_the_empty_panel():
+    """A gauntlet stage's hint sits above the legend, and the two together still
+    fit an empty panel whole — the longest hint `gauntlet.from_dict` lets
+    through, as well as every hint the tutorial ships. The touch build is the
+    binding case, which is why the hint carries no "tap to reread" line of its
+    own (the briefing card says so instead)."""
+    from starconquest import gauntlet
+
+    pygame.init()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    worst = ("abcd " * 40)[:gauntlet.HINT_MAX]
+    hints = [worst] + [s.hint for g in gauntlet.builtin() for s in g.stages]
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            ph = config.SCREEN_H - config.HUD_TOP_H - config.END_TURN_H
+            bottom = config.HUD_TOP_H + ph - config.s(8)
+            top = config.HUD_TOP_H + config.PANEL_PAD
+            font = render._fonts()["small"]
+            width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+            legend = len(render._wrap(font, render._legend_text(False), width))
+            for hint in hints:
+                used = len(render._stage_hint_lines(hint)) * render._row_h() + config.ROW_GAP * 2
+                room = (bottom - top - used - render._row_h("normal")) // render._row_h()
+                assert room >= legend, f"{hint!r}: legend needs {legend} rows, {room} left"
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_a_stage_draws_its_briefing_hint_and_next_stage_on_screen():
+    """The briefing card over the opening board, the hint (a tap target) in the
+    empty panel, and on a won stage Next stage where New map was — every rect on
+    screen, at every shipping scale."""
+    pygame.init()
+    try:
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+            scale()
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            bounds = screen.get_rect()
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            ui = _make_ui(state)
+            ui.stage_label = "Tutorial 3/10 · Defender's edge"
+            ui.stage_title = "Defender's edge"
+            ui.briefing = tuple("A paragraph long enough to wrap over several lines of the card. " * 3
+                                for _ in range(6))
+            ui.briefing_open = True
+            ui.stage_hint = "Defenders have the edge: attack with a margin. The menu's Combat tab shows the odds."
+            ui.has_next_stage = True
+            render.draw(screen, state, ui)
+            assert ui.stage_hint_rect[2] > 0
+            assert bounds.contains(pygame.Rect(*ui.stage_hint_rect))
+            assert ui.restart_live_button_rect == (0, 0, 0, 0), "no New map in a stage"
+
+            state.winner, ui.hand_turns, state.turn = 1, 30, 30
+            render.draw(screen, state, ui)
+            assert ui.next_stage_rect[2] > 0 and bounds.contains(pygame.Rect(*ui.next_stage_rect))
+            assert ui.restart_button_rect == (0, 0, 0, 0)
+            assert ui.retry_button_rect[2] > 0
+
+            ui.hand_turns = 0          # an autoplayed win clears nothing: no way on
+            render.draw(screen, state, ui)
+            assert ui.next_stage_rect == (0, 0, 0, 0)
+            assert ui.restart_button_rect == (0, 0, 0, 0)
+    finally:
+        _desktop_scale()
+        pygame.quit()
+
+
+def test_a_win_short_of_the_stage_target_offers_retry_not_next_stage():
+    """Next stage follows the target: a win short of it leaves Retry alone and
+    says "not yet"; one that meets it, or an earlier best that did, goes on."""
+    from starconquest.gauntlet import Target
+
+    pygame.init()
+    try:
+        screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.stage_label, ui.stage_title, ui.has_next_stage = "Mine 1/3 · One", "One", True
+        ui.stage_target = Target(turns=14)
+        state.winner, ui.hand_turns, state.turn = 1, 18, 18
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect == (0, 0, 0, 0) and ui.retry_button_rect[2] > 0
+        assert render._result_lines(state, ui)[-1][1] == "Win in 14 turns or fewer: not yet"
+
+        ui.stage_met_before = True
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect[2] > 0
+
+        ui.stage_met_before, state.turn = False, 14
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect[2] > 0
+        assert render._result_lines(state, ui)[-1][1].endswith(": met  ·  Stage cleared")
+    finally:
+        pygame.quit()
+
+
+def test_the_briefing_card_stays_inside_the_map():
+    """Measured and centred on the play area, never a fixed pixel size: the
+    card's border is drawn wholly inside the map at every scale, a target's
+    line included."""
+    from starconquest.gauntlet import Target
+
+    pygame.init()
+    try:
+        for scale in (_desktop_scale, _touch_scale):
+            scale()
+            screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+            ui = Ui(view=WorldView((0, 0, 10, 10), config.play_rect()), human_id=1)
+            ui.stage_label, ui.stage_title = "Tutorial 1/10 · First contact", "First contact"
+            ui.briefing = ("word " * 200,) * 6
+            ui.stage_target = Target(turns=31, lost=12, bot="x" * 24, beat=True)
+            screen.fill((0, 0, 0))
+            render._draw_briefing(screen, ui)
+            px, py, pw, ph = config.play_rect()
+            teal = pygame.Color(*render._BTN_TEAL[1])
+            hits = [(x, y) for x in range(0, screen.get_width(), 4) for y in range(0, screen.get_height(), 4)
+                    if screen.get_at((x, y)) == teal]
+            assert hits
+            assert all(px <= x < px + pw and py <= y < py + ph for x, y in hits)
     finally:
         _desktop_scale()
         pygame.quit()
@@ -1498,9 +1738,9 @@ def test_which_fights_get_a_mark_and_what_it_says():
             return out
 
         every = set(state.systems)
-        # the attacker brought 9 and kept 7, so the label is its own 2 — not the
-        # 8 that died between them, most of which is the beaten garrison
-        assert [(m.cost, m.victor, m.node_id) for m in marks((fold,), every)] == [(2, 2, node)]
+        # each side's own losses, never summed: the beaten garrison's 6, then
+        # the 2 the attacker paid for bringing 9 and keeping 7
+        assert [(m.losses, m.node_id) for m in marks((fold,), every)] == [(((1, 6), (2, 2)), node)]
         assert marks((), every) == []                  # a reinforcement is no fight
         assert marks((fold,), every - {node}) == []    # ...and neither is hearsay
     finally:
@@ -1625,7 +1865,7 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
     to the fight rather than blurring into it — so this archives them one call
     apart, the way two separate `Reel.run_to` calls would. Neither expires
     quickly, so both are still up together and must not be drawn on top of each
-    other.
+    other. They stack a row apart in resolution order, read top down.
     """
     pygame.init()
     render._FONTS.clear()
@@ -1650,13 +1890,77 @@ def test_a_garrisons_finished_hull_still_falls_and_stacks_two_marks():
         placed = {text: center for center, text, _ in render._film_labels(state, ui)}
         ui.clear_fading_marks()
 
-        assert sorted(t for t, _ in out) == ["+1", "−2"]
-        assert placed["+1"][0] == placed["−2"][0], "same column"
-        assert placed["+1"][1] < placed["−2"][1], "the gain stacks above the cost"
-        assert placed["−2"][1] - placed["+1"][1] == render._row_h("small")
-        # the hull is the defender's, in its colour; the fight is the attacker's —
-        # the two need not agree, since the hull was built before the system
+        assert sorted(t for t, _ in out) == ["+1", "−2", "−6"]
+        assert placed["+1"][0] == placed["−6"][0] == placed["−2"][0], "same column"
+        # resolution order, top down: the gain, the beaten garrison, the victor
+        row = render._row_h("small")
+        assert placed["−6"][1] - placed["+1"][1] == row
+        assert placed["−2"][1] - placed["−6"][1] == row
+        # the hull and the garrison's loss are the defender's, in its colour; the
+        # victor's cost is the attacker's — the hull was built before the system
         # changed hands
-        assert dict(out) == {"+1": config.player_color(1), "−2": config.player_color(2)}
+        assert dict(out) == {"+1": config.player_color(1), "−6": config.player_color(1),
+                             "−2": config.player_color(2)}
+    finally:
+        pygame.quit()
+
+
+def test_a_fleet_shown_from_an_unseen_system_draws_its_lane(monkeypatch):
+    """Sight at or past scout leaves no fogged ring, so an enemy fleet heading into
+    view comes from a system never seen — its lane still draws, or the fleet would
+    fly through empty space. A lane with no shown fleet to an unseen system stays
+    hidden."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        ui.visible = {home}
+        ui.seen = {home}
+        far = sorted(state.systems[home].neighbors)
+        state.fleets.append(Fleet(owner_id=2, ships=3, source_id=far[0], dest_id=home,
+                                  turns_total=2, turns_remaining=1))
+        drawn: list[tuple] = []
+        real_line = pygame.draw.line
+        monkeypatch.setattr(pygame.draw, "line",
+                            lambda surf, col, a, b, *rest: drawn.append((tuple(a), tuple(b))) or real_line(surf, col, a, b, *rest))
+        render._draw_lanes(screen, state, ui)
+        to_screen = lambda sid: tuple(ui.view.to_screen(state.systems[sid].pos))
+        ends = {frozenset(e) for e in drawn}
+        assert frozenset((to_screen(home), to_screen(far[0]))) in ends
+        for other in far[1:]:
+            assert frozenset((to_screen(home), to_screen(other))) not in ends
+    finally:
+        pygame.quit()
+
+
+def test_send_popup_hides_a_fogged_destinations_garrison(monkeypatch):
+    """At sight 0 a neighbour is only scouted: the popup must not print its ship
+    count or colour it by owner, any more than the map's "?" does."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    try:
+        state = mapgen.generate_random(3, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        home = next(s.id for s in state.systems.values() if s.owner_id == 1)
+        dest = min(state.systems[home].neighbors)
+        ui.visible = {home}
+        ui.seen = {home, dest}
+        ui.mode, ui.selected, ui.dest = CHOOSING, home, dest
+        ui.chosen = state.systems[home].ships
+        texts: list[str] = []
+        real_text = render._text
+        monkeypatch.setattr(render, "_text",
+                            lambda surf, font, s, *a, **k: texts.append(s) or real_text(surf, font, s, *a, **k))
+        render._draw_send_popup(screen, state, ui)
+        assert "?sh" in texts
+        assert f"{state.systems[dest].ships}sh" not in texts
+        texts.clear()
+        ui.visible = {home, dest}
+        render._draw_send_popup(screen, state, ui)
+        assert f"{state.systems[dest].ships}sh" in texts
     finally:
         pygame.quit()

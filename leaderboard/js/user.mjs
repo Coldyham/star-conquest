@@ -1,4 +1,5 @@
 import { configured, inList, select } from "./api.mjs";
+import { drawBadges } from "./badges-card.mjs";
 import {
   clear, el, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
@@ -22,6 +23,7 @@ const lede = document.getElementById("lede");
 const tallyBox = document.getElementById("tally");
 const target = document.getElementById("scores");
 const playstyleBox = document.getElementById("playstyle");
+const badgesBox = document.getElementById("badges");
 const form = document.getElementById("compare");
 const nameField = document.getElementById("rival");
 const extras = document.getElementById("extras");
@@ -294,6 +296,10 @@ async function load() {
     for (const row of rows) canonical.set(row.users.name_key, row.users.name);
     const roster = [...canonical].map(([key, name]) => ({ key, name }));
     setHeading(roster.map((player) => player.name));
+
+    // One player's card only: a comparison is about the maps, and four panels of
+    // badges would bury them. Drawn on its own, so a slow read never holds the list.
+    if (roster.length === 1) drawBadges(badgesBox, roster[0].key);
 
     const entries = rows.map(asEntry);
     // rows arrive newest first, so first mention is most-recently-played order.

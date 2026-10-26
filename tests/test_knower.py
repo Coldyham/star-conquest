@@ -13,6 +13,7 @@ Internals are reached through `sys.modules["sc_model_knower"]`, the synthetic na
 from __future__ import annotations
 
 import copy
+import dataclasses
 import sys
 
 import pytest
@@ -198,6 +199,98 @@ def test_sibling_oracle_is_proxied_not_recursed(kn):
         assert 3 not in kn.LAST_ORACLE.trusted
     finally:
         del sys.modules["sc_model_fake_oracle"]
+
+
+def _fake_oracle(calls, stand_in=None):
+    """Register a fake oracle module's bot as ``fake_oracle``; it records the aux
+    it was called at. ``stand_in`` becomes the module's ``stand_in_params``."""
+    def other(state, pid):
+        calls.append(state.players[pid].ai_params.aux)
+        return []
+
+    other.__module__ = "sc_model_fake_oracle"
+    fake = type(sys)("sc_model_fake_oracle")
+    fake.is_oracle_seat = lambda player: player.ai_params.aux >= 1
+    if stand_in is not None:
+        fake.stand_in_params = stand_in
+    sys.modules["sc_model_fake_oracle"] = fake
+    ai.register("fake_oracle", other)
+
+
+def test_an_oracle_with_a_stand_in_is_run_at_it(kn):
+    """An oracle seat whose module names a version of itself that doesn't predict
+    is run at those params, on our copy, and believed under `TRUST_STAND_INS`."""
+    calls = []
+    _fake_oracle(calls, lambda player: dataclasses.replace(player.ai_params, aux=0.0))
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        ai.decide(state, 2)
+        assert calls == [0.0]
+        assert state.players[3].ai_params.aux == 2.0, "the real seat's params moved"
+        assert kn.LAST_ORACLE.seats[3] == "stand-in"
+        assert (3 in kn.LAST_ORACLE.trusted) == kn.TRUST_STAND_INS
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+@pytest.mark.parametrize("hook", [
+    lambda player: player.ai_params,                    # still predicts: would recurse
+    lambda player: None,
+    lambda player: 1 / 0,
+])
+def test_a_stand_in_that_cannot_be_used_falls_back_to_blind(kn, hook):
+    calls = []
+    _fake_oracle(calls, hook)
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        ai.decide(state, 2)
+        assert calls == []
+        assert 3 not in kn.LAST_ORACLE.trusted
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+def test_a_learning_actuary_is_predicted_as_field():
+    """actuary at Learning claims the oracle flag; knower runs it at Field."""
+    assert "actuary" in ai.load_models()
+    kn = sys.modules["sc_model_knower"]          # load_models re-imported it
+    state = _state(knower_seat=2)
+    state.players[3].ai_strategy = "actuary"
+    state.players[3].ai_params.aux = 2.0
+    for _ in range(12):
+        field = copy.deepcopy(state)
+        field.players[3].ai_params.aux = 1.0
+        expected = ai.STRATEGIES["actuary"](field, 3)
+        ai.decide(state, 2)
+        assert kn.LAST_ORACLE.seats[3] == "stand-in" and 3 in kn.LAST_ORACLE.trusted
+        assert kn.LAST_ORACLE.orders[3] == expected
+        engine.end_turn(state, decide=ai.decide)
+
+
+def test_a_search_rolls_an_oracle_out_at_its_stand_in(kn):
+    calls = []
+    _fake_oracle(calls, lambda player: dataclasses.replace(player.ai_params, aux=0.0))
+    try:
+        state = _state()
+        state.players[3].ai_strategy = "fake_oracle"
+        state.players[3].ai_params.aux = 2.0
+        kn._rollout_decide(state, 3)
+        assert calls == [0.0] and state.players[3].ai_params.aux == 2.0
+    finally:
+        del sys.modules["sc_model_fake_oracle"]
+
+
+def test_knower_names_depth_zero_as_its_stand_in(kn):
+    player = Player(1, "P1", (0, 0, 0))
+    player.ai_params.aux = 2.0
+    stand_in = kn.stand_in_params(player)
+    assert stand_in.aux == 0.0 and player.ai_params.aux == 2.0
+    player.ai_params = stand_in
+    assert kn.is_oracle_seat(player) is False
 
 
 def test_raising_opponent_does_not_crash(kn):
@@ -389,14 +482,12 @@ def test_knower_beats_thinker_head_to_head(kn):
 # --------------------------------------------------------------------------- #
 # The Oracle knob (`aux`): Off, Predict, and the rollout search on Search
 # --------------------------------------------------------------------------- #
-def test_aux_slider_is_declared_as_three_named_stops(kn):
+def test_aux_slider_is_declared_as_four_named_stops(kn):
     """The AI tab labels the generic aux knob from these, offers our range, and
     shows each stop's name in place of its number."""
     assert kn.AUX_LABEL and kn.AUX_INT
-    assert ai.aux_spec("knower") == (
-        kn.AUX_LABEL, 0.0, float(kn.SEARCH_DEPTH_MAX), 1.0, True
-    )
-    assert ai.aux_names("knower") == ("Off", "Predict", "Search")
+    assert ai.aux_spec("knower") == (kn.AUX_LABEL, 0.0, float(kn.COUNCIL), 1.0, True)
+    assert ai.aux_names("knower") == ("Off", "Predict", "Search", "Council")
     assert ai.aux_stop_name("knower", 1.0) == "Predict"
     assert ai.aux_stop_name("knower", 12) == "Search", "an old depth reads as Search"
 
@@ -570,9 +661,9 @@ def test_external_candidates_are_offered_as_openings(kn):
 
     assert n > min(kn.SEARCH_WIDTH, len(kn.POSTURE_VARIANTS)), \
         "no borrowed opening survived — is the registry being read at import time?"
-    assert kn._external_plan(state, 2, "rusherplus", 11) is not None
-    assert kn._external_plan(state, 2, "no_such_bot", 11) is None, "unregistered must skip"
-    assert kn._external_plan(state, 2, "knower", 11) is None, "we are not our own candidate"
+    assert kn._external_plan(state, 2, ("rusherplus", None), 11) is not None
+    assert kn._external_plan(state, 2, ("no_such_bot", None), 11) is None, "unregistered must skip"
+    assert kn._external_plan(state, 2, ("knower", None), 11) is None, "we are not our own candidate"
 
 
 def test_an_external_candidate_never_touches_the_real_board(kn):
@@ -605,8 +696,10 @@ def test_an_external_candidate_reads_its_own_default_aux(kn):
     try:
         state = _state()
         state.players[2].ai_params.aux = 2
-        kn._external_plan(state, 2, "aux_spy_test", 11)
+        kn._external_plan(state, 2, ("aux_spy_test", None), 11)
         assert seen == [config.AI_AUX], "a borrowed candidate read our Oracle stop"
+        kn._external_plan(state, 2, ("aux_spy_test", 0.0), 11)
+        assert seen[-1] == 0.0, "a pair that names a stop borrows that stop"
         assert state.players[2].ai_params.aux == 2, "the real seat's aux was touched"
     finally:
         ai.STRATEGIES.pop("aux_spy_test", None)
@@ -618,11 +711,11 @@ def test_a_broken_external_candidate_only_costs_its_own_slot(kn):
         raise RuntimeError("candidate exploded")
 
     ai.register("exploding_bot_test", boom)
-    kn.EXTERNAL_CANDIDATES, saved = ("exploding_bot_test",), kn.EXTERNAL_CANDIDATES
+    kn.EXTERNAL_CANDIDATES, saved = (("exploding_bot_test", None),), kn.EXTERNAL_CANDIDATES
     try:
         state = _state()
-        state.players[2].ai_params.aux = 3.0
-        assert kn._external_plan(state, 2, "exploding_bot_test", 11) is None
+        state.players[2].ai_params.aux = 2.0
+        assert kn._external_plan(state, 2, ("exploding_bot_test", None), 11) is None
         assert all(o.owner_id == 2 for o in ai.decide(state, 2))   # search still ran
     finally:
         kn.EXTERNAL_CANDIDATES = saved
@@ -878,3 +971,75 @@ def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
     assert "on 120 systems" in lines[0]
     assert "use a smaller map" in lines[-1]
+
+
+# --------------------------------------------------------------------------- #
+# A doomed garrison leaves whole (`_flee`)
+# --------------------------------------------------------------------------- #
+def _doomed(kn, left, wave, human=False):
+    """Our system 1 (seat 2) under a ``wave`` from system 2 (seat 3) that lands
+    this turn, with ``left`` of its 16 ships still there after the opening; 3 is
+    a friend behind it. The oracle is built as Search builds it."""
+    ai.register("strike_test", lambda state, pid: [Order(3, 2, 1, wave)])
+    state = _board({1: (2, 16, 3), 2: (3, wave, 3), 3: (2, 4, 3)},
+                   [(1, 2, 1), (1, 3, 2)])
+    state.players[3].ai_strategy = "strike_test"
+    state.players[3].is_human = human
+    state.players[2].ai_params.aux = 2.0
+    root = [Order(2, 1, 3, 16 - left)] if left < 16 else []
+    return state, kn._build_oracle(state, 2), root
+
+
+def test_a_doomed_garrison_leaves_with_the_fleet_already_leaving(kn):
+    """3 left behind against 20 kill nobody (round(sqrt(400 - 9)) = 20): they go
+    with the 13 the opening already sends."""
+    state, orc, root = _doomed(kn, left=3, wave=20)
+    assert kn._flee(state, orc, 2, root) == [Order(2, 1, 3, 16)]
+
+
+def test_a_doomed_garrison_with_no_fleet_leaving_goes_as_evacuate_sends_it(kn):
+    """Nothing leaves 1 in the opening, so `_evacuate` picks the way out: here
+    the attacker's home, which the strike has just emptied."""
+    state, orc, root = _doomed(kn, left=16, wave=40)
+    assert kn._flee(state, orc, 2, root) == [Order(2, 1, 2, 16)]
+
+
+def test_a_garrison_that_could_hold_or_sells_itself_dearly_stays(kn):
+    # 10 against 12: the best roll holds it (10.8 against 11).
+    state, orc, root = _doomed(kn, left=10, wave=12)
+    assert kn._flee(state, orc, 2, root) == root
+    # 10 against 13: lost whatever the dice, but it takes 5 down with it.
+    state, orc, root = _doomed(kn, left=10, wave=13)
+    assert kn._flee(state, orc, 2, root) == root
+
+
+def test_a_persons_predicted_strike_never_empties_a_system(kn):
+    state, orc, root = _doomed(kn, left=3, wave=20, human=True)
+    assert 3 not in orc.trusted
+    assert kn._flee(state, orc, 2, root) == root
+
+
+def test_a_doomed_system_is_not_reinforced_into_the_same_fight(kn):
+    """A launch of ours that lands on 1 this turn would only die with it."""
+    state, _, _ = _doomed(kn, left=3, wave=20)
+    state.systems[4] = System(id=4, pos=(40.0, 0.0), owner_id=2, ships=2, production=3)
+    state.add_lane(1, 4, 6.0, 1)
+    state.rebuild_topology()
+    orc = kn._build_oracle(state, 2)
+    out = kn._flee(state, orc, 2, [Order(2, 1, 3, 13), Order(2, 4, 1, 2)])
+    assert out == [Order(2, 1, 3, 16)]
+
+
+def test_flee_runs_on_search_alone(kn, monkeypatch):
+    calls = []
+    real = kn._flee
+    monkeypatch.setattr(kn, "_flee", lambda *a: calls.append(a) or real(*a))
+    for aux, runs in ((0.0, False), (1.0, False), (2.0, True), (3.0, False)):
+        calls.clear()
+        state, _, _ = _doomed(kn, left=3, wave=20)
+        state.players[2].ai_params.aux = aux
+        ai.decide(state, 2)
+        assert bool(calls) == runs, aux
+    monkeypatch.setattr(kn, "FLEE_BELOW", 0.0)
+    state, orc, root = _doomed(kn, left=3, wave=20)
+    assert real(state, orc, 2, root) == root

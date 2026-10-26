@@ -38,9 +38,9 @@ draws **nothing** from ``state.rng`` — every tie-break here is deterministic. 
 seat decides from the same start of the turn's rng (``engine.decide_seat``), so
 predicting a rival from a copy of it is bit-exact, whichever side of us it sits.
 
---- Oracle: Off, Predict, Search -------------------------------------------- #
+--- Oracle: Off, Predict, Search, Council ----------------------------------- #
 
-The seat's generic ``ai_params.aux`` knob (``AUX_LABEL``: *Oracle*) has three stops,
+The seat's generic ``ai_params.aux`` knob (``AUX_LABEL``: *Oracle*) has four stops,
 named in the menu by ``AUX_NAMES``:
 
     0   Off      no oracle at all — the blind ``_plan``, thinker-strength (not thinker)
@@ -48,12 +48,17 @@ named in the menu by ``AUX_NAMES``:
     2   Search   the oracle, then the board *played out* and scored, far enough
                  for every lane to land: the longest lane in current travel turns
                  plus ``LANE_CUSHION`` (`_horizon`)
+    3   Council  Search with a learned judge and two more borrowed candidates
+                 (actuary, evolved), each borrowed opening played on by the bot
+                 that proposed it (`_council`; docs/design/council.md)
 
 It used to be a depth slider, 0-12. Measured, a depth only paid once the horizon
 covered the lanes and a fixed one was wrong somewhere — 12 was too long on 1-turn
 lanes and too short on 26-turn ones — so the horizon is read off the map instead,
-every decide (lanes shorten with `SHIP_SPEED_GROWTH_PCT`). Any stored value above 2
-is clamped to Search, so an old setup or link keeps its meaning and its digest.
+every decide (lanes shorten with `SHIP_SPEED_GROWTH_PCT`). Any stored value above 3
+reads as Search (``AUX_OVER``), so an old setup or link keeps its meaning and its
+digest: Council is reached only by its own value. A seat stored as ``council``
+plays here (`ai.LEGACY`).
 
 Search is a **search over openings**. ``engine.end_turn`` is drivable on a clone, so
 ``_rollout`` steps one ply of one line: every candidate opening is played on the
@@ -72,9 +77,10 @@ the root only, and four things keep that sound:
   * **Common random numbers.** Every line on a ply gets the same state-derived
     rng, so a score gap reflects the plan rather than the dice, and the real stream
     is left untouched.
-  * **Rolled turns use the blind planner for every oracle seat**, ours included
-    (``_rollout_decide``), rather than a full prediction sweep per rolled turn.
-    Our own future play is understated, but identically for every candidate.
+  * **Rolled turns play every oracle seat by its stand-in**, ours included
+    (``_rollout_decide``): its module's ``stand_in_params``, else the blind
+    planner, rather than a full prediction sweep per rolled turn. Our own future
+    play is understated, but identically for every candidate.
 
 ``EXTERNAL_CANDIDATES`` names bots whose ``decide`` is run *for our own seat* and
 offered as an opening (`_external_plan`), so the search compares moves knower's
@@ -108,7 +114,7 @@ from starconquest import ai, combat, config, engine
 from starconquest.model import Order
 
 # Lets a sibling oracle bot recognise us (and us it) so two of them proxy each
-# other with the blind planner instead of recursing. See `_surrogate`.
+# other with a stand-in instead of recursing. See `_surrogate`.
 IS_ORACLE = True
 
 # --- tunables vendored unchanged from thinker ------------------------------- #
@@ -147,12 +153,16 @@ BEYOND_DECAY = 0.35
 TRUST_HUMAN = False             # True lets a human-seat prediction relax guards and
                                 # justify snipes, as if they were a bot. Off by
                                 # default: a real human is not obliged to comply.
+TRUST_STAND_INS = True          # Believe an oracle seat's `stand_in_params` as if
+                                # it were the seat itself. Off: it may only raise a
+                                # threat, as for a person.
 
 # --- search ----------------------------------------------------------------- #
 # The mode comes from the seat's generic `ai_params.aux` knob (config.AI_AUX, whose
 # 1.0 default is what keeps an untuned seat on the plain one-turn oracle).
 SEARCH_DEPTH_DEFAULT = 1        # what a malformed or absent `aux` falls back to
-SEARCH_DEPTH_MAX = 2            # Off, Predict, Search; anything higher is Search
+SEARCH_DEPTH_MAX = 2            # Off, Predict, Search: the depths a stop plays at
+COUNCIL = 3                     # the stop past Search, which searches as Search does
 LANE_CUSHION = 5                # plies searched past the longest lane (`_horizon`)
 HORIZON_MAX = 60                # an iteration bound for a pathological hand map;
                                 # `SEARCH_BUDGET_S` stops a real one long before
@@ -163,20 +173,24 @@ SEARCH_WIDTH = 2                # candidate postures offered as openings
 # aggressive"; a rival's `decide` can propose a move the four phases below
 # structurally cannot express — rusherplus throws every garrison at its weakest
 # neighbour at once, the heuristic hoards where knower would spend, marshal and
-# claudebot price fights their own way. None is usually the pick, and none has to
-# be: the search only takes one that *outscores* the default. Names, not
-# functions, and resolved lazily in `_external_plan` — models/ files import in
-# sorted filename order, so `marshal` and `rusherplus` are not in `ai.STRATEGIES`
-# yet when this line runs.
-EXTERNAL_CANDIDATES = ("rusherplus", "heuristic", "marshal", "claudebot")
+# thinker at Claudebot price fights their own way. None is usually the pick, and
+# none has to be: the search only takes one that *outscores* the default. (name,
+# aux) pairs, not functions, and resolved lazily in `_external_plan` — models/
+# files import in sorted filename order, so `marshal` and `rusherplus` are not in
+# `ai.STRATEGIES` yet when this line runs. An aux of None is `config.AI_AUX`, the
+# documented "untuned".
+EXTERNAL_CANDIDATES = (("rusherplus", None), ("heuristic", None), ("marshal", None),
+                       ("thinker", 0.0))
 
 # What the AI tab's generic aux slider is called when this bot holds the seat, the
 # range/step it offers and what each stop is called (`ai.aux_spec`/`ai.aux_names`
-# read these; see models/README.md).
+# read these; see models/README.md). ``AUX_OVER`` is the stop a stored value past
+# the top reads as (`ai.aux_over`): Search, as it did before Council was added.
 AUX_LABEL = "Oracle"
-AUX_RANGE = (0, SEARCH_DEPTH_MAX, 1)
+AUX_RANGE = (0, COUNCIL, 1)
 AUX_INT = True
-AUX_NAMES = ("Off", "Predict", "Search")
+AUX_NAMES = ("Off", "Predict", "Search", "Council")
+AUX_OVER = SEARCH_DEPTH_MAX
 
 # A second budget, kept separate from ORACLE_BUDGET_S so depth 1 stays byte-exact.
 # Checked *between plies*, so every line is the same depth whenever it fires and the
@@ -321,18 +335,26 @@ class Oracle:
 def decide(state, pid):
     """Plan against a forecast of every other seat. Never raises.
 
-    Depth comes from the seat's own `ai_params.aux`: 0 is the blind planner, 1 the
-    plain one-turn oracle, and N the oracle plus an N-1 ply search over openings.
+    The stop comes from the seat's own `ai_params.aux`: 0 is the blind planner, 1
+    the plain one-turn oracle, 2 the oracle plus a search over openings, and 3
+    that search with a learned judge and more borrowed candidates (`_council`).
     """
-    global _DEPTH, LAST_ERROR
-
     if _DEPTH:
         # Someone is predicting *us*. Answer as the blind planner: it terminates,
         # and it is the same self-model we use for seats we cannot read.
         return _plan(state, pid, None)
 
-    depth = _seat_depth(state.players[pid]) if pid in state.players \
-        else SEARCH_DEPTH_DEFAULT
+    stop = _seat_stop(state.players[pid]) if pid in state.players else SEARCH_DEPTH_DEFAULT
+    if stop == COUNCIL:
+        return _council(state, pid)
+    return _decide(state, pid, stop)
+
+
+def _decide(state, pid, depth):
+    """`decide` at ``depth`` (0 Off, 1 Predict, 2 Search), once nobody is
+    predicting us."""
+    global _DEPTH, LAST_ERROR
+
     if depth <= 0:
         # No oracle at all. Kept ahead of `_build_oracle` so depth 0 costs nothing.
         return _plan(state, pid, None)
@@ -353,8 +375,9 @@ def decide(state, pid):
             # into `decide`, which `_surrogate`'s identity check cannot see.
             _DEPTH += 1
             try:
-                return _search(state, pid, orc, _horizon(state),
+                root = _search(state, pid, orc, _horizon(state),
                                time.perf_counter() + SEARCH_BUDGET_S * BUDGET_SCALE)
+                return root if _COUNCIL else _flee(state, orc, pid, root)
             finally:
                 _DEPTH -= 1
         return _plan(state, pid, orc)
@@ -415,12 +438,12 @@ def _predict_seat(state, orc, me, q, rng, label):
     if player.is_neutral or not player.alive:
         return True                       # the engine skips it too — no draws, no orders
 
-    fn, trustworthy = _surrogate(player)
+    fn, params, trustworthy = _surrogate(player)
     probe = _clone(state, rng)
     fingerprint = _fingerprint(probe)
 
     try:
-        orders = fn(probe, q) or []
+        orders = _run(fn, params, probe, q) or []
     except Exception:                     # noqa: BLE001 — a broken rival is their problem
         orc.seats[q] = "raised"
         return False
@@ -433,7 +456,7 @@ def _predict_seat(state, orc, me, q, rng, label):
 
     if trustworthy:
         orc.trusted.add(q)
-        orc.seats[q] = label
+        orc.seats[q] = "stand-in" if params is not None else label
     else:
         orc.seats[q] = "mutated" if mutated else "modelled"
     orc.orders[q] = list(orders)
@@ -442,13 +465,19 @@ def _predict_seat(state, orc, me, q, rng, label):
     return bool(trustworthy)
 
 
-def _surrogate(player):
-    """(fn, trustworthy) — what will really decide this seat, and can we believe it.
+def _surrogate(player, human=None):
+    """(fn, params, trustworthy) — what will really decide this seat, the params to
+    run it at (None: the seat's own), and can we believe it.
 
     A human seat is decided by a person, not by code, so it is modelled as another
-    knower one level shallower and never trusted. Our own strategy gets the same
-    treatment — under whatever filename it was registered as, and likewise any
-    sibling oracle — which is what keeps two knower seats from recursing.
+    knower one level shallower and trusted only under `TRUST_HUMAN`. ``human``
+    overrides ``player.is_human``, which a rollout board has cleared.
+
+    A seat that predicts is played by its nearest version that doesn't
+    (`_stand_in`), trusted under `TRUST_STAND_INS` when its module named one, and
+    never when it falls back to `_blind`. Our own strategy is played by `_blind` —
+    under whatever filename it was registered as — which is what keeps two knower
+    seats from recursing.
 
     The one case where the model is *exact* is a **depth-0** seat of our own module:
     its whole algorithm is `_plan(state, pid, None)`, which is precisely what
@@ -457,16 +486,66 @@ def _surrogate(player):
     `_garrison` price its vacated systems honestly. A depth-0 seat of a *different*
     oracle module cannot get that, because its blind planner is not ours.
     """
-    if player.is_human:
-        return _blind, (_TRUSTED if TRUST_HUMAN else _UNTRUSTED)
-    # Resolve exactly as ai.decide does (ai.py:84), so even a stale strategy name
-    # is predicted correctly: the engine will fall back to the heuristic too.
-    fn = ai.STRATEGIES.get(player.ai_strategy, ai.compute_orders)
+    if player.is_human if human is None else human:
+        return _blind, None, (_TRUSTED if TRUST_HUMAN else _UNTRUSTED)
+    # Resolve exactly as ai.decide does, so even a stale strategy name is predicted
+    # correctly: the engine will fall back to the heuristic too. A legacy name is
+    # its family at its stop (`ai.canonical`), and is run at that stop.
+    name, aux = ai.canonical(player.ai_strategy, player.ai_params.aux)
+    params = None
+    if name != player.ai_strategy:
+        player = copy.copy(player)
+        player.ai_strategy, player.ai_params = name, replace(player.ai_params, aux=aux)
+        params = player.ai_params
+    fn = ai.STRATEGIES.get(name, ai.compute_orders)
     if fn is decide:
-        return _blind, (_TRUSTED if _seat_depth(player) == 0 else _UNTRUSTED)
+        # A Council seat also believes a knower seat below Council
+        # (docs/design/bot-families.md).
+        believed = _seat_depth(player) == 0 or (_COUNCIL and _seat_stop(player) < COUNCIL)
+        return _blind, None, (_TRUSTED if believed else _UNTRUSTED)
     if _is_oracle(fn, player):
-        return _blind, _UNTRUSTED
-    return fn, _TRUSTED
+        fn, params = _stand_in(fn, player)
+        return fn, params, (TRUST_STAND_INS and fn is not _blind)
+    return fn, params, _TRUSTED
+
+
+def _stand_in(fn, player):
+    """(fn, params) to play a seat that predicts: its own module at the params its
+    ``stand_in_params(player)`` names, or `_blind` when it names none, names
+    params that still predict (which would recurse), or raises."""
+    if fn is decide:
+        return _blind, None
+    if not _has_stand_in(fn):
+        return _blind, None
+    try:
+        params = sys.modules[fn.__module__].stand_in_params(player)
+        if params is None:
+            return _blind, None
+        proxy = copy.copy(player)
+        proxy.ai_params = copy.copy(params)
+        if _is_oracle(fn, proxy):
+            return _blind, None
+    except Exception:                     # noqa: BLE001 — a broken hook is their bug
+        return _blind, None
+    return fn, proxy.ai_params
+
+
+def _has_stand_in(fn) -> bool:
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    return callable(getattr(module, "stand_in_params", None))
+
+
+def _run(fn, params, state, q):
+    """``fn`` deciding seat ``q`` of ``state``, a board of ours, as if the seat held
+    ``params`` (None: as it is)."""
+    if params is None:
+        return fn(state, q)
+    seat = state.players[q]
+    held, seat.ai_params = seat.ai_params, copy.copy(params)
+    try:
+        return fn(state, q)
+    finally:
+        seat.ai_params = held
 
 
 def _is_oracle(fn, player=None):
@@ -488,20 +567,30 @@ def _is_oracle(fn, player=None):
 
 
 def _seat_depth(player) -> int:
-    """This seat's oracle mode, from its generic ``ai_params.aux`` knob.
+    """This seat's oracle depth, from its generic ``ai_params.aux`` knob.
 
     0 = Off (the blind planner), 1 = Predict (the plain one-turn oracle), 2 = Search
-    (the oracle plus a `_horizon` of rollout); anything higher is Search, which is
-    what every depth past 1 meant when this was a depth slider. Tolerant by design: a
-    hand-edited token or a seat with no params at all must never take a bot down, so
-    anything unreadable is ``SEARCH_DEPTH_DEFAULT``.
+    (the oracle plus a `_horizon` of rollout), which Council searches at too.
     """
     return _depth_of(getattr(player, "ai_params", None))
 
 
 def _depth_of(params) -> int:
+    return min(SEARCH_DEPTH_MAX, _stop_of(params))
+
+
+def _stop_of(params) -> int:
+    """The stop ``params.aux`` reads as: its whole part, clamped below at Off; a
+    value past Council is ``AUX_OVER`` (Search), which is what every depth past 1
+    meant when this was a depth slider, so Council is reached only by its own
+    value. Tolerant by design: a hand-edited token or a seat with no params at
+    all must never take a bot down, so anything unreadable is
+    ``SEARCH_DEPTH_DEFAULT``."""
     try:
-        return max(0, min(SEARCH_DEPTH_MAX, int(params.aux)))
+        stop = int(params.aux)
+        if params.aux > COUNCIL:
+            return AUX_OVER
+        return max(0, stop)
     except Exception:                     # noqa: BLE001
         return SEARCH_DEPTH_DEFAULT
 
@@ -573,10 +662,12 @@ def _rivals(settings, seats, people) -> dict[str, tuple[int, float]]:
     `ply_ms` was fitted against bots that answer in microseconds, so it holds
     nothing for a rival that thinks. Every rolled turn of every line runs each
     rival bot's `decide` (`_rollout_decide`), and the forecast runs it once more,
-    so a slow rival is paid for `_lines()` times a ply. Not counted: a person
-    (modelled with `_blind`), an oracle or another knower seat (proxied with
-    `_blind` too, which `ply_ms` already holds), a bot that declares no cost, and
-    a ``random`` seat whose seed is not fixed yet, since nobody knows its bot.
+    so a slow rival is paid for `_lines()` times a ply. An oracle seat is run at its
+    `_stand_in` params, so it is counted at what its bot declares. Not counted: a
+    person (modelled with `_blind`), another knower seat or an oracle with no
+    ``stand_in_params`` (proxied with `_blind` too, which `ply_ms` already holds), a
+    bot that declares no cost, and a ``random`` seat whose seed is not fixed yet,
+    since nobody knows its bot.
     """
     from starconquest.settings import RANDOM_STRATEGY, resolve_strategy   # core; import on use
     out: dict[str, tuple[int, float]] = {}
@@ -588,8 +679,8 @@ def _rivals(settings, seats, people) -> dict[str, tuple[int, float]]:
             if settings.seed is None:
                 continue
             name = resolve_strategy(name, settings.seed, seat)
-        fn = ai.STRATEGIES.get(name)
-        if fn is None or fn is decide or _is_oracle(fn):
+        fn = ai.STRATEGIES.get(ai.family(name))
+        if fn is None or fn is decide or (_is_oracle(fn) and not _has_stand_in(fn)):
             continue
         ms = ai.decide_ms(name, settings, seat)
         if ms > 0:
@@ -634,6 +725,14 @@ def _sees_lanes_from(settings, nodes: int, rival_ms: float = 0.0) -> int | None:
 
 
 def setup_warning(settings, seats, people=()) -> list[str]:
+    """The menu's warning (`ai.setup_warning`) for every searching seat in
+    ``seats``: Search's (`_search_warning`) and Council's (`_council_warning`)."""
+    council = [seat for seat in seats if _stop_of(settings.seat_params(seat)) == COUNCIL]
+    return (_search_warning(settings, seats, people)
+            + (_council_warning(settings, council, seats, people) if council else []))
+
+
+def _search_warning(settings, seats, people=()) -> list[str]:
     """The menu's warning (`ai.setup_warning`): lines when a Search seat on this
     setup would be cut off before its own launches land, or would stall a turn
     too long. ``people`` are the seats a person holds; every other seat is a bot
@@ -643,7 +742,7 @@ def setup_warning(settings, seats, people=()) -> list[str]:
     cushion, and losing some of it costs little; short of the longest lane the
     search cannot price a launch it makes, which is the whole of what it is for.
     """
-    searchers = [seat for seat in seats if _depth_of(settings.seat_params(seat)) >= 2]
+    searchers = [seat for seat in seats if _stop_of(settings.seat_params(seat)) == SEARCH_DEPTH_MAX]
     if not searchers:
         return []
     drawn = settings.custom_map is not None
@@ -701,6 +800,22 @@ def is_oracle_seat(player) -> bool:
     models/README.md.
     """
     return _seat_depth(player) >= 1
+
+
+def stand_in_params(player):
+    """Public: the params of this seat's nearest version that doesn't predict, which
+    is Oracle: Off. A sibling oracle runs us at these rather than at our own. Part
+    of the drop-in contract — see models/README.md.
+
+    None for a Council seat, which a sibling oracle models with its own blind
+    planner."""
+    if _seat_stop(player) == COUNCIL:
+        return None
+    return replace(player.ai_params, aux=0.0)
+
+
+def _seat_stop(player) -> int:
+    return _stop_of(getattr(player, "ai_params", None))
 
 
 def _blind(state, pid):
@@ -823,22 +938,18 @@ def _evaluate(state, pid) -> float:
 def _rollout_decide(state, q, humans=frozenset()):
     """The `decide` a rollout runs its seats with.
 
-    Oracle seats — ours included — are played by the cheap blind planner. Letting
-    them build real oracles would mean a full prediction sweep on *every* rolled
-    turn, which is where the cost would run away. Understating our own future play is
-    fine: it is understated identically for every candidate, and a search only needs
-    the comparison to be fair.
+    Each seat is played by what the oracle predicts it with (`_surrogate`), so an
+    oracle seat — ours included — is played by its nearest version that doesn't
+    predict. Letting them build real oracles would mean a full prediction sweep on
+    *every* rolled turn, which is where the cost would run away. Understating our own
+    future play is fine: it is understated identically for every candidate, and a
+    search only needs the comparison to be fair.
 
-    ``humans`` are the seats a person really holds, modelled with `_blind` for the
-    same reason the oracle does it — there is no code to run for them.
+    ``humans`` are the seats a person really holds, whose flag the rollout board has
+    cleared; they are modelled as the oracle models them.
     """
-    if q in humans:
-        return _blind(state, q)
-    player = state.players[q]
-    fn = ai.STRATEGIES.get(player.ai_strategy, ai.compute_orders)
-    if fn is decide or _is_oracle(fn, player):
-        return _blind(state, q)
-    return fn(state, q)
+    fn, params, _ = _surrogate(state.players[q], human=q in humans)
+    return _run(fn, params, state, q)
 
 
 def _rollout(state, pid, plan, humans, rng):
@@ -918,14 +1029,14 @@ def _search(state, pid, orc, turns: int, deadline):
     lines = []
     for plan in _candidates(state, pid, orc, base):
         board = _rollout(state, pid, plan, humans, _priv(state, pid, _SALT_ROLLOUT))
-        lines.append(_Line(plan, board, _evaluate(board, pid)))
+        lines.append(_Line(plan, board, _score(board, pid)))
 
     for _ in range(1, turns):
         if time.perf_counter() > deadline:
             break            # every line is the same depth, so stopping here is fair
         if all(line.board.winner is not None for line in lines):
             break            # nothing left to learn; the verdicts are already in
-        lines = _advance(lines, pid, humans)
+        lines = (_policy_advance if _COUNCIL else _advance)(lines, pid, humans)
 
     best = lines[0]          # the default, so an exact tie keeps it
     for line in lines[1:]:
@@ -967,14 +1078,23 @@ def _candidates(state, pid, orc, base):
     yield base
     for overrides in POSTURE_VARIANTS[1:SEARCH_WIDTH]:
         yield _plan(state, pid, orc, replace(default, **overrides))
-    for i, name in enumerate(EXTERNAL_CANDIDATES):
-        plan = _external_plan(state, pid, name, _SALT_EXTERNAL + i)
+    for i, borrowed in enumerate(_externals()):
+        plan = _external_plan(state, pid, borrowed, _SALT_EXTERNAL + i)
         if plan is not None:
+            if _COUNCIL:
+                _SOURCE[id(plan)] = borrowed
             yield plan
 
 
-def _external_plan(state, pid, name, salt):
+def _externals():
+    """The bots whose openings this search borrows: `EXTERNAL_CANDIDATES`, and
+    `COUNCIL_CANDIDATES` after them at Council."""
+    return EXTERNAL_CANDIDATES + (COUNCIL_CANDIDATES if _COUNCIL else ())
+
+
+def _external_plan(state, pid, borrowed, salt):
     """Another registered bot's orders *for our own seat*, or None if unusable.
+    ``borrowed`` is a ``(name, aux)`` pair from `EXTERNAL_CANDIDATES`.
 
     The oracle runs rival code to learn what they will do; this runs it to borrow
     what it would do in our chair. Same three precautions as `_predict_seat`, for the
@@ -992,13 +1112,15 @@ def _external_plan(state, pid, name, salt):
     strategy reads its own way: left alone, a candidate with a knob of its own would
     read our Oracle stop (2 under Search) as its setting. So it is reset to
     ``config.AI_AUX``, the documented "untuned", and the candidate plays as it does
-    by default.
+    by default, unless the pair names the stop to borrow.
     """
+    name, aux = borrowed
     fn = ai.STRATEGIES.get(name)
     if fn is None or fn is decide or _is_oracle(fn):
         return None            # unregistered, or ourselves — nothing new to propose
     probe = _clone(state, _priv(state, pid, salt))
-    probe.players[pid].ai_params.aux = config.AI_AUX   # `_clone` copied the params
+    # `_clone` copied the params
+    probe.players[pid].ai_params.aux = config.AI_AUX if aux is None else aux
     try:
         orders = fn(probe, pid) or []
         # Mirrors `engine._own_orders`: a seat commands its own ships and nothing
@@ -1006,6 +1128,250 @@ def _external_plan(state, pid, name, salt):
         return [o for o in orders if getattr(o, "owner_id", None) == pid]
     except Exception:                     # noqa: BLE001 — a broken bot is their bug
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Oracle: Council — Search judged by a learned evaluator, each borrowed line
+# played on by its author
+# --------------------------------------------------------------------------- #
+# Council changes three things in Search (docs/design/council.md):
+#
+#   * **A learned judge.** A rolled-out board is scored by `_council_eval.value`,
+#     a small network fitted offline on roster self-play that estimates the
+#     seat's chance of winning, in place of `_evaluate`'s hand-weighted material
+#     difference (which counts a fleet in transit at full value).
+#   * **actuary and evolved as more borrowed candidates** (`COUNCIL_CANDIDATES`),
+#     their moves for our seat offered as openings beside the bots Search
+#     already borrows.
+#   * **Each borrowed candidate plays its own line.** A borrowed opening is
+#     played on by the bot that proposed it (`_policy_advance`), not by the
+#     blind planner, so the search compares whole strategies rather than first
+#     moves.
+#
+# The `_COUNCIL` branches are on for the length of one Council decide.
+# After `EXTERNAL_CANDIDATES`, as (name, aux).
+COUNCIL_CANDIDATES = (("actuary", None), ("evolved", 0.0))
+_SALT_POLICY = 51               # a borrowed line i plays on from salt _SALT_POLICY + i
+# A Council ply against a Search ply on the same setup, from the top of the
+# measured range, until a cost model is fitted to Council's own lines.
+COST_VS_KNOWER = 2.5
+COST_COUNCIL_LINES = 7          # ...measured over this many Council lines (`_council_lines`)
+
+_COUNCIL = False                # a Council seat is deciding (single-threaded, as `_DEPTH`)
+_SOURCE: dict[int, tuple] = {}  # id(opening) -> the (name, aux) that proposed it
+_EVAL = None                    # `_council_eval`, loaded on a Council seat's first decide
+
+
+def _council(state, pid):
+    """`decide` for a Council seat: Search, with the `_COUNCIL` branches on."""
+    global _COUNCIL
+    _COUNCIL = True
+    _SOURCE.clear()
+    try:
+        return _decide(state, pid, SEARCH_DEPTH_MAX)
+    finally:
+        _COUNCIL = False
+        _SOURCE.clear()
+
+
+def _council_eval():
+    """The judge's module, loaded by path: models/ files are not a package, and
+    `ai.load_models` skips it for its leading underscore."""
+    global _EVAL
+    if _EVAL is None:
+        import importlib.util
+        from pathlib import Path
+        name = "sc_council_eval"
+        _EVAL = sys.modules.get(name)
+        if _EVAL is None:
+            spec = importlib.util.spec_from_file_location(
+                name, Path(__file__).resolve().parent / "_council_eval.py")
+            _EVAL = importlib.util.module_from_spec(spec)
+            sys.modules[name] = _EVAL
+            spec.loader.exec_module(_EVAL)
+    return _EVAL
+
+
+class _Lazy:
+    """A learned score computed only when compared.
+
+    The search scores every line after every ply but only ever compares the
+    scores the lines end on, so evaluating eagerly would spend the network on
+    boards whose score is thrown away. The board is a rollout's own clone and is
+    never stepped again, so holding it is safe.
+    """
+
+    __slots__ = ("board", "pid", "_v")
+
+    def __init__(self, board, pid) -> None:
+        self.board, self.pid, self._v = board, pid, None
+
+    def get(self) -> float:
+        if self._v is None:
+            self._v = _council_eval().value(self.board, self.pid)
+        return self._v
+
+    def __gt__(self, other) -> bool:
+        return self.get() > (other.get() if isinstance(other, _Lazy) else other)
+
+    def __lt__(self, other) -> bool:
+        return self.get() < (other.get() if isinstance(other, _Lazy) else other)
+
+
+def _score(state, pid):
+    """A rolled-out board's score: the learned judge under Council, else
+    `_evaluate`."""
+    if not _COUNCIL:
+        return _evaluate(state, pid)
+    if state.winner is not None:
+        return 1.0 if state.winner == pid else 0.0
+    return _Lazy(state, pid)
+
+
+def _policy_advance(lines, pid, humans):
+    """`_advance`, except a borrowed opening is played on by the bot that
+    proposed it."""
+    out = []
+    for i, line in enumerate(lines):
+        if line.board.winner is not None:
+            out.append(line)
+            continue
+        plan = None
+        src = _SOURCE.get(id(line.root))
+        if src is not None:
+            plan = _external_plan(line.board, pid, src, _SALT_POLICY + i)
+        if plan is None:
+            plan = _plan(line.board, pid, None)
+        board = _rollout(line.board, pid, plan, humans,
+                         _priv(line.board, pid, _SALT_ROLLOUT))
+        out.append(_Line(line.root, board, _score(board, pid)))
+    return out
+
+
+def _council_lines() -> int:
+    """Lines a Council decide rolls out: Search's, and `COUNCIL_CANDIDATES`."""
+    return _lines() + len(COUNCIL_CANDIDATES)
+
+
+def _council_warning(settings, council, seats, people=()) -> list[str]:
+    """The warning for the Council seats ``council`` (all of ours ``seats``):
+    Search's, priced at ``COST_VS_KNOWER`` times a Search ply, per Council line."""
+    drawn = settings.custom_map is not None
+    nodes = len(settings.custom_map.nodes) if drawn else settings.nodes
+    longest = _longest_lane(settings)
+    plies = max(1, min(HORIZON_MAX, longest + LANE_CUSHION))
+    rival_ms = sum(ms for _, ms in _rivals(settings, set(seats), set(people)).values())
+    ply = ((ply_ms(nodes, settings.players, settings.ship_ly_per_turn) + _lines() * rival_ms)
+           * COST_VS_KNOWER * _council_lines() / COST_COUNCIL_LINES)
+    reach, one = _search_run(ply, plies, rival_ms)
+    turn_ms = one * len(council)
+    clipped = reach < longest
+    if not clipped and turn_ms < WARN_TURN_MS:
+        return []
+    need = ply * (plies - 1 + COST_ROOT_PLIES) + rival_ms
+    out = [f"Knower at Council searching {plies} turns ahead on {nodes} systems would "
+           f"need ~{_secs(need)} a turn"]
+    if clipped:
+        out.append(f"It stops thinking at {_secs(SEARCH_BUDGET_S * 1000)}, so it "
+                   f"will look about {reach} turn{'' if reach == 1 else 's'} ahead, "
+                   f"short of its {longest}-turn lanes")
+    if turn_ms >= WARN_TURN_MS or len(council) > 1:
+        who = "1 Knower seat" if len(council) == 1 else f"{len(council)} Knower seats"
+        out.append(f"{who} on Council: about {_secs(turn_ms)} per turn to resolve, "
+                   "longer in a browser")
+    smaller = "use a smaller map" if drawn else "reduce System count"
+    out.append(f'Set Knower\'s Oracle to "Predict", {smaller} or increase ship speed '
+               "to avoid this")
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# A doomed garrison leaves whole
+# --------------------------------------------------------------------------- #
+# Search plays whichever opening wins its rollouts, and a borrowed one keeps its
+# author's habits: heuristic keeps a reserve home whatever is coming, so a
+# system about to be overrun can hold back a few ships of an evacuation that
+# was otherwise right. Under the square law a garrison far smaller than the
+# wave kills next to nothing (3 against 20 leaves round(sqrt(391)) = 20), so
+# those ships are thrown away. `_flee` runs on the opening Search chose,
+# whatever it is: a garrison the oracle sees overrun this turn whatever the
+# dice, killing fewer than `FLEE_BELOW` of its own number at the nominal roll,
+# leaves. Not on Council, where it measured null against bots and leaned worse
+# on the posted maps. docs/design/knower.md, "A doomed garrison leaves whole".
+FLEE_BELOW = 0.5                # 0 turns it off
+
+
+def _flee(state, orc, pid, orders):
+    """``orders`` with every garrison that would die for next to nothing sent away.
+
+    The ships left behind join the biggest fleet the opening already sends from
+    that system, or, where it sends none, go where `_evacuate` would take a
+    doomed garrison (a capture in reach, else the friend next door with the
+    biggest garrison; a cornered one stays). Our own launches that would land there this turn, into
+    the same lost fight, stay home.
+
+    Only what is certain counts as landing: fleets already flying, and the
+    launches of seats the oracle reads exactly. A person's predicted strike is a
+    guess, and a guess may raise a threat (`_garrison`) but never empty a
+    system.
+    """
+    if orc is None or FLEE_BELOW <= 0:
+        return orders
+    post = orc.post
+    # `post` is the board's fleets, in order, then each predicted launch as
+    # `engine.apply_order` clamped it.
+    flying = len(state.fleets)
+    landing: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for k, f in enumerate(post.fleets):
+        if f.turns_remaining <= 1 and (k < flying or f.owner_id in orc.trusted):
+            landing[f.dest_id][f.owner_id] += f.ships
+    sent: dict[int, int] = defaultdict(int)
+    for o in orders:
+        sent[o.source_id] += o.ships
+        if (state.travel_turns(o.source_id, o.dest_id) or 1) <= 1:
+            landing[o.dest_id][pid] += o.ships
+
+    out = list(orders)
+    max_prod = None
+    for sid in sorted(landing):
+        s = state.systems[sid]
+        left = s.ships - sent[sid]
+        hostile = sorted((n for q, n in landing[sid].items() if q != pid and n > 0),
+                         reverse=True)
+        if s.owner_id != pid or left <= 0 or not hostile:
+            continue
+        held = left + _production_by(s, 1) + landing[sid][pid]
+        wave = _fold(hostile)
+        fight = combat.preview_fight(wave, held, config.COMBAT_JITTER,
+                                     config.DEFENDER_ADVANTAGE)
+        if fight.worst.winner != combat.ATTACKER:
+            continue                     # it could hold, or take them all with it
+        if wave - fight.nominal.survivors >= FLEE_BELOW * held:
+            continue                     # it sells itself dearly enough to stay
+        out = [o for o in out if not (o.dest_id == sid and
+                                      (state.travel_turns(o.source_id, sid) or 1) <= 1)]
+        mine = [k for k, o in enumerate(out) if o.source_id == sid]
+        if mine:
+            k = max(mine, key=lambda k: out[k].ships)
+            out[k] = replace(out[k], ships=out[k].ships + left)
+            continue
+        if max_prod is None:
+            max_prod = max(x.production for x in post.systems.values())
+        order = _evacuate(post, orc, pid, post.systems[sid], max_prod, _posture())
+        if order is not None:
+            out.append(replace(order, ships=left))
+    return out
+
+
+def _fold(sides: list[int]) -> int:
+    """The force left standing when attacking sides, strongest first, fight each
+    other before the garrison (`combat.resolve_arrival`'s pile-up), at the
+    nominal roll."""
+    cur = sides[0]
+    for ships in sides[1:]:
+        roll = combat.preview_fight(cur, ships, 0.0, 1.0).nominal
+        cur = roll.survivors
+    return cur
 
 
 # --------------------------------------------------------------------------- #

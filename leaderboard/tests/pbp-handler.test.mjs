@@ -663,3 +663,23 @@ test("claiming a seat under a claimed name is the owner's alone", async () => {
   assert.equal(status, 201, JSON.stringify(body));
   assert.equal(TABLES.pbp_matches[0].names[2], "Ann");
 });
+
+test("record counts a name's matches with a resolved turn, and the ones it won", async () => {
+  install();
+  const match = (match_id, names, turn, finished = false, winner = null) =>
+    TABLES.pbp_matches.push(withDefaults("pbp_matches", {
+      match_id, settings_json: {}, seed: 1, rules_version: 2, seats: { seats: [1, 2] },
+      names, turn, finished, winner, log: "SECRETLOG",
+    }));
+  match("0000000000000001", { 1: "Ann", 2: "Bo" }, 4, true, 1);
+  match("0000000000000002", { 1: "Bo", 2: " ann " }, 9, true, 1);
+  match("0000000000000003", { 1: "ANN" }, 2);
+  match("0000000000000004", { 1: "Ann" }, 0);                  // nothing resolved yet
+  match("0000000000000005", { 1: "Ann", 2: "Cy" }, 6, true, 0); // a draw
+  const [status, body] = await call("record", { name: "ann" }, "GET");
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.deepEqual(body, { played: 4, won: 1 });
+  assert.ok(!JSON.stringify(body).includes("0000000000000001"));
+  assert.deepEqual((await call("record", { name: "Dee" }, "GET"))[1], { played: 0, won: 0 });
+  assert.equal((await call("record", { name: "  " }, "GET"))[0], 400);
+});

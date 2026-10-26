@@ -5,6 +5,8 @@ Pure and pygame-free, like the rest of geometry.py.
 
 from __future__ import annotations
 
+import pytest
+
 from starconquest import config
 from starconquest.geometry import WorldView
 
@@ -215,3 +217,57 @@ def test_fit_to_keeps_the_full_map_reachable_by_zooming_out():
     assert (round(v.off_x, 6), round(v.off_y, 6)) == (
         round(fresh.off_x, 6), round(fresh.off_y, 6),
     )
+
+
+def _small_view():
+    # a 100x100 world fitted into a 400x400 viewport at the origin
+    return WorldView((0, 0, 100, 100), (0, 0, 400, 400), padding=0)
+
+
+def _map_on_screen(v):
+    (x0, y0), (x1, y1) = v.to_screen((0, 0)), v.to_screen((100, 100))
+    return x0, y0, x1, y1
+
+
+@pytest.mark.parametrize("room", [config.LIVE_ROOM, config.REVIEW_ROOM])
+def test_the_free_camera_zooms_out_to_leave_room_past_each_side(room):
+    """Out until ``room`` of the map's size shows again past each side: 0.85
+    leaves the map's box ~37% of the view across, 0.5 half of it."""
+    v = _small_view()
+    v.zoom_at((200, 200), 0.01, room=room)
+    x0, _y0, x1, _y1 = _map_on_screen(v)
+    assert (x1 - x0) / 400 == pytest.approx(1 / (1 + 2 * room), abs=0.01)
+    assert (x0 + x1) / 2 == pytest.approx(200, abs=1)
+    v.zoom_at((200, 200), 0.01)      # no room: the strict clamp stops at the fit
+    assert v.zoom == config.ZOOM_MIN
+
+
+@pytest.mark.parametrize("room", [config.LIVE_ROOM, config.REVIEW_ROOM])
+def test_the_free_camera_pans_anywhere_that_keeps_some_of_the_map_on_screen(room):
+    v = _small_view()
+    v.zoom_at((200, 200), 0.5, room=room)
+    v.pan(-10_000, -10_000, room=room)
+    x0, y0, x1, y1 = _map_on_screen(v)
+    keep = (1 - room) * (x1 - x0)
+    assert x1 == pytest.approx(keep, abs=1) and y1 == pytest.approx(keep, abs=1)
+    v.pan(20_000, 20_000, room=room)
+    x0, y0, _x1, _y1 = _map_on_screen(v)
+    assert x0 == pytest.approx(400 - keep, abs=1) and y0 == pytest.approx(400 - keep, abs=1)
+    # zoomed in, the keep is a share of the view, so an edge can still be reached
+    v.zoom_at((200, 200), 20, room=room)
+    v.pan(10_000, 0, room=room)
+    assert _map_on_screen(v)[0] == pytest.approx(400 - (1 - room) * 400, abs=1)
+
+
+def test_settle_brings_a_review_camera_inside_live_plays_room():
+    """Leaving review: zoomed out past live play's limit, it zooms back in to
+    it; panned further than live allows, it is pulled back in."""
+    v = _small_view()
+    v.zoom_at((200, 200), 0.01, room=config.REVIEW_ROOM)
+    v.pan(10_000, 0, room=config.REVIEW_ROOM)
+    v.settle(config.LIVE_ROOM)
+    x0, _y0, x1, _y1 = _map_on_screen(v)
+    assert (x1 - x0) / 400 == pytest.approx(1 / (1 + 2 * config.LIVE_ROOM), abs=0.01)
+    assert x0 == pytest.approx(400 - (1 - config.LIVE_ROOM) * (x1 - x0), abs=1)
+    v.settle()                       # and with no room, back to the fit
+    assert v.zoom == config.ZOOM_MIN and _map_on_screen(v) == (0, 0, 400, 400)

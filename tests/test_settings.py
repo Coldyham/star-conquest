@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import random
 
 import pytest
 
@@ -16,7 +17,8 @@ from starconquest.model import AiParams
 from starconquest.settings import (
     _GLOBAL_KNOBS,
     _LEGACY_KEY_DROPS,
-    RANDOM_POOL,
+    POOL_ERA,
+    RANDOM_POOLS,
     RANDOM_STRATEGY,
     Challenge,
     Settings,
@@ -24,6 +26,7 @@ from starconquest.settings import (
     build_state,
     random_seed,
     resolve_seed,
+    resolve_profile,
     resolve_strategy,
 )
 
@@ -45,7 +48,8 @@ def test_resolve_seed_uses_explicit():
 
 def test_resolve_seed_random_when_none():
     v = resolve_seed(Settings(seed=None))
-    assert isinstance(v, int) and 0 <= v < 1_000_000
+    base = len(RANDOM_POOLS) * POOL_ERA
+    assert isinstance(v, int) and base <= v < base + config.SEED_MAX
 
 
 def test_from_args_maps_fields():
@@ -417,6 +421,16 @@ def test_challenge_key_survives_a_round_trip_of_an_int_aux():
     assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
 
 
+def test_an_int_aux_at_the_default_value_still_travels_in_the_link():
+    """An int `aux` of 1 is `==` the float default but hashes differently, so
+    trimming it as a default seat would leave a link that fails its own key."""
+    s = Settings(seed=5, players=3)
+    s.ai[2] = AiParams(aux=1)
+    s.ai_strategy[2] = "thinker"
+    assert s.token_dict()["ai"][2]["aux"] == 1
+    assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
+
+
 def _through_a_browser(value):
     """What `JSON.parse` then `JSON.stringify` leaves of a value: JavaScript has
     one number type, so an integral float comes back an int."""
@@ -572,14 +586,14 @@ def _roster(*names):
 
 @contextlib.contextmanager
 def _pool(*names):
-    """Deal random seats from ``names`` instead of the shipped pool."""
+    """Deal every random seat from ``names`` instead of the shipped pools."""
     from starconquest import settings as settings_module
-    saved = settings_module.RANDOM_POOL
-    settings_module.RANDOM_POOL = tuple(names)
+    saved = settings_module.RANDOM_POOLS
+    settings_module.RANDOM_POOLS = (tuple(names),)
     try:
         yield
     finally:
-        settings_module.RANDOM_POOL = saved
+        settings_module.RANDOM_POOLS = saved
 
 
 def test_a_random_seat_resolves_to_a_real_bot():
@@ -641,32 +655,107 @@ def test_the_pick_ignores_what_is_registered():
     with _roster("heuristic", "alpha", "beta", "gamma"):
         busy = [resolve_strategy(RANDOM_STRATEGY, n, 2) for n in range(30)]
     assert bare == busy
-    assert set(bare) <= set(RANDOM_POOL)
+    assert set(bare) <= set(RANDOM_POOLS[0])
 
 
-def test_every_bot_in_the_pool_ships():
-    """A pool name with no model behind it would play as the heuristic, silently."""
+def test_every_bot_in_every_pool_ships():
+    """A pool name with no model behind it would play as the heuristic, silently,
+    and a past pool deals its era for good, so a bot any pool names must keep
+    shipping, registered or as a legacy name its family plays (`ai.LEGACY`). A
+    dealt stop must be one its knob has."""
     from starconquest import ai
     ai.load_models()
-    assert set(RANDOM_POOL) <= set(ai.STRATEGIES)
-    assert len(set(RANDOM_POOL)) == len(RANDOM_POOL)
-    assert RANDOM_STRATEGY not in RANDOM_POOL, "random names no decision function"
+    for pool in RANDOM_POOLS:
+        for entry in pool:
+            name, _, stop = entry.partition(":")
+            assert ai.known(name), entry
+            if stop:
+                spec = ai.aux_spec(name)
+                assert spec is not None and spec[1] <= float(stop) <= spec[2], entry
+        assert len(set(pool)) == len(pool)
+        assert RANDOM_STRATEGY not in pool, "random names no decision function"
 
 
-def test_the_pool_still_deals_what_it_dealt():
-    """Editing `RANDOM_POOL` (adding, removing or reordering a bot) re-deals
-    nearly every random seat on every map ever shared; this pins the deal, so the
-    edit is never made in passing. Map ea1d2a0bf0a95ba4 is the one where two
-    players on different rosters were dealt different lineups."""
+def test_a_shipped_pool_is_never_edited():
+    """The pools are append-only: editing one that has shipped (adding, removing
+    or reordering a bot) re-deals nearly every random seat in its era. Append a
+    pool instead, and add it here. (The second was rewritten once, on
+    2026-10-19, before any build dealt from it.)"""
+    assert RANDOM_POOLS == (
+        ("knower", "actuary", "marshal", "thinker", "claudebot", "heuristic", "rusherplus"),
+        ("knower:0", "knower:1", "knower:2", "knower:3",
+         "actuary:0", "actuary:1", "actuary:2", "actuary:3", "marshal",
+         "thinker:0", "thinker:1", "evolved:0", "evolved:1", "heuristic", "rusherplus"),
+    )
+
+
+def test_each_pool_still_deals_what_it_dealt():
+    """Pins one deal per era, so an edit is never made in passing. Map
+    ea1d2a0bf0a95ba4 is the one where two players on different rosters were dealt
+    different lineups, from before the pools were numbered."""
     assert [resolve_strategy(RANDOM_STRATEGY, 626502, pid) for pid in (2, 3, 4, 5)] == [
         "heuristic", "claudebot", "claudebot", "rusherplus"]
+    assert [resolve_profile(RANDOM_STRATEGY, 1.0, 20000015, pid) for pid in (2, 3, 4, 5)] == [
+        ("heuristic", 1.0), ("evolved", 0.0), ("heuristic", 1.0), ("heuristic", 1.0)]
 
 
-def test_random_seed_is_in_range_and_not_a_fixed_sequence():
+def test_a_dealt_profile_sets_the_seats_stop_and_a_bare_name_keeps_its_own():
+    """A ``name:stop`` entry deals the stop too, so a carried aux (12 from
+    knower's old depth slider) never reaches a random seat dealt from it; the
+    first pool's bare names still keep the seat's own aux, as they always did."""
+    from starconquest.model import AiParams
+    seed = next(n for n in range(2 * POOL_ERA, 2 * POOL_ERA + 500)
+                if resolve_profile(RANDOM_STRATEGY, 12.0, n, 2) == ("knower", 3.0))
+    cfg = Settings(players=2, nodes=12)
+    cfg.ai_strategy[1] = RANDOM_STRATEGY
+    cfg.ai[1] = AiParams(aux=12.0)
+    seat = build_state(cfg, seed).players[2]
+    assert (seat.ai_strategy, seat.ai_params.aux) == ("knower", 3.0)
+    old = next(n for n in range(500) if resolve_strategy(RANDOM_STRATEGY, n, 2) == "knower")
+    seat = build_state(cfg, old).players[2]
+    assert (seat.ai_strategy, seat.ai_params.aux) == ("knower", 12.0)
+
+
+def test_a_seed_deals_from_the_pool_its_era_names():
+    """Every seed below the second pool's era is the first pool's: every seed
+    rolled (under `SEED_MAX`) or typed (seven digits) before the pools were
+    numbered. A seed from an era with no pool yet deals from the newest."""
+    from starconquest.settings import pool_for
+    first, newest = RANDOM_POOLS[0], RANDOM_POOLS[-1]
+    for seed in (0, 626502, config.SEED_MAX - 1, 9_999_999, 2 * POOL_ERA - 1):
+        assert pool_for(seed) == first
+    assert pool_for(2 * POOL_ERA) == RANDOM_POOLS[1]
+    assert pool_for(len(RANDOM_POOLS) * POOL_ERA + config.SEED_MAX) == newest
+    assert pool_for(10 ** 9) == newest
+
+
+def test_appending_a_pool_re_deals_no_seed_from_before():
+    """The point of numbering the pools: a new one deals only its own era."""
+    from starconquest import settings as settings_module
+    seeds = list(range(0, 3000, 97)) + [2 * POOL_ERA + n for n in range(0, 3000, 97)]
+
+    def deal():
+        return [resolve_strategy(RANDOM_STRATEGY, s, pid) for s in seeds for pid in (2, 3)]
+
+    before = deal()
+    saved = settings_module.RANDOM_POOLS
+    settings_module.RANDOM_POOLS = saved + (("alpha", "beta"),)
+    try:
+        assert deal() == before
+        assert settings_module.pool_for(settings_module.random_seed()) == ("alpha", "beta")
+    finally:
+        settings_module.RANDOM_POOLS = saved
+
+
+def test_random_seed_is_in_the_newest_era_and_not_a_fixed_sequence():
     """Rolled seeds must differ *within* a run even if the clock is coarse (the
-    browser blunts it), which is what a repeated roll on the web build hit."""
+    browser blunts it), which is what a repeated roll on the web build hit, and
+    land where a random seat deals from the newest pool."""
+    from starconquest.settings import pool_for, seed_top
     seeds = [random_seed() for _ in range(50)]
-    assert all(0 <= s < config.SEED_MAX for s in seeds)
+    base = len(RANDOM_POOLS) * POOL_ERA
+    assert all(base <= s < base + config.SEED_MAX for s in seeds)
+    assert all(pool_for(s) == RANDOM_POOLS[-1] and s <= seed_top() for s in seeds)
     assert len(set(seeds)) > 45           # collisions vanishingly unlikely
 
 
@@ -782,7 +871,7 @@ def test_no_core_module_imports_pygame():
 
     core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
             "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
-            "campaign")
+            "campaign", "gauntlet", "stats", "dealer", "gauntletgen")
     pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
     for name in core:
         tree = ast.parse((pkg / f"{name}.py").read_text())
@@ -795,6 +884,34 @@ def test_no_core_module_imports_pygame():
                 continue
             assert not any(n.split(".")[0] == "pygame" for n in names), \
                 f"{name}.py is core and must not import pygame"
+
+
+def test_no_core_module_reads_a_screen_size():
+    """Every pixel figure in `config` follows the UI scale, which differs between
+    the browser, the desktop and the headless worker. A core module reading one
+    makes the same seed build a different board on a different screen, and a
+    replay then plays its orders onto the wrong map."""
+    import ast
+    import pathlib
+
+    from starconquest import config
+
+    scaled = set(config._BASE_VALUES) | {
+        "ui_scale", "touch_ui", "s", "apply_ui_scale", "node_clearance",
+        "map_fit_padding", "map_pan_padding", "play_rect", "node_radius", "SCREEN_W", "SCREEN_H",
+    }
+    core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
+            "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
+            "campaign", "gauntlet", "stats", "dealer", "gauntletgen")
+    root = pathlib.Path(__file__).resolve().parent.parent
+    paths = [root / "starconquest" / f"{name}.py" for name in core]
+    paths += sorted((root / "models").glob("*.py"))
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id == "config"):
+                assert node.attr not in scaled, \
+                    f"{path.name} reads config.{node.attr}, which follows the screen"
 
 
 def test_the_lane_survey_leaves_config_as_it_found_it():
@@ -950,3 +1067,25 @@ def test_the_layout_reaches_the_board():
     ring = build_state(Settings(mode="symmetric", players=3, nodes=18, layout="ring"), 5)
     hub = build_state(Settings(mode="symmetric", players=3, nodes=18), 5)
     assert set(ring.lanes) != set(hub.lanes)
+
+
+def test_system_count_is_the_map_that_gets_built():
+    s = Settings(mode="symmetric", layout="core", players=6, nodes=10, seed=603346)
+    assert s.system_count() == 18 == len(build_state(s, 603346).systems)
+    s.mode = "random"
+    assert s.system_count() == 10 == len(build_state(s, 603346).systems)
+
+
+def test_a_roll_never_lands_below_its_floor_but_the_slider_still_reaches_it():
+    """Sight 0 can be chosen by hand, so the slider keeps it; the dice (the menu's
+    and the campaign's "?" nodes alike) never deal it."""
+    from starconquest.settings import ADV_FOG, ROLL_FLOORS, randomise_knobs
+    assert dict((attr, lo) for _k, _l, attr, lo, *_ in ADV_FOG)["fog_sight"] < ROLL_FLOORS["fog_sight"]
+    rng = random.Random(0)
+    rolled = set()
+    for _ in range(300):
+        target = Settings.defaults()
+        randomise_knobs(target, ADV_FOG, rng)
+        rolled.add(target.fog_sight)
+    assert min(rolled) == ROLL_FLOORS["fog_sight"]
+    assert max(rolled) == config.FOG_MAX_HOPS

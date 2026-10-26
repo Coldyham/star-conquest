@@ -267,11 +267,13 @@ def test_an_autoplay_demo_plays_the_same_game_the_bot_column_does():
     cfg.ai_strategy = ["marshal", "knower", "heuristic"]
 
     # The app's own autoplay path: no human seat at all, every seat decided by
-    # the engine's own loop (`main.resolve_turn` passes no `human_orders`).
+    # the engine's own loop (`main.resolve_turn` passes no `human_orders`), each
+    # turn's rng derived as `main.resolve_turn` derives it.
     state = settings_mod.build_state(replace(cfg, autoplay=True), 7)
     assert state.human() is None
     turns = 0
     while state.winner is None and turns < 600:
+        replay.reseed(state)
         engine.end_turn(state, decide=ai.decide)
         turns += 1
 
@@ -455,10 +457,10 @@ def test_budget_scale_is_wired_and_only_matters_when_it_bites():
 
 def test_set_budget_scale_only_touches_bots_that_declare_one():
     # Opt-in and declarative, like aux_spec: a bot with no wall-clock guard has
-    # nothing to scale and must be left alone.
+    # nothing to scale and must be left alone. actuary's guard is on Hunt's look-ahead.
     ai.load_models()
     try:
-        assert ai.set_budget_scale(50) == ["knower"]
+        assert ai.set_budget_scale(50) == ["actuary", "evolved", "knower"]
     finally:
         ai.set_budget_scale(1)
 

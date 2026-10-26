@@ -419,6 +419,68 @@ The `public` column defaults to false. A one-off, commented-out
 the column, so there is something to test against. Nothing needs switching off
 before a deploy.
 
+## Spectators
+
+The ask: friends in one room each play on their own phone, and the board goes
+up on the room's TV, which must not show any one player's view or orders. So a
+match can be watched from no seat at all. There is nothing to switch on: every
+fog-off match can be watched, the invite overlay gets a Spectators row with its
+own Copy button, and the lobby's page for a match offers *Watch in game* to a
+browser holding a seat in it. Nothing is stored and the endpoint is unchanged.
+
+**A spectator is a seat nobody can hold.** The link is `#spectate=<match id>`
+(`--spectate` on desktop), and it opens the match through the same read, rebuild
+and step path a seat does, at `pbp.SPECTATOR`, neutral's id. Nothing on the
+board is its own, so input takes no orders and the End Turn block reads
+*Spectating*. It has no token, so `Seat.valid` is false and every write
+(`submit`, `send_lapse`, `send_resolved`, `remember`) refuses it before it is
+sent. That is also why a spectator never resolves a complete turn or files a
+lapse: both write what the players will be held to, so it waits for a player's
+client to do it and then steps, like any client. A pill at the top of the map
+says which seats the turn is waiting on, since that is what the room wants from
+the screen.
+
+**Fog on means no spectators.** A spectator sees the whole board
+(`main._accumulate_fog`, as a knocked-out player does). On a fogged map that
+screen would show every player what none of them should see, which defeats the
+point of a TV in a room of players. So the invite overlay leaves the row out
+under fog, and the game refuses to open a spectate link to a match that is not
+`Match.watchable`. The lobby hides *Watch in game* for a fogged match too
+(`watchable` in `js/pbp.mjs`). The other possible answers were a spectator who
+sees only what every seat sees (the shared knowledge of the table) or a delayed
+view. Both were set aside as more machinery than this use needs; see
+`decided-against.md`.
+
+**Fog off means anyone with the id may watch, and that gives nothing away.**
+With fog off every seat already sees the whole board, and no seat ever sees
+another's orders before the turn resolves, so a spectator sees exactly what a
+player does. `?action=state` is open to anyone holding the id in any case. A
+match is listed for watching nowhere: the lobby offers the link only on the
+match's own page, to a browser holding a seat in it.
+
+**A spectator holds no rules.** A device may hold a seat in the match as well,
+with standing rules saved for it (`pbp.remember_rules`). A spectator neither
+loads them (`main.open_match`) nor writes its own empty set over them when a turn
+steps (`main.resolve_turn`), so watching on the device that also plays leaves
+that seat's rules where they were.
+
+**A spectator's tab is idle by the match, not by input.** A screen nobody
+touches is exactly what a TV is, and the idle floor (below) would slow its reads
+to one a minute from the start, so the board would step up to a minute after the
+last seat is in. Instead `main.pbp_spectator_floor` keys on the match: while a
+turn resolved or a seat submitted in the last half hour
+(`PBP_SPECTATOR_QUIET_MS`), it reads at the ordinary 5 s cadence; past that it
+drops to the idle ceiling of a minute, and a touch brings it straight back.
+
+The reason is cost. At Netlify's current rates (2 credits per 10,000 requests,
+10 per GB-hour of function compute) one tab at 5 s is roughly 0.45 credits an
+hour, assuming about 150 ms per call at 1 GB. A game night of three hours costs
+about 1.3. A TV tab left open on a match that runs for days would cost about 11
+a day at that cadence, the whole free tier's 300 in a month, and the free tier
+pauses the game, board and `/api/` together. Backed off, that tab costs a
+twelfth as much. Supabase barely notices either way: a brief is two small
+indexed reads and a few hundred bytes back.
+
 ## What a poll costs
 
 The poll is the play-by-post traffic that grows: 720 reads an hour per open

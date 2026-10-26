@@ -26,7 +26,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, options = {}) {
+/** Fetch a path and hand back the parsed body plus the raw response, for the
+ * one caller that reads a header (selectPage's total). */
+async function send(path, options = {}) {
   if (!configured()) {
     throw new ApiError("The leaderboard is not connected to its database yet.", 0, "unconfigured");
   }
@@ -58,7 +60,11 @@ async function request(path, options = {}) {
   // A `return=minimal` insert answers 201 with no body at all, so this cannot
   // just be res.json() — that throws on empty input.
   const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  return { body: text ? JSON.parse(text) : null, res };
+}
+
+async function request(path, options = {}) {
+  return (await send(path, options)).body;
 }
 
 /** GET a PostgREST query string, e.g. `games?select=*&game_key=eq.abc`. */
@@ -72,10 +78,27 @@ export function select(query) {
  * more?" costs no second request and no count(*). The query must order on a
  * unique key, since offset paging over a tied order can repeat or skip rows at
  * a page boundary.
+ *
+ * `count` asks PostgREST for the number of rows the whole query matches as
+ * well (`Prefer: count=exact`, read back from `Content-Range`), returned as
+ * `total` — null when the answer didn't come back. It costs the database a
+ * count over the filtered query, so only the first page of a list asks.
  */
-export async function selectPage(query, { offset = 0, size }) {
-  const rows = await select(`${query}&limit=${size + 1}&offset=${offset}`);
-  return { rows: rows.slice(0, size), more: rows.length > size };
+export async function selectPage(query, { offset = 0, size, count = false }) {
+  const path = `${query}&limit=${size + 1}&offset=${offset}`;
+  if (!count) {
+    const rows = await select(path);
+    return { rows: rows.slice(0, size), more: rows.length > size };
+  }
+  const { body: rows, res } = await send(path, { headers: { Prefer: "count=exact" } });
+  return { rows: rows.slice(0, size), more: rows.length > size, total: rangeTotal(res.headers.get("Content-Range")) };
+}
+
+/** The total from a `Content-Range` like `0-50/123` (or `*\/0` for none), or
+ * null when it is missing or unknown (`/*`). */
+export function rangeTotal(header) {
+  const match = /\/(\d+)$/.exec(header || "");
+  return match ? Number(match[1]) : null;
 }
 
 /**

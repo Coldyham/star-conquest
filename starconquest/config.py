@@ -42,7 +42,8 @@ SHIP_SPEED_GROWTH_PCT = 0.0    # compounding % gained each game turn (0 == fixed
 DEFAULT_NODES = 18
 DEFAULT_PLAYERS = 3            # includes the human; neutral is separate (id 0)
 
-SEED_MAX = 1_000_000          # rolled seeds are 0..SEED_MAX-1 (short enough to read out)
+SEED_MAX = 1_000_000          # a rolled seed is 0..SEED_MAX-1 past its pool's era
+                              # (short enough to read out; settings.roll_seed)
 
 # Bounds for the setup menu's steppers (min systems is dynamic: players + 3).
 MIN_PLAYERS = 2               # a game needs at least two sides
@@ -56,6 +57,10 @@ MAX_NODES = 120               # cap: edge build is O(n^2), keep map-gen responsi
 STANDARD_MAX_NODES = 40
 NODES_BIG_STEP = 5            # the Systems stepper moves this far at a time past it
 LANE_SURVEY_SEEDS = 3         # maps the menu's lane readout samples when the seed is random
+# World units a core layout keeps between neighbouring seam systems, and between
+# them and the sectors behind. A world figure, never a pixel one: a map must be a
+# function of its setup and seed alone, whatever screen it is generated on.
+CORE_GAP = 90.0
 
 KNN = 4                        # candidate edges per node (k nearest neighbours)
 EXTRA_EDGE_FRACTION = 0.4      # add this fraction of extra short edges past the MST
@@ -337,6 +342,13 @@ SLIDER_KNOB_R = 7           # px: radius of the knob
 # fit-to-viewport scale (zoom == 1.0), so they don't scale with apply_ui_scale.
 ZOOM_MIN = 1.0              # can't zoom out past the original fit-all view
 ZOOM_MAX = 6.0              # sane cap on zooming in
+# The game's free camera (`WorldView`'s ``room``): zoomed out until ROOM of the
+# fitted map's size shows past each side of it, and panned anywhere that keeps
+# 1 - ROOM of the map (or of the view, once the map is the bigger) on screen per
+# axis. Live play gets some (0.5: the map half the view across); history review,
+# where the docked graphs cover the map's foot, gets more (0.85: ~37%).
+LIVE_ROOM = 0.5
+REVIEW_ROOM = 0.85
 ZOOM_WHEEL_STEP = 1.15      # multiplicative zoom factor per wheel notch
 ZOOM_BUTTON_STEP = 1.25     # multiplicative zoom factor per on-map +/- tap
 MAP_ZOOM_BTN_SIZE = 44      # px: on-map zoom +/- / reset button side (touch-sized)
@@ -376,20 +388,20 @@ BASE_SCREEN_W = 1440
 BASE_SCREEN_H = 960
 TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android)
 
-# Browser (pygbag) framebuffer size. Must match the pygbag canvas (--width/--height
-# passed to `pygbag --build` in tools/build_web.sh) so the surface fills the canvas
-# exactly (no clipping); the browser then scales this whole surface to fit the
-# window/phone, which enlarges touch targets for free — so the web build needs no
-# separate touch boost. Rendering at this native resolution (rather than a small
-# framebuffer the browser upscales) is what keeps text and edges crisp; the whole
-# UI scales up to fill it via apply_ui_scale, so keep it a clean multiple of the
-# baseline aspect and bump both these constants and the build flags together.
+# Browser (pygbag) framebuffer: the boot size, matching the pygbag canvas
+# (--width/--height passed to `pygbag --build` in tools/build_web.sh), and the
+# pixel budget the live canvas is held to. Once running, `main.web_framebuffer`
+# reshapes the surface to the browser viewport at its device resolution, capped
+# at this many pixels — pygbag letterboxes a framebuffer of any other aspect, so
+# a fixed one never filled a non-16:9 window or reflowed on a resize. Rendering
+# near native resolution (rather than a small framebuffer the browser upscales)
+# keeps text and edges crisp; the UI scales up to fill it via apply_ui_scale.
 WEB_FB_W = 2560
 WEB_FB_H = 1440
 
 # Extra zoom applied to the setup menu's own letterbox fit on web (see
-# menu.draw): its fixed 3:2 design canvas otherwise pillarboxes against the
-# 16:9 WEB_FB frame above, wasting width and shrinking every touch target.
+# menu.draw): its fixed 3:2 design canvas otherwise pillarboxes against a
+# landscape browser frame, wasting width and shrinking every touch target.
 WEB_MENU_BOOST = 1.12
 
 ui_scale = 1.0              # current factor; 1.0 == the baseline above
