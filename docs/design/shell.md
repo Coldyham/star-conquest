@@ -456,6 +456,16 @@ in proportion — so Cancel on a lane just added, or going back to the Send tab,
 leaves the others as they were. A rule sending nothing at all splits 100% when a
 lane joins, or the new lane would be born idle.
 
+**Splitting is for this turn's rule; an older one is replaced.** Adding a lane
+splits only a rule set up this turn (`Ui.forward_set_on`, stamped when the popup
+arms a lane or a route is confirmed). A rule from an earlier turn is what the
+player set up *then*; a new lane on a later turn almost always means "send here
+now", so it replaces the whole rule with that lane at 100% and hold 0. The old
+rule is kept aside (`Ui.forward_replaced`) so Cancel or the Send tab puts it back.
+A system whose rule was set up this turn also opens the popup on the Forward tab
+(`Ui.opens_on_forward`), as an empty one does: the next lane is most likely
+another split of it.
+
 **A lane taken to 0% is deleted.** A lane sending nothing is not a rule, so when the
 lane the popup is on reaches 0% — by −, the wheel or the slider — `Ui.set_share`
 deletes it exactly as the bottom button would, taking the rule (and closing the
