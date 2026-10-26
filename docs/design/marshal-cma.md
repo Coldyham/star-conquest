@@ -181,7 +181,7 @@ the one to watch (worst at 18/6, -4.0, and 24/3, -2.7), but it is under 1.5
 standard errors and fades in the second half of the seeds.
 
 **The roster ladder**, re-run with the bot before the ship beside it on the same
-seeds ([`marshal.md`](marshal.md), "Where marshal stands"). At 18 nodes, marshal
+seeds ([`ladder.md`](ladder.md)). At 18 nodes, marshal
 308 wins to 305: 39% against actuary from 27%, level against knower (83%), and
 three games lost to thinker (95% from 100%); 52 timeouts to 49. On the symmetric
 board, 300 to 300: 33% against actuary from 28%, 78% against knower from 76%,

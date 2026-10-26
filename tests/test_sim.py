@@ -70,6 +70,54 @@ def test_ladder_credits_the_winning_strategy():
     assert wins["heuristic"] > wins["_test_passive"]
 
 
+def _ladder_outcomes(games):
+    return [(g.assignment, g.result.seed, g.result.winner, g.result.turns) for g in games]
+
+
+def test_a_pooled_recorded_ladder_plays_the_same_games(tmp_path):
+    """Workers and a record change where a game is played, never how."""
+    roster = ["heuristic", "rusherplus", "thinker"]
+    ai.load_models()
+    plain = sim.run_ladder(range(2), "random", 12, roster, max_turns=300)
+    pooled = sim.run_ladder(range(2), "random", 12, roster, max_turns=300,
+                            workers=2, record=tmp_path / "ladder.jsonl")
+    assert _ladder_outcomes(pooled) == _ladder_outcomes(plain)
+    assert len((tmp_path / "ladder.jsonl").read_text().splitlines()) == len(plain)
+
+
+def test_a_recorded_ladder_resumes_and_plays_only_new_pairs(tmp_path, monkeypatch):
+    record = tmp_path / "ladder.jsonl"
+    ai.load_models()
+    first = sim.run_ladder(range(2), "random", 12, ["heuristic", "rusherplus"], max_turns=300,
+                           record=record)
+    played: list = []
+    real = sim._ladder_game
+    monkeypatch.setattr(sim, "_ladder_game", lambda job: played.append(job) or real(job))
+
+    again = sim.run_ladder(range(2), "random", 12, ["heuristic", "rusherplus"], max_turns=300,
+                           record=record)
+    assert played == [] and _ladder_outcomes(again) == _ladder_outcomes(first)
+
+    record.write_text(record.read_text() + '{"key": "cut sho')     # a killed run's last line
+    grown = sim.run_ladder(range(2), "random", 12, ["heuristic", "rusherplus", "thinker"],
+                           max_turns=300, record=record)
+    assert len(played) == 2 * 2 * 2           # thinker's two pairs, both seatings, two seeds
+    assert all("thinker" in job[-1] for job in played)
+    assert [o for o in _ladder_outcomes(grown) if "thinker" not in o[0]] == _ladder_outcomes(first)
+
+
+def test_a_recorded_ladder_game_is_keyed_by_its_setup(tmp_path):
+    """Another turn cap, or an aux on one of the pair, is another game."""
+    record = tmp_path / "ladder.jsonl"
+    ai.load_models()
+    roster = ["heuristic", "thinker"]
+    sim.run_ladder(range(1), "random", 12, roster, max_turns=300, record=record)
+    sim.run_ladder(range(1), "random", 12, roster, max_turns=299, record=record)
+    sim.run_ladder(range(1), "random", 12, roster, max_turns=300, aux={"thinker": 0.0},
+                   record=record)
+    assert len(record.read_text().splitlines()) == 3 * 2
+
+
 def test_aux_reaches_only_the_named_strategy_s_seats():
     """--aux stamps every seat a strategy holds and leaves the rest default."""
     ai.load_models()

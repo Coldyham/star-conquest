@@ -397,7 +397,9 @@ buys +5.7 points head to head at Search (+4.9 against marshal, +2.8 against
 actuary) and +6.3 at Council, for about a sixth more a decide. It joined
 `COUNCIL_CANDIDATES` after actuary, where the bench appended it, so Council plays
 exactly as measured. Search keeps its six lines and its cost. actuary buys +13.4
-at Search for about a quarter more and is not borrowed there either.
+at Search for about a quarter more and is not borrowed there either. Neither
+will be (decided 2026-10-26): a new development goes on the top stop only,
+unless it is an all-round fix.
 
 What shipping changed:
 

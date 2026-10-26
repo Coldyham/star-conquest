@@ -529,7 +529,7 @@ board the same as the per-phase scratch copy at 0.40 / 0.55 (120 games) and 0 /
 0.55 (60). Any edit to `models/marshal.py` moves the bot column's `engine_rev`,
 and knower borrows marshal for its rollouts and candidates
 ([`knower.md`](knower.md), "Borrowed candidates"), so a shipped change moves
-knower too and wants the ladder in [`marshal.md`](marshal.md) re-run.
+knower too and wants the ladder ([`ladder.md`](ladder.md)) re-run.
 Free-for-alls, where `_wedge` and the pile-up rules are live, were not measured
 for the split; the screen's candidate was (*Confirmation*, below).
 
@@ -807,7 +807,7 @@ The ship moved the bot column's `engine_rev`, and knower borrows marshal for its
 rollouts and as one of its `EXTERNAL_CANDIDATES` ([`knower.md`](knower.md),
 "Borrowed candidates"), so knower moved too. The roster ladder was re-run the
 same day with the bot before the ship beside it on the same seeds
-([`marshal.md`](marshal.md), "Where marshal stands"): marshal 290 wins to 282,
+([`ladder.md`](ladder.md)): marshal 290 wins to 282,
 35% against actuary from 24% and 70% against knower from 66%. The symmetric cell
 and both `--aux` variants moved its total by a win or less, and its head-to-head
 against actuary by 2 to 11 points.

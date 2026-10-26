@@ -75,11 +75,10 @@ These came before any code was written, and the rest of the design follows from 
    nothing for a match between people. Play-by-post games are **link-invite only**
    for now: you get a seat URL and you send it to someone.
 
-   Deliberately left open for later: a lobby page listing in-progress games with
-   **open seats**, where the first person to click one is handed a seat token.
-   That is a natural second step and the schema below should not foreclose it —
-   hence `pbp_matches.seats` recording which seats are claimed, so an unclaimed
-   seat is already a representable thing. It is not built in these phases.
+   Left for later at the time: a lobby page listing games with **open seats**,
+   where the first person to click one is handed a seat token, which is why
+   `pbp_matches.seats` records which seats are claimed. Since built: see "Public
+   matches and the lobby".
 5. **Verifiable on a PR preview.** Deploy previews on a PR are effectively
    unlimited; only publishing `main` costs credits (~20/month shared across both
    Netlify sites). Every change here must be checkable without spending a publish

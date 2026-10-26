@@ -117,8 +117,7 @@ The first row's marshal and knower-0 cells are seeds 201-300 (200 games each),
 and its thinker and claudebot cells come from the default-cell ladder (seeds
 1-30). Against knower at Search,
 default cell, seeds 401-450: **37%** (37-63). The full roster ladder, with
-actuary first in all three cells, is in [`marshal.md`](marshal.md), "Full
-roster ladder".
+actuary first in all three cells, is in [`ladder.md`](ladder.md).
 
 Free-for-all (`--swap`, seeds 301 on): with marshal and thinker, actuary 70 of
 120 (59%), marshal 41, thinker 8. With claudebot added as a fourth seat, 58 of

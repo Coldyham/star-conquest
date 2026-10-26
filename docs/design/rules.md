@@ -95,7 +95,7 @@ attack off `target.ships` alone can meet one more ship than it counted —
   `tests/sim --external` and `tools/bot_replay`. Their randomness is derived
   (`botio.decide_seed`), never drawn. A seat degraded to `heuristic` (dead, or
   `botproc.FORFEIT_TIMEOUTS`) is recorded in `degraded_runs` and must never be
-  scored or posted. Detail: `docs/design/bots.md`, "External bots".
+  scored or posted. Detail: `docs/design/external-bots.md`, "External bots".
 
 ### Animated end of turn (turnfilm.py)
 
@@ -321,7 +321,7 @@ already resolve simultaneously. The rationale for each rule is in
   new column the board posts joins that grant (`test_schema_grants`). Only two things send: *Post to leaderboard*, and
   checkpoints with *Share replays* (`webstore.share_games`); a pure autoplay demo
   never does. `game_logs` is unreadable and unwritable by the public (writes via
-  `netlify/functions/log.mjs`), rows carry no identity, and `public_replays`
+  `leaderboard/netlify/functions/log.mjs`), rows carry no identity, and `public_replays`
   exposes only matches a posted score points at. `Ui.can_post` gates every
   sharing action, so a watched replay (`Ui.watched`) can't be posted as yours.
 - **Playstyle readings are keyed by match, never by name**, and read from
@@ -338,10 +338,10 @@ already resolve simultaneously. The rationale for each rule is in
   the grace, so a blank is trusted). And
   `attemptStatus` is the one answer to "may I move here" for the page and the
   game alike: the game asks
-  `/api/campaign` (`netlify/functions/campaign.mjs`, which runs that same JS)
+  `/api/campaign` (`leaderboard/netlify/functions/campaign.mjs`, which runs that same JS)
   and only counts down the server times it is given (`starconquest/campaign.py`),
   never reimplementing a rule. Detail:
-  `docs/design/leaderboard.md` and `leaderboard/README.md`.
+  `docs/design/campaign.md` and `leaderboard/README.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's

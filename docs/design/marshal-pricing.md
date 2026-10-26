@@ -51,8 +51,8 @@ copy of yourself is a tuning artefact, and this one holds against the strongest
 bot in the roster. **It is inert in duels by construction**, not merely by
 measurement — with two players the only ships aimed at a rival's system are that
 rival's own, which `_inbound` already counted, so `_rival_waves` is empty and the
-600-game duel cell reads an exact 234-234. The full-roster `--ladder` table under
-"Where marshal stands" ([`marshal.md`](marshal.md)) is therefore untouched by this change, and stays current.
+600-game duel cell reads an exact 234-234. The full-roster `--ladder` table
+([`ladder.md`](ladder.md)) is therefore untouched by this change, and stays current.
 **It is also inert at high ship speed** for the same structural reason the
 `FRONTIER_GUARD` gain is: at 12 ly/turn almost every lane is one turn long, so
 there is no window in which an enemy fleet is on the board and visible before it
@@ -323,7 +323,7 @@ is untouched and still prices the jitter in full, which is the right asymmetry �
 our own garrison cannot decline the engagement.
 
 This is what took marshal to the top of the ladder and level with knower
-head-to-head; see the table under "Where marshal stands" in [`marshal.md`](marshal.md).
+head-to-head; see [`ladder.md`](ladder.md), "Earlier readings".
 
 ## Two doomed neighbours, and what a retreat is worth
 
@@ -712,7 +712,7 @@ New marshal clears old marshal in every melee cell, by a wide margin in the
 4-player ones (228 vs 124; 203 vs 177) — the regime the pile-up fix exists for.
 `marshal_base` (unmodified) is the weakest of the three real competitors in the
 `+rusherplus` cell despite otherwise being the same bot that leads the ladder
-(see "Where marshal stands" in [`marshal.md`](marshal.md)), which is the clearest sign the old pile-up pricing
+(see [`ladder.md`](ladder.md)), which is the clearest sign the old pile-up pricing
 was actively costing it once a third player is actually on the board.
 
 Four ideas above each measure null on their own — the remnant tactic (waiting for
@@ -832,7 +832,7 @@ deliberate exception to the usual "measured null, deleted" rule above. It applie
 to correctness fixes, never to new tactics: the remnant tactic and the neutral
 fold were *choices* about what to do, and a null there still means delete. The
 legacy fold was removed rather than kept behind a flag, and duels are untouched
-by construction, so the `--ladder` table under "Where marshal stands" ([`marshal.md`](marshal.md)) stays
+by construction, so the `--ladder` table ([`ladder.md`](ladder.md)) stays
 current.
 
 ## A fleet landing next door is relief too (`RELIEF_IN_FLIGHT`, shipped 2026-10-16)
@@ -908,4 +908,4 @@ cannot be measured offline, since no bot lays the trap. *Open:* whether the
 person's posted games show bots losing strikes this way often enough to justify
 a higher weight, and council/knower, which miss the trap for a different reason
 (their rollouts model a person with `_blind`, which does not turn round here).
-The ladder under "Where marshal stands" was not re-run.
+The ladder ([`ladder.md`](ladder.md)) was not re-run.

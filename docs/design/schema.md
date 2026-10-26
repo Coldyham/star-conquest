@@ -77,7 +77,7 @@ equally, which would also hide a submitter's own confirmation that their score
 landed. So the line is drawn at the replay, the one thing a challenge like this
 is trying to keep secret. The 90-day bound is a sanity cap, not a view on the
 right embargo length. What the pages show while a map is embargoed is in
-[`leaderboard.md`](leaderboard.md), "Crowns, the weekly campaign and
+[`campaign.md`](campaign.md), "Crowns, the weekly campaign and
 embargoes".
 
 `game_embargoes` derives the embargo in force rather than storing it, because a
@@ -254,7 +254,7 @@ configs existed and which seeds were free are facts about the moment it was
 made, the "?" nodes are random rolls, and the layout comes from the game's own
 `mapgen`, which the board cannot run. Who holds what is a replay of the week's
 scores in time order, done by the page, as crowns are derived. See
-[`leaderboard.md`](leaderboard.md), "Crowns, the weekly campaign and
+[`campaign.md`](campaign.md), "Crowns, the weekly campaign and
 embargoes".
 
 `campaign_games` matches a node to its game by seed and jsonb equality, which is
@@ -306,7 +306,7 @@ before the post come first because the game uploads as Post opens the form, so
 the player's own log is there before a `match_id` is public. Without that, a
 bogus longer upload took over the Watch link until the worker's next run.
 
-`public_watchable_replays` exists because `netlify/functions/replay.mjs` reads
+`public_watchable_replays` exists because `leaderboard/netlify/functions/replay.mjs` reads
 exactly one relation on purpose: what may be served is decided in SQL, and the
 function has no `if` that could drift from that. Its two halves are gated by
 unrelated rules, which is why it is a `union all` rather than a widened view: a
@@ -335,7 +335,7 @@ counts under the rule it was posted under. Only the first score posted for a
 `match_id` counts, and only the first for a game (`game_digest`).
 `game_summary`'s best reads it too: a score that can't hold a crown isn't a
 map's record either, so a map can have scores and no best. See
-[`leaderboard.md`](leaderboard.md), "Crowns, the weekly
+[`campaign.md`](campaign.md), "Crowns, the weekly
 campaign and embargoes".
 
 It used to count everything but a `mismatch`, so that a score whose one upload
@@ -381,7 +381,7 @@ A comment in `schema.sql` stated this from the first time it caught someone,
 and it happened twice more. The mechanism was never the hard part; re-deriving
 *which* relations a caller reads, every time one gains a query, was, and a
 comment cannot check a list. `tests/test_schema_grants.py` does: it reads the
-callers (`tools/*.py`, `netlify/functions/*.mjs`) and the grants and requires
+callers (`tools/*.py`, `leaderboard/netlify/functions/*.mjs`) and the grants and requires
 them to agree.
 
 The third time was a view chain. Owner rights stop at the first view that sets
