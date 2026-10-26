@@ -24,7 +24,7 @@ The file index is [`README.md`](README.md).
 - **Text sizing** and **`config.touch_ui`.** Measured layout. The send popup is the one place the tap floor gives way.
 - **Map viewport margins.** The `node_clearance` floor, and clamping against the fit-padded span.
 - **Send popup / `Ui.editing_existing`.** Unwinding to IDLE on an edit; the slider is hit-tested before the panel drag.
-- **Forwarding rules.** A hold per system and a share per lane. Adding a lane splits evenly and removing one undoes it; + takes from home, then the other lanes. One rounding formula behind orders and every number shown. The popup's three shapes, and what a split sheds on a short screen. The hold badge under the system. Names fit in three steps.
+- **Forwarding rules.** A hold per system and a share per lane. Adding a lane splits evenly and removing one undoes it; a lane added on a later turn replaces the rule instead, and a rule set up this turn opens the popup on Forward; + takes from home, then the other lanes. One rounding formula behind orders and every number shown. The popup's three shapes, and what a split sheds on a short screen. The hold badge under the system. Names fit in three steps.
 - **Combat rules page.** It teaches the square law from the real code (`preview_fight`): parameters rather than `config`, corners rather than samples, demo sliders on `MenuState`, hand-broken prose, the jitter matrix.
 - **Losing / spectator mode.** Keyed on defeat, plus how the reset view frames the map.
 - **Ironman and the ships-lost readout.** Ironman is a local preference that hides History (and so rewind) until a game is decided (`Ui.can_review`). The top bar shows our `ships_lost`, the score's tie-break.
