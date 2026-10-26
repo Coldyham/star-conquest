@@ -36,23 +36,46 @@ knower's Oracle) for every seat that strategy holds; repeatable, one per name.
 Every other seat keeps the default. This is how knower's three Oracle settings
 were measured against thinker and marshal (docs/design/knower.md):
     uv run python -m tests.sim --ladder --ai knower thinker marshal --aux knower=2 --trials 100
+
+A --ladder plays its games on a worker pool (``--workers``, default every core
+but two) and appends each to ``results/ladder/<rev>.jsonl`` as it finishes
+(``--record`` to name another file). ``rev`` digests the code that decides a
+game, so a rerun plays only the games that file lacks for this setup: a bot
+added to the roster plays just its new pairs, and any code change starts a
+fresh file. The bots' own wall-clock guards are lifted 100x
+(``--budget-scale``), so no result depends on how loaded the machine is.
+docs/design/ladder.md is the reading it produces.
 """
 
 from __future__ import annotations
 
 import argparse
 import atexit
+import hashlib
 import itertools
+import json
 import math
+import multiprocessing
+import os
 import signal
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from starconquest import ai, config, engine, mapgen, replay, settings, turnfilm
 from starconquest.model import AiParams, GameState
 from starconquest.settings import Settings
 
 _warned_no_sigalrm = False
+
+ROOT = Path(__file__).resolve().parent.parent
+LADDER_RESULTS = ROOT / "results" / "ladder"
+
+# The core modules a game runs through; with every models/ file, what play_rev
+# digests. The same list as tools/win_turns.py's `_PLAY_MODULES`.
+_PLAY_MODULES = ("ai", "combat", "config", "custommap", "engine", "geometry",
+                 "mapgen", "model", "replay", "settings", "starnames")
 
 
 class _BotTimeout(TimeoutError):
@@ -535,22 +558,102 @@ def run_swap(seeds, mode, nodes, strategies, max_turns, bot_timeout=0.0,
 
 
 def run_ladder(seeds, mode, nodes, roster, max_turns, bot_timeout=0.0,
-               layout=mapgen.SYMMETRIC_LAYOUTS[0], aux=None) -> list[SwapGame]:
+               layout=mapgen.SYMMETRIC_LAYOUTS[0], aux=None, workers=1, record=None,
+               budget_scale=None) -> list[SwapGame]:
     """Pairwise round-robin: every unordered pair, both seatings, on every seed.
 
     Two players per game, so a win means "beat *that* bot" rather than "survived
     the melee" — which is what makes a matchup grid readable. Both seatings of
     each pair are played on the same map so first-position advantage cancels.
     Cost is ``pairs * 2 * seeds`` games, i.e. quadratic in the roster.
+
+    ``workers`` above 1 plays the games on a process pool; each worker loads
+    ``models/`` itself and sets ``budget_scale`` (`ai.set_budget_scale`), which
+    the caller sets for its own process. A strategy registered only in this
+    process (`ai.register`) needs ``workers=1``. ``record`` is a JSON-lines
+    file each game is appended to the moment it finishes; a game already in it
+    under the same `play_rev`, setup and seating is read back, not played. The
+    games come back in the same order either way.
     """
-    games: list[SwapGame] = []
-    for seed in seeds:
-        for a, b in itertools.combinations(roster, 2):
-            for assignment in ([a, b], [b, a]):
-                r = play(seed, mode, nodes, 2, max_turns, strategies=assignment, bot_timeout=bot_timeout,
-                         layout=layout, aux=aux)
-                games.append(SwapGame(r, assignment))
-    return games
+    jobs = [(seed, assignment) for seed in seeds
+            for a, b in itertools.combinations(roster, 2)
+            for assignment in ([a, b], [b, a])]
+    setup = {"rev": play_rev() if record is not None else "", "mode": mode, "nodes": nodes,
+             "layout": layout, "max_turns": max_turns, "bot_timeout": bot_timeout,
+             "budget_scale": budget_scale}
+
+    def key(seed, assignment):
+        seat_aux = [(aux or {}).get(name) for name in assignment]
+        return json.dumps([setup, seed, assignment, seat_aux], sort_keys=True)
+
+    done: dict[str, SimResult] = {}
+    if record is not None:
+        record = Path(record)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        if record.exists():
+            for line in record.read_text().splitlines():
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue                # a line cut short by a killed run
+                done.setdefault(row["key"], SimResult(*row["result"]))
+    todo = [job for job in jobs if key(*job) not in done]
+    if record is not None:
+        print(f"ladder: {len(jobs) - len(todo)} of {len(jobs)} games recorded, playing {len(todo)} "
+              f"on {max(1, min(workers, len(todo)))} worker(s) -> {record}", flush=True)
+
+    args = [(seed, mode, nodes, max_turns, bot_timeout, layout, aux, assignment)
+            for seed, assignment in todo]
+    if workers > 1 and len(todo) > 1:
+        pool = multiprocessing.Pool(min(workers, len(todo)), initializer=_ladder_worker,
+                                    initargs=(budget_scale,))
+        results = pool.imap_unordered(_ladder_game, args)
+    else:
+        pool = None
+        results = map(_ladder_game, args)
+    out = record.open("a") if record is not None else None
+    started, step = time.monotonic(), max(1, len(todo) // 20)
+    try:
+        for i, (seed, assignment, r) in enumerate(results, 1):
+            done[key(seed, assignment)] = r
+            if out is not None:
+                out.write(json.dumps({"key": key(seed, assignment), "result": [
+                    r.seed, r.winner, r.turns, r.timed_out, r.bot_timeouts]}) + "\n")
+                out.flush()
+                if i % step == 0 or i == len(todo):
+                    print(f"  {i}/{len(todo)} games, {time.monotonic() - started:.0f}s", flush=True)
+    finally:
+        if out is not None:
+            out.close()
+        if pool is not None:
+            pool.terminate()
+    return [SwapGame(done[key(seed, assignment)], assignment) for seed, assignment in jobs]
+
+
+def _ladder_worker(budget_scale) -> None:
+    ai.load_models()
+    if budget_scale is not None:
+        ai.set_budget_scale(budget_scale)
+
+
+def _ladder_game(job) -> tuple[int, list[str], SimResult]:
+    seed, mode, nodes, max_turns, bot_timeout, layout, aux, assignment = job
+    missing = [name for name in assignment if not ai.known(name)]
+    if missing:                         # ai.decide would play them as heuristic
+        raise RuntimeError(f"no strategy {', '.join(missing)} in this process")
+    return seed, assignment, play(seed, mode, nodes, 2, max_turns, strategies=assignment,
+                                  bot_timeout=bot_timeout, layout=layout, aux=aux)
+
+
+def play_rev() -> str:
+    """A digest of the code that decides a game: `_PLAY_MODULES` and every
+    `models/` file (a rival, or a bot knower borrows). A ladder record is keyed
+    by it, so a change to any of them plays its games afresh."""
+    digest = hashlib.blake2s(digest_size=4)
+    for path in ([ROOT / "starconquest" / f"{name}.py" for name in _PLAY_MODULES]
+                 + sorted((ROOT / "models").glob("*.py"))):
+        digest.update(path.name.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
 
 
 def _seat_label(pid: int, strategies: list[str] | None) -> str:
@@ -750,6 +853,14 @@ def main() -> None:
     ap.add_argument("--trials", type=int, default=1, help="run seeds [seed .. seed+trials)")
     ap.add_argument("--bot-timeout", type=float, default=0.0, help="wall-clock seconds allowed per decide() call (0 = disabled)")
     ap.add_argument("--external", action="store_true", help="also register the bots/ external bots (subprocesses speaking docs/bot-api.md); off by default, since a subprocess in an unasked-for ladder is a surprise")
+    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 1) - 2),
+                    help="--ladder: worker processes (default every core but two; 1 with --external)")
+    ap.add_argument("--record", metavar="PATH",
+                    help="--ladder: the JSON-lines file each game is appended to, and resumed from "
+                         "(default results/ladder/<rev>.jsonl)")
+    ap.add_argument("--budget-scale", type=float, default=100.0,
+                    help="--ladder: lift the bots' own wall-clock guards this many times (default 100), "
+                         "so no result depends on machine load")
     ap.add_argument("--film", action="store_true", help="also check that each turn's playback events rebuild the board that turn produced (see turnfilm.py)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
@@ -782,8 +893,16 @@ def main() -> None:
             ap.error(f"{flag} sets the seat count itself; omit --players (it is forced to {seats})")
         seeds = range(args.seed, args.seed + args.trials)
         if args.ladder:
+            # A bots/ seat that degrades is reported by this process only, and
+            # bots/ is not in play_rev, so external bots play here, into a
+            # record of their own that no later run resumes from.
+            workers = 1 if args.external else args.workers
+            name = f"external-{time.strftime('%Y%m%d-%H%M%S')}" if args.external else play_rev()
+            record = Path(args.record or LADDER_RESULTS / f"{name}.jsonl")
+            ai.set_budget_scale(args.budget_scale)
             games = run_ladder(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout,
-                               args.layout, aux)
+                               args.layout, aux, workers=workers, record=record,
+                               budget_scale=args.budget_scale)
             _summarise_ladder(games, strategies, args.trials)
         else:
             games = run_swap(seeds, args.mode, args.nodes, strategies, args.max_turns, args.bot_timeout,

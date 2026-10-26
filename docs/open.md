@@ -23,7 +23,7 @@ ships or is dropped, delete its line here (and add it to
 - external-bots.md · The in-app bot maker: built on branch `bot-maker`, not merged. *The in-app bot maker.*
 
 ## Bot research
-- ladder.md · The slow cell (24 nodes, 3 ly/turn) predates actuary; `tests.sim` has no ship-speed flag to re-run it. `tests.sim --ladder` does not record to `results/` as it goes. *Re-running it.*
+- ladder.md · The slow cell (24 nodes, 3 ly/turn) predates actuary; `tests.sim` has no ship-speed flag to re-run it. *Re-running it.*
 - knower.md · Bait openings at Search (a wall between two rivals emptied): a lean on screening seeds; confirm on fresh seeds and read at Council. *Baiting in a free-for-all.*
 - knower.md · Not built: the remnant strike, and a person's launch folded in as uncertain. *Pile-ups under the garrison-fights-last rule.*
 - knower.md / evolved.md · evolved as a borrowed candidate at Search (Council already borrows it). *evolved as a borrowed candidate (2026-10-19).*

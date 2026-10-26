@@ -727,7 +727,9 @@ The bot maker and bots that aren't Python are in
   It also hosts the two bot tournaments, sharing `_tally`/`_avg_turns`: `--swap`
   is a free-for-all (whole roster in one game, rotated through every seat via
   the cyclic `_rotations`), `--ladder` is a pairwise round-robin (`run_ladder`:
-  every pair, both seatings, plus a head-to-head grid). `--external` adds the
+  every pair, both seatings, plus a head-to-head grid; on a worker pool, each
+  game recorded and resumed by `play_rev`, see [`ladder.md`](ladder.md),
+  "Re-running it"). `--external` adds the
   `bots/` subprocess bots to either (see [`external-bots.md`](external-bots.md), "External bots: the four rules"). Both default their
   roster to `ai.available_strategies()`, so a whole-`models/` ranking needs no
   arguments. `play_settings` is the third entry point — one bot through the

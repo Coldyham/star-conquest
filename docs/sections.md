@@ -123,7 +123,7 @@ line gives only the verdict. Ideas that lost are in
 - external-bots.md · **External bots: the four rules** (rules in full): `botio.decide_seed`, `degraded_runs` never scored or posted.
 
 ## ladder.md: the roster ladder
-- ladder.md · **Re-running it.** The `tests.sim --ladder` command and cell; claudebot as thinker's second stop; Council left out; evolved added 2026-10-26; does not record as it goes; re-run after any roster, stop-default or combat change, beside the bot before it on the same seeds.
+- ladder.md · **Re-running it.** The `tests.sim --ladder` command and cell; claudebot as thinker's second stop; Council left out; evolved added 2026-10-26; workers and a record keyed by `play_rev`, resumed; re-run after any roster, stop-default or combat change, beside the bot before it on the same seeds.
 - ladder.md · **`LADDER_ORDER` is not the grid.** `LADDER_ORDER` (`ai.py`, `standings.mjs`) places each family by its top stop; the grid seats default stops.
 - ladder.md · **The current reading (2026-10-26).** First with evolved (third, above knower at Predict); the 18-node and symmetric grids; the slow cell (old).
 - ladder.md · **Earlier readings.** 2026-10-20 marshal's CMA ship and the bot before marshal's CMA ship; 2026-10-17/16; other stops (`--aux`); the six older bots before `DENY_SWAP`.

@@ -26,10 +26,15 @@ round-robin.
   2026-10-26, so every reading below predates it; the grid's totals depend on
   who is in it, so compare a pair's head-to-head across readings, never the
   win counts. Adding a bot is a change to this file's command.
-- **It does not record as it goes.** `tests.sim --ladder` holds every game in
-  memory and prints only at the end, so a run that dies loses everything. Send
-  its output to a file under `results/` and don't run it where it may be
-  killed.
+- **How it runs.** On every core but two (`--workers`), each game appended as
+  it finishes to `results/ladder/<rev>.jsonl` (`--record` names another file),
+  where `rev` is `sim.play_rev`, a digest of the core modules a game runs
+  through and every `models/` file. A rerun plays only the games that file
+  lacks for this setup, so a killed run picks up where it stopped, a bot added
+  to the roster plays just its new pairs, and any code change starts afresh.
+  The bots' wall-clock guards are lifted 100x (`--budget-scale`), so no move
+  depends on machine load. About 30 s a cell on this machine. `--external`
+  plays in one process, into a record no later run resumes from.
 - **When.** After shipping a change to any roster bot's decisions, to a stop's
   default, or to combat or engine pricing. Run the bot before the change
   beside it on the same seeds, and read that same-day pair, not one date
@@ -56,12 +61,9 @@ when a measurement at the top stops says so, and record that measurement here.
 
 The first with evolved in the grid (at Look-ahead On), and no bot changed since
 2026-10-20: every pair without evolved reads exactly as it did then, timeouts
-included, in both cells. 1,680 games a cell. Played with `tests.sim`'s own
-`play()` on the same seeds over 22 worker processes, each game recorded as it
-finished (`results/ladder/2026-10-26-*.jsonl`, gitignored), with the bots'
-wall-clock guards lifted 100x (`ai.set_budget_scale(100)`) so no move depends
-on machine load; the exact reproduction shows the guards never bound here.
-About 30 s a cell.
+included, in both cells, although the earlier readings ran in one process
+with the guards live, so the guards never bound here. 1,680 games a cell; the
+default cell is `results/ladder/45055465.jsonl` (gitignored).
 
     random, 18 nodes (the default cell)   52 timeouts
     actuary 380 (23%), marshal 351 (22%), evolved 304 (19%), knower 255 (16%),

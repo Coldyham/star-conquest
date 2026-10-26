@@ -36,6 +36,7 @@ uv run pytest                                  # full suite (or a file / file::t
 uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
 uv run python -m tests.sim --trials 200          # batch stats; add --film to check playback
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
+                                                 # (parallel; recorded and resumed in results/ladder/)
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a bot's aux knob
 
