@@ -163,6 +163,17 @@ a { color: var(--cyan); }
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 0 14px rgba(53, 230, 255, 0.28);
 }
 
+/* A group inside the menu (Gauntlets: see public, make new): its own summary
+ * button, opening its links indented beneath it rather than as a second panel,
+ * so it reads the same on a phone. Block, not flex: a <details> won't lay out
+ * as a flex box in every browser. */
+.actions .sub > summary { display: block; list-style: none; cursor: pointer; text-align: center; }
+.actions .sub > summary::-webkit-details-marker { display: none; }
+.actions .sub > summary::after { content: " ▾"; }
+.actions .sub[open] > summary { background: #10283f; }
+.actions .sub[open] > summary::after { content: " ▴"; }
+.actions .sub > a { display: block; margin: 0.5rem 0 0 1rem; font-size: 0.75rem; }
+
 .btn.ghost { border-color: var(--dim); color: var(--dim); box-shadow: 0 3px 0 #1b2036; }
 .btn.ghost:hover { background: #131829; color: var(--ink); }
 

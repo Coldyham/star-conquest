@@ -218,8 +218,10 @@ the link `/game/#g=<id>`. A `.json` download of the same file is for desktop.
 - **Listing is an admin's decision at the author's request.** The author can tick
   "Ask for it to be listed publicly" (`wants_listing`); `tools/admin.py
   list-gauntlet` sets `listed`, and only a listed row is readable with the
-  publishable key. Nothing reads `listed` yet: it is there for a public
-  gauntlets page, so asking needs no migration then.
+  publishable key. `gauntlets.html` lists those rows newest first, each
+  opening in the game by `#g=<id>` or in the builder to remix, and the player
+  card's Gauntlet runner badge counts clears of them. The menu nests both pages
+  under one Gauntlets entry: see public, make new.
 
 ## Relation to the weekly campaign
 

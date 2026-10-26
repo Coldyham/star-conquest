@@ -21,6 +21,7 @@ the pages into `web/board/` (the site root sends visitors here; the game is at
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
+| [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's Gauntlets entry nests it beside the builder |
 | [`gauntlet.html`](gauntlet.html) | make a gauntlet: one game link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Gauntlets list. `gauntlet.html#<id>` opens a saved one to remix. Its generate form builds a `/game/#gauntlet-spec=` link instead: the game deals the maps, plays test bots on them and orders them by difficulty; each Advanced and Combat slider is a min/max pair (`js/gauntlet-spec.mjs`) |
 
 The main list's search, sort and filters live in the URL, so every view is a

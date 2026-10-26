@@ -299,6 +299,23 @@ export function gameLink(gameUrl, gauntletId) {
   return `${gameUrl}#g=${gauntletId}`;
 }
 
+/**
+ * A listed row as the public gauntlets page shows it. `row` is the page's select:
+ * `{gauntlet_id, by_name, created_at, name, stages}`, the last two lifted out of
+ * the body. Tolerant, like every reader of a stored body: a stage without a
+ * title is numbered, and a row without a name shows its id.
+ */
+export function listingOf(row) {
+  const stages = Array.isArray(row?.stages) ? row.stages : [];
+  return {
+    id: row?.gauntlet_id || "",
+    name: tidy(row?.name) || row?.gauntlet_id || "",
+    by: tidy(row?.by_name),
+    titles: stages.map((stage, i) => tidy(stage?.title) || `Stage ${i + 1}`),
+    created: row?.created_at || null,
+  };
+}
+
 /** A `.json` file name for the desktop download. */
 export function fileName(body, gauntletId) {
   return `${gauntletId || slugOf(body?.name)}.json`;
