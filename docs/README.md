@@ -50,7 +50,7 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, generated gauntlets, stage targets, the proposed run and carry-over |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, versioning, playstyle readings, one site with templated pages |
-| [`design/campaign.md`](design/campaign.md) | The weekly campaign: crowns, embargoes, the grace period, campaign fleets (proposed) |
+| [`design/campaign.md`](design/campaign.md) | The weekly campaign: crowns, embargoes, the grace period, campaign fleets (decided against) |
 | [`design/setup-families.md`](design/setup-families.md) | Grouping setups on the board: pace and the family tree |
 | [`design/schema.md`](design/schema.md) | The board's database: trust model, each table and view, the grant trap, play-by-post tables |
 | [`design/pbp.md`](design/pbp.md) | Play-by-post: the stored log as the record, deadlines, the lobby, spectators, polling cost |

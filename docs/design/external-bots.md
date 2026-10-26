@@ -45,8 +45,8 @@ copy-paste example. That intersection is close to empty, and what it buys the fe
 who are in it is a bot that loses to half the shipped roster. Against that:
 ~1,400 lines of core and shell, a third scene, three more dropdown entries, and a
 `src`-template-beside-evaluator pairing in every spec-table entry that has to be
-kept in step forever. The branch stays unmerged and undeleted; the numbers above
-are the reason not to rebuild it from scratch on a hunch.
+kept in step forever. Decided against for good (2026-10-26), so the branch need not be
+kept; the numbers above are the reason not to rebuild it on a hunch.
 
 **Three findings outlive it.**
 

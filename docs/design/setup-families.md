@@ -103,14 +103,6 @@ non-matching member stays in its tree, dimmed. Families come most recently
 active first, and Order flips that. Each row links to the config's own list,
 the existing drill-down. "Random setup" stays on By config.
 
-## Proposed, not built: recording where a setup came from
-
-The menu knows which setup it was opened on (a share link, Play a new seed, the
-last game) before the player edited it. Stamping that config key on the score
-as a claim (`scores.from_config`, per-score metadata like `campaign_start`)
-would let it override the guessed parent. It must never become a `Settings`
-field, because that would move `challenge_key()` for every map ever shared.
-
 ## Decided against
 
 - **Folding opponents into one setup on the existing views.** It was proposed
@@ -126,6 +118,11 @@ field, because that would move `challenge_key()` for every map ever shared.
 - **A family id on `Settings`.** It would move every challenge key.
 - **Grouping families on `sc_config_key` text.** The text splits on how floats
   were written, so families compare values instead.
+- **Recording where a setup came from** (`scores.from_config`): the menu knows
+  which setup it was opened on before the player edited it, and a stamp on the
+  score (per-score metadata like `campaign_start`, never a `Settings` field)
+  could override the guessed parent. Unnecessary: the parent is derived well
+  enough already, and the stamp would be one more legacy case to read.
 - **Storing the exact median lane per game** (the bot-replay job builds every
   map). It is exact, but needs a column and leaves new maps blank until the job
   runs. The estimate is within a turn.

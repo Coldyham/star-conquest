@@ -392,7 +392,12 @@ to correct. A person who plays unlike the roster is the case where it could
 pay, and no person has played Learning. This result says nothing about play
 against people.
 
-**What it leaves open, for the author.** Learning could read the prior alone
+**Decided (2026-10-26): the memory stays.** The author's call is to improve
+it, above all against people, rather than drop it. That waits on data: too
+few posted games against actuary at Learning to measure a change. The case
+for dropping it, as it was put:
+
+Learning could read the prior alone
 and keep no memory. Then `decide` reads only the board, so `is_oracle_seat`
 could go false, and knower at Predict and Search would run it. That gives back
 the 20-odd points the claim earned against knower ([`learner.md`](learner.md),

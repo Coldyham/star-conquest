@@ -2,7 +2,7 @@
 
 The board's campaign meta-map and the records around it: crowns, embargoes
 and the rules in full; the grace period after a lost neighbour; and the
-campaign fleets proposal (not built). Split out of
+campaign fleets proposal (decided against). Split out of
 [`leaderboard.md`](leaderboard.md); the tables are in [`schema.md`](schema.md).
 
 ## Crowns, the weekly campaign and embargoes
@@ -223,8 +223,9 @@ The game and the board are one site, so the game can ask before it plays.
   `weekQueries` is the one copy of the two reads a week is folded from, for the
   two pages and the endpoint.
 
-## Campaign fleets (proposed, not built)
+## Campaign fleets (decided against)
 
+**Decided against (2026-10-26):** the grace period, as built, is the answer.
 A proposal for giving the campaign meta-map real-time lanes and fleets, written
 up so it can be argued over and playtested before any of it is built. Nothing
 here is in the code. The rules in force are in "Crowns, the weekly campaign and

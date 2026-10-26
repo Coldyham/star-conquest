@@ -59,8 +59,8 @@ line gives only the verdict. Ideas that lost are in
 - gauntlet.md · *In the game / on the board:* `#gauntlet-spec=`, a slice per menu frame, budgets not lifted; the generate form, `gauntlet-spec.mjs`; sharing the file, not spec and seed.
 - gauntlet.md · *Dealing fewer candidates* (shipped 2026-10-24): round-robin depths; four probes (lean heuristic, thinker, `evolved:0`, marshal); `tools/gauntlet_pool_bench.py`. The web build is untimed.
 - gauntlet.md · **The gauntlet: proposed, not built.** A seeded run graph (`tools/campaign.py` `_layout`/`cut_nodes`), stages dealt like `_from_family`/`_mystery`, difficulty by `LADDER_ORDER`.
-- gauntlet.md · **Carry-over.** Boons via `custommap.from_state` and their cost on the board; undecided; no longer blocks the run.
-- gauntlet.md · **Stage targets.** A score to win within before later stages open (`gauntlet.Target`, `gauntlet.cleared`, `Ui.stage_cleared`); set from a pasted challenge link; none in the tutorial.
+- gauntlet.md · **Carry-over.** Boons via `custommap.from_state` and their cost on the board; decided against for stage targets.
+- gauntlet.md · **Stage targets.** A score to win within before later stages open (`gauntlet.Target`, `gauntlet.cleared`, `Ui.stage_cleared`); set from a pasted challenge link or a dealt run's probe wins; none in the tutorial.
 - gauntlet.md · *Beat the best bot:* `standings.bestBot` on the stage's setup, fixed as `{turns, lost, bot, beat}` when picked. *Later: targets on lanes* (not built).
 
 ## leaderboard.md
@@ -76,11 +76,11 @@ line gives only the verdict. Ideas that lost are in
 - campaign.md · **Crowns, the weekly campaign and embargoes** (rules in full). `counted_scores`, `crown_holders`, `crown_steals`; the 24-hour unverified grace; the campaign map, `fold`, `attemptStatus`; embargoes.
 - campaign.md · **The grace period.** Half an hour after losing a node or its neighbour, derived in `fold`, for a game started with access (`scores.campaign_start`). *In the game*: confirm before Start, a top-bar countdown.
 - campaign.md · *Decided against:* an "able to capture" flag on its own; a cooldown between moves.
-- campaign.md · **Campaign fleets (proposed, not built).** Real-time lanes on the meta-map: a launch locks a claim; holders see inbound fleets; collisions go to the better score; lane length; identity is the open problem.
+- campaign.md · **Campaign fleets (decided against).** Real-time lanes on the meta-map: a launch locks a claim; holders see inbound fleets; collisions go to the better score; lane length; identity. The grace period answers it.
 
 ## setup-families.md
 - setup-families.md · **The problem**; **Pace** (median-lane estimate, `PACE_LY`, the bands, ~81% exact as ceiling); **The family tree** (parent = nearest older config within cost 3; *data and fallback*; *the view*).
-- setup-families.md · **Proposed, not built: recording where a setup came from** (`scores.from_config`). **Decided against:** folding opponents, By ruleset, a 2-D map, clustering, a family id on `Settings`.
+- setup-families.md · **Decided against:** folding opponents, By ruleset, a 2-D map, clustering, a family id on `Settings`, recording where a setup came from (`scores.from_config`).
 
 ## schema.md
 - schema.md · **The trust model** (append-only by absent policies; worker-only and closed tables); **re-pasting upgrades a board** (view columns go last; the `public_replays.rules_version` incident).
@@ -108,7 +108,7 @@ line gives only the verdict. Ideas that lost are in
 ## bots.md: the roster as a whole
 - bots.md · **Measuring a bot: what earlier sweeps got wrong.** The method checklist, with the evidence for each item. Read before any measurement.
 - bots.md · **How differently two bots play (`tools/bot_distance.py`).** Distance, kappa, fingerprints on shared positions, contested vs opening; replaces the candidate share as the first check.
-- bots.md · **New bot families (proposed 2026-10-05).** Six designs: surveyor, convoy and learner's model built; duelist (matrix game), apprentice (learned evaluator), riposte (counter-punch) not. Two measurement ideas.
+- bots.md · **New bot families (proposed 2026-10-05).** Six designs: surveyor, convoy and learner's model built; duelist (matrix game) and riposte (counter-punch) not; apprentice (learned evaluator) not to be, as evolved covers it. Two measurement ideas.
 - bots.md · **Lane length across the parameter space.** Nodes and ship speed move lane length over an order of magnitude; a constant keyed to travel time is live in one regime of three.
 - bots.md · **The person's habits** (pointer to `learner.md`). **Positions from real games** (`position_suite`: `faster`, `median gain`, `recovered`, never blurred).
 - bots.md · **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime.
@@ -118,7 +118,7 @@ line gives only the verdict. Ideas that lost are in
 - bots.md · **Rules in full:** `AiParams.aux`, the one bot-defined knob; the `tests/sim` harness; per-seat AI and pricing a fight.
 
 ## external-bots.md (split from bots.md)
-- external-bots.md · **The in-app bot maker: built, measured, not merged.** Branch `bot-maker`, PR #20; why it stays unmerged.
+- external-bots.md · **The in-app bot maker: built, measured, not merged.** Branch `bot-maker`, PR #20; why it is decided against.
 - external-bots.md · **Bots that aren't Python.** Why the wire protocol (`bot-api.md`) is shaped as it is: the full setup, not a subset; subprocesses outside `models/`.
 - external-bots.md · **External bots: the four rules** (rules in full): `botio.decide_seed`, `degraded_runs` never scored or posted.
 
@@ -149,7 +149,7 @@ line gives only the verdict. Ideas that lost are in
 - knower.md · **Built, measured, removed.** Two ideas.
 - knower.md · **The depth search: branch the root, play the rest on.** Deeper branching did nothing; more openings beat more turns; most of the result comes from borrowing marshal.
 - knower.md · **Borrowed candidates (`EXTERNAL_CANDIDATES`).** Win shares on contested decisions; why `SEARCH_WIDTH` is 2.
-- knower.md · **evolved as a borrowed candidate (2026-10-19).** `tools/candidate_bench.py`; shipped at Council only (`COUNCIL_CANDIDATES`, `COST_COUNCIL_LINES`); actuary would gain more at Search but is not borrowed there.
+- knower.md · **evolved as a borrowed candidate (2026-10-19).** `tools/candidate_bench.py`; shipped at Council only (`COUNCIL_CANDIDATES`, `COST_COUNCIL_LINES`); actuary would gain more at Search but is not borrowed there. New developments go on the top stop.
 - knower.md · **How far to look.** Horizon = longest lane + `LANE_CUSHION`, replacing a fixed depth; Oracle became Off / Predict / Search.
 - knower.md · **Cost per decide, and where the search guard trips.** The `ply_ms` fit, `setup_warning`, rivals' `decide_ms`; the browser unmeasured.
 - knower.md · **Seats it cannot run: stand-ins and people.** `stand_in_params` (actuary Learning runs as Planned), trusted; people stay on `_blind`; `GUESS_HUMAN` removed.
@@ -163,7 +163,7 @@ line gives only the verdict. Ideas that lost are in
 - council.md · **The measurements.** Against knower:2, actuary, marshal; real-game positions; unbeaten posted maps; five players.
 - council.md · **Against the posted maps and the people who posted them.** People beat it in the middle game, where it strips frontiers it can't relieve. What to try next.
 - council.md · **evolved as one more borrowed candidate** (shipped 2026-10-20). Details in knower.md.
-- council.md · **actuary at Hunt in Field's place (measured, not shipped).** Stronger but far past the browser's search guard; without its look-ahead only a lean. Hunt and evolved together untested.
+- council.md · **actuary at Hunt in Field's place (measured, not shipped).** Stronger but far past the browser's search guard, so decided against; without its look-ahead only a lean.
 - council.md · **Stripped frontiers are trades, not mistakes.** `_cover` and `LOSS_PENALTY` both lose or null; the habit is style.
 - council.md · **What it costs.** Browser timing, guards on slow devices, the gentler-jitter test exemption.
 - council.md · **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
@@ -209,7 +209,7 @@ line gives only the verdict. Ideas that lost are in
 - learning.md · **Why the curve goes in the risk term**, **what was measured, and what failed first**, **the stop**, **what else it changed.** `LEARN_REACH` x the rival's strike curve; Raise was the wrong use.
 - learning.md · **Evacuation in the price of a capture (deleted).** Worse; it can only take credit from strikes that already win.
 - learning.md · **Strike and no-strike priced apart (kept).** Each rival garrison strikes whole or not at all; now Learning's risk term.
-- learning.md · **Memory off: the prior alone (flag removed).** Learning beats memory-off nowhere against bots; dropping the memory is open, left to the author.
+- learning.md · **Memory off: the prior alone (flag removed).** Learning beats memory-off nowhere against bots; the memory stays, to be improved against people.
 - learning.md · **Five more arms, and three combinations (deleted).** Pressed row, strike size, learned guard, joint strikes, `PRIOR_WEIGHT` 1.
 - learning.md · **The counter-strike (deleted).** An option value from a rival's learned empty rate; failed on fresh seeds; the people-profile question open.
 

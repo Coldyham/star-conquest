@@ -11,6 +11,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 ## setup-families.md
 - setup-families.md · Folding opponents into one setup, and a By ruleset view: the existing views stay as they are; opponents are a light edit in the family tree. *Decided against.*
 - setup-families.md · A 2-D map of every setup (MDS, t-SNE), and clustering: points and membership move with every new config. A family id on `Settings`: moves every challenge key. Storing the exact median lane per game: a column, and blank until the job runs. *Decided against.*
+- setup-families.md · Stamping the config a setup was opened from on the score (`scores.from_config`): the parent is already derived, and a stamp is one more legacy case to read. *Decided against.*
 
 ## knower.md
 - knower.md · Pricing three-way pile-ups with the oracle (attack side, 2026-08-05, one-turn knower, the old pile-up rule where the garrison queued by size): a wash, possibly worse. Predates the garrison-fights-last rule (2026-09-10). Re-measured under it (2026-10-21, `tools/pileup_bench.py`, two posted 4- and 5-seat configs, rivals all exactly predicted or two by stand-ins): folding rival arrivals in defence and overpaying for a third seat's same-turn strike are both null at Predict (4,000 pairs), Search and Council (about 340 each). *Built, measured, removed*; *Pile-ups under the garrison-fights-last rule*.
@@ -19,6 +20,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - knower.md · Rolling every line on until its fleets land: lost head-to-head. *The depth search.*
 - knower.md · The all-in and push-for-depth postures inside the search width: stopped paying once real rushers were candidates. *Borrowed candidates.*
 - knower.md · Any fixed search depth: replaced by longest lane + 5. Depth past 5 was noise. *How far to look.*
+- knower.md · Borrowing evolved (or actuary) at Search as well as Council: a new development goes on the top stop only, unless it is an all-round fix. *evolved as a borrowed candidate (2026-10-19).*
 - knower.md · Modelling a person with marshal or actuary (Planned) instead of `_blind`: worse forecasts (Brier +0.021, +0.025). Assuming a person holds (`GUESS_HUMAN`, built, removed): worse against bots flagged as people (z -3.33), a test that favours the guess. *Seats it cannot run.*
 
 ## council.md
@@ -30,6 +32,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - council.md · Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Built, measured, dropped.*
 - council.md · A doomed garrison leaving whole (`_flee`) on Council: null against bots (50.8%, ships lost -0.39), 47.1% (z -1.2) on the posted maps. Shipped on Search only. *A doomed garrison leaves whole* (knower.md).
 - council.md · Offering the picked opening again with the systems its rollout lost held (`_cover`): null against the weak bots, marshal, knower:2 (a z +1.7 lean that did not replicate) and the 153 posted maps. Ranking down lines that lose a system they stripped (`LOSS_PENALTY` 0.03, 0.10): halves the lost empties and loses to the old council 37.6% and 25.2% on the posted maps. Council foresees 48 of 54 such losses; they are trades. *Stripped frontiers are trades, not mistakes.*
+- council.md · actuary at Hunt in Field's place, as the actuary Council borrows: +6.8 (z +3.86), but three to nine times a decide, far past the browser's search guard. Too slow. *actuary at Hunt in Field's place.*
 - council.md · Hunt without its look-ahead in Field's place, as the actuary Council borrows: +2.6 (z +1.49), two cells negative, at no cost; a lean, not adopted (plain Hunt and Field are near-equal). *actuary at Hunt in Field's place.*
 
 ## marshal.md
@@ -119,7 +122,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - learning.md · Scaling actuary's risk by `predict`'s call at today's garrison (flat K, 1-64): better against marshal, worse against knower Off and actuary; relaxing thins the garrison the call was made at. A per-rival calibration correction points the wrong way (knower's low calls strike less than predicted). *What was measured, and what failed first.*
 - learning.md · A rival garrison next door counted at its chance-weighted share (n x min(1, `LEARN_REACH` x p)), Learning as first built: replaced by pricing a whole strike at its chance, better against marshal (z +2.26). *Strike and no-strike priced apart.*
 - learning.md · Evacuation in the price of a capture (a doomed rival garrison leaves at its learned rate, so the strike kills fewer and the evacuees threaten the capture): worse than Learning against marshal (z -4.2), knower Off (z -2.3) and Planned (z -3.0). Conditioned on a doomed garrison, it can only make strikes worth less, never cheaper. *Evacuation in the price of a capture.*
-- learning.md · Learning's memory of each rival, as against the prior curve alone: never better (9,600 paired games), worse against Planned (z -2.29). The flag is removed and the memory still ships, pending the author's call on the oracle claim. *Memory off: the prior alone.*
+- learning.md · Learning's memory of each rival, as against the prior curve alone: never better (9,600 paired games), worse against Planned (z -2.29). The flag is removed and the memory still ships. Dropping it (and with it the oracle claim): decided against; the memory is to be improved against people instead. *Memory off: the prior alone.*
 - learning.md · In Learning's risk: a rival garrison's learned guard kept home (z -2.08 against marshal), a strike all-in or sized at the prior's split (-2.20, and -2.96 against Planned), a rival's garrisons next door striking together (-2.50), `PRIOR_WEIGHT` 1 (null), and pressed with guard, with guard and size, and with guard and joint (all worse). The pressed row alone leans better, but not significantly. *Five more arms, and three combinations.*
 - learning.md · The counter-strike: a reserve next to a rival valued by that rival's learned empty rate. It failed confirmation on fresh seeds and did no better than the prior rate against the roster. Against people it is untested. *The counter-strike.*
 
@@ -154,10 +157,11 @@ nor rejected are in [`open.md`](open.md); the file index is
 - bots.md · Raw-count attack margins: the AI stops expanding. A defender-advantage ceiling of 2.0: hard stalemates. *Defender advantage and the AI.*
 - bots.md · Capping the break-even edge to win back high-jitter results: that would reintroduce the bug. *Break-even margins.*
 - bots.md · A shallower search for the offline bot column instead of a bigger budget: not reproducible. *Replaying a bot for the leaderboard.*
+- bots.md · apprentice, an evaluator learned from data: evolved (CMA-ES-trained weights over priced moves) and Council's learned judge already cover it. *New bot families (proposed 2026-10-05).*
 - bots.md · Leaving the replayed seat flagged human to match the Watch link: a handicap. Superseded by stored replays. *Replaying a bot for the leaderboard.*
 
 ## external-bots.md (the bot maker, non-Python bots)
-- external-bots.md · A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Branch kept, not merged. *The in-app bot maker.*
+- external-bots.md · A visual rule-based bot maker in the app: works, but tops out below thinker and serves almost nobody. Decided against for good; the branch need not be kept. *The in-app bot maker.*
 - external-bots.md · A `simulate` callback or oracle parity for external bots: ruled out, and rival strategy names are masked. *Bots that aren't Python.*
 
 ## bot-families.md
@@ -201,7 +205,11 @@ nor rejected are in [`open.md`](open.md); the file index is
 - campaign.md · A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - campaign.md · An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
 - campaign.md · Counting every score but a `mismatch` toward crowns and the campaign: replaced from 2026-10-15 by verified only, with 24 hours' grace, since anyone can insert a score; older scores keep the old rule. `schema.md`, *counted_scores and the crowns*.
-- campaign.md · A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (proposed, not built).*
+- campaign.md · A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (decided against).*
+- campaign.md · Campaign fleets: real-time lanes on the meta-map, a launch as a stored claim. The grace period answers the stolen neighbour, and fleets' remaining case (the Monday sweep, a warning) does not justify a stored table and a per-person credential. *Campaign fleets (decided against).*
+
+## gauntlet.md (Gauntlets)
+- gauntlet.md · Boons carried between a run's stages (a hand-map edit of the stage): a boon-modified stage scores as a different setup, and the bookkeeping is complicated. Stage targets give a run its pressure instead. *Carry-over.*
 
 ## par.md (Par search)
 - par.md · A par or floor per map on the board: decided against; the tool stays local. *Not on the board.*

@@ -240,7 +240,8 @@ from data rather than from reasoning someone wrote down, including positions
 only people create. Risk: the human corpus was 47 games at the first census
 ("The first census and setup sweep off the live board"), and a fit to bot
 self-play learns the roster's habits. Clearing claudebot is likely; matching
-actuary is not.
+actuary is not. **Not to be built** (2026-10-26): evolved (weights trained by
+CMA-ES over its own priced moves) and Council's learned judge cover it.
 
 **riposte: the counter-punch.** When a rival launches, the system it launched
 from is thin now. Strike that source with whatever lands before it refills, and
