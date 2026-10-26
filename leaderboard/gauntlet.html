@@ -1,36 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Make a gauntlet · Star Conquest Leaderboard</title>
-<link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
-<link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/style.css">
-<link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0a0c14">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-</head>
-<body>
-<header class="bar">
-  <a class="brand" href="index.html">Star Conquest <span>High Scores</span></a>
-  <div class="bar-end">
-    <a class="btn play" href="../game/">▶ Play</a>
-    <details class="menu">
-      <summary class="btn" aria-label="Menu">☰ Menu</summary>
-      <nav class="actions">
-        <a class="btn" href="index.html">All maps</a>
-        <a class="btn" href="campaign.html">Campaign</a>
-        <a class="btn" href="crowns.html">Crowns</a>
-        <a class="btn" href="pbp.html">Shared matches</a>
-        <a class="btn" href="gauntlet.html">Make a gauntlet</a>
-        <a class="btn" href="submit.html">Enter score</a>
-      </nav>
-    </details>
-  </div>
-</header>
+{% extends "templates/base.html" %}
+{% set title = "Make a gauntlet" %}
+{% set script = ["js/gauntlet-page.mjs", "js/gauntlet-gen-page.mjs"] %}
 
-<main>
+{% block main %}
   <a class="back" href="index.html">← All maps</a>
   <h1>Make a gauntlet</h1>
   <!-- A gauntlet is a run of maps played in order, each with a briefing card
@@ -182,14 +154,7 @@
 
     <button id="reset" class="drop" type="button">Start over</button>
   </form>
-</main>
+{% endblock %}
 
-<footer class="attract">
-  <span class="coin">▚</span> No account needed &nbsp;·&nbsp;
-  <a href="index.html">Back to the board</a>
-</footer>
-
-<script type="module" src="js/gauntlet-page.mjs"></script>
-<script type="module" src="js/gauntlet-gen-page.mjs"></script>
-</body>
-</html>
+{% block footer %}No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>{% endblock %}

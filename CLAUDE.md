@@ -250,7 +250,9 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 - **The game and board are one site** (`/game/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. `tools/pwa/sw.js` never touches `/api/`. The
-  sensitive-variable policy stays on "Require approval".
+  sensitive-variable policy stays on "Require approval". Board pages are
+  Jinja2 templates on `leaderboard/templates/base.html` (`tools/render_board.py`,
+  whose `PAGES` is the servable allow-list); shared chrome goes in the base.
 
 **The AI** (rules in full: `docs/design/bots.md`, "Per-seat AI and pricing a
 fight: the rules in full")
