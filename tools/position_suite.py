@@ -25,7 +25,7 @@ human finish to compare against in those, but "can any bot still take this board
 is a fair question, a hard one, and one no leaderboard score can ever pose —
 only wins are postable. ``--unwon`` keeps only those. A won game is sampled from
 its opening; one the player did not win is sampled back from its last board,
-which in an abandoned game is where the player stopped (see ``plan``).
+the latest board the corpus holds of a game the player stopped (see ``plan``).
 
 Each run is appended to ``results/position_suite/<rev>.jsonl`` the moment it
 finishes (``--record`` to name another file), and a rerun plays only the runs
@@ -172,8 +172,10 @@ def plan(log: replay.GameLog, won: bool, every: int, skip_last: int) -> list[int
     A won game is sampled from the opening (``sim.positions``), less its last
     ``skip_last`` turns, where the match is decided and every bot finishes alike.
     A game the person did not win is sampled back from its end instead, because
-    there the end is the point: the last board an abandoned game reached is where
-    its player gave up, and the turns before it are how it got there. A lost game
+    there the end is the point: the last board an abandoned game reached is the
+    nearest the corpus comes to where its player gave up. A shared game uploads
+    every ``share.CHECKPOINT_TURNS``, so that board can be that many turns short
+    of where they stopped; a local log runs to the last turn played. A lost game
     starts a turn short of its end, the last board that was still being played.
     """
     if won:

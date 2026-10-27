@@ -478,7 +478,7 @@ def play_from(
     over on turn 300 gets the same allowance as one handed over on turn 3.
 
     ``turn`` may be ``log.turn_count`` itself: the last board an abandoned game
-    reached, which is where its player stopped.
+    reached.
     """
     if not 0 <= turn <= log.turn_count:
         raise ValueError(f"turn {turn} is not inside a {log.turn_count}-turn log")
