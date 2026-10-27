@@ -79,7 +79,7 @@ line gives only the verdict. Ideas that lost are in
 - campaign.md · **Campaign fleets (decided against).** Real-time lanes on the meta-map: a launch locks a claim; holders see inbound fleets; collisions go to the better score; lane length; identity. The grace period answers it.
 
 ## daily.md (proposed, not built)
-- daily.md · **The daily challenge.** A generated gauntlet from the author's spec (every stage won by a probe, fastest win + 5 as targets), made a day ahead by `tools/daily.py` on the worker, never in the game (bots move; actuary is budgeted); `dailies` table; `/api/daily`, `#daily`, kept with `gauntlet.remember`; `daily.html` with first tries, streaks, archive; open decisions.
+- daily.md · **The daily challenge.** One dealt setup a day from the author's ranges; systems rise by weekday (7-12 to 25-30); *Ship speed follows the map*: `lane_turns` fits the speed so the mean lane is 2-5 turns (an untied 6-12 draw misses a quarter of weekend maps); the first candidate a probe wins; made by `tools/daily.py` on the worker, never in the game; `dailies` readable up to today; `/api/daily`, `#daily`; `daily.html` with first tries, streaks, the week, archive; open decisions.
 
 ## other-games.md (proposed, not built)
 - other-games.md · **Features from other games** (survey 2026-10-27). Layers: star tiers, a rating against the bot ladder, the record holder's ghost, puzzles, play-by-post chat/rematch/tournaments, a map gallery. Mechanics: bonus regions, other win conditions, terrain, an invest order, teams, handicaps, drafted starts. Not proposed: cards, tech, voting, ship types.

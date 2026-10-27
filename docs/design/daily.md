@@ -94,9 +94,8 @@ measure the map it just dealt and choose a speed that fits:
   "Average lane, turns"), and `dealer.problems` should name a range that no
   allowed speed can reach.
 - **The mean, not the median.** The author asked for the average. The menu's
-  lane readout shows the median (`settings.lane_turns`). They differ by a turn
-  at most on these boards; if the readout should match, use the median
-  instead.
+  lane readout shows the median (`settings.lane_turns`). If the readout
+  should match, use the median instead.
 
 Measured on 2026-10-27, dealing 150 maps a day from the spec above with the
 speed rule off:
@@ -132,9 +131,9 @@ from the human's seat:
 - **A candidate with no probe win**, or one where a probe game ran out of turns,
   is dropped. The next candidate is dealt from the same day's rng.
 - **The cap is 8 candidates.** After that the day is left empty and the job
-  fails loudly. On this spec about half of candidates should have a probe win
-  (the probes won 15-53% each on the first generated run, "Dealing fewer
-  candidates"), so eight misses in a row should be rare. Measure it when built.
+  fails loudly. On the first generated run each probe won 15-53% of
+  candidates (`gauntlet.md`, "Dealing fewer candidates"), so most candidates
+  should have at least one probe win and eight misses in a row should be rare. Measure it when built.
 
 ## Where it is made: the worker, not the game
 
