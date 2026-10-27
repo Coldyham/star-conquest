@@ -361,6 +361,20 @@ postable — and it is the most interesting, since a lost or abandoned game is
 precisely a position the player could not solve. It has no baseline, so it is a
 raw rate rather than a comparison; never rank it against `faster`.
 
+**A game the player didn't win is sampled back from its end** (`plan`), and
+`--unwon` keeps only those. The endgame skip suits a win, where the last turns
+are a formality, but in an abandoned game they are the boards the player gave
+up on, so a game not won starts from its last board (a turn short of it if
+lost, since the last board is decided) and steps back. Rewinds leave no trace in
+the corpus: a rewound match uploads the line played on, and every second upload
+of a match checked so far (2026-10-27) was a prefix of its longest. So the
+abandoned games are the whole of "positions the player couldn't solve". Then
+they numbered 35, against 324 won.
+
+**Every run is recorded as it finishes** in `results/position_suite/<rev>.jsonl`
+(`sim.play_rev`), and a rerun plays only what is missing. The workflow caches
+that file between runs, so a corpus too big for one job finishes over several.
+
 **Read the output as a direction, not a verdict.** The sample is whatever games
 happen to exist, on whatever setups whoever played them chose — which, per "Lane
 length across the parameter space" above, is very likely one regime of three. A

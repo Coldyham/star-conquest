@@ -86,7 +86,7 @@ def test_the_allowance_counts_from_the_position_not_from_turn_zero(played):
 
 def test_a_turn_outside_the_log_is_refused(played):
     log, _ = played
-    for bad in (-1, log.turn_count, log.turn_count + 50):
+    for bad in (-1, log.turn_count + 1, log.turn_count + 50):
         with pytest.raises(ValueError):
             sim.play_from(log, bad, "marshal")
 
@@ -181,3 +181,97 @@ def test_only_replayable_logs_are_loaded(tmp_path, played):
 
     loaded = position_suite.local_logs(tmp_path)
     assert [x.match_id for x in loaded] == [log.match_id]
+
+
+def test_a_log_from_older_rules_is_not_loaded(tmp_path, played):
+    """It would rebuild a board that was never reached."""
+    log, _ = played
+    stale = log.to_dict() | {"rules_version": engine.RULES_VERSION - 1}
+    (tmp_path / "game_stale.json").write_text(__import__("json").dumps(stale))
+    assert position_suite.local_logs(tmp_path) == []
+
+
+# --------------------------------------------------------------------------- #
+# Which games, and which turns of them
+# --------------------------------------------------------------------------- #
+def _turns(n: int, finished: bool = False, winner: int | None = None, **settings):
+    log = replay.new_log(Settings(seed=1, **settings), 1)
+    for _ in range(n):
+        log.record_turn(engine.TurnRecord(), human_ai=bool(settings.get("autoplay")))
+    log.finished, log.winner = finished, winner
+    return log
+
+
+def test_who_won_is_read_from_the_persons_seat():
+    assert position_suite.person_won(_turns(10, True, replay.HUMAN_SEAT)) is True
+    assert position_suite.person_won(_turns(10, True, 2)) is False
+    assert position_suite.person_won(_turns(10)) is False          # abandoned
+    # A demo nobody took over has no seat to hand a bot at all.
+    assert position_suite.person_won(_turns(10, autoplay=True)) is None
+
+
+def test_a_won_game_is_sampled_from_the_opening_and_drops_its_endgame():
+    log = _turns(100, True, replay.HUMAN_SEAT)
+    assert position_suite.plan(log, True, every=20, skip_last=25) == [0, 20, 40, 60]
+
+
+def test_a_game_not_won_is_sampled_back_from_where_it_stopped():
+    """The last boards of an abandoned game are the ones the player gave up on, so
+    the endgame skip that suits a win would throw away exactly those."""
+    assert position_suite.plan(_turns(100), False, every=20, skip_last=25) == [0, 20, 40, 60, 80, 100]
+    assert position_suite.plan(_turns(95), False, every=20, skip_last=25) == [15, 35, 55, 75, 95]
+    # A lost game's last board is already decided; the one before it is not.
+    assert position_suite.plan(_turns(95, True, 2), False, every=20, skip_last=0) == [14, 34, 54, 74, 94]
+
+
+def test_the_last_board_of_an_abandoned_game_can_be_handed_over(played):
+    log, _ = played
+    abandoned = replay.GameLog.from_dict(log.to_dict())
+    abandoned.truncate(30)
+    with _preserve_config():
+        result = sim.play_from(abandoned, 30, "marshal", max_turns=5)
+    assert result.turn == 30 and result.human_won is False
+
+
+# --------------------------------------------------------------------------- #
+# The record
+# --------------------------------------------------------------------------- #
+def test_a_rerun_plays_nothing_already_recorded(tmp_path, played, capsys):
+    """Every run is appended as it finishes, so a killed run keeps its work and a
+    rerun picks up where it stopped — the same report either way."""
+    log, _ = played
+    games = tmp_path / "games"
+    games.mkdir()
+    (games / "game_ok.json").write_text(__import__("json").dumps(log.to_dict()))
+    record = tmp_path / "record.jsonl"
+    argv = ["--dir", str(games), "--record", str(record), "--bots", "heuristic", "marshal",
+            "--every", "15", "--skip-last", "0", "--max-turns", "40", "--workers", "1"]
+    with _preserve_config():
+        assert position_suite.main(argv) == 0
+    first = capsys.readouterr().out
+    rows = record.read_text().splitlines()
+    assert len(rows) == 2 * len(sim.positions(log, 15, 0)) and "0 recorded" in first
+
+    with _preserve_config():
+        assert position_suite.main(argv) == 0
+    again = capsys.readouterr().out
+    assert record.read_text().splitlines() == rows
+    assert f"{len(rows)} recorded, playing 0" in again
+    assert first.split("\nbot", 1)[1] == again.split("\nbot", 1)[1]
+
+
+def test_a_pool_records_exactly_what_one_process_does(tmp_path, played):
+    """Nothing a run decides depends on which process played it."""
+    log, _ = played
+    games = tmp_path / "games"
+    games.mkdir()
+    (games / "game_ok.json").write_text(__import__("json").dumps(log.to_dict()))
+    out = {}
+    for workers in ("1", "2"):
+        record = tmp_path / f"w{workers}.jsonl"
+        with _preserve_config():
+            position_suite.main(["--dir", str(games), "--record", str(record), "--bots", "marshal",
+                                 "--every", "20", "--skip-last", "0", "--max-turns", "40",
+                                 "--workers", workers])
+        out[workers] = sorted(record.read_text().splitlines())
+    assert out["1"] == out["2"]
