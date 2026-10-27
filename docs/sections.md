@@ -78,6 +78,12 @@ line gives only the verdict. Ideas that lost are in
 - campaign.md · *Decided against:* an "able to capture" flag on its own; a cooldown between moves.
 - campaign.md · **Campaign fleets (decided against).** Real-time lanes on the meta-map: a launch locks a claim; holders see inbound fleets; collisions go to the better score; lane length; identity. The grace period answers it.
 
+## daily.md (proposed, not built)
+- daily.md · **The daily challenge.** A generated gauntlet from the author's spec (every stage won by a probe, fastest win + 5 as targets), made a day ahead by `tools/daily.py` on the worker, never in the game (bots move; actuary is budgeted); `dailies` table; `/api/daily`, `#daily`, kept with `gauntlet.remember`; `daily.html` with first tries, streaks, archive; open decisions.
+
+## other-games.md (proposed, not built)
+- other-games.md · **Features from other games** (survey 2026-10-27). Layers: star tiers, a rating against the bot ladder, the record holder's ghost, puzzles, play-by-post chat/rematch/tournaments, a map gallery. Mechanics: bonus regions, other win conditions, terrain, an invest order, teams, handicaps, drafted starts. Not proposed: cards, tech, voting, ship types.
+
 ## setup-families.md
 - setup-families.md · **The problem**; **Pace** (median-lane estimate, `PACE_LY`, the bands, ~81% exact as ceiling); **The family tree** (parent = nearest older config within cost 3; *data and fallback*; *the view*).
 - setup-families.md · **Decided against:** folding opponents, By ruleset, a 2-D map, clustering, a family id on `Settings`, recording where a setup came from (`scores.from_config`).

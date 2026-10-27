@@ -10,12 +10,27 @@ ships or is dropped, delete its line here (and add it to
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
+- daily.md · The daily: whether stage targets gate stage 2 or are only stars; a cap on probe win length; one stage or two; difficulty by weekday; remaking an unplayed day after a `RULES_VERSION` bump. *Decisions left to the author.*
 
 ## Proposed, not built
 - gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
 - gauntlet.md · Targets on lanes; the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
+- daily.md · The daily challenge: a two-stage gauntlet dealt by the hourly worker (`tools/daily.py`) from the author's spec and a date-derived seed, every stage won by a probe, stored in `dailies`, fetched by `/api/daily` and `#daily`; first tries, streaks and a copied result line. *The idea in one paragraph.*
+- other-games.md · Star tiers on every map from the bot column or probe wins. *Star tiers on every map.*
+- other-games.md · A rating against the bot ladder, with monthly seasons, computed offline. *A rating against the bot ladder.*
+- other-games.md · Racing the record holder's ghost: their systems-held curve beside yours. *Racing the record holder's ghost.*
+- other-games.md · Puzzles from real positions as hand-drawn maps; fleets in flight are not representable. *Puzzles from real positions.*
+- other-games.md · Play-by-post chat, rematch, tournaments and groups. *Play-by-post: chat, rematch, tournaments, groups.*
+- other-games.md · A map gallery of hand-drawn maps with plays, records and likes. *A map gallery.*
+- other-games.md · Bonus regions (Risk continents), hand-drawn maps first. *Bonus regions.*
+- other-games.md · Win conditions besides conquest: a turn limit with points, capitals, king of the hill. *Win conditions other than total conquest.*
+- other-games.md · Terrain: fortress systems, nebula lanes, impassable fields, wormholes. *Terrain.*
+- other-games.md · An invest order to speed a system's production (a new `Order` kind). *An invest order.*
+- other-games.md · Teams and co-op against bots. *Teams and co-op.*
+- other-games.md · Per-seat handicaps, never an `AiParams` field. *Per-seat handicaps.*
+- other-games.md · Drafted starting positions. *Drafted starting positions.*
 
 ## Bot research
 - ladder.md · The slow cell (24 nodes, 3 ly/turn) predates actuary; `tests.sim` has no ship-speed flag to re-run it. *Re-running it.*
