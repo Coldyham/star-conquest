@@ -260,7 +260,7 @@ class MenuState:
     status_ok: bool = True
     status_until: int = 0  # ms tick after which status hides
     strategy_open: bool = False  # is the AI-seat strategy dropdown open
-    footer_menu: str | None = None  # the open footer pop-up (`_FOOTER_MENUS`), if any
+    daily_open: bool = False  # is the footer's Daily list open
     strategies: list[str] = field(  # dropdown options, refreshed on open
         default_factory=lambda: _strategy_options()
     )
@@ -468,7 +468,7 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
 
     _file_control(surface, ms, w, 720)
     _draw_start(surface, ms, settings, w)
-    _draw_footer_menu(surface, ms)
+    _draw_daily_list(surface, ms)
     # Two separate lines below the Start row: the transient save/load status, then
     # the keyboard hint (dropped on touch, where there are no keys to press — and
     # where it used to be drawn straight on top of the status).
@@ -1783,81 +1783,47 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     ms.rects["seed_random"] = dice
 
 
-# The footer's pop-up menus: each trigger's label, and its items as (the key a
-# click on it is handled as, label). The dailies are `main.open_daily`; the
-# leaderboard's lists open in a tab.
-_FOOTER_MENUS = {"daily_menu": "Daily", "board_menu": "Leaderboard"}
+# The footer's daily challenges (`main.open_daily`): one button opening a list
+# of the board and the puzzle, each item the key its click is handled as.
+_DAILY_LABEL = "Daily"
+_DAILY_ITEMS = (("daily", "Daily board"), ("puzzle", "Daily puzzle"))
 
 
-def _footer_items(name: str) -> list[tuple[str, str]]:
-    if name == "daily_menu":
-        return [("daily", "Daily board"), ("puzzle", "Daily puzzle")]
-    items = [("browse_configs", "Recently played")]
-    return items + [("browse_matches", "Shared matches")] if pbp.configured() else items
-
-
-def _footer_trigger(surface, ms: MenuState, name: str, x: int, y: int, *, right: bool = False) -> pygame.Rect:
-    """The button that opens footer menu ``name``, its left edge at ``x`` (its
-    right, if ``right``). A menu of one item is just that item's button."""
-    items = _footer_items(name)
+def _daily_button(surface, ms: MenuState, x: int, y: int) -> None:
     font = _fonts()["normal"]
-    border = _START_BORDER if name == "daily_menu" else _BTN_BORDER
-    single = len(items) == 1
-    label = items[0][1] if single else _FOOTER_MENUS[name]
-    rect = pygame.Rect(0, y, font.size(label)[0] + (36 if single else 36 + _CH // 2), _CH)
-    if right:
-        rect.right = x
-    else:
-        rect.x = x
-    if single:
-        _button(surface, ms, items[0][0], rect, label, fill=_BTN_FILL, border=border, tcol=config.COLOR_TEXT)
-        return rect
-    open_ = ms.footer_menu == name
-    _button(surface, ms, name, rect, "", fill=_BTN_FILL, border=_HL_BORDER if open_ else border, tcol=config.COLOR_TEXT)
-    _text(surface, font, label, config.COLOR_TEXT, midleft=(rect.x + 16, rect.centery))
-    _draw_caret(surface, pygame.Rect(rect.right - _CH, y, _CH, _CH), open_)
-    return rect
+    rect = pygame.Rect(x, y, font.size(_DAILY_LABEL)[0] + 36 + _CH // 2, _CH)
+    _button(surface, ms, "daily_menu", rect, "", fill=_BTN_FILL,
+            border=_HL_BORDER if ms.daily_open else _START_BORDER, tcol=config.COLOR_TEXT)
+    _text(surface, font, _DAILY_LABEL, config.COLOR_TEXT, midleft=(rect.x + 16, rect.centery))
+    _draw_caret(surface, pygame.Rect(rect.right - _CH, y, _CH, _CH), ms.daily_open)
 
 
-def _draw_footer_menu(surface, ms: MenuState) -> None:
-    """The open footer menu's items, in a list rising from its trigger. Drawn
-    after every other widget, and hit first (`_footer_hit`), since the list
-    rises over the bottom of the tab panel."""
-    trigger = ms.rects.get(ms.footer_menu or "")
-    if trigger is None:
-        ms.footer_menu = None
+def _draw_daily_list(surface, ms: MenuState) -> None:
+    """The open Daily list, rising from its button; drawn after every other
+    widget so nothing paints over it."""
+    trigger = ms.rects.get("daily_menu")
+    if not ms.daily_open or trigger is None:
+        ms.daily_open = False
         return
     f = _fonts()
-    items = _footer_items(ms.footer_menu)
     rh = _CH + 4
-    width = max(trigger.width, max(f["normal"].size(label)[0] for _key, label in items) + 32)
-    panel = pygame.Rect(trigger.x, trigger.y - 4 - rh * len(items), width, rh * len(items))
-    if trigger.centerx > surface.get_width() // 2:  # line up with whichever edge faces the panel
-        panel.right = trigger.right
+    width = max(trigger.width, max(f["normal"].size(label)[0] for _key, label in _DAILY_ITEMS) + 32)
+    panel = pygame.Rect(trigger.x, trigger.y - 4 - rh * len(_DAILY_ITEMS), width, rh * len(_DAILY_ITEMS))
     pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=6)
     pygame.draw.rect(surface, _HL_BORDER, panel, 1, border_radius=6)
-    for i, (key, label) in enumerate(items):
+    for i, (key, label) in enumerate(_DAILY_ITEMS):
         row = pygame.Rect(panel.x, panel.y + i * rh, panel.width, rh)
         _text(surface, f["normal"], label, config.COLOR_TEXT, midleft=(row.x + 16, row.centery))
         ms.rects[key] = row
 
 
-def _footer_hit(ms: MenuState, pos) -> str | None:
-    """The open footer menu's item under ``pos``: tested before the widgets the
-    list is drawn over."""
-    if ms.footer_menu is None:
-        return None
-    return next((key for key, _label in _footer_items(ms.footer_menu)
-                 if key in ms.rects and ms.rects[key].collidepoint(pos)), None)
-
-
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     """Footer row. Desktop (and Android): '[ name ] [Save] [Load]', a file under
-    ``_SAVE_DIR``. Web: '[Get Link] [Leaderboard v]' — the web build's data
+    ``_SAVE_DIR``. Web: '[Get Link] [Shared matches] [Recently played]' — the web build's data
     dir is pygbag's in-memory virtual filesystem, which doesn't survive a reload,
     so a file saved there would silently vanish. Get Link (a URL token in the
     address bar plus ``localStorage``) is the persistence path that actually
-    works there; the Leaderboard menu's Recently played opens the board's main list (``home.mjs``),
+    works there; Recently played opens the board's main list (``home.mjs``),
     every map somebody has posted a score on, newest first — a setup worth
     returning to is a card (or one "By config" press) away there.
 
@@ -1878,12 +1844,17 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     # fetch them from. The constant, not a resolved URL: resolving one costs a
     # DOM read every frame (see `paths`).
     if paths.LEADERBOARD_ORIGIN:
-        _footer_trigger(surface, ms, "daily_menu", rx + 14, y)
+        _daily_button(surface, ms, rx + 14, y)
 
     if is_web():
         link = pygame.Rect(lx, y, 110, _CH)
         _button(surface, ms, "get_link", link, "Get Link", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
-        _footer_trigger(surface, ms, "board_menu", rx, y, right=True)
+        boards = pygame.Rect(rx - 190, y, 190, _CH)
+        _button(surface, ms, "browse_configs", boards, "Recently played", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
+        if pbp.configured():
+            gap = boards.x - link.right
+            lobby = pygame.Rect(link.right + (gap - 190) // 2, y, 190, _CH)
+            _button(surface, ms, "browse_matches", lobby, "Shared matches", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
         return
 
     load = pygame.Rect(rx - 90, y, 90, _CH)
@@ -2387,9 +2358,9 @@ def _handle_key(event, ms: MenuState, settings: Settings):
         if event.key == pygame.K_ESCAPE:
             ms.strategy_open = False
         return None
-    if ms.footer_menu is not None:
+    if ms.daily_open:
         if event.key == pygame.K_ESCAPE:
-            ms.footer_menu = None
+            ms.daily_open = False
         return None
 
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
@@ -2400,14 +2371,14 @@ def _handle_key(event, ms: MenuState, settings: Settings):
 
 
 def _handle_click(pos, ms: MenuState, settings: Settings):
-    hit = _footer_hit(ms, pos) or next((key for key, rect in ms.rects.items() if rect.collidepoint(pos)), None)
+    hit = next((key for key, rect in ms.rects.items() if rect.collidepoint(pos)), None)
     if hit != "seed_field":
         ms.editing_seed = False
     if hit != "filename_field":
         ms.editing_filename = False
     if not (hit == "strategy" or (hit or "").startswith("strategy_opt_")):
         ms.strategy_open = False  # click anywhere else closes the dropdown
-    opened, ms.footer_menu = ms.footer_menu, None  # ...and any footer menu
+    was_open, ms.daily_open = ms.daily_open, False  # ...and the Daily list
 
     if hit == "start":
         return _start(ms, settings)
@@ -2516,8 +2487,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_scout = config.FOG_ON_SCOUT
         else:  # on -> off: full visibility
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
-    elif hit in _FOOTER_MENUS:
-        ms.footer_menu = None if opened == hit else hit
+    elif hit == "daily_menu":
+        ms.daily_open = not was_open
     elif hit == "tutorial":
         _open_tutorial(ms, settings)
     elif hit in ("daily", "puzzle"):

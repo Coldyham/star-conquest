@@ -48,28 +48,19 @@ def _textinput(ms, settings, text):
     return menu.handle_event(ev, ms, settings)
 
 
-def _open_footer(screen, ms, settings, name):
-    """Open footer menu ``name``, then draw so its items have rects."""
-    assert _click_key(screen, ms, settings, name) is None
-    assert ms.footer_menu == name
-    menu.draw(screen, ms, settings)
-
-
-def test_web_file_row_is_get_link_and_recently_played(monkeypatch):
+def test_web_file_row_is_get_link_and_recently_played():
     """The web build's data dir is an in-memory virtual filesystem that doesn't
     survive a reload, so a file Save/Load there would silently vanish — the web
     File row instead offers 'Get Link' (the URL-token path that actually
-    persists) and 'Recently played' (the board's main list), with no filename
-    field or Save/Load buttons to click. Without play-by-post, Recently played
-    is the Leaderboard menu's only item, so it is a button of its own."""
-    monkeypatch.setattr(menu.pbp, "configured", lambda: False)
+    persists) and 'Recently played' (the board's by-config listing), with no
+    filename field or Save/Load buttons to click."""
     screen, ms, settings = _setup()
     real_is_web = menu.is_web
     menu.is_web = lambda: True
     try:
         menu.draw(screen, ms, settings)
         assert "get_link" in ms.rects
-        assert "browse_configs" in ms.rects and "board_menu" not in ms.rects
+        assert "browse_configs" in ms.rects
         assert not ms.rects["get_link"].colliderect(ms.rects["browse_configs"])
         for key in ("filename_field", "save_settings", "load_settings"):
             assert key not in ms.rects
@@ -89,10 +80,8 @@ def test_recently_played_opens_the_leaderboards_main_list(monkeypatch):
     real_is_web = menu.is_web
     menu.is_web = lambda: True
     try:
-        _open_footer(screen, ms, settings, "board_menu")
         assert _click_key(screen, ms, settings, "browse_configs") is None
         assert opened == [menu.webstore.leaderboard_url(menu.LEADERBOARD_RECENT_PATH)]
-        assert ms.footer_menu is None
     finally:
         menu.is_web = real_is_web
         pygame.quit()
@@ -106,7 +95,7 @@ def test_desktop_file_row_has_no_get_link():
         ms.filename = "x" * menu._FILENAME_MAX_LEN     # the longest name accepted
         menu.draw(screen, ms, settings)
         assert "get_link" not in ms.rects
-        assert "browse_configs" not in ms.rects and "board_menu" not in ms.rects
+        assert "browse_configs" not in ms.rects
         field = ms.rects["filename_field"]
         assert field.width > 0
         for key in ("save_settings", "load_settings"):
@@ -367,8 +356,9 @@ def test_shared_matches_opens_the_lobby_and_hands_it_nothing(monkeypatch, tmp_pa
     real_is_web = menu.is_web
     menu.is_web = lambda: True
     try:
-        _open_footer(screen, ms, settings, "board_menu")
-        assert not ms.rects["browse_matches"].colliderect(ms.rects["browse_configs"])
+        menu.draw(screen, ms, settings)
+        for other in ("get_link", "browse_configs"):
+            assert not ms.rects["browse_matches"].colliderect(ms.rects[other])
         assert _click_key(screen, ms, settings, "browse_matches") is None
         assert opened == [menu.webstore.leaderboard_url(
             menu.LEADERBOARD_LOBBY_PATH)]
@@ -612,7 +602,7 @@ def test_combat_knobs_are_gone_from_advanced():
 _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "filename_field", "get_link", "browse_configs", "seed_field",
            "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc",
-           "tutorial", "daily_menu", "board_menu"}
+           "tutorial", "daily_menu"}
 
 
 def test_the_node_stepper_takes_big_steps_past_a_standard_board():
@@ -1748,18 +1738,27 @@ def test_the_stage_list_says_where_progress_lives_on_the_web(monkeypatch, tmp_pa
         pygame.quit()
 
 
+def _open_daily(screen, ms, settings):
+    """Open the Daily list, then draw so its items have rects."""
+    assert _click_key(screen, ms, settings, "daily_menu") is None
+    assert ms.daily_open
+    menu.draw(screen, ms, settings)
+
+
 @pytest.mark.parametrize("key", ["daily", "puzzle"])
-def test_the_daily_menu_asks_main_to_fetch(monkeypatch, key):
+def test_the_daily_list_asks_main_to_fetch(monkeypatch, key):
     from starconquest import paths
     screen, ms, settings = _setup()
     menu.draw(screen, ms, settings)
     box = ms.rects["daily_menu"]
     others = [k for k, r in ms.rects.items() if k != "daily_menu" and r.colliderect(box)]
     assert others == [] and box.right <= config.SCREEN_W
-    _open_footer(screen, ms, settings, "daily_menu")
+    _open_daily(screen, ms, settings)
     assert ms.rects[key].bottom <= box.top
+    others = [k for k, r in ms.rects.items() if k not in ("daily", "puzzle") and r.colliderect(ms.rects[key])]
+    assert others == []
     assert _click_key(screen, ms, settings, key) == key
-    assert ms.footer_menu is None
+    assert not ms.daily_open
     menu.draw(screen, ms, settings)
     assert key not in ms.rects
     monkeypatch.setattr(paths, "LEADERBOARD_ORIGIN", "")
@@ -1768,21 +1767,14 @@ def test_the_daily_menu_asks_main_to_fetch(monkeypatch, key):
     pygame.quit()
 
 
-def test_an_open_footer_menu_closes_on_its_trigger_or_esc(monkeypatch):
-    """Each list rises from its button with the edge facing the panel lined up;
-    a click on the button again, or Esc, closes it."""
-    monkeypatch.setattr(menu.pbp, "configured", lambda: True)
-    monkeypatch.setattr(menu, "is_web", lambda: True)
+def test_the_daily_list_closes_on_its_button_or_esc():
     screen, ms, settings = _setup()
     try:
-        _open_footer(screen, ms, settings, "board_menu")
-        assert ms.rects["browse_matches"].right == ms.rects["board_menu"].right
-        assert ms.rects["browse_matches"].bottom <= ms.rects["board_menu"].top
-        _open_footer(screen, ms, settings, "daily_menu")
-        assert _click_key(screen, ms, settings, "daily_menu") is None   # the trigger again
-        assert ms.footer_menu is None
-        _open_footer(screen, ms, settings, "daily_menu")
+        _open_daily(screen, ms, settings)
+        assert _click_key(screen, ms, settings, "daily_menu") is None
+        assert not ms.daily_open
+        _open_daily(screen, ms, settings)
         _keydown(ms, settings, pygame.K_ESCAPE)
-        assert ms.footer_menu is None
+        assert not ms.daily_open
     finally:
         pygame.quit()
