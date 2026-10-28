@@ -44,7 +44,8 @@ link's gauntlet options are not used: its two stages, its targets, the
            "garrison_base": {"range": [2, 4]}, "garrison_k": {"range": [9, 14]},
            "garrison_jitter": {"range": [2, 4]}, "combat_jitter": {"range": [0.04, 0.1]},
            "defender_advantage": {"range": [1, 1.1]}, "lane_turns": {"range": [2, 5]}},
- "opponents": {"in": ["rusherplus", "heuristic", "thinker", "evolved", "marshal", "actuary"]}}
+ "opponents": {"in": ["rusherplus", "heuristic", "thinker:0", "thinker:1", "evolved:0", "evolved:1",
+                    "marshal", "actuary:0", "actuary:2"]}}
 ```
 
 `systems` and `players` are missing on purpose: the weekday sets them. `lane_turns` is new (see
@@ -76,7 +77,11 @@ rises. `dealer.deal` places every seat near one depth along the allowed bots,
 weakest first, and a lone stage would otherwise always deal at depth 0, which is
 rusherplus and heuristic every day. So each day draws its depth uniformly from
 0 to 1 off the day's rng: any day's field can be anything from rusherplus to
-actuary, and the odds are the same every weekday.
+actuary, and the odds are the same every weekday. Every stop of a family is
+its own step along the pool (the author, 2026-10-28), weakest stop first within
+the family's ladder place, so a day can deal thinker as Claudebot and evolved
+without its look-ahead. actuary deals only Greedy and Learning: all four of its
+stops would put it on four of eleven steps, about two seats in five.
 
 **Why players rise too.** The most rises so small boards stay roomy: with 2-6
 players on Monday's 7-12 systems, about one deal in 75 was 6 players on 9

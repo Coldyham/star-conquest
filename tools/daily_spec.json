@@ -22,5 +22,6 @@
     "defender_advantage": {"range": [1, 1.1]},
     "lane_turns": {"range": [2, 5]}
   },
-  "opponents": {"in": ["rusherplus", "heuristic", "thinker", "evolved", "marshal", "actuary"]}
+  "opponents": {"in": ["rusherplus", "heuristic", "thinker:0", "thinker:1", "evolved:0", "evolved:1", "marshal",
+                        "actuary:0", "actuary:2"]}
 }
