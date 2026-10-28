@@ -7,6 +7,7 @@ ships or is dropped, delete its line here (and add it to
 [`decided-against.md`](decided-against.md) if it lost).
 
 ## Decisions left to the author
+- daily.md · The daily puzzle: which actuary stop Sunday plays. *The daily puzzle (proposed)*.
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
@@ -16,6 +17,7 @@ ships or is dropped, delete its line here (and add it to
 - gauntlet.md · Targets on lanes; the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
+- daily.md · The daily puzzle: `dailies.kind`, the worker's puzzle spec, `#puzzle`, the menu entry and per-kind streaks and badges; its probe cap is not measured yet. *The daily puzzle (proposed)*.
 - daily.md · First tries: the game counts local attempts at a day's key and stamps the count on the score, and the board marks first-try wins. Also: offering `lane_turns` on the board's gauntlet form. *On the board*, *Ship speed follows the map*.
 - other-games.md · Star tiers on every map from the bot column or probe wins. *Star tiers on every map.*
 - other-games.md · A rating against the bot ladder, with monthly seasons, computed offline. *A rating against the bot ladder.*

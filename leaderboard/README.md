@@ -780,7 +780,7 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 
 One map a day, the same for everyone, new at 00:00 UTC
 ([`docs/design/daily.md`](../docs/design/daily.md)). The board grows through
-the week (Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and
+the week (Monday 11-14 systems and 3-4 players up to Sunday 23-26 systems and
 5-6 players; the page says only that setups get bigger), the median lane takes 2-5 turns, and every day's map was won by a
 test bot within a turn cap that grows from 80 to 110.
 

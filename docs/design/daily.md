@@ -14,8 +14,8 @@ menu's Daily button, `#daily`) and `daily.html`. First tries are not built
 
 The day's challenge is **one ordinary setup**, dealt by `dealer.deal` from the
 author's ranges with a seed derived from the date. Its board grows through the
-week, Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and 5-6
-players. Its ship speed is chosen for the map dealt, so the median lane takes
+week, Monday 11-14 systems and 3-4 players up to Sunday 23-26 systems and 5-6
+players, never a duel. Its ship speed is chosen for the map dealt, so the median lane takes
 2 to 5 turns. Opponent strength stays flat through the week. A dealt map is kept
 only once a probe bot has won it from the human's seat within a turn cap that
 grows with the board, 80 on Monday to 110 on Sunday. The hourly worker makes it
@@ -55,22 +55,28 @@ link's gauntlet options are not used: its two stages, its targets, the
 
 | Day | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Systems | 7-12 | 10-15 | 13-18 | 16-21 | 19-24 | 22-27 | 25-30 |
-| Players | 2-3 | 2-4 | 2-5 | 3-6 | 3-6 | 4-6 | 5-6 |
-| Systems per seat | 2.3-6.0 | 2.5-7.5 | 2.6-9.0 | 2.7-7.0 | 3.2-8.0 | 3.7-6.8 | 4.2-6.0 |
+| Systems | 11-14 | 13-16 | 15-18 | 17-20 | 19-22 | 21-24 | 23-26 |
+| Players | 3-4 | 3-4 | 3-5 | 3-5 | 3-6 | 4-6 | 5-6 |
+| Systems per seat | 2.8-4.7 | 3.2-5.3 | 3.0-6.0 | 3.4-6.7 | 3.2-7.3 | 3.5-6.0 | 3.8-5.2 |
 
-The systems rule is `{"range": [7 + 3w, 12 + 3w]}` for weekday `w` (Monday 0,
-by the UTC date). The players rule is a table, not a formula: the most rises
-by one a day to 6, and the fewest stays 2 to Wednesday, then rises to 3, 3, 4
-and 5 (the author, 2026-10-28). Both are added to the spec when that day is
-dealt. Neighbouring days overlap by three systems, so the week rises without
-steps.
+The systems rule is `{"range": [11 + 2w, 14 + 2w]}` for weekday `w` (Monday 0,
+by the UTC date). The players rule is a table, not a formula: the fewest is 3
+to Friday, then 4 and 5, and the most rises from 4 to 6 (the author,
+2026-10-28). Both are added to the spec when that day is dealt. Neighbouring
+days overlap by two systems, so the week rises without steps.
+
+**Narrower, and never a duel** (the author, 2026-10-28). The first table ran
+7-12 systems on Monday to 25-30 on Sunday, three more a day, with duels
+allowed to Wednesday. Small maps and duels are the daily puzzle's now (see
+"The daily puzzle (proposed)"), so the board starts at 11 systems and 3
+players, and each day's range is four systems wide, not six.
 
 **Systems per seat** is the day's system count over its players: the fewest
-systems over the most players, up to the most systems over the fewest. Every
-bound in the table was reached in 300 deals a day. Over the week it runs from
-2.3 (Monday, 7 systems for 3 players) to 9.0 (Wednesday, 18 systems for a
-duel). The middle of each day's spread is about 4 to 5.
+systems over the most players, up to the most systems over the fewest, as
+reached in 300 deals a day (2026-10-28). Over the week it runs from 2.8
+(Monday, 11 systems for 4 players) to 7.3 (Friday, 22 systems for 3). The
+middle of each day's spread is about 3.5 to 5. The first table's ran 2.3 to
+9.0, the top of it a duel on 18 systems.
 
 **Opponent strength stays flat** (the author, 2026-10-27): only the board
 rises. `dealer.deal` places every seat near one depth along the allowed bots,
@@ -84,9 +90,10 @@ without its look-ahead. actuary deals only Greedy and Learning: all four of its
 stops would put it on four of eleven steps, about two seats in five.
 
 **Why players rise too.** The most rises so small boards stay roomy: with 2-6
-players on Monday's 7-12 systems, about one deal in 75 was 6 players on 9
-systems, 3 neutrals between them. The fewest rises because a duel on a big
-board is a long opening grind of neutrals before the two seats meet.
+players on the first table's Monday of 7-12 systems, about one deal in 75 was
+6 players on 9 systems, 3 neutrals between them. The fewest rises because a
+duel on a big board is a long opening grind of neutrals before the two seats
+meet.
 
 ### Ship speed follows the map
 
@@ -171,7 +178,9 @@ from the human's seat:
 ### The turn cap
 
 **The cap grows with the board** (the author, 2026-10-28): `80 + 5w` turns for
-weekday `w`.
+weekday `w`. It was measured on the first table's ranges (7-12 systems on
+Monday to 25-30 on Sunday, duels to Wednesday), below; it has not been
+re-measured on the narrower ranges.
 
 | Day | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -407,6 +416,86 @@ author, 2026-10-28), derived like the rest (`badges.mjs`'s `dailyRecord`):
 
 A win autoplayed through (`hand` 0) counts for none, as on the standings. A
 board whose schema predates `daily_games` shows the three as unknown.
+
+## The daily puzzle (proposed)
+
+Proposed on 2026-10-28. A second daily beside the board: a small duel a day,
+where the challenge is not winning but winning in the fewest turns. The two are
+**independent**, not one two-stage gauntlet (the author, 2026-10-28). A gauntlet
+would need one of them to count for the day, and gating the board behind a duel
+holds back the player who only wants the board. Its gate would be trusted and
+local anyway, since the day's setup is a public read. A warm-up order costs
+nothing without one: the puzzle comes first on the menu and on the page.
+
+### What a puzzle is
+
+- **A duel on 5-8 systems, random mode only, no fog.** Symmetric plays oddly
+  at small system counts and leads to stalemates, and a puzzle is played on
+  the whole board (the author, 2026-10-28).
+- **Easy to win is fine.** The challenge is the most efficient win, so the
+  ranking is turns and then ships lost, as on any map. The probe check stays
+  only as a guard against a map nobody can finish.
+- **One opponent per weekday**, the same every week (the author, 2026-10-28):
+
+  | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | heuristic | heuristic+lean | rusherplus | thinker:0 (Claudebot) | thinker | marshal | actuary |
+
+  heuristic+lean is heuristic with no reserve (`gauntletgen.TWEAKS`): a
+  heuristic seat whose `reserve_fraction` and `reserve_floor` are 0, which a
+  setup's per-seat `ai` already carries. The dealer's `opponents` cannot name
+  a tweak, so the worker seats the day's opponent itself. Which stop actuary
+  plays is still open (`open.md`).
+- **Short lanes, few of them instant**: the aim is no lane longer than 4
+  turns and at most two 1-turn lanes (the author, 2026-10-28). Short lanes are
+  what make a small map a puzzle (`marshal-pricing.md`, "Arriving after the
+  rival breaks the door"): a fleet is on the board for a turn before it lands.
+  It is an aim, not a rule: a ship speed of 15-20 ly/turn, drawn like any
+  range, nearly always meets it (below), so the dealer needs nothing new and
+  the board's `lane_turns` rule is left out.
+
+### A speed range, not lane rules
+
+The author, 2026-10-28: pick a speed range that generally gives those lanes
+rather than make them hard rules. Measured the same day on 600 random-mode
+duels of 5-8 systems from the board's spec, fog off, each map's lanes timed at
+every speed of a range in steps of 0.5:
+
+| Speeds | Meets both | A lane over 4 turns | Three or more 1-turn lanes | Median lane 2-3 |
+| --- | --- | --- | --- | --- |
+| 10-20 | 78% | 22% | 0.2% | 79% |
+| 12-20 | 88% | 12% | 0.3% | 90% |
+| 14-20 | 95% | 4.3% | 0.4% | 96% |
+| **15-20** | **97.5%** | **2.0%** | **0.4%** | **98%** |
+| 16-20 | 98.6% | 0.8% | 0.5% | 99% |
+| 15-24 | 96% | 1.2% | 3.3% | 99% |
+
+- **Below 15 the long lanes run over**: a duel's longest lane is about twice
+  its shortest (median 2.0, p10-p90 1.5-3.0), so a slow ship stretches the
+  longest past 4 turns. **Above 20 the short lanes go instant.**
+- **15-20 is the pick**: one map in forty misses, nearly always by a single
+  5-turn lane, and it keeps a wider spread of speeds than 16-20 for about one
+  map in a hundred. It is well above the board's 6-12, as short lanes need.
+
+### Kept apart from the board
+
+- **Storage**: `dailies` gains `kind` (`board` or `puzzle`), primary key
+  `(day, kind)`, and `daily_games` carries it. Existing rows are `board`.
+- **The worker**: `tools/daily.py` makes both kinds from their own spec files
+  (`tools/puzzle_spec.json`), the puzzle from its own stream
+  (`daily:puzzle:<day>`) and recording under `results/daily/puzzle/`.
+- **The game**: `/api/daily?kind=puzzle`, a Puzzle entry on the menu and
+  `#puzzle` (`#puzzle=<day>`). Ironman and *Copy daily result* as for the
+  board, with the line naming the puzzle and its opponent.
+- **The embargo matters more here.** A small map's best replay is its
+  solution, so it stays hidden until the day ends, as the board's does.
+- **Streaks and badges are per kind** (the author, 2026-10-28): a puzzle
+  streak and true streak of its own, and Puzzle done, Puzzle winner of the day
+  and Full puzzle week beside the board's three.
+- **The board starts bigger** (the author, 2026-10-28): 11 systems and 3
+  players on Monday, never a duel, so the two never overlap (see "The board
+  grows through the week").
+
 ## Interactions
 
 - **No `Settings` field, no key moves.** A daily is an ordinary dealt setup

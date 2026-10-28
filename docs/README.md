@@ -51,7 +51,7 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, generated gauntlets, stage targets, the proposed run and carry-over |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, versioning, playstyle readings, one site with templated pages |
 | [`design/campaign.md`](design/campaign.md) | The weekly campaign: crowns, embargoes, the grace period, campaign fleets (decided against) |
-| [`design/daily.md`](design/daily.md) | The daily challenge: the spec, systems by weekday, ship speed fitted to the map, made by the worker, storage, in the game and on the board |
+| [`design/daily.md`](design/daily.md) | The daily challenge: the spec, systems by weekday, ship speed fitted to the map, made by the worker, storage, in the game and on the board; the daily puzzle (proposed) |
 | [`design/other-games.md`](design/other-games.md) | Features from other games (proposed): layers on top and mechanics behind default-off settings |
 | [`design/setup-families.md`](design/setup-families.md) | Grouping setups on the board: pace and the family tree |
 | [`design/schema.md`](design/schema.md) | The board's database: trust model, each table and view, the grant trap, play-by-post tables |

@@ -50,9 +50,9 @@ from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credential
 
 SPEC_FILE = ROOT / "tools" / "daily_spec.json"
 RESULTS = ROOT / "results" / "daily"
-# Players by weekday, Monday first: the fewest rises so no big board is a duel,
-# the most rises so no small board is crowded (the author, 2026-10-28).
-PLAYERS = ((2, 3), (2, 4), (2, 5), (3, 6), (3, 6), (4, 6), (5, 6))
+# Players by weekday, Monday first: never a duel, since the daily puzzle is one,
+# and the most rises so no small board is crowded (the author, 2026-10-28).
+PLAYERS = ((3, 4), (3, 4), (3, 5), (3, 5), (3, 6), (4, 6), (5, 6))
 # A day with no candidate a probe won inside its cap after this many is left
 # empty. Sunday keeps about one candidate in four, so an empty Sunday is about
 # one in 10,000 (docs/design/daily.md, "Random, but not unplayable").
@@ -61,8 +61,8 @@ DAYS_AHEAD = 1
 
 
 def systems(weekday: int) -> tuple[int, int]:
-    """The day's system count range: Monday 7-12, three more each day."""
-    return 7 + 3 * weekday, 12 + 3 * weekday
+    """The day's system count range: Monday 11-14, two more each day."""
+    return 11 + 2 * weekday, 14 + 2 * weekday
 
 
 def turn_cap(weekday: int) -> int:

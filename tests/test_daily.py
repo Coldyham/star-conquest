@@ -20,9 +20,9 @@ def _roster():
 
 def test_the_board_and_the_cap_grow_through_the_week():
     assert [daily.systems(w) for w in range(7)] == [
-        (7, 12), (10, 15), (13, 18), (16, 21), (19, 24), (22, 27), (25, 30)]
+        (11, 14), (13, 16), (15, 18), (17, 20), (19, 22), (21, 24), (23, 26)]
     assert [daily.turn_cap(w) for w in range(7)] == [80, 85, 90, 95, 100, 105, 110]
-    assert daily.PLAYERS == ((2, 3), (2, 4), (2, 5), (3, 6), (3, 6), (4, 6), (5, 6))
+    assert daily.PLAYERS == ((3, 4), (3, 4), (3, 5), (3, 5), (3, 6), (4, 6), (5, 6))
 
 
 def test_the_spec_file_deals():
