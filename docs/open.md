@@ -9,7 +9,6 @@ ships or is dropped, delete its line here (and add it to
 ## Decisions left to the author
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
-- par.md / other-games.md · Whether honest par goes on the board as a star target, reversing *Not on the board*; it costs a par job in the worker. *Star tiers on every map.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
@@ -18,8 +17,6 @@ ships or is dropped, delete its line here (and add it to
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
 - daily.md · First tries: the game counts local attempts at a day's key and stamps the count on the score, and the board marks first-try wins. Also: offering `lane_turns` on the board's gauntlet form. *On the board*, *Ship speed follows the map*.
-- other-games.md · Stars on every map: a win, beating every bot, beating honest par; targets frozen once set so a star is never lost. *Star tiers on every map.*
-- other-games.md · A rating from pairwise best scores on shared maps, roster bots included, fitted Bradley-Terry; seasons as a filter. *A rating against the bot ladder.*
 - other-games.md · Racing the record holder's ghost: their systems-held curve beside yours. *Racing the record holder's ghost.*
 - other-games.md · Puzzles from real positions as hand-drawn maps; fleets in flight are not representable. *Puzzles from real positions.*
 - other-games.md · Play-by-post chat, rematch, tournaments and groups. *Play-by-post: chat, rematch, tournaments, groups.*

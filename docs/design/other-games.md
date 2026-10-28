@@ -25,7 +25,8 @@ roster depend on. So ideas come in two kinds:
 Warzone single-player and most puzzle games grade a win with one to three
 stars. This is the stage-target machinery (`gauntlet.md`, "Stage targets")
 shown on every posted map rather than gating a gauntlet. Worked out on
-2026-10-28 from the author's sketch; not built.
+2026-10-28 from the author's sketch, then **set aside** the same day: see "Set
+aside: the board's scores" below.
 
 **The tiers.** A star is earned by a counted score (`counted_scores`) and
 compared as a best is: turns first, ships lost breaking a tie. Each tier asks
@@ -70,8 +71,10 @@ for the one below it.
   be the easier tier. "Set by" says which set it.
 - **Par goes on the board.** That reverses "Not on the board" (`par.md`,
   2026-10-07), which gave no reason beyond keeping the bot column the one
-  computed number. The cost is real: knower maps hit the 1200 s budget and
-  20+ system maps were never searched. So it is its own job in
+  computed number. The cost is in knower: every 1200 s budget hit had knower
+  as a rival, and two 14-system knower maps found no win, while every map
+  without knower finished within 234 s (a 21-system one in 135 s). The board
+  run of 2026-10-14 covered maps under 20 systems only, by choice. So it is its own job in
   `bot-replay.yml`, a budget per map, recording each map as it finishes, and a
   map it cannot reach shows no third star rather than a weak one. A budget-hit
   line is still a line; it is frozen like any other.
@@ -93,13 +96,49 @@ for the one below it.
   so the target is never a mystery. The game itself needs nothing: it asks the
   board, like `/api/campaign`.
 
+#### Set aside: the board's scores (2026-10-28)
+
+Par was dropped as a target: on knower maps it times out or finds no win, and
+the third star falls back to "any win" on exactly the hardest maps. That left
+bot-only tiers (a win; beating a middling bot; beating every bot), checked
+against every counted best (one per player per map; read from
+`counted_scores` and `bot_scores`, all 7 families on each of the 190 maps):
+204 bests by 6 players, 190 of them by one player, who posted on every map.
+
+| Bots matched or beaten (of 7) | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Bests | 1 | 2 | 3 | 12 | 52 | 134 |
+
+| ★★ means | ★ | ★★ | ★★★ (every bot) |
+| --- | --- | --- | --- |
+| the middle winning bot (better of two) | 23% | 12% | 66% |
+| the middle winning bot (worse of two) | 15% | 19% | 66% |
+| 4 of 7 bots | 1.5% | 33% | 66% |
+| marshal | 3% | 31% | 66% |
+
+- **Not old dice.** Of 74 bests posted since keyed dice (2026-10-08, by
+  submission date), 59% beat every bot (69% before), and all beat at least 4.
+- **The bot to beat** is knower on 151 maps, actuary 28, evolved 10, marshal 8.
+  Only 7 maps have no winning bot.
+- **Margins.** Where a best beats every bot, it wins a median 1.21x sooner than
+  the best bot (quartiles 1.11x, 1.49x). "1.25x sooner" as the third star would
+  go to 56 of 204 (27%), "1.5x" to 31 (15%): it spreads, but it is an arbitrary
+  number, and harder to read than "beat every bot".
+
+So the roster does not separate the one strong, regular player the board has;
+a newcomer would likely spread across the tiers, but there is no one to show
+it. Set aside until the board has more players, when the same check is worth
+repeating.
+
 ### A rating against the bot ladder
 
 Warzone and Galcon rank players, but here two people never meet in a scored
 game: play-by-post never reaches the leaderboard. They do meet on a map: two
 people who both posted on it played the same setup and seed, and their bests
 compare directly, whatever the map's difficulty or rivals. Worked out on
-2026-10-28 from the author's sketch; not built.
+2026-10-28 from the author's sketch, then **set aside**: only 12 of the 190
+maps have two or more people's bests, so today it would rate each person
+against the bots alone (the star check above).
 
 - **A comparison per pair per map.** On each map, each pair among the posters
   (best counted score each) is a win, loss or draw: turns, then ships lost,
