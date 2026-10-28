@@ -30,6 +30,14 @@
 # also replays at tools.bot_replay.replay_aux (Oracle: Search, the top of its
 # own slider — see position_suite.py --aux) rather than the untuned Predict
 # default, matching what the leaderboard's bot column measures it at.
+#
+# position_suite.py appends every run to results/position_suite/<rev>.jsonl as
+# it finishes and skips what that file already holds. The file is cached
+# between runs (restored from the newest cache, saved under this run's id), so
+# rerunning this workflow continues a corpus too big for one job rather than
+# starting it again; a code change moves <rev> and starts afresh. The suite
+# step's own timeout sits under the job's so the save steps after it still run,
+# and the record is uploaded as an artifact too.
 name: Position suite
 
 on:
@@ -43,6 +51,15 @@ on:
         description: "position_suite.py --bots (space-separated; blank = every registered strategy)"
         required: false
         default: "knower marshal"
+      unwon:
+        description: "position_suite.py --unwon (only games the player abandoned or lost)"
+        type: boolean
+        required: false
+        default: false
+      workers:
+        description: "position_suite.py --workers"
+        required: false
+        default: "4"
 
 jobs:
   position-suite:
@@ -69,20 +86,49 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Restore the run record
+        if: steps.check.outputs.ready == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: results/position_suite
+          key: position-suite-${{ github.run_id }}
+          restore-keys: position-suite-
+
       - name: position_suite.py --supabase
         if: steps.check.outputs.ready == 'true'
+        timeout-minutes: 80
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GAMES: ${{ inputs.games }}
           BOTS: ${{ inputs.bots }}
+          UNWON: ${{ inputs.unwon }}
+          WORKERS: ${{ inputs.workers }}
         run: |
-          args=(--supabase --games "$GAMES")
+          args=(--supabase --games "$GAMES" --workers "$WORKERS")
           if [ -n "$BOTS" ]; then
             args+=(--bots $BOTS)
+          fi
+          if [ "$UNWON" = "true" ]; then
+            args+=(--unwon)
           fi
           echo "## position_suite.py ${args[*]}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           python -u tools/position_suite.py "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the run record
+        if: always() && steps.check.outputs.ready == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: results/position_suite
+          key: position-suite-${{ github.run_id }}
+
+      - name: Upload the run record
+        if: always() && steps.check.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: position-suite-record
+          path: results/position_suite
+          if-no-files-found: ignore

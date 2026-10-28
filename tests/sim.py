@@ -476,8 +476,11 @@ def play_from(
 
     ``max_turns`` counts from the position, not from turn zero: a board handed
     over on turn 300 gets the same allowance as one handed over on turn 3.
+
+    ``turn`` may be ``log.turn_count`` itself: the last board an abandoned game
+    reached.
     """
-    if not 0 <= turn < log.turn_count:
+    if not 0 <= turn <= log.turn_count:
         raise ValueError(f"turn {turn} is not inside a {log.turn_count}-turn log")
     branch = replay.GameLog.from_dict(log.to_dict())
     branch.truncate(turn)

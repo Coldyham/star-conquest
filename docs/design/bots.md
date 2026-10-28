@@ -361,6 +361,41 @@ postable — and it is the most interesting, since a lost or abandoned game is
 precisely a position the player could not solve. It has no baseline, so it is a
 raw rate rather than a comparison; never rank it against `faster`.
 
+**A game the player didn't win is sampled back from its end** (`plan`), and
+`--unwon` keeps only those. The endgame skip suits a win, where the last turns
+are a formality, but in an abandoned game they are the nearest boards to where
+the player gave up, so a game not won starts from its last board (a turn short
+of it if lost, since the last board is decided) and steps back. In the shared
+corpus that last board is a checkpoint: a shared game uploads every 25 turns
+(`share.CHECKPOINT_TURNS`), so it can be up to 24 turns before the player
+stopped, and a game dropped before turn 25 is not there at all. Rewinds leave no trace in
+the corpus: a rewound match uploads the line played on, and every second upload
+of a match checked so far (2026-10-27) was a prefix of its longest. So the
+abandoned games are the whole of "positions the player couldn't solve". Then
+they numbered 35, against 324 won.
+
+First reading (2026-10-27, `--supabase --unwon`, every bot at its leaderboard
+profile, 36 games: 35 abandoned and 1 lost, 101 positions). Won is the share of
+positions the bot went on to win; "last board" is each game's final upload:
+
+    bot          last board     earlier
+    knower       29/36  81%   60/65  92%
+    actuary      19/36  53%   36/65  55%
+    marshal      15/36  42%   26/65  40%
+    evolved      12/36  33%   15/65  23%
+    thinker      11/36  31%   11/65  17%
+    heuristic     9/36  25%    7/65  11%
+    rusherplus    9/36  25%    4/65   6%
+
+7 last boards beat every bot, and on 9 more only knower won. 22 of the 36
+games end at turn 25, the first checkpoint, so most of these "last boards" are
+early-game positions that were not necessarily lost. The order matches the
+self-play ladder.
+
+**Every run is recorded as it finishes** in `results/position_suite/<rev>.jsonl`
+(`sim.play_rev`), and a rerun plays only what is missing. The workflow caches
+that file between runs, so a corpus too big for one job finishes over several.
+
 **Read the output as a direction, not a verdict.** The sample is whatever games
 happen to exist, on whatever setups whoever played them chose — which, per "Lane
 length across the parameter space" above, is very likely one regime of three. A
