@@ -11,7 +11,7 @@ week's contest, not a habit. Nothing here is built; its line in
 
 The day's challenge is **one ordinary setup**, dealt by `dealer.deal` from the
 author's ranges with a seed derived from the date. Its board grows through the
-week, Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and 2-6
+week, Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and 5-6
 players. Its ship speed is chosen for the map dealt, so the median lane takes
 2 to 5 turns. Opponent strength stays flat through the week. A dealt map is kept
 only once a probe bot has won it from the human's seat within a turn cap that
@@ -51,12 +51,21 @@ link's gauntlet options are not used: its two stages, its targets, the
 | Day | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Systems | 7-12 | 10-15 | 13-18 | 16-21 | 19-24 | 22-27 | 25-30 |
-| Players | 2-3 | 2-4 | 2-5 | 2-6 | 2-6 | 2-6 | 2-6 |
+| Players | 2-3 | 2-4 | 2-5 | 3-6 | 3-6 | 4-6 | 5-6 |
+| Systems per seat | 2.3-6.0 | 2.5-7.5 | 2.6-9.0 | 2.7-7.0 | 3.2-8.0 | 3.7-6.8 | 4.2-6.0 |
 
 The systems rule is `{"range": [7 + 3w, 12 + 3w]}` for weekday `w` (Monday 0,
-by the UTC date), and the players rule `{"range": [2, min(3 + w, 6)]}`. Both are
-added to the spec when that day is dealt. Neighbouring days overlap by three
-systems, so the week rises without steps.
+by the UTC date). The players rule is a table, not a formula: the most rises
+by one a day to 6, and the fewest stays 2 to Wednesday, then rises to 3, 3, 4
+and 5 (the author, 2026-10-28). Both are added to the spec when that day is
+dealt. Neighbouring days overlap by three systems, so the week rises without
+steps.
+
+**Systems per seat** is the day's system count over its players: the fewest
+systems over the most players, up to the most systems over the fewest. Every
+bound in the table was reached in 300 deals a day. Over the week it runs from
+2.3 (Monday, 7 systems for 3 players) to 9.0 (Wednesday, 18 systems for a
+duel). The middle of each day's spread is about 4 to 5.
 
 **Opponent strength stays flat** (the author, 2026-10-27): only the board
 rises. `dealer.deal` places every seat near one depth along the allowed bots,
@@ -65,8 +74,10 @@ rusherplus and heuristic every day. So each day draws its depth uniformly from
 0 to 1 off the day's rng: any day's field can be anything from rusherplus to
 actuary, and the odds are the same every weekday.
 
-**Why players rise too.** With 2-6 players on Monday's 7-12 systems, about one
-deal in 75 was 6 players on 9 systems, 3 neutrals between them.
+**Why players rise too.** The most rises so small boards stay roomy: with 2-6
+players on Monday's 7-12 systems, about one deal in 75 was 6 players on 9
+systems, 3 neutrals between them. The fewest rises because a duel on a big
+board is a long opening grind of neutrals before the two seats meet.
 
 ### Ship speed follows the map
 
@@ -105,10 +116,10 @@ day's players) with the speed rule off:
 | Mon 7-12 | 26.8 (21.3-31.4) | 6-28 | 3% |
 | Tue 10-15 | 22.2 (17.8-26.6) | 4.5-22 | 0% |
 | Wed 13-18 | 19.7 (16.3-22.8) | 4.5-20 | 0% |
-| Thu 16-21 | 17.8 (13.6-21.1) | 4-18 | 0% |
-| Fri 19-24 | 16.6 (13.8-19.3) | 3.5-16.75 | 0% |
-| Sat 22-27 | 15.5 (12.8-18.2) | 3.5-15.5 | 0% |
-| Sun 25-30 | 14.9 (12.4-17.0) | 3.5-15 | 1% |
+| Thu 16-21 | 17.6 (14.0-20.9) | 4-18 | 0% |
+| Fri 19-24 | 16.9 (13.9-19.5) | 3.5-17 | 0% |
+| Sat 22-27 | 15.5 (12.8-17.9) | 3.5-15.5 | 0% |
+| Sun 25-30 | 14.9 (12.8-17.0) | 3.5-15 | 0% |
 
 - **On the median, the author's 6-12 range nearly always fits by itself.** Every
   one of the 1,050 maps had a fitting speed in 6-12, and a plain draw missed on
@@ -135,10 +146,11 @@ from the human's seat:
   a probe game ran out of turns. The next candidate is dealt from the same day's
   rng.
 - **At most 24 candidates a day.** After that the day is left empty and the job
-  fails loudly. Under the growing cap about half of candidates survive on
-  every weekday (below), so a day needs two on average, and 24 straight misses
-  is under one day in a million even on the worst day (Thursday, 18 of 40). At about 8 probe-seconds
-  a Sunday candidate, the limit costs nothing until it is needed.
+  fails loudly. Sunday is the hardest day to fill: a quarter of its candidates
+  survive (10 of 40, below), so it needs four on average, and 24 straight
+  misses is about one Sunday in 1,000, once in about 19 years. Every other day
+  is rarer still (Saturday one in 2,200, Thursday one in 5,200). At about 9
+  probe-seconds a Sunday candidate, the limit costs nothing until it is needed.
 
 ### The turn cap
 
@@ -153,22 +165,29 @@ The author first proposed 80 turns every day, guessing it would cover games up
 to 30 systems at 6 ly/turn. Measured on 2026-10-27, it does not at the weekend.
 Forty candidates were dealt per weekday under this file's rules, with speed
 fitted, opponents at a random depth, and all five probes played on each with
-budgets lifted (1,400 games; the growing cap is counted from the same games):
+budgets lifted. Monday to Wednesday is from the first run (1,400 games).
+Thursday to Sunday was played again on 2026-10-28 with the day's players
+(800 games), since more seats make slower games. Both caps are counted from
+the same games:
 
-| Day | Won by a probe | Fastest probe win p50 / p90 / max | Kept under a flat 80 | Kept under the growing cap |
-| --- | --- | --- | --- | --- |
-| Mon | 25 / 40 | 50 / 83 / 97 | 22 / 40 | 22 / 40 (80) |
-| Tue | 32 / 40 | 59 / 136 / 217 | 23 / 40 | 23 / 40 (85) |
-| Wed | 26 / 40 | 72 / 120 / 205 | 15 / 40 | 19 / 40 (90) |
-| Thu | 26 / 40 | 75 / 210 / 228 | 15 / 40 | 18 / 40 (95) |
-| Fri | 26 / 40 | 82 / 153 / 197 | 13 / 40 | 19 / 40 (100) |
-| Sat | 26 / 40 | 78 / 147 / 166 | 14 / 40 | 20 / 40 (105) |
-| Sun | 27 / 40 | 95 / 205 / 349 | 9 / 40 | 20 / 40 (110) |
+| Day | Players | Won by a probe | Fastest probe win p50 / p90 / max | Kept under a flat 80 | Kept under the growing cap |
+| --- | --- | --- | --- | --- | --- |
+| Mon | 2-3 | 25 / 40 | 50 / 83 / 97 | 22 / 40 | 22 / 40 (80) |
+| Tue | 2-4 | 32 / 40 | 59 / 136 / 217 | 23 / 40 | 23 / 40 (85) |
+| Wed | 2-5 | 26 / 40 | 72 / 120 / 205 | 15 / 40 | 19 / 40 (90) |
+| Thu | 3-6 | 24 / 40 | 98 / 161 / 182 | 8 / 40 | 12 / 40 (95) |
+| Fri | 3-6 | 29 / 40 | 93 / 151 / 297 | 10 / 40 | 17 / 40 (100) |
+| Sat | 4-6 | 19 / 40 | 94 / 149 / 166 | 6 / 40 | 11 / 40 (105) |
+| Sun | 5-6 | 18 / 40 | 100 / 150 / 217 | 4 / 40 | 10 / 40 (110) |
 
-- **A flat 80 lost most slow weekend boards.** On Saturday and Sunday at 6-8
-  ly/turn the fastest probe win had a median of 100 turns, and 15 of 19 were
-  over 80. The growing cap keeps 11 of those 19, 10 of 13 at 8.5-10 ly/turn
-  and 19 of 21 at 10.5-12.
+- **More seats, fewer and slower wins.** With 2-6 players every day, Thursday
+  to Sunday had kept 18-20 of 40 under the growing cap. Raising the fewest
+  players halves that at the weekend: fewer candidates are won by any probe,
+  and the fastest win's median is 93-100 turns against 75-95.
+- **A flat 80 lost most slow weekend boards** (first run, 2-6 players). On
+  Saturday and Sunday at 6-8 ly/turn the fastest probe win had a median of 100
+  turns, and 15 of 19 were over 80. With the day's players, the growing cap
+  keeps 10 of 20 at 6-8 ly/turn, 3 of 7 at 8.5-10 and 8 of 10 at 10.5-12.
 - **Posted games agree.** On the board's posted maps of 19-24 systems (none of
   25-30 is posted yet), people's best win had a median of 77 turns, and 6 of 16
   were over 80; the two at 6 ly/turn took 93 and 121. On 13-18 systems the
@@ -177,10 +196,10 @@ budgets lifted (1,400 games; the growing cap is counted from the same games):
   7-12 systems, 77 and 78 on 19-24), so the probes are a fair stand-in for a
   good player's pace.
 - **What the cap still does to the weekend.** It keeps the maps that play
-  fastest, so Saturday and Sunday lean slightly toward fewer players (mean 4.1
-  to 3.8 among probe-won maps) and faster ships (9.0 to 9.4 ly/turn), less than
-  a flat 80 did (3.6 and 9.7). The median lane stays in 2-5, since the speed is
-  fitted first.
+  fastest, so Saturday and Sunday lean slightly toward faster ships (mean 8.6
+  to 9.0 ly/turn among probe-won maps) and barely toward fewer players (5.1 to
+  5.0), since the players range is narrow there. The median lane stays in
+  2-5, since the speed is fitted first.
 
 ## Where it is made: the worker, not the game
 
