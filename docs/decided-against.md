@@ -213,6 +213,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 
 ## par.md (Par search)
 - par.md · A par or floor per map on the board: decided against; the tool stays local. *Not on the board.*
+- par.md · A hidden bonus star for beating lucky par: a second par run per map, nearly unreachable on keyed dice, and where met it marks a short search. Hidden targets go to gauntlet lanes. *Star tiers on every map* (`other-games.md`).
 - par.md · Lucky dice as a ceiling: withdrawn, since rival fights still roll and honest dice beat lucky in 2 of 18 pairs. *Dice modes.*
 
 ## pbp.md (Play-by-post)

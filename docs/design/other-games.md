@@ -36,7 +36,6 @@ for the one below it.
 | 1 | a win | any counted score (scores are wins only) |
 | 2 | beating every bot | the bot column's best winning row |
 | 3 | beating the search | the honest par line (`par.md`, "Dice modes") |
-| bonus, hidden | beating the optimist | the lucky par line |
 
 **A star can never be lost.** That needs two things:
 
@@ -76,14 +75,14 @@ for the one below it.
   `bot-replay.yml`, a budget per map, recording each map as it finishes, and a
   map it cannot reach shows no third star rather than a weak one. A budget-hit
   line is still a line; it is frozen like any other.
-- **The bonus star is hidden and rare by design.** On keyed dice the lucky
-  line beat all 7 human wins by a median 25 turns. People beat it on 7 maps,
-  all set when a rewind re-rolled and four with a knower budget-hit, so where
-  it falls it marks a short search as much as a great game. It costs a second
-  par run per map.
+- **No bonus star for lucky par** (dropped 2026-10-28). On keyed dice the
+  lucky line beat all 7 human wins by a median 25 turns; where people beat it,
+  it marks a short search as much as a great game, and it costs a second par
+  run per map. Hidden targets belong to gauntlets instead: a bonus stage
+  behind a hidden lane target (`gauntlet.md`, "Later: targets on lanes").
 - **Rewind fishing.** Scores posted before keyed dice (2026-10-08) could fish
   a roll, which the honest search cannot. The board still counts them, but
-  the third and bonus stars should ask for a log keyed every turn
+  the third star should ask for a log keyed every turn
   (`replay.dice_follow`), the same dice the search met.
 - **Rules versions.** A `RULES_VERSION` bump that moves a map's play leaves
   old targets describing an old game. A target carries its rules version, and

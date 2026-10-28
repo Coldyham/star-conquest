@@ -322,8 +322,7 @@ tool stays as something to run locally against a map or a score
 (`--game-key`, `--log`). The bot column remains the only computed number the
 board shows.
 
-Reopened as a proposal on 2026-10-28: honest and lucky par as frozen star
-targets ([`other-games.md`](other-games.md), "Star tiers on every map").
+Reopened as a proposal on 2026-10-28: honest par as a frozen star target ([`other-games.md`](other-games.md), "Star tiers on every map").
 
 ## Next, if it goes further
 
