@@ -10,14 +10,14 @@ ships or is dropped, delete its line here (and add it to
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
-- daily.md · The daily: an 80-turn cap every day or one growing with the board (80 cuts most slow weekend maps); Wednesday's players assumed 2-5; remaking an unplayed day after a `RULES_VERSION` bump. *Decisions left to the author.*
+- daily.md · The daily: Wednesday's players assumed 2-5; remaking an unplayed day after a `RULES_VERSION` bump. *Decisions left to the author.*
 
 ## Proposed, not built
 - gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
 - gauntlet.md · Targets on lanes; the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
-- daily.md · The daily challenge: one setup a day, systems and players rising Mon (7-12, 2-3) to Sun (25-30, 2-6), opponents flat, ship speed fitted so the median lane is 2-5 turns (a new dealer rule `lane_turns`), the first candidate a probe wins within 80 turns; made by `tools/daily.py` on the hourly worker, stored in `dailies` (readable up to today), fetched by `/api/daily` and `#daily`; first tries, streaks, a copied result line. *The idea in one paragraph.*
+- daily.md · The daily challenge: one setup a day, systems and players rising Mon (7-12, 2-3) to Sun (25-30, 2-6), opponents flat, ship speed fitted so the median lane is 2-5 turns (a new dealer rule `lane_turns`), the first candidate a probe wins within a cap growing from 80 turns on Monday to 110 on Sunday; made by `tools/daily.py` on the hourly worker, stored in `dailies` (readable up to today), fetched by `/api/daily` and `#daily`; first tries, streaks, a copied result line. *The idea in one paragraph.*
 - other-games.md · Star tiers on every map from the bot column or probe wins. *Star tiers on every map.*
 - other-games.md · A rating against the bot ladder, with monthly seasons, computed offline. *A rating against the bot ladder.*
 - other-games.md · Racing the record holder's ghost: their systems-held curve beside yours. *Racing the record holder's ghost.*

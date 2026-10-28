@@ -14,8 +14,9 @@ author's ranges with a seed derived from the date. Its board grows through the
 week, Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and 2-6
 players. Its ship speed is chosen for the map dealt, so the median lane takes
 2 to 5 turns. Opponent strength stays flat through the week. A dealt map is kept
-only once a probe bot has won it from the human's seat within 80 turns. The hourly worker makes it and
-stores it in a `dailies` table. The game fetches it and opens it as a setup, as
+only once a probe bot has won it from the human's seat within a turn cap that
+grows with the board, 80 on Monday to 110 on Sunday. The hourly worker makes it
+and stores it in a `dailies` table. The game fetches it and opens it as a setup, as
 a challenge link opens. Its seed is pinned, so scores post to the board as
 themselves, crowns and verification apply unchanged, and the board's daily page
 is a view over scores it already has.
@@ -126,41 +127,49 @@ has shown winnable is the wrong bet. Each dealt candidate is played by the
 generated-gauntlet probes (`gauntletgen.PROBES`, through `gauntletgen.play`)
 from the human's seat:
 
-- **The first candidate a probe wins within 80 turns is the day's map.** The
-  cap (the author's, 2026-10-27) keeps a daily to a sitting; see "The 80-turn
-  cap" for what it costs at the weekend. It is not the easiest
+- **The first candidate a probe wins within the day's turn cap is the day's
+  map.** The cap keeps a daily to a sitting (see "The turn cap"). It is not the
+  easiest
   of several, which is what `gauntletgen.pick` would choose with one stage.
   Taking the first win keeps the day random among winnable maps.
-- **A candidate with no probe win within 80 turns** is dropped, as is one where
+- **A candidate with no probe win within the cap** is dropped, as is one where
   a probe game ran out of turns. The next candidate is dealt from the same day's
   rng.
-- **The cap is 24 candidates.** After that the day is left empty and the job
-  fails loudly. On Sunday about one candidate in four survives (below), so
-  eight would leave about one Sunday in eight empty (0.775^8). Twenty-four
-  leaves about one in 450, at about 8 probe-seconds a candidate, a few
-  minutes at worst.
+- **At most 24 candidates a day.** After that the day is left empty and the job
+  fails loudly. Under the growing cap about half of candidates survive on
+  every weekday (below), so a day needs two on average, and 24 straight misses
+  is under one day in a million even on the worst day (Thursday, 18 of 40). At about 8 probe-seconds
+  a Sunday candidate, the limit costs nothing until it is needed.
 
-### The 80-turn cap
+### The turn cap
 
-The author's guess was that 80 turns would cover games up to 30 systems at 6
-ly/turn. Measured on 2026-10-27, it does not at the weekend. Forty candidates
-were dealt per weekday under this file's rules, speed fitted, opponents at a
-random depth, and all five probes played on each with budgets lifted (1,400
-games):
+**The cap grows with the board** (the author, 2026-10-28): `80 + 5w` turns for
+weekday `w`.
 
-| Day | Won by a probe | Fastest probe win p50 / p90 / max | Over 80 | Kept under 80 |
+| Day | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Cap, turns | 80 | 85 | 90 | 95 | 100 | 105 | 110 |
+
+The author first proposed 80 turns every day, guessing it would cover games up
+to 30 systems at 6 ly/turn. Measured on 2026-10-27, it does not at the weekend.
+Forty candidates were dealt per weekday under this file's rules, with speed
+fitted, opponents at a random depth, and all five probes played on each with
+budgets lifted (1,400 games; the growing cap is counted from the same games):
+
+| Day | Won by a probe | Fastest probe win p50 / p90 / max | Kept under a flat 80 | Kept under the growing cap |
 | --- | --- | --- | --- | --- |
-| Mon | 25 / 40 | 50 / 83 / 97 | 3 | 22 / 40 |
-| Tue | 32 / 40 | 59 / 136 / 217 | 9 | 23 / 40 |
-| Wed | 26 / 40 | 72 / 120 / 205 | 11 | 15 / 40 |
-| Thu | 26 / 40 | 75 / 210 / 228 | 11 | 15 / 40 |
-| Fri | 26 / 40 | 82 / 153 / 197 | 13 | 13 / 40 |
-| Sat | 26 / 40 | 78 / 147 / 166 | 12 | 14 / 40 |
-| Sun | 27 / 40 | 95 / 205 / 349 | 18 | 9 / 40 |
+| Mon | 25 / 40 | 50 / 83 / 97 | 22 / 40 | 22 / 40 (80) |
+| Tue | 32 / 40 | 59 / 136 / 217 | 23 / 40 | 23 / 40 (85) |
+| Wed | 26 / 40 | 72 / 120 / 205 | 15 / 40 | 19 / 40 (90) |
+| Thu | 26 / 40 | 75 / 210 / 228 | 15 / 40 | 18 / 40 (95) |
+| Fri | 26 / 40 | 82 / 153 / 197 | 13 / 40 | 19 / 40 (100) |
+| Sat | 26 / 40 | 78 / 147 / 166 | 14 / 40 | 20 / 40 (105) |
+| Sun | 27 / 40 | 95 / 205 / 349 | 9 / 40 | 20 / 40 (110) |
 
-- **Slow weekend boards mostly fail the cap.** On Saturday and Sunday at 6-8
+- **A flat 80 lost most slow weekend boards.** On Saturday and Sunday at 6-8
   ly/turn the fastest probe win had a median of 100 turns, and 15 of 19 were
-  over 80. At 10.5-12 ly/turn it was 71 turns, 8 of 21 over 80.
+  over 80. The growing cap keeps 11 of those 19, 10 of 13 at 8.5-10 ly/turn
+  and 19 of 21 at 10.5-12.
 - **Posted games agree.** On the board's posted maps of 19-24 systems (none of
   25-30 is posted yet), people's best win had a median of 77 turns, and 6 of 16
   were over 80; the two at 6 ly/turn took 93 and 121. On 13-18 systems the
@@ -168,13 +177,11 @@ games):
   and the fastest bot win run close on the same sizes (medians 33 and 39 on
   7-12 systems, 77 and 78 on 19-24), so the probes are a fair stand-in for a
   good player's pace.
-- **What the cap does to the weekend.** It keeps the maps that play fast, so
-  Saturday and Sunday lean a little toward fewer players (mean 4.1 to 3.6
-  among probe-won maps) and faster ships (9.0 to 9.7 ly/turn). The median lane
-  still stays in 2-5, since the speed is fitted first.
-- **The alternative is a cap that grows with the board**, for example 80 on
-  Monday rising to 110 on Sunday. That keeps the weekend's slow, crowded maps
-  at the price of longer games. It is left open below.
+- **What the cap still does to the weekend.** It keeps the maps that play
+  fastest, so Saturday and Sunday lean slightly toward fewer players (mean 4.1
+  to 3.8 among probe-won maps) and faster ships (9.0 to 9.4 ly/turn), less than
+  a flat 80 did (3.6 and 9.7). The median lane stays in 2-5, since the speed is
+  fitted first.
 
 ## Where it is made: the worker, not the game
 
@@ -304,8 +311,6 @@ create table if not exists public.dailies (
 
 ## Decisions left to the author
 
-- **The cap's shape**: 80 turns every day (as written), or a cap that grows with
-  the board ("The 80-turn cap").
 - **Wednesday's players**: 2-5 is assumed as the step between Tuesday's 2-4 and
   Thursday's 2-6.
 - **A `RULES_VERSION` bump**: remake an unplayed future day, or leave it.
