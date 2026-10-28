@@ -1,6 +1,6 @@
 # The daily challenge
 
-Proposed on 2026-10-27, built on 2026-10-28. A fresh map every UTC day, the same for everyone,
+Proposed on 2026-10-27, built and released on 2026-10-28. A fresh map every UTC day, the same for everyone,
 dealt at random from one spec and kept only if a roster bot showed it can be
 won. Browser games keep players with a daily (Wordle, the chess.com daily
 puzzle, Polytopia, Slay the Spire's Daily Climb); the weekly campaign is a
@@ -184,18 +184,21 @@ from the human's seat:
   the next is taken from the same day's rng.
 - **At most 32 candidates a day** (`MAX_CANDIDATES`; raised from 24 by the
   author, 2026-10-28). After that the day is left empty and the job fails
-  loudly. Sunday is the hardest day to fill: a quarter of its candidates
-  survive (10 of 40, below), so it needs four on average, and 32 straight
-  misses is about one Sunday in 10,000. Every other day is rarer still. At
-  about 9 probe-seconds a Sunday candidate, the limit costs nothing until it is
-  needed. A first dry run (2026-11-01, a Sunday) took five candidates.
+  loudly. Sunday is the hardest day to fill: about a fifth of its candidates
+  survive (17 of 80, re-measured below), so it needs five on average, and 32
+  straight misses is about one Sunday in 2,000. Monday comes next at about one
+  in 17,000, and every other day is rarer still. At about 6 probe-seconds a
+  Sunday candidate, the limit costs nothing until it is needed. Dealt seat by
+  seat, the dry run of 2026-11-01 (a Sunday) took five candidates. The run
+  before it, dealt at one depth, left that day empty (see "Why not one depth a
+  day").
 
 ### The turn cap
 
 **The cap grows with the board** (the author, 2026-10-28): `80 + 5w` turns for
-weekday `w`. It was measured on the first table's ranges (7-12 systems on
-Monday to 25-30 on Sunday, duels to Wednesday), below; it has not been
-re-measured on the narrower ranges.
+weekday `w`. It was set from measurements on the first table's ranges (7-12
+systems on Monday to 25-30 on Sunday, duels to Wednesday), below. It was then
+re-measured on the narrower ranges ("On the narrower ranges", below).
 
 | Day | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -241,6 +244,33 @@ the same games:
   5.0), since the players range is narrow there. The median lane stays in
   2-5, since the speed is fitted first.
 
+**On the narrower ranges** (2026-10-28, `results/daily/cap-remeasure/`). The
+shipped spec dealt 80 candidates per weekday, seat by seat, from a trial
+stream (`daily.candidates` with a `trial`, never a real day's). Every one of
+the five probes was played on each, with budgets lifted and a 400-turn limit
+(2,800 games, 172 of them reaching the limit):
+
+| Day | Players | Won by a probe | Fastest probe win p50 / p90 / max | Kept under a flat 80 | Kept under the growing cap |
+| --- | --- | --- | --- | --- | --- |
+| Mon | 3-4 | 45 / 80 | 81 / 143 / 381 | 21 / 80 | 21 / 80 (80) |
+| Tue | 3-4 | 43 / 80 | 75 / 169 / 303 | 25 / 80 | 28 / 80 (85) |
+| Wed | 3-5 | 40 / 80 | 78 / 160 / 324 | 21 / 80 | 24 / 80 (90) |
+| Thu | 3-5 | 41 / 80 | 83 / 179 / 390 | 20 / 80 | 27 / 80 (95) |
+| Fri | 3-6 | 40 / 80 | 90 / 192 / 342 | 16 / 80 | 26 / 80 (100) |
+| Sat | 4-6 | 33 / 80 | 91 / 142 / 321 | 13 / 80 | 22 / 80 (105) |
+| Sun | 5-6 | 32 / 80 | 106 / 202 / 354 | 10 / 80 | 17 / 80 (110) |
+
+- **The week is flatter than it was.** With no duels and at least three
+  players, Monday keeps 26% of its candidates against 55% on the first table.
+  Tuesday to Saturday keep 28-35%, and Sunday keeps 21%, close to its 25%
+  before.
+- **The growing cap still earns its place.** Against a flat 80 it keeps 3 to
+  10 more candidates of 80 from Tuesday to Sunday. A weekend board's fastest
+  probe win has a median of 91-106 turns, over 80 either way.
+- **What it costs.** About 1.4 probe-seconds a candidate on Monday, rising to
+  6 on Sunday, played as the worker plays them (weakest first, stopping at the
+  first win inside the cap). A day needs 3-5 candidates on average.
+
 ## Where it is made: the worker, not the game
 
 - **Everyone must play the same map.** Which candidate survives depends on how
@@ -256,7 +286,7 @@ the same games:
   them: seconds natively, untimed in WASM, and paid by every player every day
   if the game made it.
 
-**`tools/daily.py`**, a new job on `.github/workflows/bot-replay.yml` beside
+**`tools/daily.py`**, a job on `.github/workflows/bot-replay.yml` beside
 `campaign`, modelled on `tools/campaign.py`:
 
 - Runs hourly. It makes **today's and tomorrow's** rows if missing and does
@@ -330,7 +360,8 @@ create table if not exists public.dailies (
   past one). Either fetches the day (`main.open_daily`, polled like a gauntlet
   fetch, `main.land_daily`) and applies it to the menu as a setup, as a pasted
   challenge link does, stashing it as a shared link's setup is. The status line
-  reads "Daily · Wed 28 Oct: Random · 3 players · 15 systems · vs marshal". A
+  reads "Daily · Wed 28 Oct: Symmetric · 4 players · 16 systems · fog · vs
+  thinker, rusherplus". A
   best on it is `webstore.best` on its key, derived as every best is.
 - **Known by its key** (`daily.remember`, `WEB_DAILIES_KEY`, a fortnight of
   keys): `main.new_ui` stamps `Ui.daily_day` on a game whose setup is a
@@ -347,8 +378,8 @@ create table if not exists public.dailies (
   address bar:
 
   ```
-  Star Conquest daily · Mon 27 Oct · 9 systems
-  Won in 14 turns, 6 ships lost
+  Star Conquest daily · Wed 28 Oct · 16 systems
+  Won in 64 turns, 21 ships lost
   https://star-conquest.netlify.app/game/#daily
   ```
 
@@ -520,7 +551,7 @@ weakest first as the worker plays them:
 - **Storage**: `dailies` has `kind` (`board` or `puzzle`, `dailies_kind_shape`),
   primary key `(day, kind)`, and `daily_games` carries it. Rows from before
   the puzzle are `board`. The schema's migration drops and re-adds the key, so
-  paste `schema.sql` before deploying the worker or the site.
+  `schema.sql` went in before the worker and the site were deployed.
 - **The worker**: `tools/daily.py` makes both kinds each hour, from their own
   spec files (`tools/puzzle_spec.json`), the puzzle from its own stream
   (`daily:puzzle:<day>`, a trial's `daily:puzzle:try:<weekday>:<trial>`) and
@@ -534,7 +565,7 @@ weakest first as the worker plays them:
   puzzle and its opponent:
 
   ```
-  Star Conquest daily puzzle · Wed 28 Oct · 6 systems vs Marshal
+  Star Conquest daily puzzle · Wed 28 Oct · 6 systems vs Rusherplus
   Won in 11 turns, 3 ships lost
   https://star-conquest.netlify.app/game/#puzzle
   ```
