@@ -30,11 +30,6 @@ export function weekdayOf(day) {
   return (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7;
 }
 
-/** The day's system count range: Monday 7-12, three more each day. */
-export function systemsOn(weekday) {
-  return [7 + 3 * weekday, 12 + 3 * weekday];
-}
-
 /** "Wed 28 Oct": a day as the result line and the page name it. */
 export function shortDate(day) {
   const d = new Date(`${day}T00:00:00Z`);

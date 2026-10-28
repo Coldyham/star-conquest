@@ -245,6 +245,19 @@ the same games:
   run needs no credentials. It runs on the workflow's bare Python, as every
   worker does: the core and `models/` import nothing off PyPI.
 
+**Trying a weekday at home**: `tools/try_daily.py sat` deals a map from
+Saturday's spec as the worker would and opens it in the desktop game's menu
+(`--no-menu` starts it), so the author can feel a weekday and tune it. It reads
+`daily_spec.json` and `daily.py`'s `PLAYERS`, `systems` and `turn_cap` live, so
+a change shows on the next run. Each run deals from a fresh trial stream,
+`daily:try:<weekday>:<seed>`, never the day's own (`--seed` deals one again,
+on any week); a plain deal skips the probes, so it can be a map the worker
+would throw away, and `--probe` keeps dealing until a probe wins one inside
+the cap, recording under `results/daily/try/`. `--day` probes and opens a
+real day's daily, recording under the day's own file, which the worker then
+reuses; `--week` prints one map per weekday and opens none. The setup reaches
+the game as an empty game log, which `main.py --settings-from` already opens.
+
 **A week at once** is possible: on Monday, deal the week's seven maps in one run,
 as the campaign makes its week. It buys nothing over a day at a time, though,
 since the weekday ranges make the week rise without the gauntlet maker's
@@ -342,8 +355,10 @@ create table if not exists public.dailies (
   never stored, like crowns. Names are not authenticated, so a streak is as
   trustworthy as a crown. A day mended after it falls out of the 60-day window
   no longer extends a streak.
-- **The week**: Monday to Sunday with each day's system range, the days made
-  so far linked. **The archive**: a day navigator (`daily.html?day=`, never a
+- **The week** is a short note in the lede, that setups get bigger over the
+  week, Monday's smallest and Sunday's biggest (the author, 2026-10-28: a
+  full table of each day's range was more than a player needs). **The
+  archive**: a day navigator (`daily.html?day=`, never a
   day not yet started), whose Play opens `#daily=<day>`. A past day stays
   playable and scores normally, and winning it mends a streak.
 - **The bot column comes free.** Once anyone posts on a day's map, the hourly
@@ -373,6 +388,20 @@ UTC, as a live campaign node's are until its week ends (`campaign.md`,
   `SC_TEST_PG`): today's daily is embargoed to midnight, yesterday's is not,
   and its replays are public again.
 
+
+## Badges
+
+Three badges on the player card (`leaderboard/README.md`, "Badges"; the
+author, 2026-10-28), derived like the rest (`badges.mjs`'s `dailyRecord`):
+
+- **Daily done**: a counted win on any day's daily, whenever posted.
+- **Winner of the day**: the best score posted on a day (`bestOnTheDay`), once
+  that day has ended. Later scores never take it.
+- **Full week**: every day of one Monday-to-Sunday week won. A day won later
+  from the archive counts, as it mends a streak.
+
+A win autoplayed through (`hand` 0) counts for none, as on the standings. A
+board whose schema predates `daily_games` shows the three as unknown.
 ## Interactions
 
 - **No `Settings` field, no key moves.** A daily is an ordinary dealt setup

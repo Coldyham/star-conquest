@@ -6,7 +6,7 @@ import test from "node:test";
 
 import handler, { askedDay } from "../netlify/functions/daily.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, systemsOn, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -15,8 +15,6 @@ test("days are UTC dates, Monday first", () => {
   assert.equal(weekdayOf("2026-11-01"), 6);
   assert.equal(addDays("2026-10-31", 1), "2026-11-01");
   assert.equal(addDays("2026-03-01", -1), "2026-02-28");
-  assert.deepEqual(systemsOn(0), [7, 12]);
-  assert.deepEqual(systemsOn(6), [25, 30]);
   assert.equal(shortDate("2026-10-28"), "Wed 28 Oct");
   assert.ok(validDay("2026-10-28"));
   for (const bad of ["2026-02-30", "2026-1-01", "today", "", null, "2026-10-28x"]) {

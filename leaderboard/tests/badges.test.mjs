@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BADGES, TUTORIAL_FINAL_KEYS, badgeList, botFamilies, campaignRecord, drawingsOpened, factsFrom, firsts,
+  BADGES, TUTORIAL_FINAL_KEYS, badgeList, botFamilies, campaignRecord, dailyRecord, drawingsOpened, factsFrom, firsts,
   gauntletsCleared, grouped, stealWeeksTopped,
 } from "../js/badges.mjs";
 import { LADDER_ORDER } from "../js/standings.mjs";
@@ -127,6 +127,40 @@ test("a win on any of the tutorial's last-stage keys is the Graduate badge", () 
   const win = (game_key) => ({ game_key, mode: "random", settings_json: {}, bots: [] });
   assert.ok(earned(factsFrom({ wins: [win(TUTORIAL_FINAL_KEYS.at(-1))] })).has("graduate"));
   assert.ok(!earned(factsFrom({ wins: [win("0000000000000000")] })).has("graduate"));
+});
+
+test("dailies: any win completes one, the best on the day wins it, seven in a week make a full week", () => {
+  // Mon 19 Oct to Sun 25 Oct, then Mon 26 Oct and today, Wed 28 Oct.
+  const days = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25",
+    "2026-10-26", "2026-10-28"];
+  const dailyGames = days.map((day) => ({ day, game_key: `k${day}` }));
+  const win = (user_id, day, turns, at, hand = turns) =>
+    ({ game_key: `k${day}`, user_id, user_name: `p${user_id}`, turns, lost: 0, hand, submitted_at: at });
+  const field = [
+    // Ann wins Mon to Sat on the day, and Sunday a day late, from the archive.
+    ...days.slice(0, 6).map((day) => win(1, day, 30, `${day}T12:00:00Z`)),
+    win(1, "2026-10-25", 30, "2026-10-26T09:00:00Z"),
+    // Bo beats her on the Monday, on the day; and on the Tuesday only later.
+    win(2, "2026-10-19", 25, "2026-10-19T20:00:00Z"),
+    win(2, "2026-10-20", 20, "2026-10-21T08:00:00Z"),
+    // Bo's Sunday was autoplayed through: it never counts.
+    win(2, "2026-10-25", 10, "2026-10-25T08:00:00Z", 0),
+    // Today's best can't be the day's winner until the day ends.
+    win(2, "2026-10-28", 10, "2026-10-28T08:00:00Z"),
+    // A map that isn't a daily.
+    { game_key: "other", user_id: 2, user_name: "p2", turns: 5, lost: 0, hand: 5, submitted_at: "2026-10-20T00:00:00Z" },
+  ];
+  const now = new Date("2026-10-28T12:00:00Z");
+  assert.deepEqual(dailyRecord(1, dailyGames, field, now), { days: 7, won: 5, weeks: 1 });
+  assert.deepEqual(dailyRecord(2, dailyGames, field, now), { days: 3, won: 1, weeks: 0 });
+  assert.deepEqual(dailyRecord(3, dailyGames, field, now), { days: 0, won: 0, weeks: 0 });
+
+  const state = (daily) => Object.fromEntries(badgeList(factsFrom({ daily })).map((b) => [b.id, b.earned]));
+  assert.deepEqual([state({ days: 7, won: 5, weeks: 1 })].map((s) => [s.daily, s["daily-winner"], s["full-week"]]),
+    [[true, true, true]]);
+  assert.deepEqual([state({ days: 3, won: 0, weeks: 0 })].map((s) => [s.daily, s["daily-winner"], s["full-week"]]),
+    [[true, false, false]]);
+  assert.deepEqual([state(null)].map((s) => [s.daily, s["daily-winner"], s["full-week"]]), [[null, null, null]]);
 });
 
 test("a count a function couldn't answer is unknown, never locked", () => {

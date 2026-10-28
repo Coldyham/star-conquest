@@ -1,4 +1,4 @@
-// daily.html: a day's daily challenge, its standings, the week, and streaks
+// daily.html: a day's daily challenge, its standings and streaks
 // (docs/design/daily.md). Everything is derived from `dailies`, `daily_games`,
 // `game_summary` and `counted_scores`; nothing is stored for it.
 //
@@ -9,7 +9,7 @@
 
 import { configured, inList, select } from "./api.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, systemsOn, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
 import { clear, el, leaderCredit, setupSummary, showError, userHref } from "./format.mjs";
@@ -21,7 +21,6 @@ const STREAK_DAYS = 60;
 
 const daysNav = document.getElementById("days");
 const todayBox = document.getElementById("today");
-const weekBox = document.getElementById("week");
 const standingsTitle = document.getElementById("standings-title");
 const standingsBox = document.getElementById("standings");
 const streaksBox = document.getElementById("streaks");
@@ -73,21 +72,6 @@ function drawToday(row, keys) {
       el("a", { class: "btn play", href: playHref(day), text: "▶ Play" }),
     ]),
   ]));
-}
-
-function drawWeek(made) {
-  const monday = addDays(day, -weekdayOf(day));
-  clear(weekBox).append(el("div", { class: "tally" }, WEEKDAYS.map((name, w) => {
-    const d = addDays(monday, w);
-    const [lo, hi] = systemsOn(w);
-    const label = `${name.slice(0, 3)} · ${lo}–${hi} systems`;
-    return el("div", { class: "tally-row" }, [
-      made.has(d) && d <= today
-        ? el("a", { class: "tally-name", href: dayHref(d), text: label })
-        : el("span", { class: "tally-name", text: label }),
-      el("span", { class: "tally-figs", text: d === day ? "◀" : "" }),
-    ]);
-  })));
 }
 
 /** Today, under embargo: who is ahead and by how many turns, from
@@ -160,14 +144,11 @@ async function load() {
   }
   try {
     const from = addDays(today, -STREAK_DAYS);
-    const monday = addDays(day, -weekdayOf(day));
-    const [rows, made, games] = await Promise.all([
+    const [rows, games] = await Promise.all([
       select(`dailies?select=day,settings&day=eq.${day}`),
-      select(`dailies?select=day&day=gte.${monday}&day=lte.${addDays(monday, 6)}`),
-      select(`daily_games?select=day,game_key&day=gte.${from < monday ? from : monday}`),
+      select(`daily_games?select=day,game_key&day=gte.${from < day ? from : day}`),
     ]);
     drawToday(rows[0], games.filter((g) => g.day === day).map((g) => g.game_key));
-    drawWeek(new Set(made.map((r) => r.day)));
 
     // Today's map is embargoed: its names only (for the streaks), and its
     // standing from game_summary's aggregate. Every past day's in full.

@@ -41,6 +41,7 @@ uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a bot's aux knob
 
 uv run python tools/daily.py --dry-run          # deal today's and tomorrow's daily, store nothing
+uv run python tools/try_daily.py sat            # play a fresh Saturday daily map (--probe, --seed, --week)
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column (needs SUPABASE_*)
 uv run python tools/verify_scores.py --dry-run  # check each posted score's log

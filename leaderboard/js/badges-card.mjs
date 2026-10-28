@@ -8,7 +8,7 @@
 
 import { eq, inList, select } from "./api.mjs";
 import {
-  badgeList, campaignRecord, drawingOf, drawingsOpened, factsFrom, firsts, gauntletsCleared, grouped,
+  badgeList, campaignRecord, dailyRecord, drawingOf, drawingsOpened, factsFrom, firsts, gauntletsCleared, grouped,
   stealWeeksTopped,
 } from "./badges.mjs";
 import { weekQueries } from "./campaign.mjs";
@@ -37,7 +37,8 @@ async function count(url) {
   }
 }
 
-const FIELD = "id,game_key,user_id,submitted_at";
+// user_name, turns, lost and hand only for the daily's best on the day.
+const FIELD = "id,game_key,user_id,user_name,turns,lost,hand,submitted_at";
 
 async function campaignWeeks(userId) {
   const rows = await select(`campaign_scores?select=week_start&user_id=eq.${userId}&limit=5000`);
@@ -83,7 +84,7 @@ export async function loadFacts(nameKey, now = new Date()) {
 
   const mine = await select(`counted_scores?select=${FIELD}&user_id=eq.${id}&limit=5000`);
   const keys = mine.map((score) => score.game_key);
-  const [setups, field, steals, weeks, listed, pbp, made] = await Promise.all([
+  const [setups, field, steals, weeks, listed, pbp, made, dailies] = await Promise.all([
     chunked(keys, (list) => `game_summary?select=game_key,mode,settings_json,bots&game_key=${list}`),
     chunked(keys, (list) => `counted_scores?select=${FIELD}&game_key=${list}&limit=10000`),
     stealWeeks(name, now),
@@ -93,6 +94,8 @@ export async function loadFacts(nameKey, now = new Date()) {
     select("gauntlets?select=gauntlet_id,stages:body->stages&listed=is.true&limit=1000").catch(() => null),
     count(`/api/pbp?action=record&name=${encodeURIComponent(name)}`),
     count(`/api/gauntlet?by=${encodeURIComponent(name)}`),
+    // Optional too: a board from before the daily leaves its badges unknown.
+    chunked(keys, (list) => `daily_games?select=day,game_key&game_key=${list}`).catch(() => null),
   ]);
 
   const byKey = new Map(setups.map((game) => [game.game_key, game]));
@@ -105,6 +108,7 @@ export async function loadFacts(nameKey, now = new Date()) {
     drawings: await drawings(id, wins),
     ...steals,
     campaign: campaignRecord(weeks, name, now),
+    daily: dailies ? dailyRecord(id, dailies, field, now) : null,
     gauntletsMade: made && Number.isInteger(made.made) ? made.made : null,
     gauntletsCleared: listed ? gauntletsCleared(listed, wins.map((win) => win.settings_json)) : null,
     pbp: pbp && Number.isInteger(pbp.played) ? pbp : null,

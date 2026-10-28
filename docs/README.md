@@ -113,6 +113,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `render_board.py` | Render the board's Jinja2 pages | leaderboard.md |
 | `campaign.py` | Generate this week's campaign map into `public.campaigns` | campaign.md |
 | `daily.py` | Deal and probe today's and tomorrow's daily challenge into `public.dailies` | daily.md |
+| `try_daily.py` | Deal a weekday's daily map (or a real day's) and open it in the desktop game, to feel and tune the spec | daily.md |
 | `check_pbp.py` | Play a whole play-by-post match against a real endpoint | pbp.md |
 | `gen_starnames.py` | Regenerate `starnames.py`/`starlore.py` | core.md |
 | `dump_challenge_fixtures.py` | Real challenge tokens as fixtures for the board's JS decoder | core.md |

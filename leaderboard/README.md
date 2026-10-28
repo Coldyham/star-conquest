@@ -23,7 +23,7 @@ root `netlify.toml` bundles
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
-| [`daily.html?day=…`](daily.html) | the daily challenge: one map a day for everyone, with Play (`/game/#daily`), the day's standings, the week, and streaks — see below |
+| [`daily.html?day=…`](daily.html) | the daily challenge: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
@@ -781,7 +781,7 @@ generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 One map a day, the same for everyone, new at 00:00 UTC
 ([`docs/design/daily.md`](../docs/design/daily.md)). The board grows through
 the week (Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and
-5-6 players), the median lane takes 2-5 turns, and every day's map was won by a
+5-6 players; the page says only that setups get bigger), the median lane takes 2-5 turns, and every day's map was won by a
 test bot within a turn cap that grows from 80 to 110.
 
 - **Made by the worker, a day ahead** (`tools/daily.py` on the hourly job, into
@@ -797,7 +797,7 @@ test bot within a turn cap that grows from 80 to 110.
   at reveal*, and the daily page *Best on the day*; later scores rank too, marked
   *later*.
 - **The page derives the rest**: the day's standings (each player's best
-  counted win), the week, and streaks from `counted_scores` through
+  counted win) and streaks from `counted_scores` through
   `daily_games` (seed plus the setup compared as jsonb, as `campaign_games`
   does). A streak is mended by winning a missed day later; the true streak, days
   won on the day itself, is the figure's title (hover or tap). Past days stay
@@ -817,6 +817,7 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 | Gauntlets | a win on the tutorial's last stage · a win on the last stage of a listed gauntlet · a gauntlet saved under this name |
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
 | Bots | a win with each `LADDER_ORDER` bot in a seat |
+| Daily | a daily won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
 | Play-by-post | a turn played in a match · a match won |
 
 **Derived, never stored**, like crowns and the campaign. Wins count only through

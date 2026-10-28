@@ -25,6 +25,9 @@ its row already there. Each probe game is appended to
     uv run python tools/daily.py --day 2026-11-02    # that day's
     uv run python tools/daily.py --dry-run           # make them, print them, store nothing
 
+To play what a weekday deals, and feel a change to the spec or the tables
+below, use ``tools/try_daily.py``.
+
 Pure of pygame, like the rest of the worker.
 """
 
@@ -84,17 +87,19 @@ def day_spec(day: dt.date, base: dict | None = None) -> dealer.Spec:
     return dealer.Spec.from_dict(data)
 
 
-def day_rng(day: dt.date) -> random.Random:
-    """The day's rng: every draw a day's dealing makes comes from it."""
-    return random.Random(f"daily:{day.isoformat()}")
+def day_rng(day: dt.date, trial: str = "") -> random.Random:
+    """The day's rng: every draw a day's dealing makes comes from it. A
+    ``trial`` (``tools/try_daily.py``) deals from a stream of its own and the
+    weekday's, never the day's, so it deals the same on any week's day."""
+    return random.Random(f"daily:try:{day.weekday()}:{trial}" if trial else f"daily:{day.isoformat()}")
 
 
-def candidates(day: dt.date, spec: dealer.Spec | None = None, limit: int = MAX_CANDIDATES):
+def candidates(day: dt.date, spec: dealer.Spec | None = None, limit: int = MAX_CANDIDATES, trial: str = ""):
     """``(depth, [settings, ...])``: the day's opponents' depth and its
-    candidates in the order they are tried. A pure function of the day and the
-    spec, so a rerun deals the same ones."""
+    candidates in the order they are tried. A pure function of the day, the
+    spec and the trial, so a rerun deals the same ones."""
     spec = spec if spec is not None else day_spec(day)
-    rng = day_rng(day)
+    rng = day_rng(day, trial)
     depth = round(rng.random(), 4)
     return depth, [dealer.deal(spec, rng, depth) for _ in range(limit)]
 
@@ -119,15 +124,16 @@ def winner(rows: list[dict], cap: int) -> dict | None:
 
 
 def make(day: dt.date, results: Path = RESULTS, limit: int = MAX_CANDIDATES,
-         probes=gauntletgen.PROBES, out=print) -> dict | None:
+         probes=gauntletgen.PROBES, out=print, trial: str = "") -> dict | None:
     """The day's row, or None when no candidate was won inside the cap. Probes
     play a candidate weakest first and stop at the first win; each game is
-    recorded as it finishes and reused on a rerun."""
+    recorded as it finishes and reused on a rerun. A ``trial`` deals from its
+    own stream and records under ``try/``, so it never touches the day's."""
     w = day.weekday()
     cap = turn_cap(w)
     spec = day_spec(day)
-    depth, cands = candidates(day, spec, limit)
-    path = results / f"{day.isoformat()}.jsonl"
+    depth, cands = candidates(day, spec, limit, trial)
+    path = results / (f"try/{day.strftime('%a').lower()}-{trial}.jsonl" if trial else f"{day.isoformat()}.jsonl")
     path.parent.mkdir(parents=True, exist_ok=True)
     done = {(r["candidate"], r["bot"]): r for r in _load(path)}
     ai.load_models()
