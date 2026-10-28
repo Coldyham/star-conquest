@@ -1,11 +1,14 @@
-# The daily challenge (proposed, not built)
+# The daily challenge
 
-Proposed on 2026-10-27. A fresh map every UTC day, the same for everyone,
+Proposed on 2026-10-27, built on 2026-10-28. A fresh map every UTC day, the same for everyone,
 dealt at random from one spec and kept only if a roster bot showed it can be
 won. Browser games keep players with a daily (Wordle, the chess.com daily
 puzzle, Polytopia, Slay the Spire's Daily Climb); the weekly campaign is a
-week's contest, not a habit. Nothing here is built; its line in
-[`open.md`](open.md) is under "Proposed, not built".
+week's contest, not a habit. Built: the dealer's `lane_turns` rule, the worker
+(`tools/daily.py`, `tools/daily_spec.json`), the `dailies` table and
+`daily_games` view, `/api/daily`, the game's side (`starconquest/daily.py`, the
+menu's Daily button, `#daily`) and `daily.html`. First tries are not built
+(see "On the board" and [`open.md`](open.md)).
 
 ## The idea in one paragraph
 
@@ -24,8 +27,9 @@ is a view over scores it already has.
 ## The spec
 
 The author's ranges, from the Advanced and Combat settings of a link made on
-the board's generate form (2026-10-27). They are kept in the repository
-(proposed: `tools/daily_spec.json`) and read by `dealer.Spec.from_dict`. The
+the board's generate form (2026-10-27). They are kept in
+`tools/daily_spec.json` and read by `dealer.Spec.from_dict`, with
+`ship_speed_growth_pct` fixed at 0 so the median lane holds all game. The
 link's gauntlet options are not used: its two stages, its targets, the
 `fastest`/`slack` pair and its seed. A daily is one map with no target.
 
@@ -105,9 +109,15 @@ measure the map it just dealt and choose a speed that fits:
   none does, the attempt is redealt, like a setup that `setup_warnings`
   rejects. `ship_speed_growth_pct` stays 0, so the median holds all game.
 - **The same rule serves the gauntlet maker.** `lane_turns` is a dealer name like
-  `systems`. The board's form can offer it later (a pair of pins on
-  "Average lane, turns"), and `dealer.problems` should name a range that no
-  allowed speed can reach.
+  `systems`, read from any spec. The board's form does not offer it yet (a pair
+  of pins on "Average lane, turns" would). Whether a range can be reached
+  depends on the map, so `dealer.problems` cannot name one that never is;
+  `deal` raises, as for any spec that cannot deal
+  (`test_a_lane_turns_no_speed_can_reach_never_deals`).
+- **It is drawn after everything else**, from the same rng, so a spec without it
+  deals exactly as before and one with it changes only the speed
+  (`test_lane_turns_is_drawn_after_everything_else`).
+
 Measured on 2026-10-27, dealing 150 maps a day from the spec above (with the
 day's players) with the speed rule off:
 
@@ -139,18 +149,19 @@ from the human's seat:
 
 - **The first candidate a probe wins within the day's turn cap is the day's
   map.** The cap keeps a daily to a sitting (see "The turn cap"). It is not the
-  easiest
-  of several, which is what `gauntletgen.pick` would choose with one stage.
-  Taking the first win keeps the day random among winnable maps.
-- **A candidate with no probe win within the cap** is dropped, as is one where
-  a probe game ran out of turns. The next candidate is dealt from the same day's
-  rng.
-- **At most 24 candidates a day.** After that the day is left empty and the job
-  fails loudly. Sunday is the hardest day to fill: a quarter of its candidates
-  survive (10 of 40, below), so it needs four on average, and 24 straight
-  misses is about one Sunday in 1,000, once in about 19 years. Every other day
-  is rarer still (Saturday one in 2,200, Thursday one in 5,200). At about 9
-  probe-seconds a Sunday candidate, the limit costs nothing until it is needed.
+  easiest of several, which is what `gauntletgen.pick` would choose with one
+  stage. Taking the first win keeps the day random among winnable maps.
+- **Probes play weakest first and stop at the first win**, and each probe game
+  stops at the cap (`gauntletgen.play_one`'s `max_turns`), since a win after it
+  does not count. A candidate with no probe win inside the cap is dropped and
+  the next is taken from the same day's rng.
+- **At most 32 candidates a day** (`MAX_CANDIDATES`; raised from 24 by the
+  author, 2026-10-28). After that the day is left empty and the job fails
+  loudly. Sunday is the hardest day to fill: a quarter of its candidates
+  survive (10 of 40, below), so it needs four on average, and 32 straight
+  misses is about one Sunday in 10,000. Every other day is rarer still. At
+  about 9 probe-seconds a Sunday candidate, the limit costs nothing until it is
+  needed. A first dry run (2026-11-01, a Sunday) took five candidates.
 
 ### The turn cap
 
@@ -212,7 +223,7 @@ the same games:
   lifts budgets (`gauntlet.md`, "In the game"), so a probe game against
   actuary can come out differently on a phone and a desktop. The worker lifts
   them (`ai.set_budget_scale`), as `tools/gauntlet_gen.py` does.
-- **Cost.** Up to 24 candidates times five probes, some with evolved or actuary in
+- **Cost.** Up to 32 candidates times five probes, some with evolved or actuary in
   them: seconds natively, untimed in WASM, and paid by every player every day
   if the game made it.
 
@@ -223,15 +234,16 @@ the same games:
   nothing once both exist, so the day rolls over at 00:00 UTC with the row
   already there and a missed hour never skips a day.
 - **The day's rng is derived from the date**: `random.Random(f"daily:{day}")`.
-  It deals the candidates and draws the depth. Each map's game seed still
-  comes from `settings.roll_seed` on that rng, as the dealer always rolls one,
-  so no new stream reaches the engine. Record it beside the other derived
-  streams in `rules.md` when built.
+  It draws the depth once, then deals the candidates. Each map's game seed
+  still comes from `settings.roll_seed` on that rng, as the dealer always rolls
+  one, so no new stream reaches the engine (`rules.md`, "The leaderboard").
 - **It records as it goes** (`CLAUDE.md`): each probe game is appended to
   `results/daily/<day>.jsonl` and a rerun resumes from it. That only helps a
   local run, since an Actions runner's `results/` dies with the job, but the
   job is short and a lost run is simply remade next hour.
-- `--day YYYY-MM-DD` and `--dry-run`, as `campaign.py` takes `--week`.
+- `--day YYYY-MM-DD` and `--dry-run`, as `campaign.py` takes `--week`. A dry
+  run needs no credentials. It runs on the workflow's bare Python, as every
+  worker does: the core and `models/` import nothing off PyPI.
 
 **A week at once** is possible: on Monday, deal the week's seven maps in one run,
 as the campaign makes its week. It buys nothing over a day at a time, though,
@@ -263,23 +275,32 @@ create table if not exists public.dailies (
 
 ## In the game
 
-- **`GET /api/daily[?day=YYYY-MM-DD]`** returns `{day, now, token}`, where
-  `token` is the setup as a settings token. It is read-only and uses the
+- **`GET /api/daily[?day=YYYY-MM-DD]`** returns `{day, now, settings,
+  rules_version}`; the game reads `settings` with `Settings.from_dict`, so no
+  token is minted in JavaScript. It is read-only and uses the
   publishable key with no secret, as `campaign.mjs` does. It is a function only
   because the game has no PostgREST client. A 404 means no daily that day,
   and the game shows nothing.
 - **A Daily entry on the menu** (web, or wherever `paths.LEADERBOARD_ORIGIN` is
   set; blank disables it) and a **`#daily` launch link** (`#daily=<day>` for a
-  past one). Either fetches the token and applies it to the menu as a setup,
-  as a pasted challenge link does, labelled "Daily · Monday 27 Oct". A best on
-  it is `webstore.best` on its key, derived as every best is.
+  past one). Either fetches the day (`main.open_daily`, polled like a gauntlet
+  fetch, `main.land_daily`) and applies it to the menu as a setup, as a pasted
+  challenge link does, stashing it as a shared link's setup is. The status line
+  reads "Daily · Wed 28 Oct: Random · 3 players · 15 systems · vs marshal". A
+  best on it is `webstore.best` on its key, derived as every best is.
+- **Known by its key** (`daily.remember`, `WEB_DAILIES_KEY`, a fortnight of
+  keys): `main.new_ui` stamps `Ui.daily_day` on a game whose setup is a
+  remembered daily.
 - **A fetch is not a send.** The game sends only on *Post to leaderboard* or
   *Share replays*; the daily is a GET of public rows, as the campaign lookup is.
-- **Ironman on the daily.** Proposed: a daily plays ironman whatever the local
+- **Ironman on the daily.** A daily plays ironman whatever the local
   preference (`webstore.ironman`), so History stays hidden until the game is
   decided. It is a courtesy, not a check: like every local best, it is trusted.
-- **Copy result** on the win overlay puts a spoiler-free line on the clipboard
-  (`webstore.copy_link`'s path, never the address bar):
+- **Copy daily result** takes *Challenge a friend*'s place on a daily's win
+  overlay (same button, same C key), since everyone already has the map. It
+  puts a spoiler-free line on the clipboard (`main.copy_daily_result`,
+  `daily.result_line`; the console when the clipboard refuses), never the
+  address bar:
 
   ```
   Star Conquest daily · Mon 27 Oct · 9 systems
@@ -294,22 +315,26 @@ create table if not exists public.dailies (
 
 `daily.html` (joins `render_board.PAGES`), on `base.html` like every page:
 
-- **Today**: the setup in a line (`dealer.describe`), a Play link and the
-  standings from `counted_scores`, so verification, the 24-hour grace and the
+- **Today**: the setup in a line, the opponents, a Play link (`../game/#daily`)
+  and a link to its map page once somebody has posted, then the standings from
+  `counted_scores` (`js/daily.mjs`'s `standings`: each name's best win with a
+  turn played by hand), so verification, the 24-hour grace and the
   first-post-of-a-match rule apply unchanged.
-- **First tries.** People will replay, and posting is opt-in, so the board
-  cannot know a first attempt. Proposed: the game counts local attempts at the
+- **First tries (not built).** People will replay, and posting is opt-in, so
+  the board cannot know a first attempt. Proposed: the game counts local attempts at the
   day's key and stamps the count on the score as per-score metadata
   (`Challenge`, with its column joining the grant if it gets one), and the
   board marks "first try" wins. It is trusted, as local bests are, and ranking
   stays by the best score, so cheating earns no more than it does on any map.
 - **Streaks**: consecutive UTC days on which a name has a counted win on the
-  day's map, posted within that day. Derived from `scores` and `dailies`, never
-  stored, like crowns. Names are not authenticated, so a streak is as
+  day's map, posted within that day, ending today or yesterday (a streak not yet
+  extended today is still alive). Derived from `counted_scores` through
+  `daily_games` over the last 60 days (`streaks`), never stored, like crowns. Names are not authenticated, so a streak is as
   trustworthy as a crown.
-- **The week** as one row, Monday to Sunday, with the system range of each day
-  so far. **The archive**: past days, each linking `#daily=<day>`. A past day
-  stays playable and scores normally; it only stops counting toward streaks.
+- **The week**: Monday to Sunday with each day's system range, the days made
+  so far linked. **The archive**: a day navigator (`daily.html?day=`, never a
+  day not yet started), whose Play opens `#daily=<day>`. A past day stays
+  playable and scores normally; it only stops counting toward streaks.
 - **The bot column comes free.** Once anyone posts on a day's map, the hourly
   `bot_replay` gives it a bot column, so "the best bot did 31 turns" shows
   there too.

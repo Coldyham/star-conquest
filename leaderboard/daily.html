@@ -1,0 +1,31 @@
+{% extends "templates/base.html" %}
+{% set title = "Daily" %}
+{% set description = "One map a day, the same for everyone: the day's standings and streaks." %}
+{% set script = "js/daily-page.mjs" %}
+
+{% block main %}
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Daily challenge</h1>
+  <p class="lede">
+    One map a day, the same for everyone, new at midnight UTC. The board grows
+    through the week, from 7&ndash;12 systems on Monday to 25&ndash;30 on Sunday,
+    and every map has been won by a test bot. Win it and post your score; a
+    streak is a run of days you won on the day itself.
+  </p>
+
+  <nav class="weeks" id="days"></nav>
+  <div id="today" class="loading">Loading…</div>
+
+  <h2 class="section-title">This week</h2>
+  <div id="week" class="daily-week"></div>
+
+  <h2 class="section-title" id="standings-title">Standings</h2>
+  <div id="standings"></div>
+
+  <h2 class="section-title">Streaks</h2>
+  <div id="streaks"></div>
+{% endblock %}
+
+{% block footer %}Player 1 &nbsp;·&nbsp;
+  <a href="index.html">All maps</a> &nbsp;·&nbsp;
+  <a href="crowns.html">Crowns</a>{% endblock %}

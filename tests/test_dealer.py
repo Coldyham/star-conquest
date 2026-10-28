@@ -8,7 +8,7 @@ from dataclasses import fields
 
 import pytest
 
-from starconquest import ai, config, dealer, gauntlet, mapgen
+from starconquest import ai, config, dealer, gauntlet, mapgen, settings
 from starconquest.settings import Settings, build_state
 
 SPEC = {"stages": 6,
@@ -152,3 +152,34 @@ def test_a_dealt_stage_is_an_ordinary_setup_the_gauntlet_reads():
     assert gauntlet.stage_key(g.stages[0]) == s.challenge_key()
     build_state(gauntlet.stage_settings(g.stages[0]), s.seed)
     assert dealer.describe(s).startswith("Symmetric · ")
+
+
+LANES = {"stages": 1, "rules": {"systems": {"range": [10, 30]}, "ship_speed_growth_pct": {"fix": 0},
+                                "ship_ly_per_turn": {"range": [6, 12]}, "lane_turns": {"range": [2, 5]}}}
+
+
+def test_lane_turns_fits_the_speed_to_the_dealt_map():
+    """The median lane of the map actually dealt lands in range, at a speed the
+    speed rule allows (`docs/design/daily.md`, "Ship speed follows the map")."""
+    spec = dealer.Spec.from_dict(LANES)
+    assert spec.rules["lane_turns"] == dealer.Rule("range", (2, 5))
+    for s in _deals(spec, 12):
+        median = settings.lane_turns(settings.lane_lengths(s), s.ship_ly_per_turn)[1]
+        assert 2 <= median <= 5 and 6 <= s.ship_ly_per_turn <= 12
+        assert s.ship_ly_per_turn * 2 == int(s.ship_ly_per_turn * 2)
+
+
+def test_lane_turns_is_drawn_after_everything_else():
+    """It only changes the speed: the setup is otherwise the one the spec
+    without it deals from the same rng."""
+    without = dict(LANES, rules={k: v for k, v in LANES["rules"].items() if k != "lane_turns"})
+    a = dealer.deal(dealer.Spec.from_dict(LANES), random.Random(11))
+    b = dealer.deal(dealer.Spec.from_dict(without), random.Random(11))
+    b.ship_ly_per_turn = a.ship_ly_per_turn
+    assert a.challenge_key() == b.challenge_key()
+
+
+def test_a_lane_turns_no_speed_can_reach_never_deals():
+    spec = dealer.Spec.from_dict({"rules": {"ship_ly_per_turn": {"fix": 30}, "lane_turns": {"fix": 20}}})
+    with pytest.raises(ValueError):
+        dealer.deal(spec, random.Random(1))

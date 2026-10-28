@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, campaign, combat, config, gauntlet, mapgen, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, gauntlet, mapgen, paths, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -1781,6 +1781,10 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     ms.rects["seed_random"] = dice
 
 
+# The footer's daily challenge button (`main.open_daily`).
+_DAILY_LABEL = "Daily"
+
+
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     """Footer row. Desktop (and Android): '[ name ] [Save] [Load]', a file under
     ``_SAVE_DIR``. Web: '[Get Link] [Shared matches] [Recently played]' — the web build's data
@@ -1804,6 +1808,15 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
                 fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
     else:
         ms.rects.pop("tutorial", None)
+    # ...and the daily challenge outside its right end, wherever there is a
+    # board to fetch it from. The constant, not a resolved URL: resolving one
+    # costs a DOM read every frame (see `paths`).
+    if paths.LEADERBOARD_ORIGIN:
+        dw = f["normal"].size(_DAILY_LABEL)[0] + 36
+        _button(surface, ms, "daily", pygame.Rect(rx + 14, y, dw, _CH), _DAILY_LABEL,
+                fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
+    else:
+        ms.rects.pop("daily", None)
 
     if is_web():
         for key in ("filename_field", "save_settings", "load_settings"):
@@ -2449,6 +2462,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "tutorial":
         _open_tutorial(ms, settings)
+    elif hit == "daily":
+        return "daily"
     elif hit == "create_map":
         return _open_creator(ms, settings)
     elif hit == "clear_map":

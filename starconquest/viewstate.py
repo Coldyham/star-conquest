@@ -420,6 +420,10 @@ class Ui:
     # starts so neither render nor input reads the store once a frame. It only
     # takes History away while the game is undecided — see `can_review`.
     ironman: bool = False
+    # The day this match's setup is the daily challenge of ("2026-10-28"), or
+    # blank. Stamped by `main.new_ui` from `daily.day_of`: a daily plays
+    # ironman, and its win overlay copies a result line, not a challenge link.
+    daily_day: str = ""
     # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
     # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown

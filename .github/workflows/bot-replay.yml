@@ -1,14 +1,15 @@
-# The leaderboard's whole backend, as four independent jobs:
+# The leaderboard's whole backend, as five independent jobs:
 #   bot-scores   fill in the "how would each bot have done?" column (tools/bot_replay.py)
 #   verify       check each posted score against the replay uploaded with it
 #   playstyle    read each posted replay for the player page's Playstyle panel
 #   campaign     make this week's campaign map, if it hasn't been made yet
+#   daily        make today's and tomorrow's daily challenge, if not made yet
 #
 # Every answer is a pure function of what is stored and the code, so each only
 # ever needs computing once and there is nothing to serve live: a scheduled
 # workflow that writes into Supabase leaves no service to keep up.
 #
-# The hourly schedule runs all four. *Run workflow* runs only the ones ticked,
+# The hourly schedule runs all five. *Run workflow* runs only the ones ticked,
 # with each job's own options below them. The jobs share nothing but the secrets
 # check, so a long bot replay never holds up the cheap three, and one failing
 # never stops the others.
@@ -77,6 +78,14 @@ on:
         default: true
       campaign_week:
         description: "Campaign: make this week's map, by its Monday YYYY-MM-DD (blank = this week)"
+        required: false
+        default: ""
+      daily:
+        description: "Daily challenge"
+        type: boolean
+        default: true
+      daily_day:
+        description: "Daily: make only this day, YYYY-MM-DD (blank = today and tomorrow)"
         required: false
         default: ""
 
@@ -226,3 +235,33 @@ jobs:
             args+=(--week "$WEEK")
           fi
           python tools/campaign.py "${args[@]}"
+
+  # The same shape as the campaign: the first run after midnight UTC finds
+  # tomorrow's row already made, so the day never starts without one. Making a
+  # day plays a few probe games per candidate, seconds to a few minutes.
+  daily:
+    needs: check
+    if: needs.check.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.daily)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: leaderboard-daily
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Daily challenge
+        env:
+          DAY: ${{ inputs.daily_day }}
+        run: |
+          args=()
+          if [ -n "$DAY" ]; then
+            if ! [[ "$DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "daily_day must be YYYY-MM-DD, got: $DAY" >&2
+              exit 1
+            fi
+            args+=(--day "$DAY")
+          fi
+          python tools/daily.py "${args[@]}"

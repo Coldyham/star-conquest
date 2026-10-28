@@ -23,6 +23,7 @@ root `netlify.toml` bundles
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
+| [`daily.html?day=…`](daily.html) | the daily challenge: one map a day for everyone, with Play (`/game/#daily`), the day's standings, the week, and streaks — see below |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
@@ -574,7 +575,7 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
    deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp`,
-   `/api/campaign` and `/api/gauntlet` on its own origin
+   `/api/campaign`, `/api/gauntlet` and `/api/daily` on its own origin
    (`paths.LEADERBOARD_*_PATH`). `campaign.mjs` needs no key: it reads the same
    public campaign rows campaign.html does, with the publishable key, and runs
    `js/campaign.mjs` on them. `gauntlet.mjs` is the only writer of the
@@ -774,6 +775,27 @@ agree). It is also what puts a campaign badge on a map's page and its index
 row, linking back to that node on the campaign page. Tests: `tests/test_campaign.py` for the
 generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 `tests/test_crowns_sql.py` for the view.
+
+## Daily
+
+One map a day, the same for everyone, new at 00:00 UTC
+([`docs/design/daily.md`](../docs/design/daily.md)). The board grows through
+the week (Monday 7-12 systems and 2-3 players up to Sunday 25-30 systems and
+5-6 players), the median lane takes 2-5 turns, and every day's map was won by a
+test bot within a turn cap that grows from 80 to 110.
+
+- **Made by the worker, a day ahead** (`tools/daily.py` on the hourly job, into
+  `dailies`; the secret key is its only writer). The policy hides a day until it
+  starts, so tomorrow's map can't be practised.
+- **The game fetches it** (`/api/daily`, read-only with the publishable key):
+  the menu's Daily button or a `#daily` / `#daily=<day>` link puts the setup on
+  the menu. A daily plays ironman, and its win offers *Copy daily result*, a
+  spoiler-free line, where other maps offer *Challenge a friend*.
+- **The page derives the rest**: the day's standings (each player's best
+  counted win), the week, and streaks (consecutive days won on the day, posted
+  within it), from `counted_scores` through `daily_games` (seed plus the setup
+  compared as jsonb, as `campaign_games` does). Past days stay playable via
+  `daily.html?day=`. Tests: `tests/test_daily.py`, `tests/daily.test.mjs`.
 
 ## Badges
 

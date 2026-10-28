@@ -342,6 +342,23 @@ already resolve simultaneously. The rationale for each rule is in
   and only counts down the server times it is given (`starconquest/campaign.py`),
   never reimplementing a rule. Detail:
   `docs/design/campaign.md` and `leaderboard/README.md`.
+- **The daily challenge is made by the worker and stored, never made by the
+  game.** `tools/daily.py` (on the hourly job) deals one setup per UTC day from
+  `tools/daily_spec.json` with the weekday's systems and players
+  (`daily.systems`, `daily.PLAYERS`), its ship speed fitted by the dealer's
+  `lane_turns` rule, its opponents at one depth drawn for the day, all from
+  `random.Random(f"daily:{day}")`. It keeps the first candidate a generated-
+  gauntlet probe wins within the day's turn cap (`daily.turn_cap`, 80 to 110),
+  up to `MAX_CANDIDATES`, and stores it in `dailies` with the probe games that
+  cleared it; a day nobody won is left empty, never published. Today's and
+  tomorrow's rows are made, never remade: a row stores only a setup and a seed,
+  so a `RULES_VERSION` bump needs nothing from it. The public reads a day once
+  it starts (the policy on `dailies`); `/api/daily` answers the game
+  (`starconquest/daily.py`), which applies the setup to the menu as a link
+  does, remembers it by challenge key (`daily.remember`), plays it ironman and
+  copies a result line instead of a challenge link. `daily_games` matches a day
+  to its maps by jsonb equality; standings and streaks are derived from
+  `counted_scores` on `daily.html`. Detail: `docs/design/daily.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's

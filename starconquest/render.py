@@ -2733,7 +2733,8 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
     labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
     quit_label = _key_hint("Quit", "Esc")
-    share_label = _key_hint("Challenge a friend", "C")
+    # A daily's result goes out as a line, not a link: everyone has its map.
+    share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
     board_label = _key_hint("Enter on leaderboard", "L")
     share = ui.can_post(state)
     # The constant, not a resolved URL: a blank one disables the feature
