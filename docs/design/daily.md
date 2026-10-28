@@ -4,8 +4,8 @@ Proposed on 2026-10-27. A fresh map every UTC day, the same for everyone,
 dealt at random from one spec and kept only if a roster bot showed it can be
 won. Browser games keep players with a daily (Wordle, the chess.com daily
 puzzle, Polytopia, Slay the Spire's Daily Climb); the weekly campaign is a
-week's contest, not a habit. Nothing here is built. Open decisions are at the
-end and in [`open.md`](open.md).
+week's contest, not a habit. Nothing here is built; its line in
+[`open.md`](open.md) is under "Proposed, not built".
 
 ## The idea in one paragraph
 
@@ -56,8 +56,7 @@ link's gauntlet options are not used: its two stages, its targets, the
 The systems rule is `{"range": [7 + 3w, 12 + 3w]}` for weekday `w` (Monday 0,
 by the UTC date), and the players rule `{"range": [2, min(3 + w, 6)]}`. Both are
 added to the spec when that day is dealt. Neighbouring days overlap by three
-systems, so the week rises without steps. The author set Monday, Tuesday and
-Thursday to Sunday; Wednesday's 2-5 is the step between them.
+systems, so the week rises without steps.
 
 **Opponent strength stays flat** (the author, 2026-10-27): only the board
 rises. `dealer.deal` places every seat near one depth along the allowed bots,
@@ -301,16 +300,17 @@ create table if not exists public.dailies (
 - **No `Settings` field, no key moves.** A daily is an ordinary dealt setup
   (`dealer.py`'s first rule). `lane_turns` is a dealer rule, not a setting:
   what it decides is stored as an ordinary `ship_ly_per_turn`.
-- **`RULES_VERSION`**: a bump between making a day and playing it leaves that
-  day's map on old rules (its logs are declined as outdated, as any map's are).
-  The worker stamps `rules_version`. Since it makes only a day ahead, at most
-  two days are affected; see the open decision below.
+- **`RULES_VERSION`**: a bump needs nothing from the daily. A row stores only a
+  setup and a seed, so a game played after the bump runs under the new rules,
+  is stamped with them, and verifies as any game does. A game played before it
+  is outdated, as on any map. Only the probe check is stale: it was played under
+  the old rules. A combat or phase-order change leaves the map alone and moves
+  its pace a little. A change to map generation from a seed would deal a
+  different board from the same seed, which is still a legal setup but one no
+  probe has played. The worker stamps `rules_version` so the archive can say
+  which rules a day was checked under. A day is not remade: at most today's and
+  tomorrow's rows were checked under the old rules.
 - **The campaign**: none. The campaign picks seeds nobody has played, and a
   daily's seed simply becomes a played one.
 - **Play-by-post**: none. A daily is single-player.
 
-## Decisions left to the author
-
-- **Wednesday's players**: 2-5 is assumed as the step between Tuesday's 2-4 and
-  Thursday's 2-6.
-- **A `RULES_VERSION` bump**: remake an unplayed future day, or leave it.

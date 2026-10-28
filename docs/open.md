@@ -10,7 +10,6 @@ ships or is dropped, delete its line here (and add it to
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
-- daily.md · The daily: Wednesday's players assumed 2-5; remaking an unplayed day after a `RULES_VERSION` bump. *Decisions left to the author.*
 
 ## Proposed, not built
 - gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
