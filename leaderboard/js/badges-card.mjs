@@ -94,8 +94,9 @@ export async function loadFacts(nameKey, now = new Date()) {
     select("gauntlets?select=gauntlet_id,stages:body->stages&listed=is.true&limit=1000").catch(() => null),
     count(`/api/pbp?action=record&name=${encodeURIComponent(name)}`),
     count(`/api/gauntlet?by=${encodeURIComponent(name)}`),
-    // Optional too: a board from before the daily leaves its badges unknown.
-    chunked(keys, (list) => `daily_games?select=day,game_key&game_key=${list}`).catch(() => null),
+    // Optional too: a board from before the daily, or before its puzzle,
+    // leaves their badges unknown.
+    chunked(keys, (list) => `daily_games?select=day,game_key,kind&game_key=${list}`).catch(() => null),
   ]);
 
   const byKey = new Map(setups.map((game) => [game.game_key, game]));
@@ -108,7 +109,8 @@ export async function loadFacts(nameKey, now = new Date()) {
     drawings: await drawings(id, wins),
     ...steals,
     campaign: campaignRecord(weeks, name, now),
-    daily: dailies ? dailyRecord(id, dailies, field, now) : null,
+    daily: dailies ? dailyRecord(id, dailies.filter((game) => game.kind !== "puzzle"), field, now) : null,
+    puzzle: dailies ? dailyRecord(id, dailies.filter((game) => game.kind === "puzzle"), field, now) : null,
     gauntletsMade: made && Number.isInteger(made.made) ? made.made : null,
     gauntletsCleared: listed ? gauntletsCleared(listed, wins.map((win) => win.settings_json)) : null,
     pbp: pbp && Number.isInteger(pbp.played) ? pbp : null,

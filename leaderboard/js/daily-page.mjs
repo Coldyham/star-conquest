@@ -1,6 +1,8 @@
-// daily.html: a day's daily challenge, its standings and streaks
+// daily.html and puzzle.html: a day's daily challenge of one kind, the board
+// or the puzzle (`#today`'s data-kind), its standings and streaks
 // (docs/design/daily.md). Everything is derived from `dailies`, `daily_games`,
-// `game_summary` and `counted_scores`; nothing is stored for it.
+// `game_summary` and `counted_scores`; nothing is stored for it. Each kind
+// keeps its own streaks.
 //
 // Today's map is embargoed until midnight UTC (`game_embargoes`), so for today
 // this page shows what game.html's renderEmbargoed shows: who is ahead and by
@@ -9,7 +11,7 @@
 
 import { configured, inList, select } from "./api.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, opponents, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
 import { clear, el, leaderCredit, setupSummary, showError, userHref } from "./format.mjs";
@@ -25,13 +27,18 @@ const standingsTitle = document.getElementById("standings-title");
 const standingsBox = document.getElementById("standings");
 const streaksBox = document.getElementById("streaks");
 
+const kind = todayBox.dataset.kind === "puzzle" ? "puzzle" : "board";
+const page = kind === "puzzle" ? "puzzle.html" : "daily.html";
+const fragment = kind === "puzzle" ? "puzzle" : "daily";
+const noun = kind === "puzzle" ? "puzzle" : "daily";
+
 const today = dayParam(Date.now());
 const asked = new URLSearchParams(location.search).get("day");
 const day = validDay(asked) && asked < today ? asked : today;
 const isToday = day === today;
 
-const dayHref = (d) => (d === today ? "daily.html" : `daily.html?day=${d}`);
-const playHref = (d) => (d === today ? "../game/#daily" : `../game/#daily=${d}`);
+const dayHref = (d) => (d === today ? page : `${page}?day=${d}`);
+const playHref = (d) => (d === today ? `../game/#${fragment}` : `../game/#${fragment}=${d}`);
 
 function drawDays() {
   clear(daysNav).append(
@@ -50,20 +57,15 @@ function drawToday(row, keys) {
   todayBox.classList.remove("loading");
   if (!row) {
     clear(todayBox).append(el("p", { class: "empty", text: isToday
-      ? "Today's daily isn't ready yet. It is made on the hour; try again shortly."
-      : "There was no daily that day." }));
+      ? `Today's ${noun} isn't ready yet. It is made on the hour; try again shortly.`
+      : `There was no ${noun} that day.` }));
     return;
   }
-  const settings = row.settings;
-  const bots = [];
-  for (let seat = 2; seat <= (settings.players || 2); seat += 1) {
-    const name = (settings.ai_strategy || [])[seat - 1];
-    if (name && !bots.includes(name)) bots.push(name);
-  }
+  const bots = opponents(row.settings);
   clear(todayBox).append(el("div", { class: "card" }, [
     el("div", { class: "card-body" }, [
       el("div", { class: "card-main" }, [
-        el("strong", { text: `${WEEKDAYS[weekdayOf(day)]}'s map` }),
+        el("strong", { text: `${WEEKDAYS[weekdayOf(day)]}'s ${kind === "puzzle" ? "puzzle" : "map"}` }),
         el("div", { class: "card-meta", text: setupSummary(asGame(row)) + (bots.length ? ` · vs ${bots.join(", ")}` : "") }),
         keys.length
           ? el("div", { class: "card-meta" }, [el("a", { href: `game.html?key=${encodeURIComponent(keys[0])}`, text: "Map page" })])
@@ -145,8 +147,8 @@ async function load() {
   try {
     const from = addDays(today, -STREAK_DAYS);
     const [rows, games] = await Promise.all([
-      select(`dailies?select=day,settings&day=eq.${day}`),
-      select(`daily_games?select=day,game_key&day=gte.${from < day ? from : day}`),
+      select(`dailies?select=day,settings&day=eq.${day}&kind=eq.${kind}`),
+      select(`daily_games?select=day,game_key&kind=eq.${kind}&day=gte.${from < day ? from : day}`),
     ]);
     drawToday(rows[0], games.filter((g) => g.day === day).map((g) => g.game_key));
 

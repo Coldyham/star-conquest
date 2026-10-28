@@ -1781,8 +1781,10 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     ms.rects["seed_random"] = dice
 
 
-# The footer's daily challenge button (`main.open_daily`).
+# The footer's daily challenge buttons (`main.open_daily`): the board, and the
+# puzzle beside it.
 _DAILY_LABEL = "Daily"
+_PUZZLE_LABEL = "Puzzle"
 
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
@@ -1808,15 +1810,20 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
                 fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
     else:
         ms.rects.pop("tutorial", None)
-    # ...and the daily challenge outside its right end, wherever there is a
-    # board to fetch it from. The constant, not a resolved URL: resolving one
+    # ...and the daily challenges outside its right end, wherever there is a
+    # board to fetch them from. The constant, not a resolved URL: resolving one
     # costs a DOM read every frame (see `paths`).
     if paths.LEADERBOARD_ORIGIN:
         dw = f["normal"].size(_DAILY_LABEL)[0] + 36
-        _button(surface, ms, "daily", pygame.Rect(rx + 14, y, dw, _CH), _DAILY_LABEL,
+        daily_box = pygame.Rect(rx + 14, y, dw, _CH)
+        _button(surface, ms, "daily", daily_box, _DAILY_LABEL,
+                fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
+        pw = f["normal"].size(_PUZZLE_LABEL)[0] + 36
+        _button(surface, ms, "puzzle", pygame.Rect(daily_box.right + 8, y, pw, _CH), _PUZZLE_LABEL,
                 fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
     else:
         ms.rects.pop("daily", None)
+        ms.rects.pop("puzzle", None)
 
     if is_web():
         for key in ("filename_field", "save_settings", "load_settings"):
@@ -2462,8 +2469,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "tutorial":
         _open_tutorial(ms, settings)
-    elif hit == "daily":
-        return "daily"
+    elif hit in ("daily", "puzzle"):
+        return hit
     elif hit == "create_map":
         return _open_creator(ms, settings)
     elif hit == "clear_map":

@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import handler, { askedDay } from "../netlify/functions/daily.mjs";
+import handler, { askedDay, askedKind } from "../netlify/functions/daily.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, opponents, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -78,22 +78,36 @@ test("the function answers today's day unless asked for another", () => {
   assert.equal(askedDay(new URLSearchParams("day=nope"), now), null);
 });
 
+test("the function answers the board unless asked for the puzzle", () => {
+  assert.equal(askedKind(new URLSearchParams("")), "board");
+  assert.equal(askedKind(new URLSearchParams("kind=puzzle")), "puzzle");
+  assert.equal(askedKind(new URLSearchParams("kind=board")), "board");
+  assert.equal(askedKind(new URLSearchParams("kind=chess")), null);
+});
+
 test("the handler reads the day's row and says 404 for a missing day", async () => {
   const realFetch = globalThis.fetch;
   const asked = [];
   const settings = { mode: "random", players: 2, nodes: 10, seed: 41 };
   globalThis.fetch = async (url) => {
     asked.push(String(url));
+    const kind = String(url).includes("kind=eq.puzzle") ? "puzzle" : "board";
     const body = String(url).includes("day=eq.2026-10-01")
-      ? [{ day: "2026-10-01", settings, rules_version: 2 }] : [];
+      ? [{ day: "2026-10-01", kind, settings, rules_version: 2 }] : [];
     return new Response(JSON.stringify(body), { status: 200 });
   };
   try {
     const ok = await handler(new Request("https://x/api/daily?day=2026-10-01"));
     assert.equal(ok.status, 200);
     const body = await ok.json();
-    assert.deepEqual([body.day, body.settings, body.rules_version], ["2026-10-01", settings, 2]);
+    assert.deepEqual([body.day, body.kind, body.settings, body.rules_version], ["2026-10-01", "board", settings, 2]);
     assert.ok(asked[0].includes("/rest/v1/dailies?") && asked[0].includes("day=eq.2026-10-01"));
+    assert.ok(asked[0].includes("kind=eq.board"));
+
+    const puzzle = await handler(new Request("https://x/api/daily?day=2026-10-01&kind=puzzle"));
+    assert.equal((await puzzle.json()).kind, "puzzle");
+    assert.ok(asked.at(-1).includes("kind=eq.puzzle"));
+    assert.equal((await handler(new Request("https://x/api/daily?kind=chess"))).status, 400);
 
     assert.equal((await handler(new Request("https://x/api/daily?day=2026-10-02"))).status, 404);
     assert.equal((await handler(new Request("https://x/api/daily?day=bad"))).status, 400);
@@ -102,4 +116,14 @@ test("the handler reads the day's row and says 404 for a missing day", async () 
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("opponents name each bot once, at its stop, and the lean heuristic", () => {
+  const board = { players: 4, ai_strategy: ["heuristic", "thinker", "marshal", "thinker"],
+    ai: [{}, { aux: 0 }, {}, { aux: 0 }] };
+  assert.deepEqual(opponents(board), ["thinker · claudebot", "marshal"]);
+  const lean = { players: 2, ai_strategy: ["heuristic", "heuristic"],
+    ai: [{}, { reserve_fraction: 0, reserve_floor: 0, aux: 1 }] };
+  assert.deepEqual(opponents(lean), ["heuristic+lean"]);
+  assert.deepEqual(opponents({ players: 2, ai_strategy: ["heuristic", "actuary"] }), ["actuary"]);
 });

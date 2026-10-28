@@ -422,30 +422,41 @@ join public.games g
  and (g.settings_json - array['seed', 'autoplay']) = ((node -> 'settings') - array['seed', 'autoplay']);
 
 -- ---------------------------------------------------------------------------
--- dailies: the daily challenge (daily.html, docs/design/daily.md). One row per
--- UTC day, written once a day ahead by tools/daily.py. The public reads a day
--- only once it has started, so tomorrow's map cannot be practised; the
--- worker's secret key is the only writer and reads past the policy.
+-- dailies: the daily challenges (daily.html, docs/design/daily.md). One row per
+-- UTC day and kind, the board or the puzzle, written once a day ahead by
+-- tools/daily.py. The public reads a day only once it has started, so
+-- tomorrow's maps cannot be practised; the worker's secret key is the only
+-- writer and reads past the policy.
 --
 -- settings has the pruned shape of games.settings_json, written by Python, so
 -- match it by jsonb value as campaign nodes are. spec is what it was dealt
--- from (the day's systems, players, opponents' depth, candidate and turn cap);
--- probes the probe games that cleared it.
+-- from (the day's systems, players, opponents' depth or the puzzle's opponent,
+-- candidate and turn cap); probes the probe games that cleared it. A row from
+-- before the puzzle is a board.
 -- ---------------------------------------------------------------------------
 create table if not exists public.dailies (
-  day           date primary key,
+  day           date not null,
+  kind          text not null default 'board',
   settings      jsonb not null,
   spec          jsonb not null,
   probes        jsonb not null,
   rules_version integer not null,
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  constraint dailies_pkey primary key (day, kind)
 );
 
--- daily_games: each day's games row, once somebody has posted on it. Matched by
--- seed and jsonb equality, never sc_config_key (see dailies).
+alter table public.dailies add column if not exists kind text not null default 'board';
+alter table public.dailies drop constraint if exists dailies_kind_shape;
+alter table public.dailies add  constraint dailies_kind_shape check (kind in ('board', 'puzzle'));
+-- The key was the day alone before the puzzle.
+alter table public.dailies drop constraint if exists dailies_pkey;
+alter table public.dailies add  constraint dailies_pkey primary key (day, kind);
+
+-- daily_games: each day's games row of each kind, once somebody has posted on
+-- it. Matched by seed and jsonb equality, never sc_config_key (see dailies).
 create or replace view public.daily_games
   with (security_invoker = true) as
-select d.day, g.game_key
+select d.day, g.game_key, d.kind
 from public.dailies d
 join public.games g
   on g.seed = (d.settings ->> 'seed')::integer

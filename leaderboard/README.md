@@ -24,6 +24,7 @@ root `netlify.toml` bundles
 | [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`daily.html?day=…`](daily.html) | the daily challenge: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
+| [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/game/#puzzle`), standings and its own streaks — see "Daily" |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
@@ -803,6 +804,12 @@ test bot within a turn cap that grows from 80 to 110.
   won on the day itself, is the figure's title (hover or tap). Past days stay
   playable via `daily.html?day=`. Tests: `tests/test_daily.py`,
   `tests/daily.test.mjs`, `tests/test_embargo_sql.py`.
+- **The daily puzzle beside it** (`puzzle.html`, a tab of the same page; a
+  `dailies` row of `kind` `puzzle`): a 5-8 system duel with no fog, against one
+  opponent per weekday, won in the fewest turns. The worker makes it with the
+  board, the game opens it with the menu's Puzzle button or `#puzzle` /
+  `#puzzle=<day>` (`/api/daily?kind=puzzle`), and it has its own embargo,
+  standings, streaks and badges.
 
 ## Badges
 
@@ -818,6 +825,7 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
 | Bots | a win with each `LADDER_ORDER` bot in a seat |
 | Daily | a daily won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
+| Daily puzzle | the same three, on the daily puzzle |
 | Play-by-post | a turn played in a match · a match won |
 
 **Derived, never stored**, like crowns and the campaign. Wins count only through

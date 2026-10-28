@@ -7,7 +7,8 @@ puzzle, Polytopia, Slay the Spire's Daily Climb); the weekly campaign is a
 week's contest, not a habit. Built: the dealer's `lane_turns` rule, the worker
 (`tools/daily.py`, `tools/daily_spec.json`), the `dailies` table and
 `daily_games` view, `/api/daily`, the game's side (`starconquest/daily.py`, the
-menu's Daily button, `#daily`) and `daily.html`. First tries are not built
+menu's Daily button, `#daily`) and `daily.html`. The daily puzzle beside it
+was built on 2026-10-28 too (see "The daily puzzle"). First tries are not built
 (see "On the board" and [`open.md`](open.md)).
 
 ## The idea in one paragraph
@@ -68,7 +69,7 @@ days overlap by two systems, so the week rises without steps.
 **Narrower, and never a duel** (the author, 2026-10-28). The first table ran
 7-12 systems on Monday to 25-30 on Sunday, three more a day, with duels
 allowed to Wednesday. Small maps and duels are the daily puzzle's now (see
-"The daily puzzle (proposed)"), so the board starts at 11 systems and 3
+"The daily puzzle"), so the board starts at 11 systems and 3
 players, and each day's range is four systems wide, not six.
 
 **Systems per seat** is the day's system count over its players: the fewest
@@ -281,12 +282,14 @@ ascending pick. It would also hold six days of spoilers in the table.
 
 ```sql
 create table if not exists public.dailies (
-  day           date primary key,
+  day           date not null,
+  kind          text not null default 'board',   -- or 'puzzle' (see "The daily puzzle")
   settings      jsonb not null,   -- the setup, as dealer.stage_dict writes a stage
   spec          jsonb not null,   -- the spec it was dealt from, the day's systems, players and depth included
   probes        jsonb not null,   -- the probe results that cleared it
   rules_version integer not null,
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  constraint dailies_pkey primary key (day, kind)
 );
 ```
 
@@ -417,15 +420,15 @@ author, 2026-10-28), derived like the rest (`badges.mjs`'s `dailyRecord`):
 A win autoplayed through (`hand` 0) counts for none, as on the standings. A
 board whose schema predates `daily_games` shows the three as unknown.
 
-## The daily puzzle (proposed)
+## The daily puzzle
 
-Proposed on 2026-10-28. A second daily beside the board: a small duel a day,
+Proposed and built on 2026-10-28. A second daily beside the board: a small duel a day,
 where the challenge is not winning but winning in the fewest turns. The two are
 **independent**, not one two-stage gauntlet (the author, 2026-10-28). A gauntlet
 would need one of them to count for the day, and gating the board behind a duel
 holds back the player who only wants the board. Its gate would be trusted and
 local anyway, since the day's setup is a public read. A warm-up order costs
-nothing without one: the puzzle comes first on the menu and on the page.
+nothing without one: a player can open either, in either order.
 
 ### What a puzzle is
 
@@ -444,8 +447,11 @@ nothing without one: the puzzle comes first on the menu and on the page.
   heuristic+lean is heuristic with no reserve (`gauntletgen.TWEAKS`): a
   heuristic seat whose `reserve_fraction` and `reserve_floor` are 0, which a
   setup's per-seat `ai` already carries. The dealer's `opponents` cannot name
-  a tweak, so the worker seats the day's opponent itself. Which stop actuary
-  plays is still open (`open.md`).
+  a tweak, so the worker seats the day's opponent itself
+  (`daily.PUZZLE_OPPONENTS`, through `gauntletgen.probe_profile`). actuary
+  plays its default stop, Field (the author, 2026-10-28). The game and the
+  page name the opponent with its stop ("Thinker · Claudebot") and a lean
+  heuristic as "heuristic+lean".
 - **Short lanes, few of them instant**: the aim is no lane longer than 4
   turns and at most two 1-turn lanes (the author, 2026-10-28). Short lanes are
   what make a small map a puzzle (`marshal-pricing.md`, "Arriving after the
@@ -477,21 +483,58 @@ every speed of a range in steps of 0.5:
   5-turn lane, and it keeps a wider spread of speeds than 16-20 for about one
   map in a hundred. It is well above the board's 6-12, as short lanes need.
 
+### The probe check and its cap
+
+A puzzle is kept, like a board, once a probe wins it within a turn cap, here
+**60 turns every day** (`PUZZLE_TURN_CAP`). The cap is only a guard against a
+map nobody can finish; a probe game past it counts as no win, so the next
+probe, then the next candidate, is tried. Measured on 2026-10-28, four weeks of
+puzzle days with the cap lifted to 200 (`results/daily/puzzle/`), probes
+weakest first as the worker plays them:
+
+- **Monday to Friday, every candidate was won by some probe.** Saturday
+  (marshal) had 4 of 6 won and Sunday (actuary) 4 of 8, so the weekend deals
+  a few more candidates, well inside 32.
+- **The first probe to win took 14-172 turns, median 42.5**: 22 of 28 inside
+  60, 24 inside 80. Probes are not efficient players, so a long probe game
+  says little about a person's best; a person's best on the day is the
+  puzzle's result.
+- **Cheap**: each puzzle day took under a second of probe games.
+
 ### Kept apart from the board
 
-- **Storage**: `dailies` gains `kind` (`board` or `puzzle`), primary key
-  `(day, kind)`, and `daily_games` carries it. Existing rows are `board`.
-- **The worker**: `tools/daily.py` makes both kinds from their own spec files
-  (`tools/puzzle_spec.json`), the puzzle from its own stream
-  (`daily:puzzle:<day>`) and recording under `results/daily/puzzle/`.
-- **The game**: `/api/daily?kind=puzzle`, a Puzzle entry on the menu and
-  `#puzzle` (`#puzzle=<day>`). Ironman and *Copy daily result* as for the
-  board, with the line naming the puzzle and its opponent.
+- **Storage**: `dailies` has `kind` (`board` or `puzzle`, `dailies_kind_shape`),
+  primary key `(day, kind)`, and `daily_games` carries it. Rows from before
+  the puzzle are `board`. The schema's migration drops and re-adds the key, so
+  paste `schema.sql` before deploying the worker or the site.
+- **The worker**: `tools/daily.py` makes both kinds each hour, from their own
+  spec files (`tools/puzzle_spec.json`), the puzzle from its own stream
+  (`daily:puzzle:<day>`, a trial's `daily:puzzle:try:<weekday>:<trial>`) and
+  recording under `results/daily/puzzle/`. `--kind` makes one kind only. No
+  depth is drawn for a puzzle; its row's `spec` names its `opponent`.
+- **The game**: `/api/daily?kind=puzzle` (no `kind` is the board, so an older
+  game still gets its board), a Puzzle button beside Daily on the menu, and
+  `#puzzle` (`#puzzle=<day>`). `daily.remember` keeps each key's day and kind
+  (a day alone, from before the puzzle, is a board), a fortnight of both.
+  Ironman and *Copy daily result* as for the board, with the line naming the
+  puzzle and its opponent:
+
+  ```
+  Star Conquest daily puzzle · Wed 28 Oct · 6 systems vs Marshal
+  Won in 11 turns, 3 ships lost
+  https://star-conquest.netlify.app/game/#puzzle
+  ```
+
+- **The board**: `puzzle.html`, a tab beside `daily.html` (the two share one
+  menu entry, as the gauntlet pages do), run by the same `daily-page.mjs` with
+  `#today`'s `data-kind`.
+- **`tools/try_daily.py --puzzle`** deals and opens a weekday's puzzle.
 - **The embargo matters more here.** A small map's best replay is its
   solution, so it stays hidden until the day ends, as the board's does.
 - **Streaks and badges are per kind** (the author, 2026-10-28): a puzzle
   streak and true streak of its own, and Puzzle done, Puzzle winner of the day
-  and Full puzzle week beside the board's three.
+  and Full puzzle week beside the board's three (`badges.mjs`, group "Daily
+  puzzle"; `dailyRecord` is run once per kind).
 - **The board starts bigger** (the author, 2026-10-28): 11 systems and 3
   players on Monday, never a duel, so the two never overlap (see "The board
   grows through the week").

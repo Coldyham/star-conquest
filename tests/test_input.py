@@ -2961,19 +2961,19 @@ DAILY_SETUP = {"mode": "random", "players": 3, "nodes": 12, "seed": 4242,
 
 def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_store, monkeypatch):
     ms = _gauntlet_store
-    monkeypatch.setattr(main.daily, "fetch", lambda day="": "pending")
+    monkeypatch.setattr(main.daily, "fetch", lambda day="", kind="board": "pending")
     assert main.open_daily(ms) == "pending" and ms.status == main.DAILY_OPENING_MSG
     settings = Settings()
     reply = json.dumps({"day": "2026-10-28", "now": 0, "settings": DAILY_SETUP, "rules_version": 2})
     main.land_daily(ms, settings, main.pbp.OK, reply)
     assert ms.status_ok and ms.status.startswith("Daily · Wed 28 Oct: Random · 3 players")
     assert settings.seed == 4242 and settings.challenge is None
-    assert main.daily.day_of(settings) == "2026-10-28"
+    assert main.daily.daily_of(settings) == ("2026-10-28", "board")
 
     # A game started on it is the daily: ironman whatever the preference.
     state = build_state(settings, settings.seed)
     ui = main.new_ui(state, False, settings)
-    assert ui.daily_day == "2026-10-28" and ui.ironman
+    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "board" and ui.ironman
     other = Settings.from_dict(dict(DAILY_SETUP, seed=7))
     plain = main.new_ui(build_state(other, 7), False, other)
     assert plain.daily_day == "" and plain.ironman == main.webstore.ironman()
@@ -2984,6 +2984,35 @@ def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_stor
     state.winner = ui.human_id
     assert main.copy_daily_result(settings, state, ui).startswith("Result copied")
     assert copied[0].startswith("Star Conquest daily · Wed 28 Oct")
+
+
+PUZZLE_SETUP = {"mode": "random", "players": 2, "nodes": 6, "seed": 77,
+                "ai_strategy": ["heuristic", "marshal"]}
+
+
+def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    asked = []
+    monkeypatch.setattr(main.daily, "fetch", lambda day="", kind="board": asked.append((day, kind)) or "pending")
+    assert main.open_daily(ms, kind="puzzle") == "pending"
+    assert asked == [("", "puzzle")] and ms.status == "Fetching the daily puzzle..."
+    settings = Settings()
+    reply = json.dumps({"day": "2026-10-28", "kind": "puzzle", "now": 0, "settings": PUZZLE_SETUP})
+    main.land_daily(ms, settings, main.pbp.OK, reply, "puzzle")
+    assert ms.status_ok and ms.status == f"Puzzle · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
+    assert main.daily.daily_of(settings) == ("2026-10-28", "puzzle")
+
+    state = build_state(settings, settings.seed)
+    ui = main.new_ui(state, False, settings)
+    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "puzzle" and ui.ironman
+    copied = []
+    monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
+    state.winner = ui.human_id
+    main.copy_daily_result(settings, state, ui)
+    assert copied[0].startswith("Star Conquest daily puzzle · Wed 28 Oct") and "vs Marshal" in copied[0]
+
+    main.land_daily(ms, Settings(), "missing", "{}", "puzzle")
+    assert ms.status == "There's no daily puzzle for that day"
 
 
 @pytest.mark.parametrize("state,body,msg", [

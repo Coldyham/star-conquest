@@ -137,7 +137,7 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     if settings is not None and seat == 1:
         # The daily is played once by everyone, so it hides History until it is
         # decided whatever the local preference says (docs/design/daily.md).
-        ui.daily_day = daily.day_of(settings)
+        ui.daily_day, ui.daily_kind = daily.daily_of(settings)
         ui.ironman = ui.ironman or bool(ui.daily_day)
     ui.seat_bots = seat_bot_labels(state)
     if settings is not None:
@@ -431,7 +431,7 @@ def copy_daily_result(settings: Settings, state: GameState, ui: Ui) -> str:
     overlay. The clipboard only, as a challenge link: the line names no setup,
     and its link opens today's daily, not this one."""
     text = daily.result_line(ui.daily_day, settings, state.turn,
-                             state.players[ui.human_id].ships_lost)
+                             state.players[ui.human_id].ships_lost, ui.daily_kind or daily.BOARD)
     if webstore.copy_to_clipboard(text):
         return "Result copied — paste it anywhere"
     print(text)
@@ -546,43 +546,50 @@ def land_gauntlet(menu_state: MenuState, settings: Settings, state: str, body: s
                     else GAUNTLET_UNREACHABLE_MSG, False)
 
 
-# A `#daily` launch URL (or the menu's Daily button) fetches a day's daily
-# challenge from the board and applies it to the menu as a setup, as a pasted
-# challenge link applies one (`daily`, docs/design/daily.md).
+# A `#daily` or `#puzzle` launch URL (or the menu's Daily and Puzzle buttons)
+# fetches a day's daily of that kind from the board and applies it to the menu
+# as a setup, as a pasted challenge link applies one (`daily`,
+# docs/design/daily.md). The messages name the board's; a puzzle's say
+# "daily puzzle" (`_daily_msg`).
 DAILY_OPENING_MSG = "Fetching the daily challenge..."
 DAILY_UNREACHABLE_MSG = "Couldn't fetch the daily challenge from the leaderboard"
 DAILY_MISSING_MSG = "There's no daily challenge for that day"
 DAILY_UNREADABLE_MSG = "The daily challenge downloaded but wouldn't open"
 
 
-def open_daily(menu_state: MenuState, day: str = "") -> pbp.Request | None:
-    """Start fetching ``day``'s daily (today's when blank) and answer the
-    request for the loop to poll, or say why there is none."""
-    pending = daily.fetch(day)
+def _daily_msg(msg: str, kind: str) -> str:
+    return msg.replace(daily.noun(daily.BOARD), daily.noun(kind))
+
+
+def open_daily(menu_state: MenuState, day: str = "", kind: str = daily.BOARD) -> pbp.Request | None:
+    """Start fetching ``day``'s daily of ``kind`` (today's when blank) and
+    answer the request for the loop to poll, or say why there is none."""
+    pending = daily.fetch(day, kind)
     if pending is None:
-        menu.set_status(menu_state, DAILY_UNREACHABLE_MSG, False)
+        menu.set_status(menu_state, _daily_msg(DAILY_UNREACHABLE_MSG, kind), False)
     else:
-        menu.set_status(menu_state, DAILY_OPENING_MSG, True)
+        menu.set_status(menu_state, _daily_msg(DAILY_OPENING_MSG, kind), True)
     return pending
 
 
-def land_daily(menu_state: MenuState, settings: Settings, state: str, body: str) -> None:
-    """The daily fetch answered: put its setup on the menu, or say why not.
-    The setup is stashed as a shared link's is, so an installed app relaunched
-    without the fragment still has it."""
+def land_daily(menu_state: MenuState, settings: Settings, state: str, body: str,
+               kind: str = daily.BOARD) -> None:
+    """The daily fetch for ``kind`` answered: put its setup on the menu, or say
+    why not. The setup is stashed as a shared link's is, so an installed app
+    relaunched without the fragment still has it."""
     got = daily.from_reply(body) if state == pbp.OK else None
     if got is None:
         print(f"daily fetch ended in state {state!r}: {body[:120]!r}")
-        menu.set_status(menu_state,
-                        DAILY_MISSING_MSG if state == pbp.MISSING
-                        else DAILY_UNREADABLE_MSG if state == pbp.OK
-                        else DAILY_UNREACHABLE_MSG, False)
+        menu.set_status(menu_state, _daily_msg(
+            DAILY_MISSING_MSG if state == pbp.MISSING
+            else DAILY_UNREADABLE_MSG if state == pbp.OK
+            else DAILY_UNREACHABLE_MSG, kind), False)
         return
-    day, setup = got
+    day, kind, setup = got
     settings.copy_from(setup)
-    daily.remember(day, settings)
+    daily.remember(day, settings, kind)
     webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.to_token())
-    menu.set_status(menu_state, daily.label(day, settings), True)
+    menu.set_status(menu_state, daily.label(day, settings, kind), True)
 
 
 # A `#gauntlet-spec=` launch URL, built on the board's gauntlet page, generates a
@@ -1789,14 +1796,16 @@ async def main() -> None:
         linked_gauntlet = gid is not None or inline is not None
         pending_gauntlet = open_linked_gauntlet(menu_state, settings, gid, inline)
 
-    # A `#daily` link fetches a day's daily onto the menu. One fragment per
-    # launch, so it never meets the links above.
+    # A `#daily` or `#puzzle` link fetches a day's daily onto the menu. One
+    # fragment per launch, so it never meets the links above.
     pending_daily: pbp.Request | None = None
+    pending_daily_kind = daily.BOARD
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
-        asked_day = daily.link_day(webstore.url_token())
-        if asked_day is not None:
+        asked = daily.link(webstore.url_token())
+        if asked is not None:
             linked_gauntlet = True   # a link was opened: no generator, no resume prompt
-            pending_daily = open_daily(menu_state, asked_day)
+            pending_daily_kind, asked_day = asked
+            pending_daily = open_daily(menu_state, asked_day, pending_daily_kind)
 
     gen_job: gauntletgen.Job | None = None
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
@@ -1844,7 +1853,7 @@ async def main() -> None:
             dstate, dbody = pending_daily.poll()
             if dstate != pbp.PENDING:
                 pending_daily = None
-                land_daily(menu_state, settings, dstate, dbody)
+                land_daily(menu_state, settings, dstate, dbody, pending_daily_kind)
         if pending_replay is not None:
             status, body = pending_replay.poll()
             if status != share.PENDING:
@@ -2257,9 +2266,10 @@ async def main() -> None:
                     stamp_campaign(ui, menu_state.campaign_watch)
                     scene = "game"
                     auto_accum = 0
-                elif action == "daily":
+                elif action in ("daily", "puzzle"):
                     if pending_daily is None:
-                        pending_daily = open_daily(menu_state)
+                        pending_daily_kind = daily.PUZZLE if action == "puzzle" else daily.BOARD
+                        pending_daily = open_daily(menu_state, kind=pending_daily_kind)
                 elif action == "play_by_post":
                     # The same setup, opened as a shared match — for the roster
                     # and deadline the menu's own prompt just confirmed (seat 1

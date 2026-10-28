@@ -103,6 +103,46 @@ def test_today_and_tomorrow_are_made():
 
 
 # --------------------------------------------------------------------------- #
+# The puzzle
+# --------------------------------------------------------------------------- #
+def test_a_puzzle_is_a_small_open_duel_against_the_weekdays_opponent():
+    for w, name in enumerate(daily.PUZZLE_OPPONENTS):
+        day = MONDAY + dt.timedelta(days=w)
+        depth, cands = daily.candidates(day, limit=3, kind="puzzle")
+        assert depth == 0
+        strategy, params = daily.gauntletgen.probe_profile(name)
+        for s in cands:
+            assert s.players == 2 and s.mode == "random" and 5 <= s.system_count() <= 8
+            assert settings.fog_off(s) and 15 <= s.ship_ly_per_turn <= 20
+            assert s.seat_strategy(2) == strategy and s.seat_params(2) == params
+            # The opponent survives being stored, a tweak's params included.
+            stored = Settings.from_dict(daily.dealer.stage_dict(s))
+            assert stored.seat_params(2) == params and stored.challenge_key() == s.challenge_key()
+
+
+def test_a_puzzle_deals_from_its_own_stream():
+    board = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2)[1]]
+    puzzle = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2, kind="puzzle")[1]]
+    again = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2, kind="puzzle")[1]]
+    assert puzzle == again and not set(board) & set(puzzle)
+
+
+def test_a_puzzle_row_names_its_kind_and_opponent(tmp_path, monkeypatch):
+    play, calls = _fake_play({(0, "thinker"): 30})
+    monkeypatch.setattr(daily.gauntletgen, "play_one", play)
+    sunday = MONDAY + dt.timedelta(days=6)
+    row = daily.make(sunday, results=tmp_path, limit=2, out=lambda _: None, kind="puzzle")
+    assert row is not None and row["kind"] == "puzzle" and row["spec"]["opponent"] == "actuary"
+    assert row["spec"]["turn_cap"] == daily.PUZZLE_TURN_CAP
+    assert (tmp_path / "puzzle" / f"{sunday.isoformat()}.jsonl").exists()
+    assert not (tmp_path / f"{sunday.isoformat()}.jsonl").exists()
+    play, _ = _fake_play({(0, "thinker"): 30})
+    monkeypatch.setattr(daily.gauntletgen, "play_one", play)
+    board = daily.make(MONDAY, results=tmp_path, limit=2, out=lambda _: None)
+    assert board is not None and board["kind"] == "board"
+
+
+# --------------------------------------------------------------------------- #
 # The game's side (`starconquest/daily.py`)
 # --------------------------------------------------------------------------- #
 from starconquest import daily as game_daily, webstore    # noqa: E402
@@ -114,34 +154,62 @@ def store(monkeypatch, tmp_path):
     monkeypatch.setattr(webstore, "_file_path", lambda: tmp_path / "kv.json")
 
 
-def test_a_daily_link_names_today_or_a_day():
-    assert game_daily.link_day("daily") == ""
-    assert game_daily.link_day("daily=2026-10-28") == "2026-10-28"
-    for other in ("daily=2026-02-30", "daily=soon", "g=abc", "", "dailyx"):
-        assert game_daily.link_day(other) is None, other
+def test_a_daily_link_names_its_kind_and_today_or_a_day():
+    assert game_daily.link("daily") == ("board", "")
+    assert game_daily.link("daily=2026-10-28") == ("board", "2026-10-28")
+    assert game_daily.link("puzzle") == ("puzzle", "")
+    assert game_daily.link("puzzle=2026-10-28") == ("puzzle", "2026-10-28")
+    for other in ("daily=2026-02-30", "daily=soon", "puzzle=x", "g=abc", "", "dailyx", "puzzles"):
+        assert game_daily.link(other) is None, other
+
+
+def test_a_fetch_asks_for_the_puzzle_by_kind(monkeypatch):
+    asked = []
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_url", lambda path: "https://x" + path)
+    monkeypatch.setattr(game_daily.pbp, "request", lambda url: asked.append(url) or url)
+    game_daily.fetch()
+    game_daily.fetch("2026-10-28")
+    game_daily.fetch("", "puzzle")
+    game_daily.fetch("2026-10-28", "puzzle")
+    assert asked == ["https://x/api/daily", "https://x/api/daily?day=2026-10-28",
+                     "https://x/api/daily?kind=puzzle", "https://x/api/daily?day=2026-10-28&kind=puzzle"]
+    assert game_daily.fetch("", "chess") is None
 
 
 def test_a_reply_is_read_as_a_day_and_a_setup():
     stage = daily.dealer.stage_dict(daily.candidates(MONDAY, limit=1)[1][0])
     got = game_daily.from_reply(json.dumps({"day": "2026-10-26", "now": 1, "settings": stage,
                                             "rules_version": 2}))
-    assert got is not None and got[0] == "2026-10-26"
-    assert got[1].challenge_key() == Settings.from_dict(stage).challenge_key()
+    assert got is not None and got[:2] == ("2026-10-26", "board")
+    assert got[2].challenge_key() == Settings.from_dict(stage).challenge_key()
+    puzzle = game_daily.from_reply(json.dumps({"day": "2026-10-26", "kind": "puzzle", "settings": stage}))
+    assert puzzle is not None and puzzle[1] == "puzzle"
     for bad in ("", "nope", json.dumps({"day": "x", "settings": stage}),
-                json.dumps({"day": "2026-10-26", "settings": {"mode": "random"}})):
+                json.dumps({"day": "2026-10-26", "settings": {"mode": "random"}}),
+                json.dumps({"day": "2026-10-26", "kind": "chess", "settings": stage})):
         assert game_daily.from_reply(bad) is None
 
 
 def test_a_remembered_daily_is_known_by_its_key(store):
     a, b = (daily.candidates(MONDAY + dt.timedelta(days=i), limit=1)[1][0] for i in (0, 1))
-    assert game_daily.day_of(a) == ""
+    p = daily.candidates(MONDAY, limit=1, kind="puzzle")[1][0]
+    assert game_daily.daily_of(a) == ("", "")
     game_daily.remember("2026-10-26", a)
     game_daily.remember("2026-10-27", b)
-    assert game_daily.day_of(a) == "2026-10-26" and game_daily.day_of(b) == "2026-10-27"
+    game_daily.remember("2026-10-26", p, "puzzle")
+    assert game_daily.daily_of(a) == ("2026-10-26", "board")
+    assert game_daily.daily_of(b) == ("2026-10-27", "board")
+    assert game_daily.daily_of(p) == ("2026-10-26", "puzzle")
     for i in range(game_daily.REMEMBER_MAX):
         s = Settings.from_dict(dict(daily.dealer.stage_dict(a), seed=1000 + i))
         game_daily.remember((MONDAY + dt.timedelta(days=30 + i)).isoformat(), s)
-    assert game_daily.day_of(a) == ""          # the oldest fell off
+    assert game_daily.daily_of(a) == ("", "")          # the oldest fell off
+
+
+def test_a_daily_remembered_before_the_puzzle_is_a_board(store):
+    a = daily.candidates(MONDAY, limit=1)[1][0]
+    webstore.set(game_daily.WEB_DAILIES_KEY, json.dumps({a.challenge_key(): "2026-10-26", "junk": [1]}))
+    assert game_daily.daily_of(a) == ("2026-10-26", "board")
 
 
 def test_the_result_line_gives_nothing_away():
@@ -150,3 +218,13 @@ def test_the_result_line_gives_nothing_away():
     assert text.splitlines()[:2] == [f"Star Conquest daily · Wed 28 Oct · {s.system_count()} systems",
                                      "Won in 23 turns, 7 ships lost"]
     assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#daily")
+
+
+def test_a_puzzle_result_names_its_opponent():
+    for w, name in ((1, "heuristic+lean"), (3, "Thinker · Claudebot"), (6, "Actuary · Field")):
+        s = daily.candidates(MONDAY + dt.timedelta(days=w), limit=1, kind="puzzle")[1][0]
+        text = game_daily.result_line("2026-10-28", s, 9, 2, "puzzle")
+        assert text.splitlines()[0] == (f"Star Conquest daily puzzle · Wed 28 Oct · {s.system_count()} systems"
+                                        f" vs {name}")
+        assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#puzzle")
+        assert game_daily.label("2026-10-28", s, "puzzle").endswith(f"vs {name}")

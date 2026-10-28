@@ -163,6 +163,18 @@ test("dailies: any win completes one, the best on the day wins it, seven in a we
   assert.deepEqual([state(null)].map((s) => [s.daily, s["daily-winner"], s["full-week"]]), [[null, null, null]]);
 });
 
+test("the puzzle's badges are its own, apart from the board's", () => {
+  const ids = ["daily", "daily-winner", "full-week", "puzzle", "puzzle-winner", "full-puzzle-week"];
+  const state = (daily, puzzle) => {
+    const got = Object.fromEntries(badgeList(factsFrom({ daily, puzzle })).map((b) => [b.id, b.earned]));
+    return ids.map((id) => got[id]);
+  };
+  const none = { days: 0, won: 0, weeks: 0 };
+  assert.deepEqual(state(none, { days: 7, won: 2, weeks: 1 }), [false, false, false, true, true, true]);
+  assert.deepEqual(state({ days: 1, won: 0, weeks: 0 }, none), [true, false, false, false, false, false]);
+  assert.deepEqual(state(none, null), [false, false, false, null, null, null]);
+});
+
 test("a count a function couldn't answer is unknown, never locked", () => {
   const list = badgeList(factsFrom({}));
   const state = Object.fromEntries(list.map((b) => [b.id, b.earned]));

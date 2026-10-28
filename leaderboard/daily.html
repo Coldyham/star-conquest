@@ -6,6 +6,11 @@
 {% block main %}
   <a class="back" href="index.html">← All maps</a>
   <h1>Daily challenge</h1>
+  <!-- The two dailies share one menu entry; these tabs move between them. -->
+  <nav class="sorts" aria-label="Dailies">
+    <a class="btn" href="daily.html" aria-current="page">Board</a>
+    <a class="btn ghost" href="puzzle.html">Puzzle</a>
+  </nav>
   <p class="lede">
     One map a day, the same for everyone, new at midnight UTC, and every map
     has been won by a test bot. Setups get bigger over the week: Monday's is
@@ -16,7 +21,7 @@
   </p>
 
   <nav class="weeks" id="days"></nav>
-  <div id="today" class="loading">Loading…</div>
+  <div id="today" class="loading" data-kind="board">Loading…</div>
 
   <h2 class="section-title" id="standings-title">Standings</h2>
   <div id="standings"></div>

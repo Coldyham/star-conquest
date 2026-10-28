@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Play what the daily deals on a weekday, to feel the generator and tune it.
 
-Deals a map from a weekday's daily spec as ``tools/daily.py`` would, prints it,
+Deals a map from a weekday's daily spec (the board's, or with ``--puzzle`` the
+puzzle's) as ``tools/daily.py`` would, prints it,
 and opens it in the desktop game's setup menu (``--no-menu`` starts it
 straight away). Each run deals a fresh map; ``--seed`` deals one again. The
-spec is read live: edit ``tools/daily_spec.json``, or ``PLAYERS``,
-``systems`` and ``turn_cap`` in ``tools/daily.py``, and the next run deals
-from the change. Reasons: ``docs/design/daily.md``.
+spec is read live: edit ``tools/daily_spec.json`` (``tools/puzzle_spec.json``),
+or ``PLAYERS``, ``systems``, ``PUZZLE_OPPONENTS`` and ``turn_cap`` in
+``tools/daily.py``, and the next run deals from the change. Reasons:
+``docs/design/daily.md``.
 
     uv run python tools/try_daily.py sat                 # a fresh Saturday map, in the menu
     uv run python tools/try_daily.py sat --seed 7        # that one again
     uv run python tools/try_daily.py sat --probe         # only a map a probe won inside the cap
     uv run python tools/try_daily.py --day 2026-11-01    # that day's real daily (probed)
     uv run python tools/try_daily.py --week              # print one map per weekday, open none
+    uv run python tools/try_daily.py thu --puzzle        # a fresh Thursday puzzle
 
 A plain deal skips the probes, so it may be a map the worker would throw
 away; ``--probe`` keeps dealing until a probe wins one, as the worker does,
@@ -66,19 +69,21 @@ def survey(s: Settings) -> str:
     return "no lanes" if lanes is None else "lanes {} / {} / {} turns (shortest / median / longest)".format(*lanes)
 
 
-def report(day: dt.date, s: Settings, depth: float, note: str = "") -> str:
+def report(day: dt.date, s: Settings, depth: float, note: str = "", kind: str = "board") -> str:
     w = day.weekday()
+    spec = (f"  spec: puzzle vs {daily.PUZZLE_OPPONENTS[w]}" if kind == "puzzle"
+            else f"  spec: {daily.systems(w)[0]}-{daily.systems(w)[1]} systems, "
+                 f"{daily.PLAYERS[w][0]}-{daily.PLAYERS[w][1]} players, opponents at depth {depth:.2f}")
     lines = [f"{day.strftime('%A')} ({day}){note}",
              f"  {dealer.describe(s)}",
-             f"  {s.ship_ly_per_turn:g} ly/turn · {survey(s)} · cap {daily.turn_cap(w)} turns",
-             f"  spec: {daily.systems(w)[0]}-{daily.systems(w)[1]} systems, "
-             f"{daily.PLAYERS[w][0]}-{daily.PLAYERS[w][1]} players, opponents at depth {depth:.2f}"]
+             f"  {s.ship_ly_per_turn:g} ly/turn · {survey(s)} · cap {daily.turn_cap(w, kind)} turns",
+             spec]
     return "\n".join(lines)
 
 
-def deal(day: dt.date, trial: str) -> tuple[float, Settings]:
+def deal(day: dt.date, trial: str, kind: str = "board") -> tuple[float, Settings]:
     """One candidate from the day's spec on the trial's stream, unprobed."""
-    depth, cands = daily.candidates(day, limit=1, trial=trial)
+    depth, cands = daily.candidates(day, limit=1, trial=trial, kind=kind)
     return depth, cands[0]
 
 
@@ -99,6 +104,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="deal until a probe wins a map inside the day's cap, as the worker keeps")
     parser.add_argument("--day", type=dt.date.fromisoformat, help="that day's real daily, probed as the worker makes it")
     parser.add_argument("--week", action="store_true", help="print one fresh map per weekday and open none")
+    parser.add_argument("--puzzle", action="store_true", help="the daily puzzle, not the board")
     parser.add_argument("--no-play", action="store_true", help="print the map, don't open the game")
     parser.add_argument("--no-menu", action="store_true", help="start the game straight away")
     args = parser.parse_args(argv)
@@ -110,13 +116,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     trial = args.seed or str(random.randrange(10 ** 6))
+    kind = "puzzle" if args.puzzle else "board"
 
     if args.week:
         monday = next_weekday(0)
         for w in range(7):
             day = monday + dt.timedelta(days=w)
-            depth, s = deal(day, trial)
-            print(report(day, s, depth))
+            depth, s = deal(day, trial, kind)
+            print(report(day, s, depth, kind=kind))
         print(f"(--seed {trial} deals these again)")
         return 0
 
@@ -127,19 +134,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.probe or args.day:
         print(f"probing {day.strftime('%A')}'s candidates (each game recorded as it finishes)", flush=True)
-        row = daily.make(day, out=lambda line: print(line, flush=True), trial=trial)
+        row = daily.make(day, out=lambda line: print(line, flush=True), trial=trial, kind=kind)
         if row is None:
-            print(f"no candidate of {daily.MAX_CANDIDATES} was won inside {daily.turn_cap(day.weekday())} turns",
+            print(f"no candidate of {daily.MAX_CANDIDATES} was won inside {daily.turn_cap(day.weekday(), kind)} turns",
                   file=sys.stderr)
             return 1
         s, depth = Settings.from_dict(row["settings"]), row["spec"]["depth"]
     else:
-        depth, s = deal(day, trial)
-    print(report(day, s, depth, note))
+        depth, s = deal(day, trial, kind)
+    print(report(day, s, depth, note, kind))
 
     if args.no_play:
         return 0
     name = day.isoformat() if args.day else f"{WEEKDAYS[day.weekday()][:3].lower()}-{trial}"
+    name = f"puzzle-{name}" if kind == "puzzle" else name
     path = save(s, name)
     print(f"opening {path.relative_to(ROOT)}", flush=True)
     cmd = [sys.executable, str(ROOT / "main.py"), "--settings-from", str(path)]

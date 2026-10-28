@@ -1,0 +1,25 @@
+{
+  "stages": 1,
+  "roll": false,
+  "rules": {
+    "mode": {"fix": "random"},
+    "fog": {"fix": false},
+    "players": {"fix": 2},
+    "systems": {"range": [5, 8]},
+    "node_jitter": {"range": [0.3, 1]},
+    "relax_min_sep_frac": {"range": [0.3, 1.2]},
+    "lloyd_passes": {"range": [0, 2]},
+    "extra_edge_fraction": {"range": [0.4, 1]},
+    "max_edge_length_frac": {"range": [0.5, 1]},
+    "ship_ly_per_turn": {"range": [15, 20]},
+    "ship_speed_growth_pct": {"fix": 0},
+    "home_start_ships": {"range": [10, 14]},
+    "home_production": {"range": [1, 4]},
+    "garrison_base": {"range": [2, 4]},
+    "garrison_k": {"range": [9, 14]},
+    "garrison_jitter": {"range": [2, 4]},
+    "combat_jitter": {"range": [0.04, 0.1]},
+    "defender_advantage": {"range": [1, 1.1]}
+  },
+  "opponents": {"in": ["heuristic"]}
+}

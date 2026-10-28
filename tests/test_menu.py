@@ -13,6 +13,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
+import pytest
 
 from starconquest import ai, combat, config, mapgen, menu
 from starconquest.menu import MenuState
@@ -601,7 +602,7 @@ def test_combat_knobs_are_gone_from_advanced():
 _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "filename_field", "get_link", "browse_configs", "seed_field",
            "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc",
-           "tutorial", "daily"}
+           "tutorial", "daily", "puzzle"}
 
 
 def test_the_node_stepper_takes_big_steps_past_a_standard_board():
@@ -1737,15 +1738,16 @@ def test_the_stage_list_says_where_progress_lives_on_the_web(monkeypatch, tmp_pa
         pygame.quit()
 
 
-def test_the_daily_button_asks_main_to_fetch_and_overlaps_nothing(monkeypatch):
+@pytest.mark.parametrize("key", ["daily", "puzzle"])
+def test_the_daily_buttons_ask_main_to_fetch_and_overlap_nothing(monkeypatch, key):
     from starconquest import paths
     screen, ms, settings = _setup()
-    assert _click_key(screen, ms, settings, "daily") == "daily"
-    box = ms.rects["daily"]
+    assert _click_key(screen, ms, settings, key) == key
+    box = ms.rects[key]
     assert box.right <= config.SCREEN_W
-    others = [k for k, r in ms.rects.items() if k != "daily" and r.colliderect(box)]
+    others = [k for k, r in ms.rects.items() if k != key and r.colliderect(box)]
     assert others == []
     monkeypatch.setattr(paths, "LEADERBOARD_ORIGIN", "")
     menu.draw(screen, ms, settings)
-    assert "daily" not in ms.rects
+    assert key not in ms.rects
     pygame.quit()

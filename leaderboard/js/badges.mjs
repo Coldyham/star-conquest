@@ -136,8 +136,9 @@ export function campaignRecord(weeks, name, now = new Date()) {
 }
 
 /**
- * `{days, won, weeks}` over the daily challenge. `dailyGames` are
- * `daily_games` rows (`{day, game_key}`) for the maps the player has wins on;
+ * `{days, won, weeks}` over one kind of daily challenge. `dailyGames` are
+ * `daily_games` rows (`{day, game_key}`) of that kind for the maps the player
+ * has wins on;
  * `field` every counted score on those maps, `{game_key, user_id, user_name,
  * turns, lost, hand, submitted_at}`. As on daily.html, a win autoplayed
  * through (`hand` 0) doesn't count.
@@ -189,8 +190,8 @@ export function gauntletsCleared(gauntlets, setups) {
  */
 export function factsFrom({
   wins = [], opened = new Set(), joined = new Set(), drawings = 0, steals = 0, stealWeeks = 0,
-  campaign = { homes: 0, wins: 0 }, daily = { days: 0, won: 0, weeks: 0 }, gauntletsMade = null, gauntletsCleared: cleared = 0,
-  pbp = null,
+  campaign = { homes: 0, wins: 0 }, daily = { days: 0, won: 0, weeks: 0 }, puzzle = { days: 0, won: 0, weeks: 0 },
+  gauntletsMade = null, gauntletsCleared: cleared = 0, pbp = null,
 } = {}) {
   const custom = wins.filter((win) => win.settings_json?.custom_map);
   const generated = wins.filter((win) => !win.settings_json?.custom_map);
@@ -207,6 +208,9 @@ export function factsFrom({
     dailyDays: daily ? daily.days : null,
     dailyWon: daily ? daily.won : null,
     dailyWeeks: daily ? daily.weeks : null,
+    puzzleDays: puzzle ? puzzle.days : null,
+    puzzleWon: puzzle ? puzzle.won : null,
+    puzzleWeeks: puzzle ? puzzle.weeks : null,
     tutorial: wins.some((win) => TUTORIAL_FINAL_KEYS.includes(win.game_key)),
     gauntletsMade,
     gauntletsCleared: cleared,
@@ -251,6 +255,14 @@ export const BADGES = [
   { id: "full-week", group: "Daily", title: "Full week",
     how: "Win all seven dailies of one Monday-to-Sunday week (days won later from the archive count).",
     has: (f) => atLeastOne(f.dailyWeeks) },
+
+  { id: "puzzle", group: "Daily puzzle", title: "Puzzle done",
+    how: "Win a daily puzzle, any day's, and post the score.", has: (f) => atLeastOne(f.puzzleDays) },
+  { id: "puzzle-winner", group: "Daily puzzle", title: "Puzzle winner of the day",
+    how: "Post the best score on a daily puzzle before its day ends.", has: (f) => atLeastOne(f.puzzleWon) },
+  { id: "full-puzzle-week", group: "Daily puzzle", title: "Full puzzle week",
+    how: "Win all seven puzzles of one Monday-to-Sunday week (days won later from the archive count).",
+    has: (f) => atLeastOne(f.puzzleWeeks) },
 
   { id: "graduate", group: "Gauntlets", title: "Graduate",
     how: "Win the tutorial's last stage and post the score.", has: (f) => f.tutorial },

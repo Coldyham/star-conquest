@@ -1,12 +1,37 @@
-// The daily challenge (docs/design/daily.md): what the page and /api/daily
-// share. A day is a UTC date; a row of `dailies` is made a day ahead by
-// tools/daily.py and readable once its day has started.
+// The daily challenges (docs/design/daily.md): what the page and /api/daily
+// share. A day is a UTC date; a row of `dailies` per kind is made a day ahead
+// by tools/daily.py and readable once its day has started.
 //
 // Pure: no DOM, no fetch.
+
+import { profileLabel, seatProfile } from "./bots.mjs";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86400000;
 export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// A day's two dailies (`dailies.kind`): the board, and the puzzle, a small duel
+// won in the fewest turns.
+export const KINDS = ["board", "puzzle"];
+
+/**
+ * Who a day's setup is played against, each bot once, as the board names a
+ * seat's bot ("thinker · claudebot", or "marshal" at its default stop). A
+ * heuristic with no reserve is the probes' "heuristic+lean"
+ * (`gauntletgen.TWEAKS`), a puzzle's Tuesday opponent.
+ */
+export function opponents(settings) {
+  const out = [];
+  for (let seat = 2; seat <= (settings.players || 2); seat += 1) {
+    const name = (settings.ai_strategy || [])[seat - 1];
+    if (!name) continue;
+    const params = (settings.ai || [])[seat - 1] || {};
+    const label = name === "heuristic" && params.reserve_fraction === 0 && params.reserve_floor === 0
+      ? "heuristic+lean"
+      : profileLabel(seatProfile(name, params.aux));
+    if (!out.includes(label)) out.push(label);
+  }
+  return out;
+}
 
 /** `date`'s UTC day as YYYY-MM-DD. */
 export function dayParam(date) {
