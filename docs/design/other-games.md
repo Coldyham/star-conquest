@@ -23,22 +23,110 @@ roster depend on. So ideas come in two kinds:
 ### Star tiers on every map
 
 Warzone single-player and most puzzle games grade a win with one to three
-stars. Bronze, silver and gold turn targets could be taken from numbers the
-board already has: the bot column's wins on that map, or a dealt run's probe
-wins. This is the stage-target machinery (`gauntlet.md`, "Stage targets")
-shown on any posted map rather than gating a gauntlet. `par.md`, "Not on the
-board", kept a *computed* par off the board, so take the tiers from scores
-that exist and say which bot set each one.
+stars. This is the stage-target machinery (`gauntlet.md`, "Stage targets")
+shown on every posted map rather than gating a gauntlet. Worked out on
+2026-10-28 from the author's sketch; not built.
+
+**The tiers.** A star is earned by a counted score (`counted_scores`) and
+compared as a best is: turns first, ships lost breaking a tie. Each tier asks
+for the one below it.
+
+| Stars | For | Target |
+| --- | --- | --- |
+| 1 | a win | any counted score (scores are wins only) |
+| 2 | beating every bot | the bot column's best winning row |
+| 3 | beating the search | the honest par line (`par.md`, "Dice modes") |
+| bonus, hidden | beating the optimist | the lucky par line |
+
+**A star can never be lost.** That needs two things:
+
+- **Other people never move it.** Every target comes from the map and the
+  code, never from another person's score, so a better player arriving takes
+  nothing.
+- **A target is frozen when it is first set, and never changes.** Stage
+  targets do the opposite (tightened later, checked again), and the bot
+  column moves too: `bot_scores` is keyed `(game_key, bot)` and overwritten
+  when `engine_rev` goes stale, and a new bot joins the column on every map.
+  Either can beat a line that used to be the best. So a worker writes a
+  map's targets once into a table of their own (`star_targets`: game key,
+  tier, turns, lost, what set it, rules version, when), with no update path,
+  the way a day is never remade (`daily.md`). Stars stay **derived, never
+  stored**: a score against frozen targets, so a deleted or demoted score
+  takes its stars with it, as crowns do. A retuned bot or a better search
+  shows on the next map, not on old ones.
+
+**Details that follow.**
+
+- **Meeting a target counts**, as with stage targets. Seven maps have a par
+  line on the floor (`par.md`, "The live board"); nobody can beat those on
+  turns, only on ships, and on `b9119a724511200d` honest dice reach the floor.
+- **No bot wins: the second target is any win.** Same for a search that finds
+  no win (3 of 84 maps on honest dice). One win then earns two or three stars
+  at once, which reads right: nothing else took that map.
+- **The second target freezes once the column is whole**: every family in
+  `ai.LADDER_ORDER` has a row on the map. Until then the map shows one star possible and
+  the rest pending.
+- **The third target is the better of honest par and the second target.**
+  Honest par lost to the bot column's best on 9 of 93 maps, and it must never
+  be the easier tier. "Set by" says which set it.
+- **Par goes on the board.** That reverses "Not on the board" (`par.md`,
+  2026-10-07), which gave no reason beyond keeping the bot column the one
+  computed number. The cost is real: knower maps hit the 1200 s budget and
+  20+ system maps were never searched. So it is its own job in
+  `bot-replay.yml`, a budget per map, recording each map as it finishes, and a
+  map it cannot reach shows no third star rather than a weak one. A budget-hit
+  line is still a line; it is frozen like any other.
+- **The bonus star is hidden and rare by design.** On keyed dice the lucky
+  line beat all 7 human wins by a median 25 turns. People beat it on 7 maps,
+  all set when a rewind re-rolled and four with a knower budget-hit, so where
+  it falls it marks a short search as much as a great game. It costs a second
+  par run per map.
+- **Rewind fishing.** Scores posted before keyed dice (2026-10-08) could fish
+  a roll, which the honest search cannot. The board still counts them, but
+  the third and bonus stars should ask for a log keyed every turn
+  (`replay.dice_follow`), the same dice the search met.
+- **Rules versions.** A `RULES_VERSION` bump that moves a map's play leaves
+  old targets describing an old game. A target carries its rules version, and
+  a score is graded against targets of its own version; a map's targets for a
+  new version are set afresh, once.
+- **Showing it.** A star column on each map's standings, one row per person
+  (their best), a profile total, and on the map page "★★ needs 31/12 (marshal)",
+  so the target is never a mystery. The game itself needs nothing: it asks the
+  board, like `/api/campaign`.
 
 ### A rating against the bot ladder
 
 Warzone and Galcon rank players, but here two people never meet in a scored
-game: play-by-post never reaches the leaderboard. Scores against bots of known
-strength could stand in. A win against marshal on a 4-seat map says more than
-one against rusherplus, so each posted score is a result against a rated
-field. The rating would be computed by the offline worker, like the bot
-column, and served as a view. Monthly seasons would reset it. Crowns reward
-records; a rating would reward playing.
+game: play-by-post never reaches the leaderboard. They do meet on a map: two
+people who both posted on it played the same setup and seed, and their bests
+compare directly, whatever the map's difficulty or rivals. Worked out on
+2026-10-28 from the author's sketch; not built.
+
+- **A comparison per pair per map.** On each map, each pair among the posters
+  (best counted score each) is a win, loss or draw: turns, then ships lost,
+  equal both a draw. The map's difficulty cancels within the pair, so no
+  "rated field" is needed.
+- **The roster bots are players.** Each bot-column row (one per family, at the
+  top of its knob) posts on every map; a losing row loses to every human win,
+  and two losing rows draw. Bots have the most comparisons, so they anchor the
+  list and give it a meaning: "rated between marshal and knower".
+- **Fit, don't update.** Comparisons have no order worth keeping, so fit a
+  Bradley-Terry model to all of them at once (minorisation-maximisation, a few
+  hundred iterations at board sizes) rather than Elo, which would depend on
+  posting order. A prior of one draw against an average player keeps a
+  one-map player off the top, and the list shows people with five maps or
+  more. Weight a map's comparisons by 1/(n-1) for n posters, so one crowded
+  map doesn't count as a hundred.
+- **Derived, never stored.** Inputs are `counted_scores` and `bot_scores`, both
+  public, and the fit is cheap, so the board can fit it in JS at render time,
+  like the standings; a nightly view only if it gets slow.
+- **What it cannot see.** People post wins only, and bots always have a row,
+  so a person is absent from the maps they lost and rates high against the
+  bots. That is the honest reading of the data (it rates how good your wins
+  are, and which maps you win), and the list should say so. Unlike stars, a
+  rating moves when others post; that is what a rating is.
+- **Seasons** (Warzone's monthly reset) become a filter: the same fit over
+  maps first posted in a month.
 
 ### Racing the record holder's ghost
 
