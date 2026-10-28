@@ -1,0 +1,36 @@
+{% extends "templates/base.html" %}
+{% set title = "Daily puzzle" %}
+{% set description = "A small duel a day, the same for everyone: win it in the fewest turns." %}
+{% set script = "js/daily-page.mjs" %}
+
+{% block main %}
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Daily puzzle</h1>
+  <!-- The two dailies share one menu entry; these tabs move between them. -->
+  <nav class="sorts" aria-label="Dailies">
+    <a class="btn ghost" href="daily.html">Board</a>
+    <a class="btn" href="puzzle.html" aria-current="page">Puzzle</a>
+  </nav>
+  <p class="lede">
+    A small duel a day, the same for everyone, new at midnight UTC, with no
+    fog. Winning is the easy part: the puzzle is winning in the fewest turns,
+    then with the fewest ships lost. Each weekday has its own opponent, the
+    same every week. Scores and replays stay hidden until the day ends: the
+    best score posted on the day wins it. A streak is a run of days won; a
+    missed day won later mends it, and the true streak, days won on the day
+    itself, shows when you hover or tap.
+  </p>
+
+  <nav class="weeks" id="days"></nav>
+  <div id="today" class="loading" data-kind="puzzle">Loading…</div>
+
+  <h2 class="section-title" id="standings-title">Standings</h2>
+  <div id="standings"></div>
+
+  <h2 class="section-title">Streaks</h2>
+  <div id="streaks"></div>
+{% endblock %}
+
+{% block footer %}Player 1 &nbsp;·&nbsp;
+  <a href="index.html">All maps</a> &nbsp;·&nbsp;
+  <a href="daily.html">Daily</a>{% endblock %}

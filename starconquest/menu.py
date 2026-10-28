@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, campaign, combat, config, gauntlet, mapgen, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, gauntlet, mapgen, paths, pbp, softkeyboard, uifont, webstore
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -260,6 +260,7 @@ class MenuState:
     status_ok: bool = True
     status_until: int = 0  # ms tick after which status hides
     strategy_open: bool = False  # is the AI-seat strategy dropdown open
+    daily_open: bool = False  # is the footer's Daily list open
     strategies: list[str] = field(  # dropdown options, refreshed on open
         default_factory=lambda: _strategy_options()
     )
@@ -467,6 +468,7 @@ def _draw_menu(surface: pygame.Surface, ms: MenuState, settings: Settings) -> No
 
     _file_control(surface, ms, w, 720)
     _draw_start(surface, ms, settings, w)
+    _draw_daily_list(surface, ms)
     # Two separate lines below the Start row: the transient save/load status, then
     # the keyboard hint (dropped on touch, where there are no keys to press — and
     # where it used to be drawn straight on top of the status).
@@ -1781,6 +1783,40 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
     ms.rects["seed_random"] = dice
 
 
+# The footer's daily challenges (`main.open_daily`): one button opening a list
+# of the board and the puzzle, each item the key its click is handled as.
+_DAILY_LABEL = "Daily"
+_DAILY_ITEMS = (("daily", "Daily board"), ("puzzle", "Daily puzzle"))
+
+
+def _daily_button(surface, ms: MenuState, x: int, y: int) -> None:
+    font = _fonts()["normal"]
+    rect = pygame.Rect(x, y, font.size(_DAILY_LABEL)[0] + 36 + _CH // 2, _CH)
+    _button(surface, ms, "daily_menu", rect, "", fill=_BTN_FILL,
+            border=_HL_BORDER if ms.daily_open else _START_BORDER, tcol=config.COLOR_TEXT)
+    _text(surface, font, _DAILY_LABEL, config.COLOR_TEXT, midleft=(rect.x + 16, rect.centery))
+    _draw_caret(surface, pygame.Rect(rect.right - _CH, y, _CH, _CH), ms.daily_open)
+
+
+def _draw_daily_list(surface, ms: MenuState) -> None:
+    """The open Daily list, rising from its button; drawn after every other
+    widget so nothing paints over it."""
+    trigger = ms.rects.get("daily_menu")
+    if not ms.daily_open or trigger is None:
+        ms.daily_open = False
+        return
+    f = _fonts()
+    rh = _CH + 4
+    width = max(trigger.width, max(f["normal"].size(label)[0] for _key, label in _DAILY_ITEMS) + 32)
+    panel = pygame.Rect(trigger.x, trigger.y - 4 - rh * len(_DAILY_ITEMS), width, rh * len(_DAILY_ITEMS))
+    pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=6)
+    pygame.draw.rect(surface, _HL_BORDER, panel, 1, border_radius=6)
+    for i, (key, label) in enumerate(_DAILY_ITEMS):
+        row = pygame.Rect(panel.x, panel.y + i * rh, panel.width, rh)
+        _text(surface, f["normal"], label, config.COLOR_TEXT, midleft=(row.x + 16, row.centery))
+        ms.rects[key] = row
+
+
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     """Footer row. Desktop (and Android): '[ name ] [Save] [Load]', a file under
     ``_SAVE_DIR``. Web: '[Get Link] [Shared matches] [Recently played]' — the web build's data
@@ -1804,10 +1840,13 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
                 fill=_BTN_FILL, border=_START_BORDER, tcol=config.COLOR_TEXT)
     else:
         ms.rects.pop("tutorial", None)
+    # ...and the dailies outside its right end, wherever there is a board to
+    # fetch them from. The constant, not a resolved URL: resolving one costs a
+    # DOM read every frame (see `paths`).
+    if paths.LEADERBOARD_ORIGIN:
+        _daily_button(surface, ms, rx + 14, y)
 
     if is_web():
-        for key in ("filename_field", "save_settings", "load_settings"):
-            ms.rects.pop(key, None)
         link = pygame.Rect(lx, y, 110, _CH)
         _button(surface, ms, "get_link", link, "Get Link", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
         boards = pygame.Rect(rx - 190, y, 190, _CH)
@@ -1816,12 +1855,8 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
             gap = boards.x - link.right
             lobby = pygame.Rect(link.right + (gap - 190) // 2, y, 190, _CH)
             _button(surface, ms, "browse_matches", lobby, "Shared matches", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
-        else:
-            ms.rects.pop("browse_matches", None)
         return
 
-    for key in ("get_link", "browse_configs", "browse_matches"):
-        ms.rects.pop(key, None)
     load = pygame.Rect(rx - 90, y, 90, _CH)
     save = pygame.Rect(load.x - 10 - 90, y, 90, _CH)
     field = pygame.Rect(lx, y, save.x - 10 - lx, _CH)
@@ -2323,6 +2358,10 @@ def _handle_key(event, ms: MenuState, settings: Settings):
         if event.key == pygame.K_ESCAPE:
             ms.strategy_open = False
         return None
+    if ms.daily_open:
+        if event.key == pygame.K_ESCAPE:
+            ms.daily_open = False
+        return None
 
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
         return _start(ms, settings)
@@ -2339,6 +2378,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
         ms.editing_filename = False
     if not (hit == "strategy" or (hit or "").startswith("strategy_opt_")):
         ms.strategy_open = False  # click anywhere else closes the dropdown
+    was_open, ms.daily_open = ms.daily_open, False  # ...and the Daily list
 
     if hit == "start":
         return _start(ms, settings)
@@ -2447,8 +2487,12 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_scout = config.FOG_ON_SCOUT
         else:  # on -> off: full visibility
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
+    elif hit == "daily_menu":
+        ms.daily_open = not was_open
     elif hit == "tutorial":
         _open_tutorial(ms, settings)
+    elif hit in ("daily", "puzzle"):
+        return hit
     elif hit == "create_map":
         return _open_creator(ms, settings)
     elif hit == "clear_map":

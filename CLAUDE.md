@@ -40,6 +40,8 @@ uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwi
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a bot's aux knob
 
+uv run python tools/daily.py --dry-run          # deal today's and tomorrow's dailies (board, puzzle), store nothing
+uv run python tools/try_daily.py sat            # play a fresh Saturday daily map (--puzzle, --probe, --seed, --week)
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column (needs SUPABASE_*)
 uv run python tools/verify_scores.py --dry-run  # check each posted score's log
@@ -84,7 +86,7 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `stats` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -237,6 +239,12 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   `campaign_games` matches by jsonb equality. `attemptStatus` is the one answer
   to "may I move here"; the game asks `/api/campaign` and never reimplements a
   rule.
+- **The daily is made by the worker and stored, never made by the game**
+  (`tools/daily.py` into `dailies`, a day ahead, readable once its day starts;
+  the game asks `/api/daily`). A day has two kinds, the board and the puzzle,
+  each with its own streaks and badges. A day is never remade. A day's map is embargoed
+  until the day ends (`game_embargoes`); its winner, standings and streaks
+  (mended, and true) are derived. `docs/design/daily.md`.
 - **The game and board are one site** (`/game/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. `tools/pwa/sw.js` never touches `/api/`. The

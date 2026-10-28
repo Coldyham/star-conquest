@@ -422,24 +422,72 @@ join public.games g
  and (g.settings_json - array['seed', 'autoplay']) = ((node -> 'settings') - array['seed', 'autoplay']);
 
 -- ---------------------------------------------------------------------------
--- game_embargoes: the embargo in force on each map: the later of
--- games.embargo_until and the end of a live campaign week the map is a node of
--- (Monday 00:00 UTC, as campaign_scores counts). Derived, because a node's games
--- row does not exist when its week is written. Only live weeks are read. Read by
--- public_replays and game_summary.
+-- dailies: the daily challenges (daily.html, docs/design/daily.md). One row per
+-- UTC day and kind, the board or the puzzle, written once a day ahead by
+-- tools/daily.py. The public reads a day only once it has started, so
+-- tomorrow's maps cannot be practised; the worker's secret key is the only
+-- writer and reads past the policy.
+--
+-- settings has the pruned shape of games.settings_json, written by Python, so
+-- match it by jsonb value as campaign nodes are. spec is what it was dealt
+-- from (the day's systems and players or the puzzle's opponent,
+-- candidate and turn cap); probes the probe games that cleared it. A row from
+-- before the puzzle is a board.
+-- ---------------------------------------------------------------------------
+create table if not exists public.dailies (
+  day           date not null,
+  kind          text not null default 'board',
+  settings      jsonb not null,
+  spec          jsonb not null,
+  probes        jsonb not null,
+  rules_version integer not null,
+  created_at    timestamptz not null default now(),
+  constraint dailies_pkey primary key (day, kind)
+);
+
+alter table public.dailies add column if not exists kind text not null default 'board';
+alter table public.dailies drop constraint if exists dailies_kind_shape;
+alter table public.dailies add  constraint dailies_kind_shape check (kind in ('board', 'puzzle'));
+-- The key was the day alone before the puzzle.
+alter table public.dailies drop constraint if exists dailies_pkey;
+alter table public.dailies add  constraint dailies_pkey primary key (day, kind);
+
+-- daily_games: each day's games row of each kind, once somebody has posted on
+-- it. Matched by seed and jsonb equality, never sc_config_key (see dailies).
+create or replace view public.daily_games
+  with (security_invoker = true) as
+select d.day, g.game_key, d.kind
+from public.dailies d
+join public.games g
+  on g.seed = (d.settings ->> 'seed')::integer
+ and (g.settings_json - array['seed', 'autoplay']) = (d.settings - array['seed', 'autoplay']);
+
+-- ---------------------------------------------------------------------------
+-- game_embargoes: the embargo in force on each map: the latest of
+-- games.embargo_until, the end of a live campaign week the map is a node of
+-- (Monday 00:00 UTC, as campaign_scores counts), and the end of a live day the
+-- map is the daily of (the next 00:00 UTC). Derived, because a node's or a
+-- day's games row does not exist when its week or day is written. Only live
+-- weeks and days are read. Read by public_replays and game_summary.
 -- ---------------------------------------------------------------------------
 create or replace view public.game_embargoes
   with (security_invoker = true) as
 select
   g.game_key,
-  greatest(g.embargo_until, camp.ends_at) as embargo_until
+  greatest(g.embargo_until, camp.ends_at, daily.ends_at) as embargo_until
 from public.games g
 left join lateral (
   select max((cg.week_start + 7)::timestamp at time zone 'UTC') as ends_at
   from public.campaign_games cg
   where cg.game_key = g.game_key
     and (cg.week_start + 7)::timestamp at time zone 'UTC' > now()
-) camp on true;
+) camp on true
+left join lateral (
+  select max((dg.day + 1)::timestamp at time zone 'UTC') as ends_at
+  from public.daily_games dg
+  where dg.game_key = g.game_key
+    and (dg.day + 1)::timestamp at time zone 'UTC' > now()
+) daily on true;
 
 -- ---------------------------------------------------------------------------
 -- public_replays: the only game_logs rows a visitor can read. A replay is public
@@ -816,6 +864,7 @@ alter table public.bot_scores enable row level security;
 alter table public.game_logs enable row level security;
 alter table public.score_checks enable row level security;
 alter table public.campaigns enable row level security;
+alter table public.dailies enable row level security;
 alter table public.playstyle_readings enable row level security;
 
 drop policy if exists "users public read"    on public.users;
@@ -832,6 +881,7 @@ drop policy if exists "bot_scores public read" on public.bot_scores;
 drop policy if exists "game_logs public insert" on public.game_logs;   -- superseded by the function
 drop policy if exists "score_checks public read" on public.score_checks;
 drop policy if exists "campaigns public read" on public.campaigns;
+drop policy if exists "dailies public read up to today" on public.dailies;
 drop policy if exists "playstyle_readings public read" on public.playstyle_readings;
 
 create policy "users public read"    on public.users  for select using (true);
@@ -849,6 +899,9 @@ create policy "config_tags public insert" on public.config_tags for insert with 
 create policy "bot_scores public read" on public.bot_scores for select using (true);
 create policy "score_checks public read" on public.score_checks for select using (true);
 create policy "campaigns public read" on public.campaigns for select using (true);
+-- A day is made a day ahead: hidden until it starts (UTC).
+create policy "dailies public read up to today" on public.dailies
+  for select using (day <= (now() at time zone 'UTC')::date);
 create policy "playstyle_readings public read" on public.playstyle_readings
   for select using (true);
 
@@ -868,7 +921,8 @@ grant select on public.users, public.games, public.scores, public.configs,
   public.bot_scores, public.score_checks, public.public_replays,
   public.counted_scores, public.crown_holders, public.crown_steals,
   public.campaigns, public.campaign_games, public.campaign_scores,
-  public.game_embargoes, public.playstyle_readings
+  public.game_embargoes, public.playstyle_readings, public.dailies,
+  public.daily_games
   to anon, authenticated;
 grant select on public.config_tag_counts to anon, authenticated;
 grant insert on public.users, public.games, public.configs,
@@ -900,6 +954,8 @@ grant select, insert, update on public.score_checks to service_role;
 -- removes one. It counts last week's players off counted_scores.
 grant select, insert, delete on public.campaigns to service_role;
 grant select on public.counted_scores to service_role;
+-- tools/daily.py writes each day's map, after checking it is not made yet.
+grant select, insert on public.dailies to service_role;
 -- The workers read replays and prune superseded ones; netlify/functions/log.mjs
 -- inserts.
 grant select, insert, delete on public.game_logs to service_role;
@@ -908,7 +964,7 @@ grant select on public.public_watchable_replays to service_role;
 -- ...and what that view reaches. Owner rights stop at the first security_invoker
 -- view in a chain: game_embargoes reads campaign_games as the caller.
 -- game_embargoes is listed against the day public_replays turns security_invoker.
-grant select on public.game_embargoes, public.campaign_games to service_role;
+grant select on public.game_embargoes, public.campaign_games, public.daily_games to service_role;
 -- tools/playstyle_worker.py: reads public replays, writes one reading per match,
 -- and prunes a reading whose replay is no longer public.
 grant select on public.public_replays to service_role;

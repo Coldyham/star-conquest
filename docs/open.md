@@ -16,6 +16,20 @@ ships or is dropped, delete its line here (and add it to
 - gauntlet.md · Targets on lanes; the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
+- daily.md · First tries: the game counts local attempts at a day's key and stamps the count on the score, and the board marks first-try wins. Also: offering `lane_turns` on the board's gauntlet form. *On the board*, *Ship speed follows the map*.
+- other-games.md · Star tiers on every map from the bot column or probe wins. *Star tiers on every map.*
+- other-games.md · A rating against the bot ladder, with monthly seasons, computed offline. *A rating against the bot ladder.*
+- other-games.md · Racing the record holder's ghost: their systems-held curve beside yours. *Racing the record holder's ghost.*
+- other-games.md · Puzzles from real positions as hand-drawn maps; fleets in flight are not representable. *Puzzles from real positions.*
+- other-games.md · Play-by-post chat, rematch, tournaments and groups. *Play-by-post: chat, rematch, tournaments, groups.*
+- other-games.md · A map gallery of hand-drawn maps with plays, records and likes. *A map gallery.*
+- other-games.md · Bonus regions (Risk continents), hand-drawn maps first. *Bonus regions.*
+- other-games.md · Win conditions besides conquest: a turn limit with points, capitals, king of the hill. *Win conditions other than total conquest.*
+- other-games.md · Terrain: fortress systems, nebula lanes, impassable fields, wormholes. *Terrain.*
+- other-games.md · An invest order to speed a system's production (a new `Order` kind). *An invest order.*
+- other-games.md · Teams and co-op against bots. *Teams and co-op.*
+- other-games.md · Per-seat handicaps, never an `AiParams` field. *Per-seat handicaps.*
+- other-games.md · Drafted starting positions. *Drafted starting positions.*
 
 ## Bot research
 - ladder.md · The slow cell (24 nodes, 3 ly/turn) predates actuary; `tests.sim` has no ship-speed flag to re-run it. *Re-running it.*

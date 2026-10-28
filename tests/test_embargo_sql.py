@@ -1,6 +1,6 @@
 """The embargo in force (`game_embargoes`, leaderboard/schema.sql) against a real
-Postgres: a map's own stored reveal date, or the end of a live campaign week it
-is a node of, whichever is later.
+Postgres: a map's own stored reveal date, the end of a live campaign week it
+is a node of, or the end of a live day it is the daily of, whichever is latest.
 
 Opt-in, like test_crowns_sql: set ``SC_TEST_PG``. Campaign weeks are placed
 relative to the server's clock, since "live" is a question about now.
@@ -18,6 +18,8 @@ DB = "sc_embargo_test"
 
 # This week's Monday and the one before it, UTC — the campaign's own boundary.
 _THIS_WEEK = "date_trunc('week', now() at time zone 'UTC')::date"
+# Today, UTC — the daily's own boundary.
+_TODAY = "(now() at time zone 'UTC')::date"
 
 
 def _node(node_id: int, seed: int) -> str:
@@ -46,6 +48,17 @@ def board():
            jsonb_build_array({_node(0, 1)}, {_node(1, 2)}, {_node(2, 3)}), 'lanes', '[]'::jsonb)),
         ({_THIS_WEEK} - 7, jsonb_build_object('nodes',
            jsonb_build_array({_node(0, 4)}), 'lanes', '[]'::jsonb));
+      -- Seed 5 is today's daily, 6 yesterday's, 7 tomorrow's (already made),
+      -- all boards (a row with no kind is one); 8 is today's puzzle.
+      insert into dailies (day, settings, spec, probes, rules_version)
+        select {_TODAY} + d, jsonb_build_object('mode', 'random', 'players', 2, 'nodes', 18,
+                                               'seed', s, 'ship_ly_per_turn', 6.0),
+               '{{}}'::jsonb, '[]'::jsonb, 2
+        from (values (0, 5), (-1, 6), (1, 7)) v(d, s);
+      insert into dailies (day, kind, settings, spec, probes, rules_version)
+        values ({_TODAY}, 'puzzle', jsonb_build_object('mode', 'random', 'players', 2, 'nodes', 18,
+                                                     'seed', 8, 'ship_ly_per_turn', 6.0),
+                '{{}}'::jsonb, '[]'::jsonb, 2);
       insert into users (name) values ('alice');
       insert into games (game_key, mode, players, nodes, seed, settings_json, embargo_until)
         select 'g' || s, 'random', 2, 18, s,
@@ -53,13 +66,14 @@ def board():
                                   'seed', s, 'ship_ly_per_turn', 6),
                e
         from (values (1, null::timestamptz), (2, now() + interval '30 days'),
-                     (3, now() - interval '1 day'), (4, null), (9, null)) v(s, e);
+                     (3, now() - interval '1 day'), (4, null), (5, null), (6, null),
+                     (8, null), (9, null)) v(s, e);
       insert into scores (game_key, user_id, turns, lost, hand, raw_token, match_id)
         select 'g' || s, 1, 30, 0, 30, '', lpad(s::text, 16, '0')
-        from unnest(array[1, 2, 3, 4, 9]) s;
+        from unnest(array[1, 2, 3, 4, 5, 6, 8, 9]) s;
       insert into game_logs (match_id, game_key, turns, finished, won, hand, log)
         select lpad(s::text, 16, '0'), 'g' || s, 30, true, true, 30, 'x'
-        from unnest(array[1, 2, 3, 4, 9]) s;
+        from unnest(array[1, 2, 3, 4, 5, 6, 8, 9]) s;
     """, DB)
     yield DB
     _psql(f"drop database if exists {DB}")
@@ -70,6 +84,7 @@ def test_a_live_campaign_node_is_embargoed_until_its_week_ends(board):
       select game_key,
              case when embargo_until is null then 'none'
                   when embargo_until = ({_THIS_WEEK} + 7)::timestamp at time zone 'UTC' then 'week end'
+                  when embargo_until = ({_TODAY} + 1)::timestamp at time zone 'UTC' then 'day end'
                   when embargo_until > now() then 'stored'
                   else 'lifted' end
       from game_summary order by game_key""", board)
@@ -78,10 +93,36 @@ def test_a_live_campaign_node_is_embargoed_until_its_week_ends(board):
         "g2|stored",     # its own reveal is later than the week's: that one holds
         "g3|week end",   # its own reveal has passed; the week has not
         "g4|none",       # last week's campaign is over
+        "g5|day end",    # today's daily, until midnight UTC
+        "g6|none",       # yesterday's daily is over
+        "g8|day end",    # today's puzzle, the same
         "g9|none",       # on no campaign at all
     ]
 
 
 def test_only_replays_off_embargo_are_public(board):
     rows = _psql("select game_key from public_replays order by game_key", board)
-    assert rows.splitlines() == ["g4", "g9"]
+    assert rows.splitlines() == ["g4", "g6", "g9"]
+
+
+def test_the_public_reads_a_daily_only_once_its_day_has_started(board):
+    rows = _psql(f"set role anon; select day - {_TODAY}, kind from dailies order by day, kind", board)
+    assert rows.splitlines() == ["-1|board", "0|board", "0|puzzle"]
+    # Tomorrow's row is there for the worker, whose key bypasses row security
+    # (Supabase's service_role; the owner here).
+    assert _psql("select count(*) from dailies", board).strip() == "4"
+
+
+def test_a_day_holds_one_daily_of_each_kind(board):
+    rows = _psql("select game_key, kind from daily_games order by game_key", board)
+    assert rows.splitlines() == ["g5|board", "g6|board", "g8|puzzle"]
+    out = subprocess.run(["psql", f"{DSN} dbname={board}", "-q", "-c",
+                          f"insert into dailies (day, kind, settings, spec, probes, rules_version)"
+                          f" values ({_TODAY}, 'puzzle', '{{}}', '{{}}', '[]', 2)"],
+                         capture_output=True, text=True)
+    assert "dailies_pkey" in out.stderr
+    out = subprocess.run(["psql", f"{DSN} dbname={board}", "-q", "-c",
+                          f"insert into dailies (day, kind, settings, spec, probes, rules_version)"
+                          f" values ({_TODAY} + 5, 'chess', '{{}}', '{{}}', '[]', 2)"],
+                         capture_output=True, text=True)
+    assert "dailies_kind_shape" in out.stderr

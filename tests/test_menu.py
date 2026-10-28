@@ -13,6 +13,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
+import pytest
 
 from starconquest import ai, combat, config, mapgen, menu
 from starconquest.menu import MenuState
@@ -601,7 +602,7 @@ def test_combat_knobs_are_gone_from_advanced():
 _CHROME = {"start", "quit", "play_by_post", "save_settings", "load_settings",
            "filename_field", "get_link", "browse_configs", "seed_field",
            "seed_random", "create_map", "clear_map", "ui_size_dec", "ui_size_inc",
-           "tutorial"}
+           "tutorial", "daily_menu"}
 
 
 def test_the_node_stepper_takes_big_steps_past_a_standard_board():
@@ -1733,5 +1734,47 @@ def test_the_stage_list_says_where_progress_lives_on_the_web(monkeypatch, tmp_pa
             canvas = pygame.Rect(0, 0, config.BASE_SCREEN_W, config.BASE_SCREEN_H)
             assert all(canvas.contains(r) for k, r in ms.rects.items()
                        if k.startswith(menu._TUTORIAL_KEYS))
+    finally:
+        pygame.quit()
+
+
+def _open_daily(screen, ms, settings):
+    """Open the Daily list, then draw so its items have rects."""
+    assert _click_key(screen, ms, settings, "daily_menu") is None
+    assert ms.daily_open
+    menu.draw(screen, ms, settings)
+
+
+@pytest.mark.parametrize("key", ["daily", "puzzle"])
+def test_the_daily_list_asks_main_to_fetch(monkeypatch, key):
+    from starconquest import paths
+    screen, ms, settings = _setup()
+    menu.draw(screen, ms, settings)
+    box = ms.rects["daily_menu"]
+    others = [k for k, r in ms.rects.items() if k != "daily_menu" and r.colliderect(box)]
+    assert others == [] and box.right <= config.SCREEN_W
+    _open_daily(screen, ms, settings)
+    assert ms.rects[key].bottom <= box.top
+    others = [k for k, r in ms.rects.items() if k not in ("daily", "puzzle") and r.colliderect(ms.rects[key])]
+    assert others == []
+    assert _click_key(screen, ms, settings, key) == key
+    assert not ms.daily_open
+    menu.draw(screen, ms, settings)
+    assert key not in ms.rects
+    monkeypatch.setattr(paths, "LEADERBOARD_ORIGIN", "")
+    menu.draw(screen, ms, settings)
+    assert "daily_menu" not in ms.rects
+    pygame.quit()
+
+
+def test_the_daily_list_closes_on_its_button_or_esc():
+    screen, ms, settings = _setup()
+    try:
+        _open_daily(screen, ms, settings)
+        assert _click_key(screen, ms, settings, "daily_menu") is None
+        assert not ms.daily_open
+        _open_daily(screen, ms, settings)
+        _keydown(ms, settings, pygame.K_ESCAPE)
+        assert not ms.daily_open
     finally:
         pygame.quit()

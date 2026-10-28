@@ -15,6 +15,7 @@
 import { BOT_LEGACY } from "./bot-stops.mjs";
 import { fold, keyOf } from "./campaign.mjs";
 import { weekAfter, weekParam, weekStart } from "./crowns.mjs";
+import { addDays, bestOnTheDay, dayParam, weekdayOf } from "./daily.mjs";
 import { stageSetup } from "./gauntlet-build.mjs";
 import { hasFog } from "./setup.mjs";
 import { LADDER_ORDER } from "./standings.mjs";
@@ -135,6 +136,36 @@ export function campaignRecord(weeks, name, now = new Date()) {
 }
 
 /**
+ * `{days, won, weeks}` over one kind of daily challenge. `dailyGames` are
+ * `daily_games` rows (`{day, game_key}`) of that kind for the maps the player
+ * has wins on;
+ * `field` every counted score on those maps, `{game_key, user_id, user_name,
+ * turns, lost, hand, submitted_at}`. As on daily.html, a win autoplayed
+ * through (`hand` 0) doesn't count.
+ *
+ * `days` is how many days' maps the player has won, whenever. `won` is how
+ * many days they won outright: the best score posted on the day
+ * (`bestOnTheDay`), counted only once the day has ended. `weeks` is how many
+ * Monday-to-Sunday weeks they have won every day of; a day won later from the
+ * archive counts, as it mends a streak.
+ */
+export function dailyRecord(userId, dailyGames, field, now = new Date()) {
+  const dayOf = new Map(dailyGames.map((game) => [game.game_key, game.day]));
+  const onDaily = field.filter((score) => dayOf.has(score.game_key) && score.hand > 0);
+  const days = new Set(onDaily.filter((score) => score.user_id === userId).map((score) => dayOf.get(score.game_key)));
+  const today = dayParam(now);
+  let won = 0;
+  for (const day of days) {
+    if (day >= today) continue;
+    const best = bestOnTheDay(onDaily.filter((score) => dayOf.get(score.game_key) === day), day);
+    if (best && best.user_id === userId) won += 1;
+  }
+  const mondays = new Set([...days].map((day) => addDays(day, -weekdayOf(day))));
+  const weeks = [...mondays].filter((monday) => [0, 1, 2, 3, 4, 5, 6].every((n) => days.has(addDays(monday, n))));
+  return { days: days.size, won, weeks: weeks.length };
+}
+
+/**
  * How many listed gauntlets the player has cleared: a counted win on the last
  * stage, the board's only record of a run (progress lives in each player's own
  * game). `gauntlets` are `{gauntlet_id, stages}`; `setups` the settings_json
@@ -154,13 +185,13 @@ export function gauntletsCleared(gauntlets, setups) {
  * Everything the badges read, from what badges-card.mjs fetched. `wins` are
  * the player's counted scores joined to their map: `{game_key, mode,
  * settings_json, bots}`. A part that could not be read (`pbp`, `gauntletsMade`
- * when a function is down, `gauntletsCleared` without the table) stays null, and its badges show as unknown rather
- * than locked.
+ * when a function is down, `gauntletsCleared` and `daily` without their
+ * tables) stays null, and its badges show as unknown rather than locked.
  */
 export function factsFrom({
   wins = [], opened = new Set(), joined = new Set(), drawings = 0, steals = 0, stealWeeks = 0,
-  campaign = { homes: 0, wins: 0 }, gauntletsMade = null, gauntletsCleared: cleared = 0,
-  pbp = null,
+  campaign = { homes: 0, wins: 0 }, daily = { days: 0, won: 0, weeks: 0 }, puzzle = { days: 0, won: 0, weeks: 0 },
+  gauntletsMade = null, gauntletsCleared: cleared = 0, pbp = null,
 } = {}) {
   const custom = wins.filter((win) => win.settings_json?.custom_map);
   const generated = wins.filter((win) => !win.settings_json?.custom_map);
@@ -174,6 +205,12 @@ export function factsFrom({
     stealWeeks,
     homes: campaign.homes,
     campaignWins: campaign.wins,
+    dailyDays: daily ? daily.days : null,
+    dailyWon: daily ? daily.won : null,
+    dailyWeeks: daily ? daily.weeks : null,
+    puzzleDays: puzzle ? puzzle.days : null,
+    puzzleWon: puzzle ? puzzle.won : null,
+    puzzleWeeks: puzzle ? puzzle.weeks : null,
     tutorial: wins.some((win) => TUTORIAL_FINAL_KEYS.includes(win.game_key)),
     gauntletsMade,
     gauntletsCleared: cleared,
@@ -210,6 +247,22 @@ export const BADGES = [
     how: "Claim a home on the weekly campaign map.", has: (f) => f.homes > 0 },
   { id: "warlord", group: "Campaign", title: "Warlord",
     how: "Hold the most campaign nodes when a week closes.", has: (f) => f.campaignWins > 0 },
+
+  { id: "daily", group: "Daily", title: "Daily done",
+    how: "Win a daily challenge, any day's, and post the score.", has: (f) => atLeastOne(f.dailyDays) },
+  { id: "daily-winner", group: "Daily", title: "Winner of the day",
+    how: "Post the best score on a daily challenge before its day ends.", has: (f) => atLeastOne(f.dailyWon) },
+  { id: "full-week", group: "Daily", title: "Full week",
+    how: "Win all seven dailies of one Monday-to-Sunday week (days won later from the archive count).",
+    has: (f) => atLeastOne(f.dailyWeeks) },
+
+  { id: "puzzle", group: "Daily puzzle", title: "Puzzle done",
+    how: "Win a daily puzzle, any day's, and post the score.", has: (f) => atLeastOne(f.puzzleDays) },
+  { id: "puzzle-winner", group: "Daily puzzle", title: "Puzzle winner of the day",
+    how: "Post the best score on a daily puzzle before its day ends.", has: (f) => atLeastOne(f.puzzleWon) },
+  { id: "full-puzzle-week", group: "Daily puzzle", title: "Full puzzle week",
+    how: "Win all seven puzzles of one Monday-to-Sunday week (days won later from the archive count).",
+    has: (f) => atLeastOne(f.puzzleWeeks) },
 
   { id: "graduate", group: "Gauntlets", title: "Graduate",
     how: "Win the tutorial's last stage and post the score.", has: (f) => f.tutorial },

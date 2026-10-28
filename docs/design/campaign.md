@@ -84,8 +84,10 @@ campaign fleets proposal (decided against). Split out of
     was made rather than on whether one exists.
   - **A campaign node is embargoed until its week ends, and that is derived,
     never stored.** `game_embargoes` (schema.sql) is the embargo in force:
-    the later of `games.embargo_until` and the end of any live campaign week
-    the map is a node of (matched through `campaign_games`). `public_replays`
+    the latest of `games.embargo_until`, the end of any live campaign week
+    the map is a node of (matched through `campaign_games`), and the end of a
+    live day the map is the daily of (`daily_games`, [`daily.md`](daily.md),
+    "The day's winner"). `public_replays`
     and `game_summary.embargo_until` both read it, so every page that honours
     an embargo honours this one with no JS of its own. It cannot be stamped on
     the row instead: a node's seed is fresh, so its `games` row is created

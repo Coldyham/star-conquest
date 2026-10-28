@@ -168,9 +168,9 @@ def test_a_role_can_read_what_its_invoker_views_read(role):
 
 def test_the_view_scrape_sees_the_chain():
     views = _views()
-    assert views["game_embargoes"] == (True, {"games", "campaign_games"})
+    assert views["game_embargoes"] == (True, {"games", "campaign_games", "daily_games"})
     assert views["public_replays"][0] is False
-    assert "campaign_games" in _invoker_reads({"public_watchable_replays"})
+    assert {"campaign_games", "daily_games", "dailies"} <= _invoker_reads({"public_watchable_replays"})
 
 def test_the_scrape_actually_found_the_callers():
     """A regex that silently matches nothing would make the test above vacuous."""
