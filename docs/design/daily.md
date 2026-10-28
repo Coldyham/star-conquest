@@ -7,7 +7,7 @@ puzzle, Polytopia, Slay the Spire's Daily Climb); the weekly campaign is a
 week's contest, not a habit. Built: the dealer's `lane_turns` rule, the worker
 (`tools/daily.py`, `tools/daily_spec.json`), the `dailies` table and
 `daily_games` view, `/api/daily`, the game's side (`starconquest/daily.py`, the
-menu's Daily button, `#daily`) and `daily.html`. The daily puzzle beside it
+menu's Daily menu, `#daily`) and `daily.html`. The daily puzzle beside it
 was built on 2026-10-28 too (see "The daily puzzle"). First tries are not built
 (see "On the board" and [`open.md`](open.md)).
 
@@ -527,7 +527,7 @@ weakest first as the worker plays them:
   recording under `results/daily/puzzle/`. `--kind` makes one kind only. A
   puzzle's row's `spec` names its `opponent`.
 - **The game**: `/api/daily?kind=puzzle` (no `kind` is the board, so an older
-  game still gets its board), a Puzzle button beside Daily on the menu, and
+  game still gets its board), a Daily puzzle item under the menu's Daily button, and
   `#puzzle` (`#puzzle=<day>`). `daily.remember` keeps each key's day and kind
   (a day alone, from before the puzzle, is a board), a fortnight of both.
   Ironman and *Copy daily result* as for the board, with the line naming the

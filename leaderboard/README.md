@@ -789,7 +789,7 @@ test bot within a turn cap that grows from 80 to 110.
   `dailies`; the secret key is its only writer). The policy hides a day until it
   starts, so tomorrow's map can't be practised.
 - **The game fetches it** (`/api/daily`, read-only with the publishable key):
-  the menu's Daily button or a `#daily` / `#daily=<day>` link puts the setup on
+  the menu's Daily ▸ Daily board or a `#daily` / `#daily=<day>` link puts the setup on
   the menu. A daily plays ironman, and its win offers *Copy daily result*, a
   spoiler-free line, where other maps offer *Challenge a friend*.
 - **Embargoed until the day ends** (`game_embargoes`, as a campaign node is
@@ -807,7 +807,7 @@ test bot within a turn cap that grows from 80 to 110.
 - **The daily puzzle beside it** (`puzzle.html`, a tab of the same page; a
   `dailies` row of `kind` `puzzle`): a 5-8 system duel with no fog, against one
   opponent per weekday, won in the fewest turns. The worker makes it with the
-  board, the game opens it with the menu's Puzzle button or `#puzzle` /
+  board, the game opens it with the menu's Daily ▸ Daily puzzle or `#puzzle` /
   `#puzzle=<day>` (`/api/daily?kind=puzzle`), and it has its own embargo,
   standings, streaks and badges.
 

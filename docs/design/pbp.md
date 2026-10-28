@@ -341,8 +341,8 @@ other turn does.
 ## Public matches and the lobby
 
 A match opened with **Publicly joinable** ticked is listed on the leaderboard's
-lobby page, `pbp.html`. The game's **Shared matches** footer button (web only)
-opens it. It shows three groups: open invitations, the matches this browser
+lobby page, `pbp.html`. The game's **Leaderboard ▸ Shared matches** footer menu item (web
+only) opens it. It shows three groups: open invitations, the matches this browser
 holds a seat in, and finished results. A stranger's match that is under way is
 not listed at all: it offers nothing to do, and with no accounts nobody can tell
 from it whether they are in it. `?action=list` returns only public rows. A
