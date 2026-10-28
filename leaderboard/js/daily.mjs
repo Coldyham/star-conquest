@@ -59,29 +59,53 @@ export function standings(rows) {
   return [...best.values()].sort(better);
 }
 
+/** Consecutive days in `days` (a Set) ending on `today`, or on the day
+ * before when `today` is not in it yet (a streak not yet extended today is
+ * still alive). */
+function run(days, today) {
+  let day = days.has(today) ? today : addDays(today, -1);
+  let n = 0;
+  while (days.has(day)) {
+    n += 1;
+    day = addDays(day, -1);
+  }
+  return n;
+}
+
 /**
- * Each name's streak of consecutive days won, ending on `today` or the day
- * before (a streak not yet extended today is still alive). `wins` is
- * `[{name, day}]`: a counted win on a day's map, posted within that day.
- * Returns `[{name, days}]`, longest first, then by name.
+ * Each name's streaks, ending on `today` or the day before. `wins` is
+ * `[{name, day, onTheDay}]`: a counted win on a day's map, and whether it was
+ * posted within that day.
+ *
+ * `days` is the mended streak: a missed day counts once it is won later, from
+ * the archive. `onTheDay` is the true streak: only wins posted on the day
+ * itself, while the map was new and its replays still embargoed.
+ * Returns `[{name, days, onTheDay}]` with `days` > 0, longest first, then the
+ * longer true streak, then by name.
  */
 export function streaks(wins, today) {
   const byName = new Map();
-  for (const { name, day } of wins) {
-    if (!byName.has(name)) byName.set(name, new Set());
-    byName.get(name).add(day);
+  for (const { name, day, onTheDay } of wins) {
+    if (!byName.has(name)) byName.set(name, { any: new Set(), onDay: new Set() });
+    const sets = byName.get(name);
+    sets.any.add(day);
+    if (onTheDay) sets.onDay.add(day);
   }
   const out = [];
-  for (const [name, days] of byName) {
-    let day = days.has(today) ? today : addDays(today, -1);
-    let n = 0;
-    while (days.has(day)) {
-      n += 1;
-      day = addDays(day, -1);
-    }
-    if (n > 0) out.push({ name, days: n });
+  for (const [name, sets] of byName) {
+    const days = run(sets.any, today);
+    if (days > 0) out.push({ name, days, onTheDay: run(sets.onDay, today) });
   }
-  return out.sort((a, b) => b.days - a.days || a.name.localeCompare(b.name));
+  return out.sort((a, b) => b.days - a.days || b.onTheDay - a.onTheDay || a.name.localeCompare(b.name));
+}
+
+/**
+ * The best counted win posted within `day`, while its map was embargoed: the
+ * day's own winner, which later scores (made with the replays out) can beat
+ * on the standings but never take from it. Null when nobody won on the day.
+ */
+export function bestOnTheDay(rows, day) {
+  return standings(rows.filter((row) => postedOn(row.submitted_at, day)))[0] || null;
 }
 
 /** Whether a score posted at `submittedAt` was posted within `day` (UTC). */

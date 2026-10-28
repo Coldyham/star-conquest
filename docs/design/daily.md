@@ -316,28 +316,62 @@ create table if not exists public.dailies (
 `daily.html` (joins `render_board.PAGES`), on `base.html` like every page:
 
 - **Today**: the setup in a line, the opponents, a Play link (`../game/#daily`)
-  and a link to its map page once somebody has posted, then the standings from
-  `counted_scores` (`js/daily.mjs`'s `standings`: each name's best win with a
-  turn played by hand), so verification, the 24-hour grace and the
-  first-post-of-a-match rule apply unchanged.
+  and a link to its map page once somebody has posted. While the day runs the
+  map is embargoed (see "The day's winner"), so the page shows what game.html
+  shows of an embargoed map: who is ahead, by how many turns, and how many
+  scores are posted (`game_summary`), and it never fetches that day's turns or
+  ships lost.
+- **A past day**: every counted win (`js/daily.mjs`'s `standings`: each name's
+  best with a turn played by hand), the best posted on the day marked *Best on
+  the day*, and any posted after it marked *later*. Verification, the 24-hour
+  grace and the first-post-of-a-match rule apply unchanged.
 - **First tries (not built).** People will replay, and posting is opt-in, so
   the board cannot know a first attempt. Proposed: the game counts local attempts at the
   day's key and stamps the count on the score as per-score metadata
   (`Challenge`, with its column joining the grant if it gets one), and the
   board marks "first try" wins. It is trusted, as local bests are, and ranking
   stays by the best score, so cheating earns no more than it does on any map.
-- **Streaks**: consecutive UTC days on which a name has a counted win on the
-  day's map, posted within that day, ending today or yesterday (a streak not yet
-  extended today is still alive). Derived from `counted_scores` through
-  `daily_games` over the last 60 days (`streaks`), never stored, like crowns. Names are not authenticated, so a streak is as
-  trustworthy as a crown.
+- **Streaks are mendable** (the author, 2026-10-28). A streak is consecutive
+  UTC days on each of which a name has a counted win on the day's map, ending
+  today or yesterday (a streak not yet extended today is still alive). A missed
+  day counts once it is won later from the archive, so a streak can be mended.
+  The **true streak** counts only days won on the day itself, while the map was
+  new and embargoed; it is the figure's title, so hovering or tapping shows it
+  (tip.mjs), and a mended streak reads "3 days (1 true)". Both are derived from
+  `counted_scores` through `daily_games` over the last 60 days (`streaks`),
+  never stored, like crowns. Names are not authenticated, so a streak is as
+  trustworthy as a crown. A day mended after it falls out of the 60-day window
+  no longer extends a streak.
 - **The week**: Monday to Sunday with each day's system range, the days made
   so far linked. **The archive**: a day navigator (`daily.html?day=`, never a
   day not yet started), whose Play opens `#daily=<day>`. A past day stays
-  playable and scores normally; it only stops counting toward streaks.
+  playable and scores normally, and winning it mends a streak.
 - **The bot column comes free.** Once anyone posts on a day's map, the hourly
   `bot_replay` gives it a bot column, so "the best bot did 31 turns" shows
   there too.
+
+## The day's winner
+
+**A day's map is embargoed until the day ends** (the author, 2026-10-28):
+replays and every score but the leader stay hidden until the next midnight
+UTC, as a live campaign node's are until its week ends (`campaign.md`,
+"Crowns, the weekly campaign and embargoes").
+
+- **Derived, never stored.** `game_embargoes` takes the end of a live day the
+  map is the daily of (`daily_games`), beside the stored reveal and a live
+  campaign week, so `public_replays`, `game_summary` and every page that
+  honours an embargo honour this one with no code of its own. A day's games
+  row is created by whoever posts first, after the day was made, so the
+  embargo cannot be stamped on it.
+- **It gives the day a winner for free.** Nobody can watch the leader's replay
+  until the day is over, so the best score posted on the day was made blind,
+  and it stays the day's result after the replays come out. The map page names
+  it *Led at reveal* (`standings.embargoLiftedAt`'s `dailyDay`, read off
+  `daily_games`), and daily.html marks it *Best on the day* (`bestOnTheDay`).
+  Later scores still rank on the standings, marked *later*.
+- **Tested against Postgres** (`tests/test_embargo_sql.py`, opt-in with
+  `SC_TEST_PG`): today's daily is embargoed to midnight, yesterday's is not,
+  and its replays are public again.
 
 ## Interactions
 

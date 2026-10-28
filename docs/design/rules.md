@@ -357,8 +357,15 @@ already resolve simultaneously. The rationale for each rule is in
   (`starconquest/daily.py`), which applies the setup to the menu as a link
   does, remembers it by challenge key (`daily.remember`), plays it ironman and
   copies a result line instead of a challenge link. `daily_games` matches a day
-  to its maps by jsonb equality; standings and streaks are derived from
-  `counted_scores` on `daily.html`. Detail: `docs/design/daily.md`.
+  to its maps by jsonb equality. **A day's map is embargoed until the day ends**
+  (`game_embargoes`, as a live campaign week is), so the best score posted on
+  the day is its winner: the map page's *Led at reveal* (`embargoLiftedAt`'s
+  `dailyDay`) and `daily.html`'s *Best on the day* (`bestOnTheDay`). While the
+  day runs, `daily.html` shows only `game_summary`'s leader and never fetches
+  that day's turns or ships lost. Streaks are derived from `counted_scores`,
+  never stored: the mended streak counts a missed day won later, the true one
+  only days won on the day (`js/daily.mjs`'s `streaks`). Detail:
+  `docs/design/daily.md`.
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's

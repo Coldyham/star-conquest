@@ -791,11 +791,18 @@ test bot within a turn cap that grows from 80 to 110.
   the menu's Daily button or a `#daily` / `#daily=<day>` link puts the setup on
   the menu. A daily plays ironman, and its win offers *Copy daily result*, a
   spoiler-free line, where other maps offer *Challenge a friend*.
+- **Embargoed until the day ends** (`game_embargoes`, as a campaign node is
+  for its week): replays and every score but the leader stay hidden, so the
+  best score posted on the day is the day's winner. The map page marks it *Led
+  at reveal*, and the daily page *Best on the day*; later scores rank too, marked
+  *later*.
 - **The page derives the rest**: the day's standings (each player's best
-  counted win), the week, and streaks (consecutive days won on the day, posted
-  within it), from `counted_scores` through `daily_games` (seed plus the setup
-  compared as jsonb, as `campaign_games` does). Past days stay playable via
-  `daily.html?day=`. Tests: `tests/test_daily.py`, `tests/daily.test.mjs`.
+  counted win), the week, and streaks from `counted_scores` through
+  `daily_games` (seed plus the setup compared as jsonb, as `campaign_games`
+  does). A streak is mended by winning a missed day later; the true streak, days
+  won on the day itself, is the figure's title (hover or tap). Past days stay
+  playable via `daily.html?day=`. Tests: `tests/test_daily.py`,
+  `tests/daily.test.mjs`, `tests/test_embargo_sql.py`.
 
 ## Badges
 

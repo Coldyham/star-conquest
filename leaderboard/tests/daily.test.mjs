@@ -6,7 +6,7 @@ import test from "node:test";
 
 import handler, { askedDay } from "../netlify/functions/daily.mjs";
 import {
-  addDays, dayParam, postedOn, shortDate, standings, streaks, systemsOn, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, postedOn, shortDate, standings, streaks, systemsOn, validDay, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -38,14 +38,39 @@ test("standings keep each player's best counted win, best first", () => {
 });
 
 test("a streak counts back from today, or yesterday when today is not won yet", () => {
+  const on = (name, day) => ({ name, day, onTheDay: true });
   const wins = [
-    { name: "ann", day: "2026-10-26" }, { name: "ann", day: "2026-10-27" },
-    { name: "ann", day: "2026-10-28" },
-    { name: "bo", day: "2026-10-26" }, { name: "bo", day: "2026-10-27" },
-    { name: "cy", day: "2026-10-25" },
+    on("ann", "2026-10-26"), on("ann", "2026-10-27"), on("ann", "2026-10-28"),
+    on("bo", "2026-10-26"), on("bo", "2026-10-27"),
+    on("cy", "2026-10-25"),
   ];
-  assert.deepEqual(streaks(wins, "2026-10-28"), [{ name: "ann", days: 3 }, { name: "bo", days: 2 }]);
-  assert.deepEqual(streaks(wins, "2026-10-29"), [{ name: "ann", days: 3 }]);
+  assert.deepEqual(streaks(wins, "2026-10-28"),
+    [{ name: "ann", days: 3, onTheDay: 3 }, { name: "bo", days: 2, onTheDay: 2 }]);
+  assert.deepEqual(streaks(wins, "2026-10-29"), [{ name: "ann", days: 3, onTheDay: 3 }]);
+});
+
+test("a missed day won later mends the streak, but not the true one", () => {
+  const wins = [
+    { name: "ann", day: "2026-10-25", onTheDay: true },
+    { name: "ann", day: "2026-10-26", onTheDay: false },   // won from the archive
+    { name: "ann", day: "2026-10-27", onTheDay: true },
+    { name: "ann", day: "2026-10-28", onTheDay: true },
+    { name: "bo", day: "2026-10-27", onTheDay: false },
+    { name: "bo", day: "2026-10-28", onTheDay: false },
+  ];
+  assert.deepEqual(streaks(wins, "2026-10-28"),
+    [{ name: "ann", days: 4, onTheDay: 2 }, { name: "bo", days: 2, onTheDay: 0 }]);
+});
+
+test("the best on the day is the best posted within it, whatever came later", () => {
+  const rows = [
+    { user_name: "ann", turns: 40, lost: 5, hand: 40, submitted_at: "2026-10-28T10:00:00Z" },
+    { user_name: "bo", turns: 30, lost: 2, hand: 30, submitted_at: "2026-10-29T09:00:00Z" },
+    { user_name: "cy", turns: 42, lost: 0, hand: 42, submitted_at: "2026-10-28T23:00:00Z" },
+  ];
+  assert.equal(bestOnTheDay(rows, "2026-10-28").user_name, "ann");
+  assert.equal(standings(rows)[0].user_name, "bo");
+  assert.equal(bestOnTheDay(rows, "2026-10-27"), null);
 });
 
 test("the function answers today's day unless asked for another", () => {

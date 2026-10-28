@@ -240,8 +240,9 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   rule.
 - **The daily is made by the worker and stored, never made by the game**
   (`tools/daily.py` into `dailies`, a day ahead, readable once its day starts;
-  the game asks `/api/daily`). A day is never remade. Standings and streaks are
-  derived. `docs/design/daily.md`.
+  the game asks `/api/daily`). A day is never remade. A day's map is embargoed
+  until the day ends (`game_embargoes`); its winner, standings and streaks
+  (mended, and true) are derived. `docs/design/daily.md`.
 - **The game and board are one site** (`/game/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. `tools/pwa/sw.js` never touches `/api/`. The

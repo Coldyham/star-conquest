@@ -452,24 +452,31 @@ join public.games g
  and (g.settings_json - array['seed', 'autoplay']) = (d.settings - array['seed', 'autoplay']);
 
 -- ---------------------------------------------------------------------------
--- game_embargoes: the embargo in force on each map: the later of
--- games.embargo_until and the end of a live campaign week the map is a node of
--- (Monday 00:00 UTC, as campaign_scores counts). Derived, because a node's games
--- row does not exist when its week is written. Only live weeks are read. Read by
--- public_replays and game_summary.
+-- game_embargoes: the embargo in force on each map: the latest of
+-- games.embargo_until, the end of a live campaign week the map is a node of
+-- (Monday 00:00 UTC, as campaign_scores counts), and the end of a live day the
+-- map is the daily of (the next 00:00 UTC). Derived, because a node's or a
+-- day's games row does not exist when its week or day is written. Only live
+-- weeks and days are read. Read by public_replays and game_summary.
 -- ---------------------------------------------------------------------------
 create or replace view public.game_embargoes
   with (security_invoker = true) as
 select
   g.game_key,
-  greatest(g.embargo_until, camp.ends_at) as embargo_until
+  greatest(g.embargo_until, camp.ends_at, daily.ends_at) as embargo_until
 from public.games g
 left join lateral (
   select max((cg.week_start + 7)::timestamp at time zone 'UTC') as ends_at
   from public.campaign_games cg
   where cg.game_key = g.game_key
     and (cg.week_start + 7)::timestamp at time zone 'UTC' > now()
-) camp on true;
+) camp on true
+left join lateral (
+  select max((dg.day + 1)::timestamp at time zone 'UTC') as ends_at
+  from public.daily_games dg
+  where dg.game_key = g.game_key
+    and (dg.day + 1)::timestamp at time zone 'UTC' > now()
+) daily on true;
 
 -- ---------------------------------------------------------------------------
 -- public_replays: the only game_logs rows a visitor can read. A replay is public
@@ -946,7 +953,7 @@ grant select on public.public_watchable_replays to service_role;
 -- ...and what that view reaches. Owner rights stop at the first security_invoker
 -- view in a chain: game_embargoes reads campaign_games as the caller.
 -- game_embargoes is listed against the day public_replays turns security_invoker.
-grant select on public.game_embargoes, public.campaign_games to service_role;
+grant select on public.game_embargoes, public.campaign_games, public.daily_games to service_role;
 -- tools/playstyle_worker.py: reads public replays, writes one reading per match,
 -- and prunes a reading whose replay is no longer public.
 grant select on public.public_replays to service_role;
