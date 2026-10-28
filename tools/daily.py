@@ -5,8 +5,8 @@ Every UTC day has two maps, each the same for everyone: the **board** and the
 **puzzle** (a row's ``kind``). The board is dealt by ``starconquest.dealer``
 from ``tools/daily_spec.json`` with the weekday's systems and players added
 (the board grows from Monday to Sunday), its ship speed fitted so the median
-lane takes 2-5 turns (the ``lane_turns`` rule), and its opponents drawn at one
-depth chosen for the day. The puzzle is a small duel dealt from
+lane takes 2-5 turns (the ``lane_turns`` rule), and each opponent's seat drawn
+on its own from every allowed bot. The puzzle is a small duel dealt from
 ``tools/puzzle_spec.json`` against the weekday's one opponent
 (``PUZZLE_OPPONENTS``). A candidate is kept only once a generated-gauntlet probe
 has won it from the human's seat within the day's turn cap; the first such
@@ -123,17 +123,16 @@ def _seat_puzzle_opponent(settings: Settings, weekday: int) -> Settings:
 
 
 def candidates(day: dt.date, spec: dealer.Spec | None = None, limit: int = MAX_CANDIDATES, trial: str = "",
-               kind: str = "board"):
-    """``(depth, [settings, ...])``: the day's opponents' depth and its
-    candidates in the order they are tried. A pure function of the day, the
-    spec, the trial and the kind, so a rerun deals the same ones. A puzzle has
-    one opponent, so no depth is drawn for it (0)."""
+               kind: str = "board") -> list[Settings]:
+    """The day's candidates in the order they are tried. A pure function of the
+    day, the spec, the trial and the kind, so a rerun deals the same ones. A
+    board's every opponent seat is drawn on its own from the allowed bots, so
+    any mix can be dealt on any day; a puzzle has the weekday's one opponent."""
     spec = spec if spec is not None else day_spec(day, kind=kind)
     rng = day_rng(day, trial, kind)
     if kind == "puzzle":
-        return 0.0, [_seat_puzzle_opponent(dealer.deal(spec, rng), day.weekday()) for _ in range(limit)]
-    depth = round(rng.random(), 4)
-    return depth, [dealer.deal(spec, rng, depth) for _ in range(limit)]
+        return [_seat_puzzle_opponent(dealer.deal(spec, rng), day.weekday()) for _ in range(limit)]
+    return [dealer.deal(spec, rng, None) for _ in range(limit)]
 
 
 def _load(path: Path) -> list[dict]:
@@ -172,7 +171,7 @@ def make(day: dt.date, results: Path = RESULTS, limit: int = MAX_CANDIDATES,
     w = day.weekday()
     cap = turn_cap(w, kind)
     spec = day_spec(day, kind=kind)
-    depth, cands = candidates(day, spec, limit, trial, kind)
+    cands = candidates(day, spec, limit, trial, kind)
     path = record_path(day, results, trial, kind)
     path.parent.mkdir(parents=True, exist_ok=True)
     done = {(r["candidate"], r["bot"]): r for r in _load(path)}
@@ -195,7 +194,7 @@ def make(day: dt.date, results: Path = RESULTS, limit: int = MAX_CANDIDATES,
             out(f"  {day} {kind} candidate {i + 1}: {dealer.describe(settings)} -> "
                 + (f"won by {best['bot']} in {best['turns']}" if best else f"no probe win within {cap}"))
             if best:
-                spec_out = {**spec.to_dict(), "depth": depth, "candidate": i, "turn_cap": cap}
+                spec_out = {**spec.to_dict(), "candidate": i, "turn_cap": cap}
                 if kind == "puzzle":
                     spec_out["opponent"] = PUZZLE_OPPONENTS[w]
                 return {"day": day.isoformat(), "kind": kind, "settings": stage, "spec": spec_out,

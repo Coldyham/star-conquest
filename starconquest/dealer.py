@@ -4,7 +4,9 @@ A **spec** says how many stages a generated gauntlet has and which setups are
 allowed: a knob fixed, kept in a range, drawn from a list or kept off some
 values; which bots may sit in the opponents' seats; and whether a knob nothing
 names is rolled or left at its default. ``deal`` turns a spec, an rng and a
-depth (0 for the first stage, 1 for the last) into one ``Settings``.
+depth (0 for the first stage, 1 for the last) into one ``Settings``; with no
+depth, each opponent's seat is drawn on its own from every allowed bot (the
+daily's board, ``tools/daily.py``).
 ``tools/gauntlet_gen.py`` deals candidates, plays bots on them and picks a
 rising sequence. Reasons and the rest of the plan: ``docs/design/gauntlet.md``,
 "Generated gauntlets".
@@ -334,12 +336,13 @@ def _seat_bot(pool: list[str], depth: float, rng: random.Random) -> str:
     return pool[max(0, min(len(pool) - 1, at))]
 
 
-def deal(spec: Spec, rng: random.Random, depth: float = 0.0) -> Settings:
+def deal(spec: Spec, rng: random.Random, depth: float | None = 0.0) -> Settings:
     """One setup ``spec`` allows, drawn from ``rng``, its opponents picked for
-    ``depth`` (0 the first stage, 1 the last). Raises ValueError when
-    ``MAX_ATTEMPTS`` draws find none (``problems`` names a spec that can never
-    deal; this is the rest)."""
-    depth = max(0.0, min(1.0, depth))
+    ``depth`` (0 the first stage, 1 the last), or with ``depth`` None each seat
+    drawn evenly from every allowed bot, so any mix can be dealt. Raises
+    ValueError when ``MAX_ATTEMPTS`` draws find none (``problems`` names a spec
+    that can never deal; this is the rest)."""
+    depth = None if depth is None else max(0.0, min(1.0, depth))
     pool = ladder(spec.opponents)
     if not pool:
         raise ValueError("no opponents are allowed")
@@ -353,7 +356,7 @@ def deal(spec: Spec, rng: random.Random, depth: float = 0.0) -> Settings:
     raise ValueError("no setup fits this spec")
 
 
-def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> Settings | None:
+def _attempt(spec: Spec, rng: random.Random, depth: float | None, pool: list[str]) -> Settings | None:
     rules = spec.rules
     settings = Settings.defaults()
     if spec.roll:
@@ -400,7 +403,7 @@ def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> S
         return None
 
     for seat in range(2, settings.players + 1):
-        entry = _seat_bot(pool, depth, rng)
+        entry = rng.choice(pool) if depth is None else _seat_bot(pool, depth, rng)
         name, _, stop = entry.partition(":")
         settings.ai_strategy[seat - 1] = name
         if stop:

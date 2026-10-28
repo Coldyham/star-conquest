@@ -31,11 +31,11 @@ def test_a_weekday_is_read_by_name_or_number():
 
 def test_a_trial_deals_the_same_on_any_week_and_never_the_days_own():
     sat, next_sat = MONDAY + dt.timedelta(days=5), MONDAY + dt.timedelta(days=12)
-    a = [s.challenge_key() for s in daily.candidates(sat, limit=2, trial="7")[1]]
-    assert a == [s.challenge_key() for s in daily.candidates(next_sat, limit=2, trial="7")[1]]
-    assert a != [s.challenge_key() for s in daily.candidates(sat, limit=2, trial="8")[1]]
-    assert a != [s.challenge_key() for s in daily.candidates(sat, limit=2)[1]]
-    _, s = try_daily.deal(sat, "7")
+    a = [s.challenge_key() for s in daily.candidates(sat, limit=2, trial="7")]
+    assert a == [s.challenge_key() for s in daily.candidates(next_sat, limit=2, trial="7")]
+    assert a != [s.challenge_key() for s in daily.candidates(sat, limit=2, trial="8")]
+    assert a != [s.challenge_key() for s in daily.candidates(sat, limit=2)]
+    s = try_daily.deal(sat, "7")
     lo, hi = daily.systems(5)
     assert lo <= s.system_count() <= hi and daily.PLAYERS[5][0] <= s.players <= daily.PLAYERS[5][1]
 
@@ -51,7 +51,7 @@ def test_a_probed_trial_records_apart_from_the_day(tmp_path, monkeypatch):
 
 def test_the_saved_setup_opens_as_the_dealt_map(tmp_path, monkeypatch):
     monkeypatch.setattr(try_daily, "TRY_DIR", tmp_path)
-    _, s = try_daily.deal(MONDAY, "3")
+    s = try_daily.deal(MONDAY, "3")
     path = try_daily.save(s, "mon-3")
     log = replay.GameLog.from_dict(json.loads(path.read_text()))
     back = Settings.from_dict(log.settings)

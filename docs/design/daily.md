@@ -80,15 +80,29 @@ middle of each day's spread is about 3.5 to 5. The first table's ran 2.3 to
 9.0, the top of it a duel on 18 systems.
 
 **Opponent strength stays flat** (the author, 2026-10-27): only the board
-rises. `dealer.deal` places every seat near one depth along the allowed bots,
-weakest first, and a lone stage would otherwise always deal at depth 0, which is
-rusherplus and heuristic every day. So each day draws its depth uniformly from
-0 to 1 off the day's rng: any day's field can be anything from rusherplus to
-actuary, and the odds are the same every weekday. Every stop of a family is
-its own step along the pool (the author, 2026-10-28), weakest stop first within
-the family's ladder place, so a day can deal thinker as Claudebot and evolved
-without its look-ahead. actuary deals only Greedy and Learning: all four of its
-stops would put it on four of eleven steps, about two seats in five.
+rises. **Each opponent's seat is drawn on its own**, evenly from every allowed
+bot (`dealer.deal` with no depth; the author, 2026-10-28), so any mix can sit
+on any day, rusherplus beside actuary included, and the odds are the same every
+weekday. Every stop of a family is its own entry (the author, 2026-10-28), so
+a day can deal thinker as Claudebot and evolved without its look-ahead.
+actuary deals only Greedy and Learning: all four of its stops would put it on
+four entries of eleven, about two seats in five, where two of nine is about
+one in five.
+
+**Why not one depth a day**, as a generated gauntlet deals a stage. That put
+every seat within a step of one point along the pool, weakest first, with the
+day's depth drawn from 0 to 1. A day's field then spanned at most three
+neighbouring entries: rusherplus never met marshal or actuary, and a depth past
+about 0.94 made every seat actuary. With Learning at the top of the pool, the
+2026-11-01 board drew 0.94 and was left empty: 32 candidates, 160 probe games,
+none won. Rows dealt that way carry a `depth` in their `spec`.
+
+**Measured on 2026-10-28**, the week of 2026-10-26 dealt seat by seat
+(`results/daily/spread-dryrun/`): every day was kept, after 1 to 7 candidates
+(26 in all) and 1 to 8 seconds of probe games, 2026-11-01 on its fifth. The
+probe check leans away from actuary without shutting it out: half the
+candidates had an actuary seat, and 2 of those 13 were won against 5 of the 13
+without, so 2 of the 7 days kept have one.
 
 **Why players rise too.** The most rises so small boards stay roomy: with 2-6
 players on the first table's Monday of 7-12 systems, about one deal in 75 was
@@ -249,7 +263,7 @@ the same games:
   nothing once both exist, so the day rolls over at 00:00 UTC with the row
   already there and a missed hour never skips a day.
 - **The day's rng is derived from the date**: `random.Random(f"daily:{day}")`.
-  It draws the depth once, then deals the candidates. Each map's game seed
+  It deals the candidates, each opponent seat drawn on its own. Each map's game seed
   still comes from `settings.roll_seed` on that rng, as the dealer always rolls
   one, so no new stream reaches the engine (`rules.md`, "The leaderboard").
 - **It records as it goes** (`CLAUDE.md`): each probe game is appended to
@@ -285,7 +299,7 @@ create table if not exists public.dailies (
   day           date not null,
   kind          text not null default 'board',   -- or 'puzzle' (see "The daily puzzle")
   settings      jsonb not null,   -- the setup, as dealer.stage_dict writes a stage
-  spec          jsonb not null,   -- the spec it was dealt from, the day's systems, players and depth included
+  spec          jsonb not null,   -- the spec it was dealt from, the day's systems and players included
   probes        jsonb not null,   -- the probe results that cleared it
   rules_version integer not null,
   created_at    timestamptz not null default now(),
@@ -510,8 +524,8 @@ weakest first as the worker plays them:
 - **The worker**: `tools/daily.py` makes both kinds each hour, from their own
   spec files (`tools/puzzle_spec.json`), the puzzle from its own stream
   (`daily:puzzle:<day>`, a trial's `daily:puzzle:try:<weekday>:<trial>`) and
-  recording under `results/daily/puzzle/`. `--kind` makes one kind only. No
-  depth is drawn for a puzzle; its row's `spec` names its `opponent`.
+  recording under `results/daily/puzzle/`. `--kind` makes one kind only. A
+  puzzle's row's `spec` names its `opponent`.
 - **The game**: `/api/daily?kind=puzzle` (no `kind` is the board, so an older
   game still gets its board), a Puzzle button beside Daily on the menu, and
   `#puzzle` (`#puzzle=<day>`). `daily.remember` keeps each key's day and kind

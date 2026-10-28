@@ -35,8 +35,7 @@ def test_the_spec_file_deals():
 @pytest.mark.parametrize("w", [0, 3, 6])
 def test_a_days_candidates_keep_its_weekday_and_lanes(w):
     day = MONDAY + dt.timedelta(days=w)
-    depth, cands = daily.candidates(day, limit=4)
-    assert 0 <= depth <= 1
+    cands = daily.candidates(day, limit=4)
     lo, hi = daily.systems(w)
     plo, phi = daily.PLAYERS[w]
     for s in cands:
@@ -46,10 +45,29 @@ def test_a_days_candidates_keep_its_weekday_and_lanes(w):
         assert isinstance(s.seed, int)
 
 
+def test_a_board_can_seat_any_mix_of_the_allowed_bots():
+    # Each seat is drawn on its own, so the weakest and strongest can meet.
+    allowed = set(daily.base_spec()["opponents"]["in"])
+    staged = {e.partition(":")[0] for e in allowed if ":" in e}
+
+    def entry(s, seat):
+        name = s.seat_strategy(seat)
+        return f"{name}:{s.seat_params(seat).aux:g}" if name in staged else name
+
+    seen, mixed = set(), False
+    for i in range(14):
+        for s in daily.candidates(MONDAY + dt.timedelta(days=i), limit=3):
+            seats = {entry(s, seat) for seat in range(2, s.players + 1)}
+            assert seats <= allowed
+            seen |= seats
+            mixed |= "rusherplus" in seats and any(e.startswith("actuary") for e in seats)
+    assert seen == allowed and mixed
+
+
 def test_a_days_candidates_are_a_pure_function_of_the_date():
-    a = [s.challenge_key() for s in daily.candidates(MONDAY, limit=3)[1]]
-    b = [s.challenge_key() for s in daily.candidates(MONDAY, limit=3)[1]]
-    c = [s.challenge_key() for s in daily.candidates(MONDAY + dt.timedelta(days=7), limit=3)[1]]
+    a = [s.challenge_key() for s in daily.candidates(MONDAY, limit=3)]
+    b = [s.challenge_key() for s in daily.candidates(MONDAY, limit=3)]
+    c = [s.challenge_key() for s in daily.candidates(MONDAY + dt.timedelta(days=7), limit=3)]
     assert a == b and a != c
 
 
@@ -75,7 +93,7 @@ def test_the_first_candidate_a_probe_wins_inside_the_cap_is_the_day(tmp_path, mo
     assert row is not None and row["spec"]["candidate"] == 1 and row["spec"]["turn_cap"] == 80
     assert [p["bot"] for p in row["probes"]] == ["heuristic+lean", "thinker"]
     assert row["probes"][-1]["won"] and row["day"] == MONDAY.isoformat()
-    assert row["settings"] == daily.dealer.stage_dict(daily.candidates(MONDAY, limit=4)[1][1])
+    assert row["settings"] == daily.dealer.stage_dict(daily.candidates(MONDAY, limit=4)[1])
     # Probes stop at the first win: five on candidate 0, two on candidate 1.
     assert len(calls) == 7
     lines = (tmp_path / f"{MONDAY.isoformat()}.jsonl").read_text().splitlines()
@@ -108,8 +126,7 @@ def test_today_and_tomorrow_are_made():
 def test_a_puzzle_is_a_small_open_duel_against_the_weekdays_opponent():
     for w, name in enumerate(daily.PUZZLE_OPPONENTS):
         day = MONDAY + dt.timedelta(days=w)
-        depth, cands = daily.candidates(day, limit=3, kind="puzzle")
-        assert depth == 0
+        cands = daily.candidates(day, limit=3, kind="puzzle")
         strategy, params = daily.gauntletgen.probe_profile(name)
         for s in cands:
             assert s.players == 2 and s.mode == "random" and 5 <= s.system_count() <= 8
@@ -121,9 +138,9 @@ def test_a_puzzle_is_a_small_open_duel_against_the_weekdays_opponent():
 
 
 def test_a_puzzle_deals_from_its_own_stream():
-    board = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2)[1]]
-    puzzle = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2, kind="puzzle")[1]]
-    again = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2, kind="puzzle")[1]]
+    board = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2)]
+    puzzle = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2, kind="puzzle")]
+    again = [s.challenge_key() for s in daily.candidates(MONDAY, limit=2, kind="puzzle")]
     assert puzzle == again and not set(board) & set(puzzle)
 
 
@@ -177,7 +194,7 @@ def test_a_fetch_asks_for_the_puzzle_by_kind(monkeypatch):
 
 
 def test_a_reply_is_read_as_a_day_and_a_setup():
-    stage = daily.dealer.stage_dict(daily.candidates(MONDAY, limit=1)[1][0])
+    stage = daily.dealer.stage_dict(daily.candidates(MONDAY, limit=1)[0])
     got = game_daily.from_reply(json.dumps({"day": "2026-10-26", "now": 1, "settings": stage,
                                             "rules_version": 2}))
     assert got is not None and got[:2] == ("2026-10-26", "board")
@@ -191,8 +208,8 @@ def test_a_reply_is_read_as_a_day_and_a_setup():
 
 
 def test_a_remembered_daily_is_known_by_its_key(store):
-    a, b = (daily.candidates(MONDAY + dt.timedelta(days=i), limit=1)[1][0] for i in (0, 1))
-    p = daily.candidates(MONDAY, limit=1, kind="puzzle")[1][0]
+    a, b = (daily.candidates(MONDAY + dt.timedelta(days=i), limit=1)[0] for i in (0, 1))
+    p = daily.candidates(MONDAY, limit=1, kind="puzzle")[0]
     assert game_daily.daily_of(a) == ("", "")
     game_daily.remember("2026-10-26", a)
     game_daily.remember("2026-10-27", b)
@@ -207,13 +224,13 @@ def test_a_remembered_daily_is_known_by_its_key(store):
 
 
 def test_a_daily_remembered_before_the_puzzle_is_a_board(store):
-    a = daily.candidates(MONDAY, limit=1)[1][0]
+    a = daily.candidates(MONDAY, limit=1)[0]
     webstore.set(game_daily.WEB_DAILIES_KEY, json.dumps({a.challenge_key(): "2026-10-26", "junk": [1]}))
     assert game_daily.daily_of(a) == ("2026-10-26", "board")
 
 
 def test_the_result_line_gives_nothing_away():
-    s = daily.candidates(MONDAY, limit=1)[1][0]
+    s = daily.candidates(MONDAY, limit=1)[0]
     text = game_daily.result_line("2026-10-28", s, 23, 7)
     assert text.splitlines()[:2] == [f"Star Conquest daily · Wed 28 Oct · {s.system_count()} systems",
                                      "Won in 23 turns, 7 ships lost"]
@@ -222,7 +239,7 @@ def test_the_result_line_gives_nothing_away():
 
 def test_a_puzzle_result_names_its_opponent():
     for w, name in ((1, "heuristic+lean"), (3, "Thinker · Claudebot"), (6, "Actuary · Field")):
-        s = daily.candidates(MONDAY + dt.timedelta(days=w), limit=1, kind="puzzle")[1][0]
+        s = daily.candidates(MONDAY + dt.timedelta(days=w), limit=1, kind="puzzle")[0]
         text = game_daily.result_line("2026-10-28", s, 9, 2, "puzzle")
         assert text.splitlines()[0] == (f"Star Conquest daily puzzle · Wed 28 Oct · {s.system_count()} systems"
                                         f" vs {name}")

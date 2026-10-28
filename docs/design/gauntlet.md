@@ -352,6 +352,9 @@ that rounds out of it), seeds with `settings.roll_seed`, and rerolls a setup
 `setup_warnings` objects to. **Opponents follow depth**: the allowed bots are
 ordered weakest first by `LADDER_ORDER` and each seat draws near
 `depth * (n - 1)`, so difficulty rises by design and the benchmark checks it.
+With no depth (`None`), each seat draws evenly from every allowed bot instead,
+for a setup that should not rise, the daily's board (`daily.md`, "Opponent
+strength stays flat").
 That matters because a random map is decided by position as much as by play
 (the tutorial's seed hunt, above).
 

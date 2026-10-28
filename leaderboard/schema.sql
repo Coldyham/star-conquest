@@ -430,7 +430,7 @@ join public.games g
 --
 -- settings has the pruned shape of games.settings_json, written by Python, so
 -- match it by jsonb value as campaign nodes are. spec is what it was dealt
--- from (the day's systems, players, opponents' depth or the puzzle's opponent,
+-- from (the day's systems and players or the puzzle's opponent,
 -- candidate and turn cap); probes the probe games that cleared it. A row from
 -- before the puzzle is a board.
 -- ---------------------------------------------------------------------------

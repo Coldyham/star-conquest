@@ -69,11 +69,11 @@ def survey(s: Settings) -> str:
     return "no lanes" if lanes is None else "lanes {} / {} / {} turns (shortest / median / longest)".format(*lanes)
 
 
-def report(day: dt.date, s: Settings, depth: float, note: str = "", kind: str = "board") -> str:
+def report(day: dt.date, s: Settings, note: str = "", kind: str = "board") -> str:
     w = day.weekday()
     spec = (f"  spec: puzzle vs {daily.PUZZLE_OPPONENTS[w]}" if kind == "puzzle"
             else f"  spec: {daily.systems(w)[0]}-{daily.systems(w)[1]} systems, "
-                 f"{daily.PLAYERS[w][0]}-{daily.PLAYERS[w][1]} players, opponents at depth {depth:.2f}")
+                 f"{daily.PLAYERS[w][0]}-{daily.PLAYERS[w][1]} players, each opponent drawn on its own")
     lines = [f"{day.strftime('%A')} ({day}){note}",
              f"  {dealer.describe(s)}",
              f"  {s.ship_ly_per_turn:g} ly/turn · {survey(s)} · cap {daily.turn_cap(w, kind)} turns",
@@ -81,10 +81,9 @@ def report(day: dt.date, s: Settings, depth: float, note: str = "", kind: str = 
     return "\n".join(lines)
 
 
-def deal(day: dt.date, trial: str, kind: str = "board") -> tuple[float, Settings]:
+def deal(day: dt.date, trial: str, kind: str = "board") -> Settings:
     """One candidate from the day's spec on the trial's stream, unprobed."""
-    depth, cands = daily.candidates(day, limit=1, trial=trial, kind=kind)
-    return depth, cands[0]
+    return daily.candidates(day, limit=1, trial=trial, kind=kind)[0]
 
 
 def save(s: Settings, name: str) -> Path:
@@ -122,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         monday = next_weekday(0)
         for w in range(7):
             day = monday + dt.timedelta(days=w)
-            depth, s = deal(day, trial, kind)
-            print(report(day, s, depth, kind=kind))
+            s = deal(day, trial, kind)
+            print(report(day, s, kind=kind))
         print(f"(--seed {trial} deals these again)")
         return 0
 
@@ -139,10 +138,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"no candidate of {daily.MAX_CANDIDATES} was won inside {daily.turn_cap(day.weekday(), kind)} turns",
                   file=sys.stderr)
             return 1
-        s, depth = Settings.from_dict(row["settings"]), row["spec"]["depth"]
+        s = Settings.from_dict(row["settings"])
     else:
-        depth, s = deal(day, trial, kind)
-    print(report(day, s, depth, note, kind))
+        s = deal(day, trial, kind)
+    print(report(day, s, note, kind))
 
     if args.no_play:
         return 0

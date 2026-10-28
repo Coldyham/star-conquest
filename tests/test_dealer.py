@@ -63,6 +63,16 @@ def test_opponents_follow_depth_weakest_first():
     assert mean_rank(0.0) < 1 < mean_rank(0.5) < 2.5 < mean_rank(1.0)
 
 
+
+def test_with_no_depth_each_seat_is_drawn_from_every_allowed_bot():
+    spec = dealer.Spec.from_dict({"opponents": ["rusherplus", "marshal", "actuary"],
+                                  "rules": {"players": {"fix": 6}}})
+    rng = random.Random(3)
+    fields = [{s.seat_strategy(seat) for seat in range(2, 7)} for s in (dealer.deal(spec, rng, None)
+                                                                        for _ in range(20))]
+    assert set().union(*fields) == {"rusherplus", "marshal", "actuary"}
+    assert any({"rusherplus", "actuary"} <= field for field in fields)
+
 def test_an_opponent_stop_is_dealt_onto_the_seat():
     spec = dealer.Spec.from_dict({"opponents": ["actuary:3"], "rules": {"players": {"fix": 2}}})
     s = dealer.deal(spec, random.Random(2))
