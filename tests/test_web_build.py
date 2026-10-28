@@ -28,6 +28,20 @@ def test_the_service_worker_never_answers_the_api():
     assert bypass < SW.index("event.respondWith("), "the bypass must come before any respondWith"
 
 
+def test_the_service_worker_caches_the_runtime_pygbag_loads():
+    """The runtime is cross-origin; only its CDN prefix joins the cache, and only
+    as CORS responses (an opaque one can't be checked and pads the quota)."""
+    import importlib.util
+
+    runtime = re.search(r'const RUNTIME = "([^"]+)";', SW).group(1)
+    spec = importlib.util.find_spec("pygbag")
+    assert spec is not None and spec.origin is not None
+    app = (Path(spec.origin).parent / "app.py").read_text()
+    assert f'DEFAULT_CDN = f"{runtime}{{cdn_version}}/"' in app
+    assert 'res.type === "cors"' in SW
+    assert "!url.href.startsWith(RUNTIME)) return;" in SW
+
+
 def test_the_service_worker_fetches_board_pages_network_first():
     board = SW.index('url.pathname.startsWith("/board/")')
     branch = SW[board:SW.index("return;", board)]

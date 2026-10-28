@@ -35,6 +35,7 @@ line gives only the verdict. Ideas that lost are in
 - shell.md · **End-of-game graphs (`stats`, `render._draw_history_graph`).** Systems, ships, income and losses per seat from the history boards; legend toggles; rivals only once revealed.
 - shell.md · **Naming each seat's bot (`Ui.bot_label`).** Tooltip and legend name bot and stop; a random seat reads "Random" until decided.
 - shell.md · **Route mode.** A proposal plus a confirm; owned-only paths. *Two sub-modes*: chain and rally share `flow_field`; distance in travel turns; auto-route; a plan keeps a system's hold.
+- shell.md · **The web build's download.** `tools/slim_web.py` strips comments/docstrings (lines kept) and subsets the fonts: archive 938 KB to 427 KB; `sw.js` caches pygbag's CDN runtime. *Not done*: `.pyc`, lazy imports.
 - shell.md · **Rules in full:** measured layout and `touch_ui`; browser bridges (`softkeyboard`, `webstore`, `share`, quitting); send popup and spectating; viewport margins; the Combat tab; route mode.
 
 ## turnfilm.md
