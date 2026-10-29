@@ -2163,19 +2163,25 @@ def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Setting
     else:
         full = pygame.Rect(pad, pad, w - 2 * pad, h - 2 * pad)
         y = _compact_heading(surface, ms, settings, full, full.y)
+        # The panel is as tall as its tallest tab, whichever is showing, so
+        # neither it nor the map under it moves as the tabs change; the buttons
+        # grow as they do in landscape, and the map takes what is left.
+        panel_h = _C_BTN_H + 8 + _tallest_tab_h(ms, settings, full.w)
         actions_h = _compact_actions(surface, ms, settings, full.w, None)
-        actions_top = full.bottom - actions_h
+        rows = _compact_rows(ms, settings, full.w)
+        spare = full.bottom - actions_h - pad - y - panel_h - pad
+        grow = max(0, min(_C_GROW, (spare - _C_SKETCH_MIN) // (rows + 1)))
+        actions_top = full.bottom - _compact_actions(surface, ms, settings, full.w, None, grow)
         status_h = 0
         if ms.status and pygame.time.get_ticks() < ms.status_until:
             status_h = len(widgets.wrap(f["small"], ms.status, full.w)) * _NOTE_H + 4
-        _compact_status(surface, ms, pygame.Rect(full.x, actions_top - status_h - 2, full.w, status_h))
-        # The panel stops where its tab does, and the map takes what that leaves
-        # (on a tab that fills the panel, as Combat's does, there is none).
-        view = _compact_settings(surface, ms, settings,
-                                 pygame.Rect(full.x, y, full.w, actions_top - status_h - pad - y), fit=True)
-        _compact_sketch(surface, ms, pygame.Rect(full.x, view.bottom + pad, full.w,
-                                                 actions_top - status_h - 2 * pad - view.bottom))
-        _compact_actions(surface, ms, settings, full.w, (full.x, actions_top))
+        # the status shares the map's slot, but squeezes the panel if that is too small
+        bottom = min(y + panel_h, actions_top - pad - (status_h + pad if status_h else 0))
+        view = _compact_settings(surface, ms, settings, pygame.Rect(full.x, y, full.w, bottom - y))
+        gap = pygame.Rect(full.x, view.bottom + pad, full.w, actions_top - 2 * pad - view.bottom)
+        _compact_sketch(surface, ms, gap)
+        _compact_status(surface, ms, gap)
+        _compact_actions(surface, ms, settings, full.w, (full.x, actions_top), grow)
 
     _draw_daily_list(surface, ms)
     ms.board_open = _draw_drop_list(surface, ms, "board_menu", _BOARD_ITEMS, ms.board_open)
@@ -2386,40 +2392,64 @@ def _compact_tabs(surface, ms: MenuState, settings: Settings, area: pygame.Rect)
     return area.y + th + 8
 
 
-def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect,
-                      fit: bool = False) -> pygame.Rect:
-    """The tabs, and under them the scrolling window onto the current tab: all
-    of ``area`` under the tabs, or with ``fit`` only as much as the tab fills.
-    Returns the window."""
+def _panel_layer(width: int) -> pygame.Surface:
+    """The scrolling panel's layer at ``width``, cleared."""
     global _PANEL_LAYER
+    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != width:
+        _PANEL_LAYER = pygame.Surface((width, _LAYER_H))
+    _PANEL_LAYER.fill(_PANEL_BG)
+    return _PANEL_LAYER
+
+
+def _draw_tab_on(layer: pygame.Surface, ms: MenuState, settings: Settings, tab: str) -> int:
+    """Draw ``tab`` whole onto ``layer``; returns how far its content runs:
+    whatever was drawn that isn't the panel's own colour. Measured, so no tab
+    has to report its height."""
+    panel = pygame.Rect(0, 0, layer.get_width(), _LAYER_H)
+    if tab == "basic":
+        _draw_basic(layer, ms, settings, panel)
+    elif tab == "combat":
+        _draw_combat(layer, ms, settings, panel)
+    elif tab == "advanced":
+        _draw_advanced(layer, ms, settings, panel)
+    elif tab == "ai":
+        _draw_ai(layer, ms, settings, panel)
+    layer.set_colorkey(_PANEL_BG)
+    used = layer.get_bounding_rect()
+    layer.set_colorkey(None)
+    return (used.bottom + 16) if used.h else 0
+
+
+_TALLEST: tuple[tuple, int] | None = None  # `_tallest_tab_h`'s last (key, answer)
+
+
+def _tallest_tab_h(ms: MenuState, settings: Settings, width: int) -> int:
+    """The tallest tab's content at ``width`` (Combat's, with its jitter
+    matrix), so the portrait panel can keep one height across the tabs.
+    Measured by drawing each, and only again when what they draw could change."""
+    global _TALLEST
+    key = (width, config.ui_scale, repr(settings), ms.preview_attacker, ms.preview_defender)
+    if _TALLEST is None or _TALLEST[0] != key:
+        rects = dict(ms.rects)
+        tallest = max(_draw_tab_on(_panel_layer(width), ms, settings, tab) for tab, _l, on in _TABS if on)
+        ms.rects.clear()
+        ms.rects.update(rects)
+        _TALLEST = (key, tallest)
+    return _TALLEST[1]
+
+
+def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect) -> pygame.Rect:
+    """The tabs, and under them the scrolling window onto the current tab, all
+    of ``area`` under the tabs. Returns the window."""
     top = _compact_tabs(surface, ms, settings, area)
     if area.bottom - top <= 4:
         ms.panel_view = pygame.Rect(area.x, top, area.w, max(0, area.bottom - top))
         return ms.panel_view
 
-    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != area.w:
-        _PANEL_LAYER = pygame.Surface((area.w, _LAYER_H))
-    layer = _PANEL_LAYER
-    layer.fill(_PANEL_BG)
     before = dict(ms.rects)
-    panel = pygame.Rect(0, 0, area.w, _LAYER_H)
-    if ms.tab == "basic":
-        _draw_basic(layer, ms, settings, panel)
-    elif ms.tab == "combat":
-        _draw_combat(layer, ms, settings, panel)
-    elif ms.tab == "advanced":
-        _draw_advanced(layer, ms, settings, panel)
-    elif ms.tab == "ai":
-        _draw_ai(layer, ms, settings, panel)
-    # How far the tab's content runs: whatever was drawn that isn't the panel's
-    # own colour. Measured, so no tab has to report its height.
-    layer.set_colorkey(_PANEL_BG)
-    used = layer.get_bounding_rect()
-    layer.set_colorkey(None)
-    ms.panel_content_h = (used.bottom + 16) if used.h else 0
+    layer = _panel_layer(area.w)
+    ms.panel_content_h = _draw_tab_on(layer, ms, settings, ms.tab)
     view = pygame.Rect(area.x, top, area.w, area.bottom - top)
-    if fit:
-        view.h = min(view.h, ms.panel_content_h)
     ms.panel_view = view
     pygame.draw.rect(surface, _PANEL_BG, view, border_radius=10)
     pygame.draw.rect(surface, _PANEL_BORDER, view, 1, border_radius=10)

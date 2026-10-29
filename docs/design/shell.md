@@ -85,9 +85,10 @@ is what switches it:
   actions, so the buttons grow into some of the slack (up to `_C_GROW`) and a
   sketch of the setup's map fills the rest (`_compact_sketch`,
   `settings.map_sketch`, made in `pump`). Portrait puts one under the panel,
-  which stops where its tab does (`_compact_settings`' ``fit``), so a tab that
-  fills the panel simply has none; on a 870 CSS px phone even Combat, jitter
-  matrix and all, leaves room. It is the real board only with fog off; under
+  which is as tall as its tallest tab (Combat, jitter matrix and all;
+  `_tallest_tab_h`) whichever tab shows, so neither moves as the tabs change,
+  and its buttons grow the same way, so turning the phone doesn't resize them.
+  The status message takes the map's slot while it shows. It is the real board only with fog off; under
   fog a pinned board (a daily's, a challenge's, a hand map) is what fog keeps
   from you, so it is a "?" and "Map hidden". A seed left to chance has no board
   yet, so it is a sample, captioned so, which gives nothing away. The actions are folded to six, so no row is
