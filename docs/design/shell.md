@@ -81,7 +81,13 @@ is what switches it:
   in baseline units. Its settings panel keeps the desktop's 560 width
   (`_C_PANEL_W`), so every tab lays out as on the desktop; landscape gives the
   rest of the width to the title and the actions, three to a row where their
-  labels fit (`_compact_columns`), and the Basic tab's rows close up a little
+  labels fit (`_compact_columns`). The actions are folded to six, so no row is
+  left with one (`_compact_action_items`): the board's Recently played and
+  Shared matches share a Leaderboard list, as the desktop footer once did; a
+  drawn map's x sits inside Edit map; and there is no Quit, which a browser tab
+  can't do and a phone leaves to its own controls (the game's overflow list
+  keeps it). Tutorial, Daily and Play by post each open something of their
+  own, so none is nested in another. The Basic tab's rows close up a little
   (`_C_ROW_H`). Basic and Advanced fit whole; a tab that doesn't (Combat, on a
   short screen) scrolls, and a drag that starts on a slider goes by its
   direction, up or down to scroll and across to move it. The canvas is upscaled,

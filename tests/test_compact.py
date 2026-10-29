@@ -17,6 +17,7 @@ import pygame
 import pytest
 
 from starconquest import config, input as game_input, main, mapgen, menu, render
+from starconquest.custommap import CustomMap, MapNode
 from starconquest.geometry import WorldView
 from starconquest.model import Order
 from starconquest.settings import Settings
@@ -395,9 +396,50 @@ def test_the_daily_list_takes_presses_over_what_it_covers(screen_for, landscape)
     assert _menu_click(screen, ms, settings, "daily") == "daily"
 
 
-def test_the_portrait_sheet_owns_presses_over_the_zoom_buttons(screen_for):
-    """In portrait the docked popup's sheet can rise over the map's zoom buttons;
-    a press on a control of the sheet there is the sheet's, never a zoom."""
+@pytest.mark.parametrize("web", [True, False])
+@pytest.mark.parametrize("landscape", [True, False])
+def test_the_compact_menus_actions_fill_whole_rows(screen_for, monkeypatch, landscape, web):
+    """Six actions under Start, so no row is left with one: the board's two lists
+    share a button, a drawn map's x sits inside Edit map, and there is no Quit."""
+    monkeypatch.setattr(menu, "is_web", lambda: web)
+    opened = []
+    monkeypatch.setattr(menu.webstore, "open_url", lambda url: opened.append(url) or True)
+    screen = screen_for(landscape)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    menu.draw(screen, ms, settings)
+    keys = [k for k, _l, _b in menu._compact_action_items(ms, settings)]
+    assert len(keys) == 6 and "quit" not in ms.rects
+    rows = {ms.rects[k].y for k in keys}
+    assert len(keys) % len(rows) == 0
+    if web:
+        assert "board_menu" in keys
+        _menu_click(screen, ms, settings, "board_menu")
+        assert ms.board_open
+        menu.draw(screen, ms, settings)
+        assert {"browse_configs", "browse_matches"} <= set(ms.rects)
+        _menu_click(screen, ms, settings, "browse_matches")
+        assert not ms.board_open and opened == [menu.webstore.leaderboard_url(menu.LEADERBOARD_LOBBY_PATH)]
+
+
+def test_a_drawn_maps_clear_is_inside_its_edit_button(screen_for, monkeypatch):
+    monkeypatch.setattr(menu, "is_web", lambda: True)
+    screen = screen_for(True)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    settings.custom_map = CustomMap(nodes=[MapNode(200, 200, 3, 10, 1), MapNode(600, 600, 4, 8, 2)],
+                                    lanes=[(0, 1)]).normalised()
+    settings.players, settings.nodes = 2, 2
+    menu.draw(screen, ms, settings)
+    assert len(menu._compact_action_items(ms, settings)) == 6
+    edit, clear = ms.rects["create_map"], ms.rects["clear_map"]
+    assert edit.y == clear.y and clear.x > edit.right and not edit.colliderect(clear)
+
+
+def test_the_zoom_buttons_ride_above_the_portrait_sheet(screen_for):
+    """In portrait the docked popup's sheet covers the foot of the map, so the
+    zoom buttons move up onto its top edge, as they do over history's graphs,
+    and still zoom."""
     screen = screen_for(False)
     state = mapgen.generate_random(1, num_nodes=18, num_players=3)
     ui = _make_ui(state)
@@ -407,14 +449,10 @@ def test_the_portrait_sheet_owns_presses_over_the_zoom_buttons(screen_for):
     ui.set_forward_mode(state, True)
     render.draw(screen, state, ui)
     sheet = pygame.Rect(ui.popup_rect)
-    zoom = [pygame.Rect(r) for r in (ui.zoom_plus_rect, ui.zoom_minus_rect, ui.reset_view_rect)]
-    covered = [z for z in zoom if sheet.colliderect(z)]
-    assert covered, "the case under test: the sheet over the zoom buttons"
-    controls = [pygame.Rect(r) for r in (ui.send_tab_rect, ui.forward_tab_rect, ui.hold_minus_rect,
-                                         ui.hold_plus_rect, ui.cancel_rect, ui.done_rect) if r[2]]
-    clash = next(((c, z) for c in controls for z in covered if c.colliderect(z)), None)
-    assert clash is not None
+    play = pygame.Rect(config.play_rect())
+    for r in (ui.zoom_plus_rect, ui.zoom_minus_rect, ui.reset_view_rect):
+        zoom = pygame.Rect(r)
+        assert zoom.w and zoom.bottom <= sheet.top and play.contains(zoom)
     zoom_before = ui.view.zoom
-    spot = clash[0].clip(clash[1]).center
-    game_input.handle_event(_press(spot), state, ui)
-    assert ui.view.zoom == zoom_before
+    game_input.handle_event(_press(pygame.Rect(ui.zoom_plus_rect).center), state, ui)
+    assert ui.view.zoom > zoom_before

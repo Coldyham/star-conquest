@@ -261,6 +261,7 @@ class MenuState:
     status_until: int = 0  # ms tick after which status hides
     strategy_open: bool = False  # is the AI-seat strategy dropdown open
     daily_open: bool = False  # is the footer's Daily list open
+    board_open: bool = False  # ...and the compact menu's Leaderboard list
     strategies: list[str] = field(  # dropdown options, refreshed on open
         default_factory=lambda: _strategy_options()
     )
@@ -1901,20 +1902,34 @@ def _daily_button(surface, ms: MenuState, x: int, y: int) -> None:
 def _draw_daily_list(surface, ms: MenuState) -> None:
     """The open Daily list, rising from its button; drawn after every other
     widget so nothing paints over it."""
-    trigger = ms.rects.get("daily_menu")
-    if not ms.daily_open or trigger is None:
-        ms.daily_open = False
-        return
+    ms.daily_open = _draw_drop_list(surface, ms, "daily_menu", _DAILY_ITEMS, ms.daily_open)
+
+
+# The compact menu's one button for the board's two lists, which the desktop
+# footer has room to offer side by side (`_file_control`).
+_BOARD_LABEL = "Leaderboard"
+_BOARD_ITEMS = (("browse_configs", "Recently played"), ("browse_matches", "Shared matches"))
+
+
+def _draw_drop_list(surface, ms: MenuState, trigger_key: str, items, open_: bool) -> bool:
+    """A list of ``items`` rising from the button ``trigger_key``, when
+    ``open_``; each row records its rect under its key. Returns whether it is
+    still open (not without its button)."""
+    trigger = ms.rects.get(trigger_key)
+    if not open_ or trigger is None:
+        return False
     f = _fonts()
     rh = _CH + 4
-    width = max(trigger.width, max(f["normal"].size(label)[0] for _key, label in _DAILY_ITEMS) + 32)
-    panel = pygame.Rect(trigger.x, trigger.y - 4 - rh * len(_DAILY_ITEMS), width, rh * len(_DAILY_ITEMS))
+    width = max(trigger.width, max(f["normal"].size(label)[0] for _key, label in items) + 32)
+    panel = pygame.Rect(trigger.x, trigger.y - 4 - rh * len(items), width, rh * len(items))
+    panel.right = min(panel.right, surface.get_width() - 4)
     pygame.draw.rect(surface, _PANEL_BG, panel, border_radius=6)
     pygame.draw.rect(surface, _HL_BORDER, panel, 1, border_radius=6)
-    for i, (key, label) in enumerate(_DAILY_ITEMS):
+    for i, (key, label) in enumerate(items):
         row = pygame.Rect(panel.x, panel.y + i * rh, panel.width, rh)
         _text(surface, f["normal"], label, config.COLOR_TEXT, midleft=(row.x + 16, row.centery))
         ms.rects[key] = row
+    return True
 
 
 def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
@@ -2142,6 +2157,7 @@ def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Setting
         _compact_actions(surface, ms, settings, full.w, (full.x, actions_top))
 
     _draw_daily_list(surface, ms)
+    ms.board_open = _draw_drop_list(surface, ms, "board_menu", _BOARD_ITEMS, ms.board_open)
     if ms.confirm_clear_map:
         _fit_modal(surface, ms, lambda s, sw, sh: _draw_clear_map(s, ms, sw, sh))
     if ms.pbp_prompt:
@@ -2188,10 +2204,17 @@ def _compact_status(surface, ms: MenuState, area: pygame.Rect) -> None:
         y += _NOTE_H
 
 
+_C_LISTS = ("daily_menu", "board_menu")   # the actions that open a list, with a caret
+
+
 def _compact_action_items(ms: MenuState, settings: Settings) -> list[tuple[str, str, tuple]]:
     """The menu's actions other than Start, in the order the grid shows them:
-    ``(key, label, border)``. The same set the desktop rows offer (`_file_control`,
-    `_draw_start`), gated the same way."""
+    ``(key, label, border)``. The desktop rows' set (`_file_control`,
+    `_draw_start`), gated the same way, folded to an even six on the web and off
+    it: the board's two lists share one button (`_BOARD_ITEMS`), clearing a
+    drawn map is a corner of its Edit map button, and there is no Quit, which a
+    browser tab can't do and a phone leaves to its own controls (the game's
+    overflow list still has it)."""
     items: list[tuple[str, str, tuple]] = []
     if ms.gauntlets:
         items.append(("tutorial", _gauntlets_label(ms), _START_BORDER))
@@ -2200,25 +2223,24 @@ def _compact_action_items(ms: MenuState, settings: Settings) -> list[tuple[str, 
     if pbp.configured():
         items.append(("play_by_post", "Play by post", _HL_BORDER))
     if is_web():
-        if pbp.configured():
-            items.append(("browse_matches", "Shared matches", _BTN_BORDER))
         items.append(("get_link", "Get Link", _BTN_BORDER))
-        items.append(("browse_configs", "Recently played", _BTN_BORDER))
+        if pbp.configured():
+            items.append(("board_menu", _BOARD_LABEL, _BTN_BORDER))
+        else:
+            items.append(("browse_configs", "Recently played", _BTN_BORDER))
     else:
         items.append(("save_settings", "Save", _BTN_BORDER))
         items.append(("load_settings", "Load", _BTN_BORDER))
     drawn = settings.custom_map is not None
     items.append(("create_map", "Edit map" if drawn else "Create map", _HL_BORDER))
-    if drawn:
-        items.append(("clear_map", "Clear map", _BTN_BORDER))
-    items.append(("quit", "Quit", _BTN_BORDER))
     return items
 
 
 def _compact_columns(items, width: int) -> int:
     """How many actions to a row: up to `_C_COLS`, as many as leave each one
-    room for the longest label, and never fewer than two."""
-    label_w = max(_fonts()["normal"].size(label)[0] for _k, label, _b in items) + 24
+    room for the longest label (and a list's caret), and never fewer than two."""
+    font = _fonts()["normal"]
+    label_w = max(font.size(label)[0] + (_CH if key in _C_LISTS else 0) for key, label, _b in items) + 24
     return max(2, min(_C_COLS, (width + _C_GAP) // (label_w + _C_GAP)))
 
 
@@ -2251,16 +2273,23 @@ def _compact_actions(surface, ms: MenuState, settings: Settings, width: int,
         c = i % cols
         rect = pygame.Rect(x + c * (bw + _C_GAP), y + (i // cols) * (_C_BTN_H + _C_GAP),
                            bw if c < cols - 1 else width - c * (bw + _C_GAP), _C_BTN_H)
-        font = f["normal"] if f["normal"].size(label)[0] + 24 <= rect.w else f["small"]
-        if key == "daily_menu":
+        if key == "create_map" and settings.custom_map is not None:
+            # the desktop's little x beside Edit map, inside its cell
+            clear = pygame.Rect(rect.right - _C_BTN_H, rect.y, _C_BTN_H, rect.h)
+            rect.w -= clear.w + _C_GAP
+            _button(surface, ms, "clear_map", clear, "x", fill=_BTN_FILL, border=_BTN_BORDER,
+                    tcol=config.COLOR_TEXT_DIM, font=f["normal"])
+        caret = _CH if key in _C_LISTS else 0
+        font = f["normal"] if f["normal"].size(label)[0] + 24 + caret <= rect.w else f["small"]
+        if caret:
+            open_ = ms.daily_open if key == "daily_menu" else ms.board_open
             _button(surface, ms, key, rect, "", fill=_BTN_FILL,
-                    border=_HL_BORDER if ms.daily_open else border, tcol=config.COLOR_TEXT)
+                    border=_HL_BORDER if open_ else border, tcol=config.COLOR_TEXT)
             _text(surface, font, label, config.COLOR_TEXT, center=(rect.centerx - _CH // 4, rect.centery))
-            _draw_caret(surface, pygame.Rect(rect.right - _CH, rect.y + (rect.h - _CH) // 2, _CH, _CH),
-                        ms.daily_open)
+            _draw_caret(surface, pygame.Rect(rect.right - _CH, rect.y + (rect.h - _CH) // 2, _CH, _CH), open_)
         else:
-            tcol = config.COLOR_TEXT_DIM if key == "quit" else config.COLOR_TEXT
-            _button(surface, ms, key, rect, label, fill=_BTN_FILL, border=border, tcol=tcol, font=font)
+            _button(surface, ms, key, rect, label, fill=_BTN_FILL, border=border, tcol=config.COLOR_TEXT,
+                    font=font)
     return height
 
 
@@ -2379,7 +2408,7 @@ def _compact_scroll(event, ms: MenuState, settings: Settings) -> bool:
             return False
         # what a press on nothing does elsewhere: drop the caret and any open list
         ms.editing_seed = ms.editing_filename = False
-        ms.strategy_open = ms.daily_open = False
+        ms.strategy_open = ms.daily_open = ms.board_open = False
         ms.scroll_drag = (event.pos[1], ms.panel_scroll.get(ms.tab, 0))
         ms.slider_press = (hit, event.pos) if hit is not None else None
         return True
@@ -2829,9 +2858,9 @@ def _handle_key(event, ms: MenuState, settings: Settings):
         if event.key == pygame.K_ESCAPE:
             ms.strategy_open = False
         return None
-    if ms.daily_open:
+    if ms.daily_open or ms.board_open:
         if event.key == pygame.K_ESCAPE:
-            ms.daily_open = False
+            ms.daily_open = ms.board_open = False
         return None
 
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
@@ -2852,6 +2881,7 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     if not (hit == "strategy" or (hit or "").startswith("strategy_opt_")):
         ms.strategy_open = False  # click anywhere else closes the dropdown
     was_open, ms.daily_open = ms.daily_open, False  # ...and the Daily list
+    board_was_open, ms.board_open = ms.board_open, False
 
     if hit == "start":
         return _start(ms, settings)
@@ -2962,6 +2992,8 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
             settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "daily_menu":
         ms.daily_open = not was_open
+    elif hit == "board_menu":
+        ms.board_open = not board_was_open
     elif hit == "tutorial":
         _open_tutorial(ms, settings)
     elif hit in ("daily", "puzzle"):
