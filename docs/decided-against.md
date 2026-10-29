@@ -181,6 +181,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - core.md · Reading star names from a data file at runtime: no, they are generated. *Star names.*
 
 ## shell.md
+- shell.md · Shipping `.pyc` in the web archive (pygbag's packer drops them); importing modules lazily to start sooner (about 0.2 s natively, small beside the runtime). *The web build's download.*
 - shell.md · Printing the "subtract the fleets" answer for contrast; the survivor curve (replaced by the jitter matrix); five swings per axis; runtime prose wrap on the menu: all rejected. *Combat rules page.*
 - shell.md · A "keep N / send N%" switch on each forwarding rule: "keep N" means "send the rest", so only one lane per system could use it; replaced by a hold per system and a share per lane. Showing the hold on each lane's label: crowded a split's source. Disabling + once the shares reach 100%: dead in the default state. *Forwarding rules.*
 - shell.md · Rally tie-break by ships/turn toward the rally point drawing less: built, then replaced by an even split once rules could split. *Route mode.*

@@ -21,6 +21,12 @@ cp -r "$ROOT/starconquest" "$STAGE/"
 cp -r "$ROOT/models" "$STAGE/"
 find "$STAGE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
+# Every visitor downloads the stage as one archive before the game starts, so
+# slim it first: comments and docstrings out (lines kept in place, so browser
+# tracebacks still match the repo), the fonts subset to the scripts the game
+# draws. Only this scratch copy changes; the desktop game ships whole.
+uv run --project "$ROOT" python "$ROOT/tools/slim_web.py" "$STAGE"
+
 # --width/--height set the canvas framebuffer size: render at a high native
 # resolution so text/edges stay crisp instead of the browser upscaling pygbag's
 # 1280x720 default. Must match config.WEB_FB_W/WEB_FB_H, the boot size; the game

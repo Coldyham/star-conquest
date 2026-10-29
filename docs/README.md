@@ -111,6 +111,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md |
 | `playstyle.py --baseline`, `playstyle_worker.py` | Regenerate the Playstyle bots column; the readings worker | leaderboard.md |
 | `render_board.py` | Render the board's Jinja2 pages | leaderboard.md |
+| `slim_web.py` | Slim the web build's stage: strip comments, subset the fonts (`build_web.sh` runs it) | shell.md |
 | `campaign.py` | Generate this week's campaign map into `public.campaigns` | campaign.md |
 | `daily.py` | Deal and probe today's and tomorrow's daily challenge and puzzle into `public.dailies` | daily.md |
 | `try_daily.py` | Deal a weekday's daily map or puzzle (or a real day's) and open it in the desktop game, to feel and tune the spec | daily.md |
