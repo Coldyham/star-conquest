@@ -455,3 +455,34 @@ def test_the_zoom_buttons_ride_above_the_portrait_sheet(screen_for):
     zoom_before = ui.view.zoom
     game_input.handle_event(_press(pygame.Rect(ui.zoom_plus_rect).center), state, ui)
     assert ui.view.zoom > zoom_before
+
+
+def test_landscape_fills_the_title_column_with_taller_buttons_and_a_map(screen_for):
+    """Held sideways, the column under the title is slack: the buttons grow
+    into some of it and a sketch of the setup's map takes the rest."""
+    screen = screen_for(True)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    menu.pump(ms, settings)
+    menu.draw(screen, ms, settings)
+    assert ms.sketch is not None
+    assert ms.rects["start"].h > menu._C_START_H and ms.rects["create_map"].h > menu._C_BTN_H
+
+
+def test_portrait_keeps_one_panel_height_with_the_map_and_taller_buttons_under_it(screen_for):
+    """In portrait the panel is as tall as its tallest tab whichever shows, so
+    the map under it never moves as the tabs change; the buttons grow as in
+    landscape, so turning the phone doesn't resize them."""
+    screen = screen_for(False)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    menu.pump(ms, settings)
+    views = {}
+    for tab in ("basic", "combat", "advanced", "ai"):
+        ms.tab = tab
+        menu.draw(screen, ms, settings)
+        views[tab] = ms.panel_view
+        assert ms.panel_content_h <= ms.panel_view.h, tab   # no tab scrolls
+    assert len(set(map(tuple, views.values()))) == 1
+    assert ms.rects["start"].y - views["ai"].bottom > menu._C_SKETCH_MIN
+    assert ms.rects["start"].h > menu._C_START_H and ms.rects["create_map"].h > menu._C_BTN_H

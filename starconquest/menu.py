@@ -45,8 +45,9 @@ from . import ai, campaign, combat, config, gauntlet, mapgen, paths, pbp, softke
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
-                       Settings, fog_off, fresh_rng, lane_lengths, lane_survey_key, lane_turns,
-                       randomise_knobs, random_seed, seed_top, setup_warnings)
+                       MapSketch, Settings, fog_off, fresh_rng, lane_lengths, lane_survey_key,
+                       lane_turns, map_sketch, randomise_knobs, random_seed, seed_top, setup_warnings,
+                       sketch_key)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -328,6 +329,10 @@ class MenuState:
     # never by `draw`, which only shows it while the key still matches.
     lane_key: tuple | None = None
     lane_ly: list[float] = field(default_factory=list)
+    # The landscape phone's map beside the title (`settings.map_sketch`), for the
+    # setup `sketch_key` names; filled by `pump` like the lane readout.
+    sketch_at: tuple | None = None
+    sketch: MapSketch | None = None
     # A gauntlet stage (the tutorial's, by default) picked from the Tutorial list:
     # `(gauntlet id, stage id)`, or None when no gauntlet is being played. Never a
     # `Settings` field (`gauntlet` module docstring): the stage is active only
@@ -1732,6 +1737,10 @@ def _survey_lanes(ms: MenuState, settings: Settings) -> None:
     key = lane_survey_key(settings)
     if key != ms.lane_key:
         ms.lane_key, ms.lane_ly = key, lane_lengths(settings)
+    if config.compact:  # only the compact menu draws one (`_compact_sketch`)
+        key = sketch_key(settings)
+        if key != ms.sketch_at:
+            ms.sketch_at, ms.sketch = key, map_sketch(settings)
 
 
 def _lane_readout_lines(ms: MenuState, settings: Settings) -> list[str]:
@@ -2117,6 +2126,8 @@ _C_PAD = 10        # canvas margin, and the gap between columns
 _C_GAP = 6         # between neighbouring buttons
 _C_BTN_H = 38      # an action button: a fingertip
 _C_START_H = 48
+_C_GROW = 12       # landscape: how much taller the buttons get where there's room
+_C_SKETCH_MIN = 90 # ...and the least room a map beside the title is drawn in
 _C_LEFT_MIN = 300  # landscape: the title-and-actions column at its narrowest
 _C_PANEL_W = 560   # ...and the settings panel at its widest, the desktop's
 _C_ROW_H = 46      # the Basic tab's row pitch, so it fits without a scroll
@@ -2138,23 +2149,39 @@ def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Setting
         col = pygame.Rect(pad, pad, w - 3 * pad - panel_w, h - 2 * pad)
         main = pygame.Rect(col.right + pad, pad, panel_w, h - 2 * pad)
         y = _compact_heading(surface, ms, settings, col, col.y)
+        # The column is taller than its title and actions: the buttons take some
+        # of the slack, a sketch of the map the rest (or the status, in its place).
         actions_h = _compact_actions(surface, ms, settings, col.w, None)
-        actions_top = col.bottom - actions_h
-        _compact_status(surface, ms, pygame.Rect(col.x, y, col.w, actions_top - y))
-        _compact_actions(surface, ms, settings, col.w, (col.x, actions_top))
+        rows = _compact_rows(ms, settings, col.w)
+        grow = max(0, min(_C_GROW, (col.bottom - actions_h - y - _C_SKETCH_MIN) // (rows + 1)))
+        actions_top = col.bottom - _compact_actions(surface, ms, settings, col.w, None, grow)
+        gap = pygame.Rect(col.x, y, col.w, actions_top - pad - y)
+        _compact_sketch(surface, ms, gap)
+        _compact_status(surface, ms, gap)
+        _compact_actions(surface, ms, settings, col.w, (col.x, actions_top), grow)
         _compact_settings(surface, ms, settings, main)
     else:
         full = pygame.Rect(pad, pad, w - 2 * pad, h - 2 * pad)
         y = _compact_heading(surface, ms, settings, full, full.y)
+        # The panel is as tall as its tallest tab, whichever is showing, so
+        # neither it nor the map under it moves as the tabs change; the buttons
+        # grow as they do in landscape, and the map takes what is left.
+        panel_h = _C_BTN_H + 8 + _tallest_tab_h(ms, settings, full.w)
         actions_h = _compact_actions(surface, ms, settings, full.w, None)
-        actions_top = full.bottom - actions_h
+        rows = _compact_rows(ms, settings, full.w)
+        spare = full.bottom - actions_h - pad - y - panel_h - pad
+        grow = max(0, min(_C_GROW, (spare - _C_SKETCH_MIN) // (rows + 1)))
+        actions_top = full.bottom - _compact_actions(surface, ms, settings, full.w, None, grow)
         status_h = 0
         if ms.status and pygame.time.get_ticks() < ms.status_until:
             status_h = len(widgets.wrap(f["small"], ms.status, full.w)) * _NOTE_H + 4
-        _compact_status(surface, ms, pygame.Rect(full.x, actions_top - status_h - 2, full.w, status_h))
-        _compact_settings(surface, ms, settings,
-                          pygame.Rect(full.x, y, full.w, actions_top - status_h - pad - y))
-        _compact_actions(surface, ms, settings, full.w, (full.x, actions_top))
+        # the status shares the map's slot, but squeezes the panel if that is too small
+        bottom = min(y + panel_h, actions_top - pad - (status_h + pad if status_h else 0))
+        view = _compact_settings(surface, ms, settings, pygame.Rect(full.x, y, full.w, bottom - y))
+        gap = pygame.Rect(full.x, view.bottom + pad, full.w, actions_top - 2 * pad - view.bottom)
+        _compact_sketch(surface, ms, gap)
+        _compact_status(surface, ms, gap)
+        _compact_actions(surface, ms, settings, full.w, (full.x, actions_top), grow)
 
     _draw_daily_list(surface, ms)
     ms.board_open = _draw_drop_list(surface, ms, "board_menu", _BOARD_ITEMS, ms.board_open)
@@ -2188,6 +2215,42 @@ def _compact_heading(surface, ms: MenuState, settings: Settings, area: pygame.Re
             _text(surface, f["small"], line, colour, center=(area.centerx, y + _NOTE_H // 2))
             y += _NOTE_H
     return y + 8
+
+
+def _compact_sketch(surface, ms: MenuState, area: pygame.Rect) -> None:
+    """The setup's map (`settings.map_sketch`) fitted into ``area``, captioned
+    with whether it is the board you will play or a sample of its kind, or a "?"
+    where fog hides it. Nothing while the status message has the room, or when
+    there is too little of it."""
+    sketch = ms.sketch
+    if (sketch is None or area.h < _C_SKETCH_MIN
+            or (ms.status and pygame.time.get_ticks() < ms.status_until)):
+        return
+    f = _fonts()
+    caption = {"yours": "your map", "sample": "a sample map: the seed is random",
+               "hidden": "Map hidden by fog of war"}[sketch.kind]
+    _text(surface, f["small"], caption, config.COLOR_TEXT_DIM,
+          center=(area.centerx, area.bottom - _NOTE_H // 2))
+    if sketch.kind == "hidden":
+        _text(surface, f["big"], "?", config.COLOR_TEXT_DIM,
+              center=(area.centerx, area.y + (area.h - _NOTE_H) // 2))
+        return
+    r = 5  # a home's radius; every other system is half that
+    box = pygame.Rect(area.x, area.y, area.w, area.h - _NOTE_H - 4).inflate(-2 * r - 4, -2 * r - 4)
+    xs = [p[0] for p in sketch.points.values()]
+    ys = [p[1] for p in sketch.points.values()]
+    scale = min(box.w / (max(xs) - min(xs) or 1.0), box.h / (max(ys) - min(ys) or 1.0))
+    ox = box.centerx - (min(xs) + max(xs)) / 2 * scale
+    oy = box.centery - (min(ys) + max(ys)) / 2 * scale
+    at = {sid: (round(ox + x * scale), round(oy + y * scale)) for sid, (x, y) in sketch.points.items()}
+    for a, b in sketch.lanes:
+        pygame.draw.line(surface, config.COLOR_LANE, at[a], at[b], 1)
+    for sid, pt in at.items():
+        owner = sketch.homes.get(sid)
+        if owner is None:
+            pygame.draw.circle(surface, config.COLOR_NEUTRAL, pt, r // 2)
+        else:
+            pygame.draw.circle(surface, config.player_color(owner), pt, r)
 
 
 def _compact_status(surface, ms: MenuState, area: pygame.Rect) -> None:
@@ -2244,35 +2307,43 @@ def _compact_columns(items, width: int) -> int:
     return max(2, min(_C_COLS, (width + _C_GAP) // (label_w + _C_GAP)))
 
 
-def _compact_actions(surface, ms: MenuState, settings: Settings, width: int,
-                     at: tuple[int, int] | None) -> int:
-    """Start Game across ``width``, then every other action in rows (off the web,
-    the save file's name field first). Draws at ``at``, or only measures when it
-    is None. Returns the height."""
+def _compact_rows(ms: MenuState, settings: Settings, width: int) -> int:
+    """How many rows `_compact_actions` draws below Start."""
     items = _compact_action_items(ms, settings)
-    field_h = 0 if is_web() else _C_BTN_H + _C_GAP
+    cols = _compact_columns(items, width)
+    return (len(items) + cols - 1) // cols + (0 if is_web() else 1)
+
+
+def _compact_actions(surface, ms: MenuState, settings: Settings, width: int,
+                     at: tuple[int, int] | None, grow: int = 0) -> int:
+    """Start Game across ``width``, then every other action in rows (off the web,
+    the save file's name field first), each ``grow`` taller than its least. Draws
+    at ``at``, or only measures when it is None. Returns the height."""
+    items = _compact_action_items(ms, settings)
+    btn_h = _C_BTN_H + grow
+    field_h = 0 if is_web() else btn_h + _C_GAP
     cols = _compact_columns(items, width)
     rows = (len(items) + cols - 1) // cols
-    height = _C_START_H + _C_GAP + field_h + rows * _C_BTN_H + (rows - 1) * _C_GAP
+    height = _C_START_H + grow + _C_GAP + field_h + rows * btn_h + (rows - 1) * _C_GAP
     if at is None:
         return height
     x, y = at
     f = _fonts()
-    start = pygame.Rect(x, y, width, _C_START_H)
+    start = pygame.Rect(x, y, width, _C_START_H + grow)
     _button(surface, ms, "start", start, "Start Game", fill=_START_FILL, border=_START_BORDER,
             tcol=config.COLOR_TEXT, font=f["normal"])
     y = start.bottom + _C_GAP
     if not is_web():
-        field = pygame.Rect(x, y, width, _C_BTN_H)
+        field = pygame.Rect(x, y, width, btn_h)
         _text_field(surface, f["normal"], field, ms.filename or _DEFAULT_FILENAME, ms.editing_filename,
                     config.COLOR_TEXT)
         ms.rects["filename_field"] = field
-        y += _C_BTN_H + _C_GAP
+        y += btn_h + _C_GAP
     bw = (width - _C_GAP * (cols - 1)) // cols
     for i, (key, label, border) in enumerate(items):
         c = i % cols
-        rect = pygame.Rect(x + c * (bw + _C_GAP), y + (i // cols) * (_C_BTN_H + _C_GAP),
-                           bw if c < cols - 1 else width - c * (bw + _C_GAP), _C_BTN_H)
+        rect = pygame.Rect(x + c * (bw + _C_GAP), y + (i // cols) * (btn_h + _C_GAP),
+                           bw if c < cols - 1 else width - c * (bw + _C_GAP), btn_h)
         if key == "create_map" and settings.custom_map is not None:
             # the desktop's little x beside Edit map, inside its cell
             clear = pygame.Rect(rect.right - _C_BTN_H, rect.y, _C_BTN_H, rect.h)
@@ -2321,37 +2392,67 @@ def _compact_tabs(surface, ms: MenuState, settings: Settings, area: pygame.Rect)
     return area.y + th + 8
 
 
-def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect) -> None:
-    """The tabs, and under them the scrolling window onto the current tab."""
+def _panel_layer(width: int) -> pygame.Surface:
+    """The scrolling panel's layer at ``width``, cleared."""
     global _PANEL_LAYER
-    top = _compact_tabs(surface, ms, settings, area)
-    view = pygame.Rect(area.x, top, area.w, max(0, area.bottom - top))
-    ms.panel_view = view
-    pygame.draw.rect(surface, _PANEL_BG, view, border_radius=10)
-    pygame.draw.rect(surface, _PANEL_BORDER, view, 1, border_radius=10)
-    if view.h <= 4:
-        return
+    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != width:
+        _PANEL_LAYER = pygame.Surface((width, _LAYER_H))
+    _PANEL_LAYER.fill(_PANEL_BG)
+    return _PANEL_LAYER
 
-    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != view.w:
-        _PANEL_LAYER = pygame.Surface((view.w, _LAYER_H))
-    layer = _PANEL_LAYER
-    layer.fill(_PANEL_BG)
-    before = dict(ms.rects)
-    panel = pygame.Rect(0, 0, view.w, _LAYER_H)
-    if ms.tab == "basic":
+
+def _draw_tab_on(layer: pygame.Surface, ms: MenuState, settings: Settings, tab: str) -> int:
+    """Draw ``tab`` whole onto ``layer``; returns how far its content runs:
+    whatever was drawn that isn't the panel's own colour. Measured, so no tab
+    has to report its height."""
+    panel = pygame.Rect(0, 0, layer.get_width(), _LAYER_H)
+    if tab == "basic":
         _draw_basic(layer, ms, settings, panel)
-    elif ms.tab == "combat":
+    elif tab == "combat":
         _draw_combat(layer, ms, settings, panel)
-    elif ms.tab == "advanced":
+    elif tab == "advanced":
         _draw_advanced(layer, ms, settings, panel)
-    elif ms.tab == "ai":
+    elif tab == "ai":
         _draw_ai(layer, ms, settings, panel)
-    # How far the tab's content runs: whatever was drawn that isn't the panel's
-    # own colour. Measured, so no tab has to report its height.
     layer.set_colorkey(_PANEL_BG)
     used = layer.get_bounding_rect()
     layer.set_colorkey(None)
-    ms.panel_content_h = (used.bottom + 16) if used.h else 0
+    return (used.bottom + 16) if used.h else 0
+
+
+_TALLEST: tuple[tuple, int] | None = None  # `_tallest_tab_h`'s last (key, answer)
+
+
+def _tallest_tab_h(ms: MenuState, settings: Settings, width: int) -> int:
+    """The tallest tab's content at ``width`` (Combat's, with its jitter
+    matrix), so the portrait panel can keep one height across the tabs.
+    Measured by drawing each, and only again when what they draw could change."""
+    global _TALLEST
+    key = (width, config.ui_scale, repr(settings), ms.preview_attacker, ms.preview_defender)
+    if _TALLEST is None or _TALLEST[0] != key:
+        rects = dict(ms.rects)
+        tallest = max(_draw_tab_on(_panel_layer(width), ms, settings, tab) for tab, _l, on in _TABS if on)
+        ms.rects.clear()
+        ms.rects.update(rects)
+        _TALLEST = (key, tallest)
+    return _TALLEST[1]
+
+
+def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect) -> pygame.Rect:
+    """The tabs, and under them the scrolling window onto the current tab, all
+    of ``area`` under the tabs. Returns the window."""
+    top = _compact_tabs(surface, ms, settings, area)
+    if area.bottom - top <= 4:
+        ms.panel_view = pygame.Rect(area.x, top, area.w, max(0, area.bottom - top))
+        return ms.panel_view
+
+    before = dict(ms.rects)
+    layer = _panel_layer(area.w)
+    ms.panel_content_h = _draw_tab_on(layer, ms, settings, ms.tab)
+    view = pygame.Rect(area.x, top, area.w, area.bottom - top)
+    ms.panel_view = view
+    pygame.draw.rect(surface, _PANEL_BG, view, border_radius=10)
+    pygame.draw.rect(surface, _PANEL_BORDER, view, 1, border_radius=10)
     scroll = _clamp_scroll(ms, ms.panel_scroll.get(ms.tab, 0))
     ms.panel_scroll[ms.tab] = scroll
 
@@ -2380,6 +2481,7 @@ def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.R
             for i in range(18):
                 fade.fill((*_PANEL_BG, i * 12), pygame.Rect(0, i, fade.get_width(), 1))
             surface.blit(fade, (inner.x, inner.bottom - 18))
+    return view
 
 
 def _clamp_scroll(ms: MenuState, scroll: int) -> int:

@@ -81,7 +81,17 @@ is what switches it:
   in baseline units. Its settings panel keeps the desktop's 560 width
   (`_C_PANEL_W`), so every tab lays out as on the desktop; landscape gives the
   rest of the width to the title and the actions, three to a row where their
-  labels fit (`_compact_columns`). The actions are folded to six, so no row is
+  labels fit (`_compact_columns`). That column is taller than its title and
+  actions, so the buttons grow into some of the slack (up to `_C_GROW`) and a
+  sketch of the setup's map fills the rest (`_compact_sketch`,
+  `settings.map_sketch`, made in `pump`). Portrait puts one under the panel,
+  which is as tall as its tallest tab (Combat, jitter matrix and all;
+  `_tallest_tab_h`) whichever tab shows, so neither moves as the tabs change,
+  and its buttons grow the same way, so turning the phone doesn't resize them.
+  The status message takes the map's slot while it shows. It is the real board only with fog off; under
+  fog a pinned board (a daily's, a challenge's, a hand map) is what fog keeps
+  from you, so it is a "?" and "Map hidden". A seed left to chance has no board
+  yet, so it is a sample, captioned so, which gives nothing away. The actions are folded to six, so no row is
   left with one (`_compact_action_items`): the board's Recently played and
   Shared matches share a Leaderboard list, as the desktop footer once did; a
   drawn map's x sits inside Edit map; and there is no Quit, which a browser tab
