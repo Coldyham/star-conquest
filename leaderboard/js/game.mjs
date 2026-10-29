@@ -386,11 +386,11 @@ async function replayVersions(scores) {
  * not nothing at all: without a target, there is no reason to keep trying
  * before the reveal.
  *
- * The bots table is unaffected and fetched the same as always: a bot's game
- * is a pure function of the setup and the code (docs/design/leaderboard.md), already
- * fully public via `bot_scores`, so there is no *person's* strategy in it to
- * protect. Its verdict is built off the same aggregate rather than a fetched
- * score row — `{turns, lost}` is all `humanVsBots`/`bestBot` ever read.
+ * The bots table is fetched the same as always, but is normally empty here:
+ * the worker never replays a map while it is embargoed (`bot_replay.pending`),
+ * since a winning bot's replay is a solution to copy. Its verdict is built off
+ * the same aggregate rather than a fetched score row — `{turns, lost}` is all
+ * `humanVsBots`/`bestBot` ever read.
  *
  * The play link is always the setup alone (`freshPlayLink`), never a score's
  * `raw_token` — that token is a full challenge link and would smuggle out the

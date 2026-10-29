@@ -82,6 +82,10 @@ campaign fleets proposal (decided against). Split out of
     read apart from anyone else's, so the only boundary that can be
     enforced for everyone alike, the setter included, is on *how* a score
     was made rather than on whether one exists.
+  - **No bot is replayed on an embargoed map** until the embargo lifts
+    (`bot_replay.pending`), so the bot column has no Watch link to copy a
+    line from either ([`leaderboard.md`](leaderboard.md), "The bot column:
+    the rules in full").
   - **A campaign node is embargoed until its week ends, and that is derived,
     never stored.** `game_embargoes` (schema.sql) is the embargo in force:
     the latest of `games.embargo_until`, the end of any live campaign week

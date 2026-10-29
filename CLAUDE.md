@@ -225,7 +225,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 `leaderboard/README.md`)
 
 - **The bot column is computed offline, never served** (`tools/bot_replay.py`).
-  `bot_scores` has no public insert path.
+  `bot_scores` has no public insert path. An embargoed map is not replayed
+  until its embargo lifts.
 - **Replays are uploaded; scores are checked against them**
   (`tools/verify_scores.py`). Only *Post to leaderboard* and *Share replays*
   send; an autoplay demo never does. `game_logs` is not publicly readable or

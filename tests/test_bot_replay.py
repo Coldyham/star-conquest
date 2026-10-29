@@ -107,6 +107,16 @@ def test_each_bot_replays_at_the_top_of_its_own_slider():
     assert bot_replay.replay_aux("actuary", {"actuary": 1.0}) == 1.0  # --aux still wins
 
 
+def test_an_embargoed_map_owes_no_replay_until_it_lifts():
+    games = [{"game_key": "open", "seed": 1, "settings_json": {"seed": 1}},
+             {"game_key": "daily", "seed": 2, "settings_json": {"seed": 2}}]
+    args = (games, {}, ["marshal"], "rev", lambda bot: 1.0)
+    assert [job.game_key for job in bot_replay.pending(*args, embargoed={"daily"})] == ["open"]
+    assert [job.game_key for job in bot_replay.pending(*args, embargoed={"daily"},
+                                                       recompute=True)] == ["open"]
+    assert [job.game_key for job in bot_replay.pending(*args)] == ["open", "daily"]
+
+
 def _answering(monkeypatch, *bodies: tuple[int, str]) -> list[int]:
     """Serve each (status, body) in turn to the worker's client; count the calls."""
     calls: list[int] = []
