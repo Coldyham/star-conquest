@@ -586,7 +586,10 @@ def map_pan_padding() -> int:
 # map at full width, then the strip, then End Turn across the foot, where a
 # thumb rests. History mode drops End Turn; in portrait its slot is kept (the
 # scrubber takes both rows) so the map doesn't move on the way in or out.
-PORTRAIT_PANEL_FRAC = 0.26   # of the screen's height, for the panel under the map
+# The portrait panel's height in baseline units: a heading and three rows, the
+# compact system readout (`render._panel_system_compact`). Fixed, so the map
+# above it never moves as the selection changes.
+PORTRAIT_PANEL_H = 118
 
 
 def side_panel_rect(history: bool = False) -> tuple[int, int, int, int]:
@@ -594,7 +597,7 @@ def side_panel_rect(history: bool = False) -> tuple[int, int, int, int]:
     while reviewing history, which has no End Turn), or, in portrait, the band
     between the map and the button strip."""
     if portrait:
-        h = round(SCREEN_H * PORTRAIT_PANEL_FRAC)
+        h = s(PORTRAIT_PANEL_H)
         return (0, SCREEN_H - END_TURN_H - HUD_BOTTOM_H - h, SCREEN_W, h)
     foot = HUD_BOTTOM_H if history else END_TURN_H
     return (SCREEN_W - HUD_RIGHT_W, HUD_TOP_H, HUD_RIGHT_W, SCREEN_H - HUD_TOP_H - foot)

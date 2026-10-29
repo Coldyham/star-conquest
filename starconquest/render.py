@@ -2067,13 +2067,6 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
     # hit-tests them, so drawing them there offers a destructive press that does
     # nothing — the same reason route mode zeroes them just above, arrived at from
     # the other side (there they must not fire, here they cannot).
-    if ui.auto_forward and not ui.history:
-        y = _draw_clear_forward_button(surface, ui, px, y)
-    # below it, a narrower button for just the rules currently tinted dangerous
-    # (pointed at a system we don't hold) — shown only while at least one exists
-    dangerous = [] if ui.history else [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
-    if dangerous:
-        y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     # A highlighted rule wins the panel's focus over a plain hover; while the popup
     # is open `ui.selected` is that rule's source anyway, so the two agree.
     editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
@@ -2081,25 +2074,46 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
         focus = editing_rule
     else:
         focus = ui.selected if ui.selected is not None else ui.hover
-    if focus is None or focus not in state.systems:
+    focused = focus is not None and focus in state.systems
+    dangerous = [] if ui.history else [sid for sid in ui.auto_forward if ui.rule_is_hostile(state, sid)]
+    if config.portrait:
+        # A short band: the clear buttons share one row, and only while nothing
+        # is in focus, so a selected system's readout gets the whole band.
+        if not focused and not ui.history and ui.auto_forward:
+            y = _draw_clear_row(surface, ui, px, y, pw, len(dangerous))
+    else:
+        if ui.auto_forward and not ui.history:
+            y = _draw_clear_forward_button(surface, ui, px, y)
+        # below it, a narrower button for just the rules currently tinted dangerous
+        # (pointed at a system we don't hold) — shown only while at least one exists
+        if dangerous:
+            y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
+    if not focused:
         if ui.stage_hint and not ui.history:
             y = _panel_stage_hint(surface, ui, x, y, content_bottom)
+            if config.portrait:
+                return   # the hint is the band's one job in a stage
+        if config.portrait:
+            # The rules in full are the tutorial's to teach; the band keeps a
+            # reminder, so the map gets the room.
+            for line in _wrap(_fonts()["small"], _portrait_hint(ui), _panel_w()):
+                y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)
+            return
         _panel_legend(surface, x, y, content_bottom, history=ui.history,
                       spectating=ui.spectating)
         return
 
     gap = config.ROW_GAP * 2  # breathing space between sections
     dest = _panel_lane_target(state, ui, focus)
-    if config.portrait and (dest is not None or focus in ui.auto_forward):
-        # A full-width band a fifth of the screen tall: the system on the left,
-        # its lane and rule on the right, rather than one column running off the
-        # foot of it.
+    if config.portrait:
+        # A full-width band a few rows tall: the system on the left, its lane
+        # and rule on the right, rather than one column running off the foot.
         half = pw // 2
         _PANEL_COLUMN_W = half
         outer = surface.get_clip()
         try:
             surface.set_clip(outer.clip((px, py, half, ph)))
-            _panel_system(surface, state, ui, x, y, state.systems[focus])
+            _panel_system_compact(surface, state, ui, x, y, state.systems[focus])
             surface.set_clip(outer.clip((px + half, py, pw - half, ph)))
             y2 = y - gap
             if dest is not None:
@@ -2117,6 +2131,63 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
 
     if focus in ui.auto_forward:
         _panel_rule(surface, state, ui, x, y + gap, focus)
+
+
+def _portrait_hint(ui: Ui) -> str:
+    """The portrait band's line while nothing is in focus."""
+    if ui.history:
+        return "Reviewing played turns. Drag the scrubber or step a turn; tap a system to see it."
+    if ui.spectating:
+        return "Watching: tap a system to see it. Drag to pan, pinch to zoom."
+    return "Tap one of your systems, then a neighbour, to send its ships. Drag to pan, pinch to zoom."
+
+
+def _draw_clear_row(surface, ui: Ui, px: int, y: int, pw: int, dangerous: int) -> int:
+    """Portrait's clear buttons: "Clear all forwarding" and, while any rule is
+    pointed at a system we don't hold, "Clear dangerous", side by side in one
+    row. Records the same rects the landscape column does."""
+    font = _fonts()["small"]
+    h = _tap_size(font.get_height() + config.s(10))
+    inset, gap = config.s(12), config.s(8)
+    w = pw - 2 * inset
+    items = [(f"Clear forwarding ({ui.forward_lanes()})", (58, 38, 42), (170, 96, 104), "clear_forward_rect")]
+    if dangerous:
+        items.append((f"Clear dangerous ({dangerous})", *_BTN_DANGER, "clear_dangerous_rect"))
+    bw = (w - gap * (len(items) - 1)) // len(items)
+    for i, (label, fill, edge, attr) in enumerate(items):
+        r = pygame.Rect(px + inset + i * (bw + gap), y, bw, h)
+        pygame.draw.rect(surface, fill, r, border_radius=config.s(5))
+        pygame.draw.rect(surface, edge, r, config.s(1), border_radius=config.s(5))
+        _text(surface, font, label, config.COLOR_TEXT, center=r.center)
+        setattr(ui, attr, (r.x, r.y, r.w, r.h))
+    return y + h + config.s(10)
+
+
+def _panel_system_compact(surface, state: GameState, ui: Ui, x, y, sys) -> int:
+    """`_panel_system` in the portrait band's few rows: the name, then who holds
+    it and its ships, what it builds, and the pressure on it."""
+    width = _panel_w()
+    if sys.id == ui.selected and sys.name in starlore.LORE and not ui.history:
+        width -= _draw_lore_button(surface, ui, x + _panel_w(), y)
+    if sys.id not in ui.visible:
+        y = _head_named(surface, x, y, sys.label, config.COLOR_TEXT_DIM, width)
+        return _row(surface, x, y, "Out of sight", config.COLOR_TEXT_DIM)
+    colour = config.player_color(sys.owner_id)
+    y = _head_named(surface, x, y, sys.label, colour, width)
+    who = config.player_name(sys.owner_id)
+    if sys.owner_id == ui.human_id and not ui.spectating:
+        y = _row(surface, x, y, f"{who} · {ui.available(state, sys.id)}/{sys.ships} free", colour)
+    else:
+        y = _row(surface, x, y, f"{who} · {sys.ships} ships", colour)
+    if sys.production > 0:
+        y = _row(surface, x, y, f"1 per {sys.production}t · {sys.prod_progress}/{sys.production}",
+                 config.COLOR_TEXT_DIM)
+    else:
+        y = _row(surface, x, y, "Builds nothing", config.COLOR_TEXT_DIM)
+    threat = _adjacent_enemy_strength(state, sys.id, sys.owner_id)
+    fin, ein = _inbound_summary(state, sys.id, sys.owner_id)
+    tail = f" · in +{fin}/{ein}" if fin or ein else f" · {len(sys.neighbors)} lanes"
+    return _row(surface, x, y, f"Threat {threat}{tail}", config.COLOR_TEXT_DIM)
 
 
 def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:

@@ -54,7 +54,12 @@ is what switches it:
   controls under the map, so the map stays whole while it is open. Docked, it
   has a *Done*: closing by tapping the map is a desktop idiom a panel doesn't say.
 - **Portrait moves the panel under the map.** A right-hand column on a
-  portrait phone left the map a sliver; the regions are `config.play_rect`,
+  portrait phone left the map a sliver. The band under the map is a fixed
+  few rows (`config.PORTRAIT_PANEL_H`), so the map never moves with the
+  selection: a selected system in four rows (`render._panel_system_compact`),
+  its lane and rule beside it, and with nothing in focus a one-line reminder
+  rather than the how-to prose, which a quarter of the screen spent on was
+  noticed as wasted and which the tutorial already teaches. The regions are `config.play_rect`,
   `side_panel_rect`, `footer_rect` and `end_turn_rect`, and End Turn crosses
   the foot of the screen, under a thumb. History keeps End Turn's row (the
   scrubber takes both) so the map does not move on the way in.
