@@ -224,12 +224,15 @@ class Job:
     budget is spent, ``progress`` says how far along it is (``total`` is the most
     games it may play: it stops at the first round its pick settles), and
     ``result`` is the gauntlet file once it is done (None if no candidate was
-    won)."""
+    won). ``listing`` is the author's name when the link asked for the result
+    to be listed on the board, the one consent to send it there; None (the
+    default) keeps it in this browser only."""
 
     def __init__(self, spec: dealer.Spec, seed: int, rounds: int = ROUNDS,
                  probes=PROBES, targets: str | None = None, slack: int = 0, name: str = "",
-                 unwon_last: bool = True):
+                 unwon_last: bool = True, listing: str | None = None):
         self.spec, self.seed, self.rounds = spec, seed, rounds
+        self.listing = listing
         self.probes = tuple(probes)
         self.targets, self.slack = targets, slack
         self.unwon_last = unwon_last
@@ -297,10 +300,12 @@ class Job:
 # --------------------------------------------------------------------------- #
 # The board's gauntlet page builds `#gauntlet-spec=<payload>`: the spec as
 # deflated JSON in base64url, as a settings token is, with the run's own options
-# beside it (`candidates`, `targets`, `slack`, `name`, `unwon_last`), which `Spec.from_dict`
-# ignores. `candidates` is the most rounds to deal (it once counted candidates
-# per stage, which a round deals one of). A spec is a recipe, not a result: it is never kept or shared on, the
-# gauntlet it makes is (`gauntlet.remember`).
+# beside it (`candidates`, `targets`, `slack`, `name`, `unwon_last`, and
+# `wants_listing` with `by_name`), which `Spec.from_dict` ignores.
+# `candidates` is the most rounds to deal (it once counted candidates per stage,
+# which a round deals one of). A spec is a recipe, not a result: it is never kept
+# or shared on, the gauntlet it makes is (`gauntlet.remember`, and
+# `gauntlet.ask_listing` when the link asked for it to be listed).
 def spec_from_fragment(fragment: str) -> dict | None:
     """The spec a ``#gauntlet-spec=`` fragment carries, or None."""
     if not fragment.startswith(SPEC_FRAGMENT):
@@ -336,8 +341,13 @@ def job_from_link(data: dict, seed: int) -> Job:
     name = data.get("name")
     targets = data.get("targets")
     targets = "slowest" if targets is True else targets if targets in TARGETS else None
+    # Only a ticked "ask for it to be listed" sends the result anywhere; the
+    # name rides with it, clipped as the board would refuse it past the limit.
+    by_name = data.get("by_name")
+    by_name = " ".join(by_name.split())[:gauntlet.BY_NAME_MAX] if isinstance(by_name, str) else ""
+    listing = by_name if data.get("wants_listing") is True else None
     return Job(spec, spec.seed if spec.seed is not None else seed,
                rounds=max(1, min(MAX_ROUNDS, rounds)),
                targets=targets, slack=slack,
                name=" ".join(name.split()) if isinstance(name, str) else "",
-               unwon_last=data.get("unwon_last") is not False)
+               unwon_last=data.get("unwon_last") is not False, listing=listing)

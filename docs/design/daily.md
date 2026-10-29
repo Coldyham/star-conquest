@@ -367,7 +367,7 @@ create table if not exists public.dailies (
   keys): `main.new_ui` stamps `Ui.daily_day` on a game whose setup is a
   remembered daily.
 - **A fetch is not a send.** The game sends only on *Post to leaderboard* or
-  *Share replays*; the daily is a GET of public rows, as the campaign lookup is.
+  *Share replays* (and a generated gauntlet asked to be listed); the daily is a GET of public rows, as the campaign lookup is.
 - **Ironman on the daily.** A daily plays ironman whatever the local
   preference (`webstore.ironman`), so History stays hidden until the game is
   decided. It is a courtesy, not a check: like every local best, it is trusted.

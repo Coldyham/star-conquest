@@ -598,6 +598,11 @@ def land_daily(menu_state: MenuState, settings: Settings, state: str, body: str,
 GAUNTLET_GEN_MSG = "Generating a gauntlet: {pct:.0%} (games {done} of at most {total})"
 GAUNTLET_GEN_REFUSED_MSG = "Can't generate that gauntlet: {why}"
 GAUNTLET_GEN_EMPTY_MSG = "No generated map was won by any test bot: try a looser setup"
+# Asked for on the board's form ("Ask for it to be listed publicly"), and only
+# then: the generated file is saved to the board for an admin to list.
+GAUNTLET_LISTING_MSG = "Generated {name}: sending it to the board to ask for a listing..."
+GAUNTLET_LISTED_MSG = "Generated {name}: sent to the board, asking for it to be listed"
+GAUNTLET_LISTING_FAILED_MSG = "Generated {name}, but couldn't send it to the board"
 # How long the generator may hold a menu frame. A probe turn is a few ms for
 # most bots, so this keeps the menu answering while it works.
 GAUNTLET_GEN_BUDGET_S = 0.03
@@ -656,6 +661,29 @@ def pump_generation(menu_state: MenuState, settings: Settings,
     menu.set_status(menu_state, f"Generated {g.name}: {len(g.stages)} stages", True)
     menu.open_gauntlet(menu_state, settings, g.id)
     return None
+
+
+def ask_listing(menu_state: MenuState, job: gauntletgen.Job) -> tuple[str, pbp.Request] | None:
+    """A finished run whose link ticked "Ask for it to be listed publicly":
+    start saving it to the board under the author's name, and answer the
+    gauntlet's name with the save for the loop to poll. Nothing is sent for any
+    other run, or when there is no board."""
+    data = job.result() if job.done and job.listing is not None else None
+    if data is None:
+        return None
+    pending = gauntlet.ask_listing(data, job.listing or "")
+    if pending is None:
+        return None
+    menu.set_status(menu_state, GAUNTLET_LISTING_MSG.format(name=data["name"]), True)
+    return data["name"], pending
+
+
+def land_listing(menu_state: MenuState, name: str, state: str) -> None:
+    """The board answered the listing save: say whether it took."""
+    if state == pbp.OK:
+        menu.set_status(menu_state, GAUNTLET_LISTED_MSG.format(name=name), True)
+    else:
+        menu.set_status(menu_state, GAUNTLET_LISTING_FAILED_MSG.format(name=name), False)
 
 
 def replay_request() -> str:
@@ -1857,6 +1885,7 @@ async def main() -> None:
             pending_daily = open_daily(menu_state, asked_day, pending_daily_kind)
 
     gen_job: gauntletgen.Job | None = None
+    pending_listing: tuple[str, pbp.Request] | None = None   # (name, save) once a run ends
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         gen_job = start_generation(menu_state, spec_request(args.gauntlet_spec))
         linked_gauntlet = gen_job is not None
@@ -1893,6 +1922,11 @@ async def main() -> None:
         # would teleport the glide rather than advance it (`config.MAX_FRAME_MS`).
         dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
         pbp_idle += dt
+        if pending_listing is not None:
+            lstate, _lbody = pending_listing[1].poll()
+            if lstate != pbp.PENDING:
+                land_listing(menu_state, pending_listing[0], lstate)
+                pending_listing = None
         if pending_gauntlet is not None:
             gstate, gbody = pending_gauntlet.poll()
             if gstate != pbp.PENDING:
@@ -2604,7 +2638,10 @@ async def main() -> None:
             # menu needs a per-frame poll as well as its event handler.
             menu.pump(menu_state, settings)
             if gen_job is not None:
+                ran = gen_job
                 gen_job = pump_generation(menu_state, settings, gen_job)
+                if gen_job is None:
+                    pending_listing = ask_listing(menu_state, ran)
             menu.draw(screen, menu_state, settings)
             if resume_prompt is not None:
                 menu.draw_resume_prompt(screen, resume_prompt)

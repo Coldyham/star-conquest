@@ -616,6 +616,15 @@ Reasons: `docs/design/gauntlet.md`.
   gauntlet; the board's form only builds the link (`gauntlet-spec.mjs`). One
   probe path, `gauntletgen.play`, for the tool and the game
   (`tests/test_gauntletgen.py`).
+- **A generated gauntlet reaches the board only when its link asked to be
+  listed.** The page's name, author and "Ask for it to be listed publicly" are
+  shared by both ways of making one; ticked, the spec link carries
+  `wants_listing` and `by_name` (`buildSpec`), and the finished run is saved
+  through `/api/gauntlet` under that name (`gauntletgen.Job.listing`,
+  `gauntlet.ask_listing`, `main.ask_listing`). The ticked box is the consent
+  for that send; a name without it sends nothing. It is the game's one send
+  outside *Post to leaderboard* and *Share replays*
+  (`test_a_generated_gauntlet_goes_to_the_board_only_when_listing_was_asked`).
 - **`#g=<id>` is fetched once and kept**, `#gauntlet=<payload>` carries the file
   (`gauntlet.link_id`, `gauntlet.inline_data`); both open the Tutorial list on
   it (`main.open_linked_gauntlet`). A kept one opens without a fetch. What the

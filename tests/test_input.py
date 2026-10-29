@@ -1868,6 +1868,39 @@ def test_a_spec_link_generates_a_frame_at_a_time_then_opens_the_list(_gauntlet_s
     assert [g.id for g in main.gauntlet.remembered()] == [picked.id]
 
 
+def _run(ms, settings, spec):
+    job = main.start_generation(ms, main.gauntletgen.spec_fragment(spec))
+    assert job is not None
+    while (left := main.pump_generation(ms, settings, job)) is not None:
+        job = left
+    return job
+
+
+def test_a_generated_gauntlet_goes_to_the_board_only_when_listing_was_asked(_gauntlet_store, monkeypatch):
+    ms, settings = _gauntlet_store, Settings()
+    sent = []
+    monkeypatch.setattr(main.gauntlet, "ask_listing", lambda data, by: sent.append((data, by)) or "req")
+    assert main.ask_listing(ms, _run(ms, settings, {**_SPEC, "by_name": "Ann"})) is None
+    assert sent == []
+    job = _run(ms, settings, {**_SPEC, "name": "Climb", "by_name": "Ann", "wants_listing": True})
+    assert main.ask_listing(ms, job) == ("Climb", "req")
+    [(data, by)] = sent
+    assert by == "Ann" and data == job.result() and data["name"] == "Climb"
+    assert ms.status == main.GAUNTLET_LISTING_MSG.format(name="Climb") and ms.status_ok
+
+
+def test_a_listing_save_says_whether_it_took(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    main.land_listing(ms, "Climb", main.pbp.OK)
+    assert ms.status == main.GAUNTLET_LISTED_MSG.format(name="Climb") and ms.status_ok
+    main.land_listing(ms, "Climb", main.pbp.ERROR)
+    assert ms.status == main.GAUNTLET_LISTING_FAILED_MSG.format(name="Climb") and not ms.status_ok
+    # With no board there is nothing to send, and nothing is said about it.
+    monkeypatch.setattr(main.gauntlet.webstore, "leaderboard_url", lambda path: "")
+    job = _run(ms, Settings(), {**_SPEC, "wants_listing": True})
+    assert main.ask_listing(ms, job) is None
+
+
 def test_a_spec_link_that_can_never_deal_says_why(_gauntlet_store):
     ms = _gauntlet_store
     frag = main.gauntletgen.spec_fragment({"opponents": []})

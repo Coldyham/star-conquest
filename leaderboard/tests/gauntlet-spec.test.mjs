@@ -50,6 +50,20 @@ test("each choice becomes the dealer's rule", () => {
   assert.equal(spec.name, "Sym eight");
 });
 
+test("the author rides in the link only beside a ticked listing box", () => {
+  const unticked = buildSpec({ ...emptyForm(), byName: "Ann" }, seven);
+  assert.ok(!("by_name" in unticked) && !("wants_listing" in unticked));
+  const ticked = buildSpec({ ...emptyForm(), byName: "  Ann   Lee ", wantsListing: true }, seven);
+  assert.equal(ticked.wants_listing, true);
+  assert.equal(ticked.by_name, "Ann Lee");
+  const anonymous = buildSpec({ ...emptyForm(), wantsListing: true }, seven);
+  assert.equal(anonymous.wants_listing, true);
+  assert.ok(!("by_name" in anonymous));
+  assert.match(buildSpec({ ...emptyForm(), byName: "x".repeat(33), wantsListing: true }, seven), /your name is over 32/);
+  // Unticked, a long name is not this form's business: it is never sent.
+  assert.equal(typeof buildSpec({ ...emptyForm(), byName: "x".repeat(33) }, seven), "object");
+});
+
 test("a slider's pins are a range, a fixed value, or nothing on the default", () => {
   const rules = buildSpec({ ...emptyForm(), knobs: {
     home_production: [3, 3],               // the default: no rule

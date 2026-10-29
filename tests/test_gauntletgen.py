@@ -53,6 +53,18 @@ def test_the_last_stage_may_be_unwon_unless_the_link_says_not():
     assert not off.unwon_last and off.gid != gg.job_from_link(SMALL, seed=0).gid
 
 
+def test_only_a_ticked_listing_box_gives_the_run_an_author_to_send_under():
+    assert gg.job_from_link(SMALL, seed=0).listing is None
+    # A name alone is not consent: it rides only beside a ticked box.
+    assert gg.job_from_link({**SMALL, "by_name": "Ann"}, seed=0).listing is None
+    assert gg.job_from_link({**SMALL, "by_name": "Ann", "wants_listing": "yes"}, seed=0).listing is None
+    asked = gg.job_from_link({**SMALL, "by_name": "  Ann   Lee " + "x" * 40, "wants_listing": True}, seed=0)
+    assert asked.listing == ("Ann Lee " + "x" * 40)[:gauntlet.BY_NAME_MAX]
+    assert gg.job_from_link({**SMALL, "wants_listing": True}, seed=0).listing == ""
+    # Asking for a listing is not a different gauntlet.
+    assert asked.gid == gg.job_from_link(SMALL, seed=0).gid
+
+
 def test_the_id_follows_the_spec_and_seed():
     a = gg.job_from_link(SMALL, seed=0)
     assert a.seed == 9 and a.gid == gg.job_from_link(SMALL, seed=5).gid

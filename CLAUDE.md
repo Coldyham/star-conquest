@@ -229,7 +229,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   until its embargo lifts.
 - **Replays are uploaded; scores are checked against them**
   (`tools/verify_scores.py`). Only *Post to leaderboard* and *Share replays*
-  send; an autoplay demo never does. `game_logs` is not publicly readable or
+  send (and a generated gauntlet whose link ticked "Ask for it to be listed
+  publicly"); an autoplay demo never does. `game_logs` is not publicly readable or
   writable. A new column the board posts to `scores` joins the column grant
   (`test_schema_grants`), never `submitted_at`. `Ui.can_post` gates sharing.
 - **Playstyle readings are keyed by match, never by name**;
@@ -364,5 +365,7 @@ matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
 **A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
 `/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
 page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but
-for `listed` (admin only). Never store one in `campaigns`. The game fetches
+for `listed` (admin only). Never store one in `campaigns`. **A generated
+gauntlet is sent to the board only when its link asked to be listed**
+(`wants_listing`, `gauntlet.ask_listing`): that ticked box is the consent. The game fetches
 `#g=<id>` once and keeps the file (`gauntlet.remember`).
