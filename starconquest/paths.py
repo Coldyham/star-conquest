@@ -29,6 +29,10 @@ WEB_SHARED_SETTINGS_KEY = "sc_shared_settings"
 # relaunches without the fragment, and offline. Newest first, a few at most
 # (`gauntlet.remember`). Never progress: that is `WEB_BESTS_KEY`, as for any game.
 WEB_GAUNTLETS_KEY = "sc_gauntlets"
+# The daily challenge setups this device has opened, as challenge key -> day
+# (`daily.remember`), so a game started on one is known as the daily. A
+# fortnight at most. Never progress: that is `WEB_BESTS_KEY`, as for any game.
+WEB_DAILIES_KEY = "sc_dailies"
 
 # Storage key for your best result per challenge setup (see `webstore.best`),
 # so replaying a shared link can show what you already managed.
@@ -134,6 +138,7 @@ LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions
 LEADERBOARD_CAMPAIGN_PATH = "/api/campaign"  # is this setup a campaign node (`campaign`)
 LEADERBOARD_GAUNTLET_PATH = "/api/gauntlet"  # a gauntlet built on the board, by id
+LEADERBOARD_DAILY_PATH = "/api/daily"  # a day's daily challenge setup (`daily`)
 # The board's main list (`leaderboard/js/home.mjs`): every map somebody has
 # posted a score on, newest activity first — what the menu's "Recently played"
 # button says it opens. Its "By config" toggle is one press away from there.

@@ -22,6 +22,7 @@ dev = [
     "pygbag>=0.9.3",
     "pip",            # pygbag's build/dev server shells out to `python -m pip`
     "jinja2>=3.1.6",  # the leaderboard pages are templates — see tools/render_board.py
+    "fonttools>=4.68.0",  # the web build subsets its fonts — see tools/slim_web.py
 ]
 
 [tool.ruff.lint]

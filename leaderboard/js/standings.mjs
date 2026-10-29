@@ -52,19 +52,21 @@ export function displayOrder(scores, key) {
 const DAY_MS = 86400000;
 
 /**
- * When a map's embargo lifted, as an ISO timestamp: the later of its stored
+ * When a map's embargo lifted, as an ISO timestamp: the latest of its stored
  * reveal date (`game_summary.embargo_until`, which once nothing is in force is
- * `games.embargo_until` alone) and the end of the last campaign week it was a
+ * `games.embargo_until` alone), the end of the last campaign week it was a
  * node of (`campaign_games.week_start`, a "YYYY-MM-DD" Monday; the week ends
- * seven days on, as `game_embargoes` counts). Null while either is still to
- * come, or when the map never had one. Worked out here rather than in
- * `game_embargoes`, which reads live weeks only so the home page never scans
- * every past campaign.
+ * seven days on, as `game_embargoes` counts) and the end of the day it was
+ * the daily of (`daily_games.day`; the day ends at the next midnight UTC).
+ * Null while any is still to come, or when the map never had one. Worked out
+ * here rather than in `game_embargoes`, which reads live weeks and days only
+ * so the home page never scans every past campaign or daily.
  */
-export function embargoLiftedAt(embargoUntil, weekStartDay, now = Date.now()) {
+export function embargoLiftedAt(embargoUntil, weekStartDay, now = Date.now(), dailyDay = null) {
   const ends = [];
   if (embargoUntil) ends.push(Date.parse(embargoUntil));
   if (weekStartDay) ends.push(Date.parse(`${weekStartDay}T00:00:00Z`) + 7 * DAY_MS);
+  if (dailyDay) ends.push(Date.parse(`${dailyDay}T00:00:00Z`) + DAY_MS);
   const valid = ends.filter((t) => Number.isFinite(t));
   if (!valid.length) return null;
   const lifted = Math.max(...valid);
@@ -189,8 +191,7 @@ export function tally(rows, roster) {
 }
 
 /**
- * The measured full-roster ladder (docs/design/marshal.md "Full roster ladder" in
- * the Python repo, mirrored here since JS can't import it), strongest to
+ * The measured full-roster ladder (docs/design/ladder.md in the Python repo, mirrored here since JS can't import it), strongest to
  * weakest, one entry per family. Keep in sync with `starconquest/ai.py`'s
  * `LADDER_ORDER`.
  */

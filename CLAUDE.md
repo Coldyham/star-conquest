@@ -6,24 +6,23 @@ Star Conquest is a minimalist turn-based strategy game: a graph star map where
 systems are nodes and spacelanes are edges, one ship type, take every system to
 win. Python 3.12+, pygame for presentation, `uv` for dependency management.
 
-This file states the rules in short. Each rule's full wording, with every
-function and test it names, is in `docs/design/rules.md` under the same heading;
-grep it for the section you are touching. The reasons, measurements and rejected
-alternatives live in the other `docs/design/` files, one per area. [`docs/README.md`](docs/README.md) is the short index of
-those files. Two companion pages are for **grepping, not reading whole**:
-`docs/sections.md` (every design file's sections, one line each) and
-`docs/decided-against.md` (every idea built or proposed and then dropped).
-**Grep `docs/decided-against.md` before proposing a mechanism, a bot tactic or a
-re-tune.** Read a design file only when touching that code, and prefer the
-section you need to the whole file. Design files: `core`, `shell`, `turnfilm`,
-`hand-maps`, `gauntlet`, `leaderboard`, `setup-families`, `schema`, `rules`; `bots`, `win-turns`, `bot-families`, `knower`,
-`council`, `marshal`, `marshal-pricing`, `marshal-flow`, `marshal-joint`, `marshal-cma`,
-`actuary`, `hunter`, `learner`, `learning`, `field`, `convoy`, `evolved`; `pbp`; `par`; `seat-play`. Keep
-each under ~1000 lines (split by topic and update the index and
-`docs/sections.md` when one grows past that). Keep this file to rules and
-pointers. `docs/bot-api.md` (wire protocol for non-Python bots) and
-`docs/bot-brief.md` (a brief players paste into an AI assistant; checked by
-`tests/test_bot_brief.py`) are published documents, not working notes.
+This file states the rules in short and how the system fits together. The
+*why* (reasons, measurements, history, rejected alternatives) lives in
+`docs/design/`, indexed by [`docs/README.md`](docs/README.md), which also lists
+the measurement tools. Each rule's full wording is in `docs/design/rules.md`
+under the same heading. To find anything else, **grep the three index pages
+rather than reading design files**; every line names its file and section:
+
+- `docs/sections.md`: every design-file section, one line each.
+- `docs/decided-against.md`: every idea built or proposed and then dropped.
+- `docs/open.md`: work left open, and decisions left to the author.
+
+**Grep `decided-against.md` and `open.md` before proposing a mechanism, a bot
+tactic or a re-tune.** Then read only the section you need. Keep each design
+file under ~1000 lines (split by topic; update `docs/README.md` and
+`docs/sections.md`) and this file to rules, structure and pointers.
+`docs/bot-api.md` and `docs/bot-brief.md` (checked by `tests/test_bot_brief.py`)
+are published documents for outside developers, not working notes.
 
 ## Commands
 
@@ -37,38 +36,23 @@ uv run pytest                                  # full suite (or a file / file::t
 uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
 uv run python -m tests.sim --trials 200          # batch stats; add --film to check playback
 uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwise
+                                                 # (parallel; recorded and resumed in results/ladder/)
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a bot's aux knob
 
+uv run python tools/daily.py --dry-run          # deal today's and tomorrow's dailies (board, puzzle), store nothing
+uv run python tools/try_daily.py sat            # play a fresh Saturday daily map (--puzzle, --probe, --seed, --week)
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column (needs SUPABASE_*)
 uv run python tools/verify_scores.py --dry-run  # check each posted score's log
 uv run python tools/admin.py matches            # moderation (dry run until --yes)
-uv run python tools/position_suite.py           # rank bots on real-game positions
-uv run python tools/bot_distance.py             # how differently bots play, by phase
-uv run python tools/learner_check.py            # actuary's rival model vs the roster
-                                                # (--logs public: posted human games)
-uv run python tools/human_habits.py             # how people play vs roster self-play
 uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots column
-uv run python tools/config_census.py            # which setups people play
-uv run python tools/setup_sweep.py              # ...and whether the ranking moves there
-uv run python tools/seat_play.py new --key KEY  # play a posted map's seat by hand
-uv run python tools/hunt_bench.py --seeds 50     # actuary at Hunt (or a --variant) vs Field, paired
-uv run python tools/candidate_bench.py --borrow actuary     # a bot as one more knower candidate, paired
-uv run python tools/pileup_bench.py --stop 2 --seeds 60     # knower's pile-up pricing on posted 4/5-seat maps, paired
-uv run python tools/mp_tactics.py --seeds 400   # marshal's multiplayer tactics vs stock, paired
-uv run python tools/bait_bench.py --seeds 200    # knower's Search offered bait openings, paired
-uv run python tools/fold_check.py               # a stop plays as the bot folded into it
-uv run python tools/gauntlet_check.py --quick   # the tutorial's stages rise in difficulty
-uv run python tools/gauntlet_gen.py --run NAME --spec spec.json   # deal, probe, pick a gauntlet
-uv run python tools/win_turns.py                # turns to win: Council, Hunt, marshal vs the weak bots
-                                                # (--label NEW --base OLD pairs two trees game by game)
-uv run python tools/par_search.py --nodes 13 --ai marshal actuary   # par search (local)
-uv run python tools/evo_bench.py --bot evolved --quick --seeds 50   # evolved's gate
-uv run --with cma python tools/evo_train.py --run NAME  # retrain evolved (CMA-ES)
-uv run --with cma python tools/const_train.py --run NAME  # tune marshal's constants (CMA-ES)
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 ```
+
+Measurement, tuning and generator tools (benches, censuses, CMA-ES, par
+search, gauntlet dealing) are listed in `docs/README.md`, "Tools", with the
+design file each one reports into.
 
 No lint step; match the surrounding style. Pylance basic type-checking
 (`.vscode/settings.json`) warnings are real signal.
@@ -91,12 +75,18 @@ scratch output.
 
 ## Architecture
 
+Where things live: `starconquest/` the game (core and shell, below);
+`models/` the shipped bots; `bots/` subprocess bots; `tests/` (with the
+`tests.sim` harness); `tools/` offline jobs and benches; `leaderboard/` the
+board site, its SQL (`schema.sql`), JS and Netlify functions
+(`leaderboard/netlify/functions/`); `results/` run ledgers (gitignored).
+
 A hard split between a **pure simulation core** and a **thin pygame shell**, so
 the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `stats` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -135,7 +125,7 @@ independent) → win check → `turn += 1`. A bot sizing an attack off
 - **Non-Python bots are subprocesses** (`botio` wire format, `tests/botproc.py`,
   `bots/<name>.bot.json`), outside `models/` since WASM can't fork. Their
   randomness is derived (`botio.decide_seed`). A degraded seat (`degraded_runs`)
-  must never be scored or posted. `docs/design/bots.md`, "External bots".
+  must never be scored or posted. `docs/design/external-bots.md`, "External bots".
 
 Detail: `docs/design/core.md`.
 
@@ -181,7 +171,7 @@ rolls its own stream (`engine._Dice`). Rules in full: `docs/design/core.md`,
 Per-seat URLs onto a shared match, played asynchronously. Reasons:
 `docs/design/pbp.md`, under the same headings as the full rules.
 
-- **Thin server; clients resolve.** `netlify/functions/pbp.mjs` and the `pbp_*`
+- **Thin server; clients resolve.** `leaderboard/netlify/functions/pbp.mjs` and the `pbp_*`
   tables store orders and the log, never a board or engine. A seat token is
   scoped to one match. Play-by-post never reaches the leaderboard.
 - **The stored log is the record; a turn is decided once** (first upload wins;
@@ -235,7 +225,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 `leaderboard/README.md`)
 
 - **The bot column is computed offline, never served** (`tools/bot_replay.py`).
-  `bot_scores` has no public insert path.
+  `bot_scores` has no public insert path. An embargoed map is not replayed
+  until its embargo lifts.
 - **Replays are uploaded; scores are checked against them**
   (`tools/verify_scores.py`). Only *Post to leaderboard* and *Share replays*
   send; an autoplay demo never does. `game_logs` is not publicly readable or
@@ -244,10 +235,17 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 - **Playstyle readings are keyed by match, never by name**;
   `leaderboard/js/playstyle-baseline.mjs` is generated, never edited.
 - **Crowns, campaign, embargoes and badges are derived, never stored**
-  (badges: `leaderboard/README.md`, "Badges").
+  (reasons: `docs/design/campaign.md`; badges: `leaderboard/README.md`,
+  "Badges").
   `campaign_games` matches by jsonb equality. `attemptStatus` is the one answer
   to "may I move here"; the game asks `/api/campaign` and never reimplements a
   rule.
+- **The daily is made by the worker and stored, never made by the game**
+  (`tools/daily.py` into `dailies`, a day ahead, readable once its day starts;
+  the game asks `/api/daily`). A day has two kinds, the board and the puzzle,
+  each with its own streaks and badges. A day is never remade. A day's map is embargoed
+  until the day ends (`game_embargoes`); its winner, standings and streaks
+  (mended, and true) are derived. `docs/design/daily.md`.
 - **The game and board are one site** (`/game/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. `tools/pwa/sw.js` never touches `/api/`. The
@@ -262,6 +260,25 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 
 **The AI** (rules in full: `docs/design/bots.md`, "Per-seat AI and pricing a
 fight: the rules in full")
+
+The roster, strongest first (`ai.LADDER_ORDER`; a family's variants are stops
+of its `aux` knob, `docs/design/bot-families.md`; the measured ladder, and
+when to re-run it, is `docs/design/ladder.md`):
+
+- `knower` (Oracle: Off, Predict, Search, Council): an oracle (`IS_ORACLE`)
+  that runs rival seats' `decide` to read their orders. Search plays out
+  openings borrowed from other bots; Council adds a learned judge.
+- `actuary` (Style: Greedy, Field, Learning, Hunt): prices every launch
+  against a projected ledger of the board. Field pulls by an influence field,
+  Learning remembers each rival's strike habits, Hunt adds a look-ahead.
+- `marshal`: thinker's planner in fixed phases, made to commit; a fast,
+  deterministic rule bot.
+- `evolved` (Look-ahead: Off, On): blind; CMA-ES-trained weights over priced
+  moves.
+- `thinker` (Claudebot, Thinker): flows ships to the front.
+- `heuristic` (in `ai.py`, the fallback) and `rusherplus` (attacks the weakest
+  neighbour): the weak baselines.
+
 
 - **AI is per-seat and pluggable** (`Player.ai_strategy`, `model.AiParams`).
 - **A random seat is resolved in `build_state`** from the pool its seed's era
@@ -335,7 +352,7 @@ through `without_node`; the editor's model is the recipe, never a `GameState`;
 ### Gauntlets (gauntlet.py)
 
 Pinned setups played in order, each with a briefing card and a side-panel hint;
-the tutorial is one (`assets/gauntlets/tutorial.json`). Full rules:
+the tutorial is one (`starconquest/assets/gauntlets/tutorial.json`). Full rules:
 `docs/design/rules.md`, "Gauntlets". **A gauntlet is data, never `Settings`**: a
 stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup

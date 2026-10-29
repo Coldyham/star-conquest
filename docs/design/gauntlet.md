@@ -6,9 +6,10 @@ a one-line hint, played in order. The tutorial is one
 `starconquest/gauntlet.py`. Players make their own on the board's gauntlet page
 (`leaderboard/gauntlet.html`), which stores them and hands out a short link; see
 "Gauntlets made on the board". The same file format is meant to carry a later
-single-player run with branching graph navigation, carry-over between stages
-and score targets that gate the way on; that part is proposed below and not
-built.
+single-player run with branching graph navigation and score targets that gate
+the way on. Stage targets and generated (linear) gauntlets are built; the
+branching run is proposed below and not built, and carry-over between stages is
+decided against.
 
 Planned on 2026-10-21; the plan's decisions are recorded here with their
 reasons.
@@ -351,6 +352,9 @@ that rounds out of it), seeds with `settings.roll_seed`, and rerolls a setup
 `setup_warnings` objects to. **Opponents follow depth**: the allowed bots are
 ordered weakest first by `LADDER_ORDER` and each seat draws near
 `depth * (n - 1)`, so difficulty rises by design and the benchmark checks it.
+With no depth (`None`), each seat draws evenly from every allowed bot instead,
+for a setup that should not rise, the daily's board (`daily.md`, "Opponent
+strength stays flat").
 That matters because a random map is decided by position as much as by play
 (the tutorial's seed hunt, above).
 
@@ -611,7 +615,10 @@ your path through branching stages toward an end node.
 
 ## Carry-over
 
-The open problem. A roguelite run wants boons carried between stages: extra
+**Decided against (2026-10-26).** Stage targets give a run its pressure, and
+boons get complicated. What was proposed:
+
+A roguelite run wants boons carried between stages: extra
 home ships or production, a scouted node, an extra starting system. There are no
 per-seat economy fields to put them in, and adding one would be a `Settings`
 field (a key move for every shared map) that only this mode reads.
@@ -625,14 +632,14 @@ scores separately from the same stage without the boon, and two players with
 different boons never compare. Whether that is acceptable is the decision to
 make before boons are built.
 
-It no longer blocks the run. Stage targets (below) give a run its pressure
-without carrying anything between stages, so the run can be built on them, and
-boons can follow later or never.
+Stage targets (below) give a run its pressure without carrying anything
+between stages, so the run is built on them instead.
 
 ## Stage targets
 
-Proposed and built on 2026-10-23, beat the best bot included; targets on lanes
-and a dealt run's targets are not built. An author can give a stage a score to
+Proposed and built on 2026-10-23, beat the best bot included, and a dealt
+run's targets with it (`tools/gauntlet_gen.py --targets`, "Generated
+gauntlets"); targets on lanes are not built. An author can give a stage a score to
 win within, and the stages beyond it open only once you have. This gives a gauntlet, and a later
 run, the pressure to play well rather than just win, and it leaves the setup
 alone: the stage stays the ordinary map it is, scores on it still compare on the
@@ -687,10 +694,11 @@ board, and no key moves. Boons cannot do that.
   the device, for the reasons "Relation to the weekly campaign" gives.
 - **Not in the tutorial.** A beginner should be held up by what they have not
   learned yet, not by how fast they won.
-- **A dealt run has no author to set them.** The cheap answer is a roster bot's
-  score on the stage plus some slack, measured once when the run is dealt
-  (marshal is fast and draws nothing, so the target is reproducible from the run
-  seed). This is not the par that was kept off the board
+- **A dealt run has no author to set them.** The answer is a roster bot's
+  score on the stage plus some slack, measured once when the run is dealt. As
+  built, it is the slowest (or fastest) probe win plus `--target-slack`, from
+  the probe games the dealer plays anyway ("Generated gauntlets", "The
+  benchmark"). This is not the par that was kept off the board
   ([`par.md`](par.md), "Not on the board"): that was a computed number shown on
   every map. A run's target is local and only gates its own stages.
 
@@ -737,9 +745,10 @@ asks an author for no number of their own.
   saving. A later step would let them pick from the column ("Beat marshal")
   rather than take the best; that needs no new shape, since `bot` already names
   which one.
-- **A dealt run uses the same shape.** A dealt setup is on no board, so its
+- **A dealt run uses the plain shape.** A dealt setup is on no board, so its
   "roster bot's score plus slack" above is measured locally when the run is
-  dealt and written with `bot` and, with no slack, `beat`.
+  dealt. `gauntletgen.target` writes it as an ordinary met target, `turns` and
+  `lost` (or `turns` alone with slack), not with `bot` and `beat`.
 
 ### Later: targets on lanes
 
@@ -768,6 +777,11 @@ or an alternate route to the end.
   target can be met is the author's to show, by playing it.
 - **The list names each locked way on and what it needs** ("Shortcut: win in
   12"), so a player can see a route is there before they can take it.
+- **A lane may be hidden** (`{"turns": 12, "hidden": true}`): the list shows
+  nothing of it until its target is met, then the bonus stage appears, as
+  Mario Kart unlocks a staff ghost for a fast enough time trial. Proposed
+  2026-10-28, in place of a hidden star on board maps (`other-games.md`, "Star
+  tiers on every map"). `checkBody` learns `hidden` with the rest.
 - **It waits for a page that draws lanes.** The board's gauntlet page edits
   order only, so lanes and their targets would be written by hand or dealt
   until it draws the graph.

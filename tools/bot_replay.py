@@ -62,7 +62,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -417,8 +417,13 @@ def _row_for(job: Job, result: sim.ReplayResult, log: replay.GameLog, rev: str) 
 
 def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[str],
             rev: str, aux_for: Callable[[str], float], *,
-            recompute: bool = False, stale: bool = False) -> list[Job]:
+            recompute: bool = False, stale: bool = False,
+            embargoed: Collection[str] = frozenset()) -> list[Job]:
     """The (map, bot) pairs still owing an answer, in the order given.
+
+    A map in ``embargoed`` owes nothing yet, whatever the flags: a winning bot's
+    replay is a solution anyone could copy, so its rows wait for the embargo to
+    lift and the next run fills them in.
 
     ``done`` maps a computed pair to the stored row, so a cached answer can be
     judged on more than its existence:
@@ -433,6 +438,8 @@ def pending(games: list[dict], done: dict[tuple[str, str], dict], roster: list[s
     """
     jobs: list[Job] = []
     for row in games:
+        if row.get("game_key") in embargoed:
+            continue
         built = _settings_for(row)
         if built is None:
             print(f"  skipping {row.get('game_key')}: unreadable settings_json")
@@ -538,10 +545,14 @@ def main(argv: list[str] | None = None) -> int:
     computed = api.select("bot_scores",
                           "select=game_key,bot,engine_rev,aux&order=game_key.asc,bot.asc")
     done = {(row["game_key"], row["bot"]): row for row in computed}
-    print(f"{len(games)} maps on the board, {len(done)} results cached")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    embargoed = {row["game_key"] for row in api.select(
+        "game_embargoes", f"select=game_key&embargo_until=gt.{now}&order=game_key.asc")}
+    print(f"{len(games)} maps on the board, {len(done)} results cached, "
+          f"{len(embargoed)} embargoed (skipped until they lift)")
 
     jobs = pending(games, done, roster, rev, aux_for,
-                   recompute=args.recompute, stale=args.stale)
+                   recompute=args.recompute, stale=args.stale, embargoed=embargoed)
     if args.limit > 0:
         jobs = jobs[: args.limit]
     if not jobs:

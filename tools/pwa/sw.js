@@ -17,11 +17,18 @@
 //   are thin shells over live data, and a single stale load after a deploy could
 //   pair old JS with a new API or rules version.
 //
+// One cross-origin prefix is cached too: pygbag's runtime (CPython and pygame
+// compiled to WebAssembly, several megabytes) loads from the pygame-web CDN under
+// a versioned path. Without this, a returning player re-checks every runtime file
+// with the CDN before the game can start, and nothing loads offline. It is the
+// same stale-while-revalidate, keeping only CORS responses the page can read.
+//
 // It is served from the site root, not /game/ beside the game, so its scope stays
 // "/" — the scope every install from before the game moved to /game/ registered —
 // and it keeps covering the board. v3 drops the v2 cache, whose "/" was the game.
 
 const CACHE = "starconquest-v3";
+const RUNTIME = "https://pygame-web.github.io/cdn/";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -41,14 +48,15 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Only handle same-origin GETs; leave range requests and everything else alone.
-  if (req.method !== "GET" || url.origin !== self.location.origin || req.headers.has("range")) {
-    return;
-  }
+  // Only handle GETs, same-origin or pygbag's runtime; leave range requests and
+  // everything else alone.
+  if (req.method !== "GET" || req.headers.has("range")) return;
+  const sameOrigin = url.origin === self.location.origin;
+  if (!sameOrigin && !url.href.startsWith(RUNTIME)) return;
 
-  if (url.pathname.startsWith("/api/")) return;
+  if (sameOrigin && url.pathname.startsWith("/api/")) return;
 
-  if (url.pathname.startsWith("/board/")) {
+  if (sameOrigin && url.pathname.startsWith("/board/")) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE);
@@ -71,7 +79,7 @@ self.addEventListener("fetch", (event) => {
 
       const network = fetch(req)
         .then((res) => {
-          if (res && res.ok && res.type === "basic") {
+          if (res && res.ok && (res.type === "basic" || res.type === "cors")) {
             cache.put(req, res.clone());
           }
           return res;

@@ -267,6 +267,10 @@ test("embargoLiftedAt: the later of the stored reveal and the campaign week's en
   // Still in force, by either half: nothing has lifted yet.
   assert.equal(embargoLiftedAt("2026-10-25T00:00:00Z", "2026-10-05", now), null);
   assert.equal(embargoLiftedAt(null, "2026-10-19", now), null);
+  // A daily's embargo ends at the midnight after its day.
+  assert.equal(embargoLiftedAt(null, null, now, "2026-10-14"), "2026-10-15T00:00:00.000Z");
+  assert.equal(embargoLiftedAt(null, "2026-10-05", now, "2026-10-14"), "2026-10-15T00:00:00.000Z");
+  assert.equal(embargoLiftedAt(null, null, Date.parse("2026-10-14T23:00:00Z"), "2026-10-14"), null);
 });
 
 test("leaderAt: the best counted score posted by then, ignoring later and uncounted ones", () => {

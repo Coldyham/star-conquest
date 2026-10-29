@@ -3,7 +3,7 @@
 A wire protocol so a bot can be written in any language, judged in the ladder,
 and never need to be Python. Why it takes this shape — and why the in-app
 rule-builder it replaces was not merged — is in
-[`design/bots.md`](design/bots.md) under "Bots that aren't Python".
+[`design/external-bots.md`](design/external-bots.md) under "Bots that aren't Python".
 
 **Built:** the schema (`starconquest/botio.py`, pure core), the transport
 (`tests/botproc.py`), a worked example (`bots/rusherwire`, a port of
@@ -289,9 +289,11 @@ than a check.
   container per bot, or committed binaries are the three answers, and none of
   them is free.
 - **What is the ladder's baseline?** `heuristic` is the historical yardstick, but
-  an entrant beating it says little now that marshal exists. A published ladder
-  needs a fixed reference roster and a stated trial count, or scores from
-  different weeks are not comparable.
+  an entrant beating it says little now that marshal exists. The reference
+  roster, trial count and cell are the roster ladder's
+  ([`design/ladder.md`](design/ladder.md), "Re-running it"); read a pair's
+  head-to-head against the same-day reading, since the grid's totals move with
+  who is in it.
 - **Does anything get to be slow?** `budget_scale` lifts a guard 100x for a batch
   today because the answer stays reproducible. A native searcher with no guard at
   all is a different proposition for a runner that has to finish.

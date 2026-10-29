@@ -21,7 +21,7 @@ from starconquest import config, engine, mapgen, replay, turnfilm
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.model import Fleet, ForwardRule, Order
-from starconquest.settings import Challenge, Settings
+from starconquest.settings import Challenge, Settings, build_state
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
 
@@ -2953,3 +2953,83 @@ def test_a_stage_with_no_hint_still_has_a_line_back_to_its_briefing(monkeypatch)
     assert ui.stage_hint.startswith("B:")
     main.stage_ui(ui, (g, dataclasses.replace(bare, briefing=())))
     assert ui.stage_hint is None
+
+
+DAILY_SETUP = {"mode": "random", "players": 3, "nodes": 12, "seed": 4242,
+               "ai_strategy": ["heuristic", "marshal", "thinker"]}
+
+
+def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    monkeypatch.setattr(main.daily, "fetch", lambda day="", kind="board": "pending")
+    assert main.open_daily(ms) == "pending" and ms.status == main.DAILY_OPENING_MSG
+    settings = Settings()
+    reply = json.dumps({"day": "2026-10-28", "now": 0, "settings": DAILY_SETUP, "rules_version": 2})
+    main.land_daily(ms, settings, main.pbp.OK, reply)
+    assert ms.status_ok and ms.status.startswith("Daily · Wed 28 Oct: Random · 3 players")
+    assert settings.seed == 4242 and settings.challenge is None
+    assert main.daily.daily_of(settings) == ("2026-10-28", "board")
+
+    # A game started on it is the daily: ironman whatever the preference.
+    state = build_state(settings, settings.seed)
+    ui = main.new_ui(state, False, settings)
+    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "board" and ui.ironman
+    other = Settings.from_dict(dict(DAILY_SETUP, seed=7))
+    plain = main.new_ui(build_state(other, 7), False, other)
+    assert plain.daily_day == "" and plain.ironman == main.webstore.ironman()
+
+    # Its win copies the result line, never a challenge link.
+    copied = []
+    monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
+    state.winner = ui.human_id
+    assert main.copy_daily_result(settings, state, ui).startswith("Result copied")
+    assert copied[0].startswith("Star Conquest daily · Wed 28 Oct")
+
+
+PUZZLE_SETUP = {"mode": "random", "players": 2, "nodes": 6, "seed": 77,
+                "ai_strategy": ["heuristic", "marshal"]}
+
+
+def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    asked = []
+    monkeypatch.setattr(main.daily, "fetch", lambda day="", kind="board": asked.append((day, kind)) or "pending")
+    assert main.open_daily(ms, kind="puzzle") == "pending"
+    assert asked == [("", "puzzle")] and ms.status == "Fetching the daily puzzle..."
+    settings = Settings()
+    reply = json.dumps({"day": "2026-10-28", "kind": "puzzle", "now": 0, "settings": PUZZLE_SETUP})
+    main.land_daily(ms, settings, main.pbp.OK, reply, "puzzle")
+    assert ms.status_ok and ms.status == f"Puzzle · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
+    assert main.daily.daily_of(settings) == ("2026-10-28", "puzzle")
+
+    state = build_state(settings, settings.seed)
+    ui = main.new_ui(state, False, settings)
+    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "puzzle" and ui.ironman
+    copied = []
+    monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
+    state.winner = ui.human_id
+    main.copy_daily_result(settings, state, ui)
+    assert copied[0].startswith("Star Conquest daily puzzle · Wed 28 Oct") and "vs Marshal" in copied[0]
+
+    main.land_daily(ms, Settings(), "missing", "{}", "puzzle")
+    assert ms.status == "There's no daily puzzle for that day"
+
+
+@pytest.mark.parametrize("state,body,msg", [
+    ("missing", '{"error": "no daily"}', "DAILY_MISSING_MSG"),
+    ("error", "", "DAILY_UNREACHABLE_MSG"),
+    ("ok", "<html>", "DAILY_UNREADABLE_MSG"),
+])
+def test_a_daily_that_cannot_be_had_says_why(_gauntlet_store, state, body, msg):
+    ms = _gauntlet_store
+    settings = Settings()
+    before = settings.to_token()
+    main.land_daily(ms, settings, state, body)
+    assert ms.status == getattr(main, msg) and not ms.status_ok
+    assert settings.to_token() == before
+
+
+def test_no_board_means_no_daily(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    monkeypatch.setattr(main.daily.webstore, "leaderboard_url", lambda path: "")
+    assert main.open_daily(ms) is None and ms.status == main.DAILY_UNREACHABLE_MSG

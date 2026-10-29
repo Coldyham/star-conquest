@@ -386,11 +386,11 @@ async function replayVersions(scores) {
  * not nothing at all: without a target, there is no reason to keep trying
  * before the reveal.
  *
- * The bots table is unaffected and fetched the same as always: a bot's game
- * is a pure function of the setup and the code (docs/design/leaderboard.md), already
- * fully public via `bot_scores`, so there is no *person's* strategy in it to
- * protect. Its verdict is built off the same aggregate rather than a fetched
- * score row — `{turns, lost}` is all `humanVsBots`/`bestBot` ever read.
+ * The bots table is fetched the same as always, but is normally empty here:
+ * the worker never replays a map while it is embargoed (`bot_replay.pending`),
+ * since a winning bot's replay is a solution to copy. Its verdict is built off
+ * the same aggregate rather than a fetched score row — `{turns, lost}` is all
+ * `humanVsBots`/`bestBot` ever read.
  *
  * The play link is always the setup alone (`freshPlayLink`), never a score's
  * `raw_token` — that token is a full challenge link and would smuggle out the
@@ -444,7 +444,7 @@ async function load() {
     // not to be embargoed, below. Fetching the full list up front and simply
     // not rendering it would still hand every score's detail to the page
     // (and anyone watching the network tab) before a single row is drawn.
-    const [games, bots, nodes] = await Promise.all([
+    const [games, bots, nodes, dailies] = await Promise.all([
       select(`game_summary?select=*&game_key=${eq(gameKey)}&limit=1`),
       // The one query allowed to fail quietly. A board running an older
       // schema.sql has no bot_scores table, and PostgREST answers 404 — which
@@ -461,6 +461,8 @@ async function load() {
         `campaign_games?select=week_start,node_id,kind&game_key=${eq(gameKey)}` +
           `&order=week_start.desc&limit=1`,
       ).catch(() => []),
+      // Quiet too: the day this map was the daily of, if it was one.
+      select(`daily_games?select=day&game_key=${eq(gameKey)}&order=day.desc&limit=1`).catch(() => []),
     ]);
     target.classList.remove("loading");
 
@@ -519,10 +521,12 @@ async function load() {
     const leader = scores.find((score) => countedIds.has(score.id)) || null;
     const link = leader ? playLink(leader.raw_token) : await freshPlayLink(game);
 
-    // An embargo that has lifted: the stored reveal date, or the end of the
-    // campaign week this map was a node of (game_embargoes forgets a week once
-    // it is over, so it is read off the node instead).
-    const liftedAt = embargoLiftedAt(game.embargo_until, nodes.length ? nodes[0].week_start : null);
+    // An embargo that has lifted: the stored reveal date, the end of the
+    // campaign week this map was a node of, or the end of its day as the daily
+    // (game_embargoes forgets a week or day once it is over, so they are read
+    // off the node and the day instead).
+    const liftedAt = embargoLiftedAt(game.embargo_until, nodes.length ? nodes[0].week_start : null,
+      Date.now(), dailies.length ? dailies[0].day : null);
     const ahead = liftedAt ? leaderAt(scores, countedIds, liftedAt) : null;
     const lift = ahead ? { score: ahead, at: liftedAt } : null;
 

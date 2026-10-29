@@ -23,6 +23,8 @@ root `netlify.toml` bundles
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
+| [`daily.html?day=…`](daily.html) | the daily challenge: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
+| [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/game/#puzzle`), standings and its own streaks — see "Daily" |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`account.html`](account.html) | sign in with Google and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
@@ -576,7 +578,7 @@ paths and a folded key would make a `game_key` lookup quietly miss.
    (`SECRETS_SCAN_OMIT_KEYS`), which is committed so it never has to be set by
    hand. The *key* stays scanned, so a build still fails if that ever lands in a
    deployed file. The game talks to `/api/log`, `/api/replay`, `/api/pbp`,
-   `/api/campaign` and `/api/gauntlet` on its own origin
+   `/api/campaign`, `/api/gauntlet` and `/api/daily` on its own origin
    (`paths.LEADERBOARD_*_PATH`). `campaign.mjs` needs no key: it reads the same
    public campaign rows campaign.html does, with the publishable key, and runs
    `js/campaign.mjs` on them. `gauntlet.mjs` is the only writer of the
@@ -820,6 +822,40 @@ row, linking back to that node on the campaign page. Tests: `tests/test_campaign
 generator, `tests/campaign.test.mjs` for the rules, and the opt-in
 `tests/test_crowns_sql.py` for the view.
 
+## Daily
+
+One map a day, the same for everyone, new at 00:00 UTC
+([`docs/design/daily.md`](../docs/design/daily.md)). The board grows through
+the week (Monday 11-14 systems and 3-4 players up to Sunday 23-26 systems and
+5-6 players; the page says only that setups get bigger), the median lane takes 2-5 turns, and every day's map was won by a
+test bot within a turn cap that grows from 80 to 110.
+
+- **Made by the worker, a day ahead** (`tools/daily.py` on the hourly job, into
+  `dailies`; the secret key is its only writer). The policy hides a day until it
+  starts, so tomorrow's map can't be practised.
+- **The game fetches it** (`/api/daily`, read-only with the publishable key):
+  the menu's Daily ▸ Daily board or a `#daily` / `#daily=<day>` link puts the setup on
+  the menu. A daily plays ironman, and its win offers *Copy daily result*, a
+  spoiler-free line, where other maps offer *Challenge a friend*.
+- **Embargoed until the day ends** (`game_embargoes`, as a campaign node is
+  for its week): replays and every score but the leader stay hidden, so the
+  best score posted on the day is the day's winner. The map page marks it *Led
+  at reveal*, and the daily page *Best on the day*; later scores rank too, marked
+  *later*.
+- **The page derives the rest**: the day's standings (each player's best
+  counted win) and streaks from `counted_scores` through
+  `daily_games` (seed plus the setup compared as jsonb, as `campaign_games`
+  does). A streak is mended by winning a missed day later; the true streak, days
+  won on the day itself, is the figure's title (hover or tap). Past days stay
+  playable via `daily.html?day=`. Tests: `tests/test_daily.py`,
+  `tests/daily.test.mjs`, `tests/test_embargo_sql.py`.
+- **The daily puzzle beside it** (`puzzle.html`, a tab of the same page; a
+  `dailies` row of `kind` `puzzle`): a 5-8 system duel with no fog, against one
+  opponent per weekday, won in the fewest turns. The worker makes it with the
+  board, the game opens it with the menu's Daily ▸ Daily puzzle or `#puzzle` /
+  `#puzzle=<day>` (`/api/daily?kind=puzzle`), and it has its own embargo,
+  standings, streaks and badges.
+
 ## Badges
 
 A player card for one name (`user.html?u=…`) opens with its badges: one-off
@@ -833,6 +869,8 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 | Gauntlets | a win on the tutorial's last stage · a win on the last stage of a listed gauntlet · a gauntlet saved under this name |
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
 | Bots | a win with each `LADDER_ORDER` bot in a seat |
+| Daily | a daily won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
+| Daily puzzle | the same three, on the daily puzzle |
 | Play-by-post | a turn played in a match · a match won |
 
 **Derived, never stored**, like crowns and the campaign. Wins count only through

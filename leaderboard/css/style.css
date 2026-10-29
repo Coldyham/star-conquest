@@ -1094,6 +1094,12 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   white-space: nowrap;
 }
 
+/* -- the daily challenge (daily.html) ------------------------------------- */
+/* A score posted after its day, once the replays were out (daily-page.mjs). */
+.daily-later { margin-left: 0.6em; color: var(--dim); cursor: help; border-bottom: 1px dotted currentColor; }
+/* A streak whose title holds the true streak: hover or tap reads it. */
+.tally-figs[title] { cursor: help; }
+
 /* -- the weekly campaign (campaign.html) --------------------------------- */
 .campaign-status { margin: 0 0 1rem; color: var(--dim); }
 .campaign-map svg { display: block; width: 100%; height: auto; }

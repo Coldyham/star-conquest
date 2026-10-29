@@ -4,8 +4,8 @@
 four files, in the order the work happened:
 
 - **This file:** what marshal was built on, what the first measurements
-  deleted, the current ladder ("Where marshal stands", which is the table to
-  update), and the 2026-09 sweep of its constants.
+  deleted, where marshal stands against knower, and the 2026-09 sweep of its
+  constants. The roster ladder is in [`ladder.md`](ladder.md).
 - [`marshal-pricing.md`](marshal-pricing.md): what a strike or a defence is
   priced against. Covers third-party fleets, garrisons that retreat, doomed
   neighbours, pile-ups, and four tactics that measured null.
@@ -172,107 +172,12 @@ that the margins hold up off their tuned point, not a tuning:
 
 Weakest in the middle rather than at either end, and never below 68%.
 
-**Full roster ladder** (`uv run python -m tests.sim --ladder --trials 30 --ai
-knower actuary marshal thinker claudebot heuristic rusherplus`, 18 nodes,
-default settings — 1260 games, 52 timed out and are excluded from the
-percentages; council is left out, as it always has been here, for its cost).
-**This table is the current one** — update it, not the module docstring, the
-next time marshal or the roster's pricing changes. Re-run 2026-10-20, when
-marshal shipped nine constants tuned jointly by CMA-ES
-([`marshal-cma.md`](marshal-cma.md)), with the bot before that ship beside it on
-the same seeds:
+The full roster ladder (every bot, round-robin, re-run whenever the roster
+changes) is in [`ladder.md`](ladder.md), with its earlier readings. The
+paragraphs below are marshal's own history on older readings of it.
 
-    actuary 328 (27%), marshal 308 (25%), knower 236 (20%), thinker 164 (14%),
-    claudebot 83 (7%), heuristic 52 (4%), rusherplus 37 (3%)
-
-    head-to-head (row's win rate vs column)
-                knower  actuar  marsha  thinke  claude  heuris  rusher
-      knower         —      8%     17%     89%     95%    100%    100%
-      actuary      92%       —     61%    100%    100%    100%    100%
-      marshal      83%     39%       —     95%    100%    100%    100%
-      thinker      11%      0%      5%       —     89%     96%    100%
-      claudebot     5%      0%      0%     11%       —     66%     75%
-      heuristic     0%      0%      0%      4%     34%       —     61%
-      rusherplus    0%      0%      0%      0%     25%     39%       —
-
-The bot before the ship, same day and seeds (49 timeouts): actuary 337, marshal
-305, knower 236, thinker 161, marshal beating actuary 27%, knower 83% and thinker
-100%. So 39% against actuary from 27%, level against knower, and three games lost
-to thinker it used to win; every pair without marshal reads game for game the
-same, since knower at Predict borrows no marshal. The before-ship reading had
-already moved from the 2026-10-18 table it replaces (actuary 336, marshal 285,
-knower 242; marshal beating knower 70% and actuary 25%), so something else in
-the roster moved between the two; read the same-day pair, not the dates.
-
-The next four paragraphs predate the 2026-10-20 ship; "the ship" in them is the
-2026-10-17 one. The 2026-10-17 run, with actuary at Planned, read actuary 89% against knower,
-65% against marshal and 98% against thinker, and in all: actuary 321 (27%),
-marshal 290 (24%), knower 244 (20%), thinker 163, claudebot 84, heuristic 52,
-rusherplus 37. It was taken when
-marshal shipped a pour floor with `FEED` 3.0, `FEED_MAX_TURNS` 3 and
-`RELIEF_AWARE` 0.65 ([`marshal-joint.md`](marshal-joint.md), "Screening against
-the roster"); knower moved with it, since it borrows marshal. The bot before
-that ship, run the same day on the same seeds, is an exact A/B: actuary 326,
-marshal 282, knower 247, marshal beating knower 66% and actuary 24%.
-
-Eight more wins, all against actuary and knower (marshal beats the rest 98-100%
-either way): 35% against actuary from 24%, and 70% against knower from 66%. At 60
-games a pair that is a direction; the paired measurement behind the ship is +6.8
-points against actuary and +3.8 against knower over 2,400 cell-seeds each. The
-previous reading (2026-10-16, when knower began running a Learning seat as
-Planned; [`knower.md`](knower.md), "Seats it cannot run"), actuary 330, marshal
-283, knower 246, predates `RELIEF_IN_FLIGHT` in marshal and actuary, merged the
-same day. learner is no longer a file of its own but actuary's Learning stop, so
-it has left the grid.
-
-With `--aux actuary=2` (every actuary seat at Learning) the grid barely moves:
-actuary 324, marshal 285, knower 242, actuary beating knower 93% and marshal 72%
-(the bot before the ship: 328, 284, 245; 93% and 74%). Before knower ran the
-stand-in, Learning beat knower 95% on the same seeds (`--ai knower actuary --aux
-actuary=2`); now it reads 93% to Planned's 89%, so the oracle claim earns little
-in this cell.
-
-knower here is at its default, Predict. With `--aux knower=0` (Off) the same
-ladder reads actuary 325, marshal 297, knower 209, thinker 170, actuary beating
-knower-0 95% and marshal beating it 94% (the bot before the ship: 330, 297, 208;
-95% and 96%). For all three Oracle settings against marshal and thinker over
-more seeds, see [`knower.md`](knower.md), "Each Oracle setting against thinker
-and marshal" (measured before the 2026-10-17 ship).
-
-The same ladder in two other cells, since this one cannot see anything keyed on
-long lanes. 30 seeds each; the symmetric one re-run 2026-10-20 with the bot
-before the ship beside it, the slow one not since actuary joined (`tests.sim` has
-no ship-speed flag; actuary's head-to-heads there are in `actuary.md`, and
-marshal beats it 68%):
-
-    symmetric, 18 nodes, 6 ly/turn     128 timeouts (before the ship: 121)
-    actuary 325 (29%), marshal 300 (27%), knower 215 (19%), thinker 127 (11%),
-    claudebot 105 (9%), heuristic 39 (3%), rusherplus 21 (2%)
-    marshal vs actuary 33% (28%), vs knower 78% (76%), vs thinker 100% (98%)
-    before the ship: actuary 330, marshal 300, knower 216
-
-    random, 24 nodes, 3 ly/turn        96 timeouts, 900 games, before actuary
-    marshal 270 (34%), knower 224 (28%), thinker 157 (20%),
-    claudebot 84 (10%), heuristic 64 (8%), rusherplus 5 (1%)
-    marshal vs knower 76%
-
-Among the six older bots the order is the same in all three, but marshal leads
-knower by a much wider margin in both. That gap is not the gate: the symmetric cell has no 5-turn lane either.
-Head to head it is 60 games a pair less timeouts, so read it as a direction.
-
-The previous reading, before `DENY_SWAP`, was marshal 251 / knower 248 with the
-head-to-head at 51% and 58 timeouts. The same caveat as the paragraph below
-applies: 60 games a pair cannot resolve a few points, so this says nothing
-regressed, not that the knower cell moved.
-
-Re-run after the retreat fixes ([`marshal-pricing.md`](marshal-pricing.md), "Two doomed neighbours") and it did not move: 251/248 against
-251/249, the knower head-to-head 51% against 50%, one more timeout. That is not
-a null result about those fixes — this cell is 60 games a pair against opponents
-marshal already beats 89-100% of the time, so it has no resolution at the
-1-2 point scale their own paired sweep measures them at. It is here as a
-regression check, and what it says is that nothing regressed.
-
-marshal took the top of the ladder here, and level with knower head-to-head, on
+marshal took the top of the six-bot ladder (`ladder.md`, "Older: before
+`DENY_SWAP`, and after the retreat fixes"), and level with knower head-to-head, on
 the strength of dropping the jitter premium from its attack margin — see
 "Garrisons run away" in [`marshal-pricing.md`](marshal-pricing.md). The previous reading of this table had it second at
 219 against knower's 255, losing the head-to-head 35%. Both the 251/249 gap and

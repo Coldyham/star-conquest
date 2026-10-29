@@ -4,12 +4,14 @@ A **spec** says how many stages a generated gauntlet has and which setups are
 allowed: a knob fixed, kept in a range, drawn from a list or kept off some
 values; which bots may sit in the opponents' seats; and whether a knob nothing
 names is rolled or left at its default. ``deal`` turns a spec, an rng and a
-depth (0 for the first stage, 1 for the last) into one ``Settings``.
+depth (0 for the first stage, 1 for the last) into one ``Settings``; with no
+depth, each opponent's seat is drawn on its own from every allowed bot (the
+daily's board, ``tools/daily.py``).
 ``tools/gauntlet_gen.py`` deals candidates, plays bots on them and picks a
 rising sequence. Reasons and the rest of the plan: ``docs/design/gauntlet.md``,
 "Generated gauntlets".
 
-Three rules:
+Four rules:
 
 **No `Settings` field is added.** A dealt stage is an ordinary setup with a
 pinned seed and a named bot in every seat (never ``random``), so it posts to the
@@ -17,6 +19,12 @@ board as itself and no challenge key moves.
 
 **Dealing is a pure function of the spec and the rng.** Every draw comes from
 the rng passed in, and the seed through ``settings.roll_seed``.
+
+**A rule on `lane_turns` is settled last.** It bounds the median lane's
+travel time on the dealt map, so the map is measured once its seed is rolled
+and the ship speed is drawn from the values the `ship_ly_per_turn` rule allows
+that land the median in range (`_fit_speed`). A spec without it deals exactly
+as it always did.
 
 **`Spec.from_dict` never raises.** A spec will arrive in a link: a rule that
 cannot be read is dropped and a range is clamped to its slider, as
@@ -31,13 +39,15 @@ from dataclasses import dataclass, field
 
 from . import ai, config, mapgen
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, ROLL_FLOORS, Settings,
-                       fog_off, roll_seed, setup_warnings)
+                       fog_off, lane_lengths, lane_turns, roll_seed, setup_warnings)
 
 MAX_STAGES = 64
 # How far a roll of `systems` goes when no rule bounds it: a standard board, as
 # the campaign's "?" node rolls (`tools/campaign.py`, MYSTERY_MAX_NODES).
 SYSTEMS_ROLL_MAX = config.STANDARD_MAX_NODES
 MAX_ATTEMPTS = 400
+# The highest median lane, in turns, a `lane_turns` rule may ask for.
+LANE_TURNS_MAX = 20
 
 # attr -> (lo, hi, step, is_int): every slider a rule may name.
 KNOBS = {attr: (lo, hi, step, is_int)
@@ -113,6 +123,8 @@ def _bounds(name: str) -> tuple[float, float, float, bool] | None:
         return (config.MIN_PLAYERS, config.MAX_PLAYERS, 1, True)
     if name == "systems":
         return (config.MIN_PLAYERS + 3, config.MAX_NODES, 1, True)
+    if name == "lane_turns":
+        return (1, LANE_TURNS_MAX, 1, True)
     return None
 
 
@@ -324,12 +336,13 @@ def _seat_bot(pool: list[str], depth: float, rng: random.Random) -> str:
     return pool[max(0, min(len(pool) - 1, at))]
 
 
-def deal(spec: Spec, rng: random.Random, depth: float = 0.0) -> Settings:
+def deal(spec: Spec, rng: random.Random, depth: float | None = 0.0) -> Settings:
     """One setup ``spec`` allows, drawn from ``rng``, its opponents picked for
-    ``depth`` (0 the first stage, 1 the last). Raises ValueError when
-    ``MAX_ATTEMPTS`` draws find none (``problems`` names a spec that can never
-    deal; this is the rest)."""
-    depth = max(0.0, min(1.0, depth))
+    ``depth`` (0 the first stage, 1 the last), or with ``depth`` None each seat
+    drawn evenly from every allowed bot, so any mix can be dealt. Raises
+    ValueError when ``MAX_ATTEMPTS`` draws find none (``problems`` names a spec
+    that can never deal; this is the rest)."""
+    depth = None if depth is None else max(0.0, min(1.0, depth))
     pool = ladder(spec.opponents)
     if not pool:
         raise ValueError("no opponents are allowed")
@@ -343,7 +356,7 @@ def deal(spec: Spec, rng: random.Random, depth: float = 0.0) -> Settings:
     raise ValueError("no setup fits this spec")
 
 
-def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> Settings | None:
+def _attempt(spec: Spec, rng: random.Random, depth: float | None, pool: list[str]) -> Settings | None:
     rules = spec.rules
     settings = Settings.defaults()
     if spec.roll:
@@ -390,13 +403,39 @@ def _attempt(spec: Spec, rng: random.Random, depth: float, pool: list[str]) -> S
         return None
 
     for seat in range(2, settings.players + 1):
-        entry = _seat_bot(pool, depth, rng)
+        entry = rng.choice(pool) if depth is None else _seat_bot(pool, depth, rng)
         name, _, stop = entry.partition(":")
         settings.ai_strategy[seat - 1] = name
         if stop:
             settings.ai[seat - 1].aux = float(stop)
     settings.seed = roll_seed(rng)
+    if "lane_turns" in rules and not _fit_speed(settings, rules["lane_turns"], rules.get("ship_ly_per_turn"), rng):
+        return None
     return settings
+
+
+def _speeds(rule: Rule | None) -> list[float]:
+    """Every ship speed ``rule`` allows, on the slider's steps."""
+    lo, hi, step, _is_int = KNOBS["ship_ly_per_turn"]
+    if rule is not None and rule.kind in ("fix", "in"):
+        return sorted([rule.value] if rule.kind == "fix" else list(rule.value))       # type: ignore[arg-type]
+    if rule is not None and rule.kind == "range":
+        lo, hi = rule.value       # type: ignore[misc]
+    banned = rule.value if rule is not None and rule.kind == "not" else ()
+    values = (round(lo + i * step, 4) for i in range(int(round((hi - lo) / step)) + 1))
+    return [v for v in values if v not in banned]       # type: ignore[operator]
+
+
+def _fit_speed(settings: Settings, rule: Rule, speed_rule: Rule | None, rng: random.Random) -> bool:
+    """Draw ``settings``' ship speed from those ``speed_rule`` allows whose
+    median lane, in turns, ``rule`` allows on this map. False when none does."""
+    lengths = lane_lengths(settings)
+    fits = [v for v in _speeds(speed_rule)
+            if (turns := lane_turns(lengths, v)) is not None and _fits(turns[1], rule)]
+    if not fits:
+        return False
+    settings.ship_ly_per_turn = rng.choice(fits)
+    return True
 
 
 def _fit_systems(settings: Settings, want: int, rule: Rule | None, cap: int) -> bool:

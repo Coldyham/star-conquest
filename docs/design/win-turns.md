@@ -366,8 +366,7 @@ the two changes unless stated:
   edge there is knowing what the rival will do. A rule bot doesn't get that.
 - **The three-seat stalls** where marshal is the weakest seat.
 - **The second round** (below) tried the relay and 29 other arms. None ships.
-- **Not re-run:** the full ladder in [`marshal.md`](marshal.md), "Where marshal
-  stands", the advantage and jitter sliders, free-for-alls past three seats, and
+- **Not re-run:** the full ladder ([`ladder.md`](ladder.md)), the advantage and jitter sliders, free-for-alls past three seats, and
   the posted maps.
 
 ## marshal: a second round, nothing shipped (2026-10-19)

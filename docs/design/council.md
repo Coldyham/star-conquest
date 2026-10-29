@@ -268,7 +268,8 @@ systems on 3 ly/turn. The browser's 150 ms search guard would cut most of those
 searches short, so a player would not meet the Council this bench measured.
 evolved, added beside Field, buys about as much (+6.3, "evolved as one more
 borrowed candidate") for a sixth more a decide, and has been borrowed since
-2026-10-20; this run was against Council without it. Untested: the two together.
+2026-10-20; this run was against Council without it. Decided against
+(2026-10-26) for its cost; the two together are not to be measured.
 
 **Without its look-ahead** (`--with LOOKAHEAD=0`, set only around the borrowed
 actuary's own calls; no stop of actuary's knob offers it), on the same seeds: +2.6
