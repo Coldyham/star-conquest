@@ -2124,7 +2124,9 @@ def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Setting
         y = _compact_heading(surface, ms, settings, full, full.y)
         actions_h = _compact_actions(surface, ms, settings, full.w, None)
         actions_top = full.bottom - actions_h
-        status_h = _NOTE_H + 4 if ms.status and pygame.time.get_ticks() < ms.status_until else 0
+        status_h = 0
+        if ms.status and pygame.time.get_ticks() < ms.status_until:
+            status_h = len(widgets.wrap(f["small"], ms.status, full.w)) * _NOTE_H + 4
         _compact_status(surface, ms, pygame.Rect(full.x, actions_top - status_h - 2, full.w, status_h))
         _compact_settings(surface, ms, settings,
                           pygame.Rect(full.x, y, full.w, actions_top - status_h - pad - y))
