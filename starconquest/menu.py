@@ -2169,8 +2169,12 @@ def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Setting
         if ms.status and pygame.time.get_ticks() < ms.status_until:
             status_h = len(widgets.wrap(f["small"], ms.status, full.w)) * _NOTE_H + 4
         _compact_status(surface, ms, pygame.Rect(full.x, actions_top - status_h - 2, full.w, status_h))
-        _compact_settings(surface, ms, settings,
-                          pygame.Rect(full.x, y, full.w, actions_top - status_h - pad - y))
+        # The panel stops where its tab does, and the map takes what that leaves
+        # (on a tab that fills the panel, as Combat's does, there is none).
+        view = _compact_settings(surface, ms, settings,
+                                 pygame.Rect(full.x, y, full.w, actions_top - status_h - pad - y), fit=True)
+        _compact_sketch(surface, ms, pygame.Rect(full.x, view.bottom + pad, full.w,
+                                                 actions_top - status_h - 2 * pad - view.bottom))
         _compact_actions(surface, ms, settings, full.w, (full.x, actions_top))
 
     _draw_daily_list(surface, ms)
@@ -2209,16 +2213,22 @@ def _compact_heading(surface, ms: MenuState, settings: Settings, area: pygame.Re
 
 def _compact_sketch(surface, ms: MenuState, area: pygame.Rect) -> None:
     """The setup's map (`settings.map_sketch`) fitted into ``area``, captioned
-    with whether it is the board you will play or a sample of its kind. Nothing
-    while the status message has the room, or when there is too little of it."""
+    with whether it is the board you will play or a sample of its kind, or a "?"
+    where fog hides it. Nothing while the status message has the room, or when
+    there is too little of it."""
     sketch = ms.sketch
     if (sketch is None or area.h < _C_SKETCH_MIN
             or (ms.status and pygame.time.get_ticks() < ms.status_until)):
         return
     f = _fonts()
-    caption = "your map" if sketch.actual else "a sample of this setup's maps"
+    caption = {"yours": "your map", "sample": "a sample map: the seed is random",
+               "hidden": "Map hidden by fog of war"}[sketch.kind]
     _text(surface, f["small"], caption, config.COLOR_TEXT_DIM,
           center=(area.centerx, area.bottom - _NOTE_H // 2))
+    if sketch.kind == "hidden":
+        _text(surface, f["big"], "?", config.COLOR_TEXT_DIM,
+              center=(area.centerx, area.y + (area.h - _NOTE_H) // 2))
+        return
     r = 5  # a home's radius; every other system is half that
     box = pygame.Rect(area.x, area.y, area.w, area.h - _NOTE_H - 4).inflate(-2 * r - 4, -2 * r - 4)
     xs = [p[0] for p in sketch.points.values()]
@@ -2376,23 +2386,23 @@ def _compact_tabs(surface, ms: MenuState, settings: Settings, area: pygame.Rect)
     return area.y + th + 8
 
 
-def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect) -> None:
-    """The tabs, and under them the scrolling window onto the current tab."""
+def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect,
+                      fit: bool = False) -> pygame.Rect:
+    """The tabs, and under them the scrolling window onto the current tab: all
+    of ``area`` under the tabs, or with ``fit`` only as much as the tab fills.
+    Returns the window."""
     global _PANEL_LAYER
     top = _compact_tabs(surface, ms, settings, area)
-    view = pygame.Rect(area.x, top, area.w, max(0, area.bottom - top))
-    ms.panel_view = view
-    pygame.draw.rect(surface, _PANEL_BG, view, border_radius=10)
-    pygame.draw.rect(surface, _PANEL_BORDER, view, 1, border_radius=10)
-    if view.h <= 4:
-        return
+    if area.bottom - top <= 4:
+        ms.panel_view = pygame.Rect(area.x, top, area.w, max(0, area.bottom - top))
+        return ms.panel_view
 
-    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != view.w:
-        _PANEL_LAYER = pygame.Surface((view.w, _LAYER_H))
+    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != area.w:
+        _PANEL_LAYER = pygame.Surface((area.w, _LAYER_H))
     layer = _PANEL_LAYER
     layer.fill(_PANEL_BG)
     before = dict(ms.rects)
-    panel = pygame.Rect(0, 0, view.w, _LAYER_H)
+    panel = pygame.Rect(0, 0, area.w, _LAYER_H)
     if ms.tab == "basic":
         _draw_basic(layer, ms, settings, panel)
     elif ms.tab == "combat":
@@ -2407,6 +2417,12 @@ def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.R
     used = layer.get_bounding_rect()
     layer.set_colorkey(None)
     ms.panel_content_h = (used.bottom + 16) if used.h else 0
+    view = pygame.Rect(area.x, top, area.w, area.bottom - top)
+    if fit:
+        view.h = min(view.h, ms.panel_content_h)
+    ms.panel_view = view
+    pygame.draw.rect(surface, _PANEL_BG, view, border_radius=10)
+    pygame.draw.rect(surface, _PANEL_BORDER, view, 1, border_radius=10)
     scroll = _clamp_scroll(ms, ms.panel_scroll.get(ms.tab, 0))
     ms.panel_scroll[ms.tab] = scroll
 
@@ -2435,6 +2451,7 @@ def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.R
             for i in range(18):
                 fade.fill((*_PANEL_BG, i * 12), pygame.Rect(0, i, fade.get_width(), 1))
             surface.blit(fade, (inner.x, inner.bottom - 18))
+    return view
 
 
 def _clamp_scroll(ms: MenuState, scroll: int) -> int:

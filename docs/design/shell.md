@@ -84,10 +84,13 @@ is what switches it:
   labels fit (`_compact_columns`). That column is taller than its title and
   actions, so the buttons grow into some of the slack (up to `_C_GROW`) and a
   sketch of the setup's map fills the rest (`_compact_sketch`,
-  `settings.map_sketch`, made in `pump`). It is the real board only with fog
-  off and a pinned seed; under fog a pinned board (a daily's, a challenge's) is
-  what fog keeps from you, so it is a sample from another seed, captioned so,
-  and a hand map under fog shows nothing. The actions are folded to six, so no row is
+  `settings.map_sketch`, made in `pump`). Portrait puts one under the panel,
+  which stops where its tab does (`_compact_settings`' ``fit``), so a tab that
+  fills the panel simply has none; on a 870 CSS px phone even Combat, jitter
+  matrix and all, leaves room. It is the real board only with fog off; under
+  fog a pinned board (a daily's, a challenge's, a hand map) is what fog keeps
+  from you, so it is a "?" and "Map hidden". A seed left to chance has no board
+  yet, so it is a sample, captioned so, which gives nothing away. The actions are folded to six, so no row is
   left with one (`_compact_action_items`): the board's Recently played and
   Shared matches share a Leaderboard list, as the desktop footer once did; a
   drawn map's x sits inside Edit map; and there is no Quit, which a browser tab

@@ -26,7 +26,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## shell.md
 - shell.md · **Text sizing** and **`config.touch_ui`.** Measured layout; the send popup is where the tap floor gives way.
-- shell.md · **Phones: the compact layout (`config.compact`).** CSS-pixel scale on a touch browser, shrunk to leave a phone 600x480 units; footer folds into a list; popup docks; portrait panel under the map; the menu's own canvas and scrolling panel, and in landscape a map sketch (never a fogged board); touch: a send finishes its source, pinch to zoom, no text selection.
+- shell.md · **Phones: the compact layout (`config.compact`).** CSS-pixel scale on a touch browser, shrunk to leave a phone 600x480 units; footer folds into a list; popup docks; portrait panel under the map; the menu's own canvas and scrolling panel, and a map sketch under the title (landscape) or panel (portrait), hidden under fog; touch: a send finishes its source, pinch to zoom, no text selection.
 - shell.md · **Map viewport margins.** The `node_clearance` floor; clamping against the fit-padded span.
 - shell.md · **Send popup / `Ui.editing_existing`.** Unwinding to IDLE on an edit; slider hit-tested before the panel drag.
 - shell.md · **Forwarding rules.** A hold per system, a share per lane; adding a lane splits evenly; one rounding formula; the popup's three shapes; the hold badge.

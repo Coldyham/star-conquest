@@ -468,3 +468,19 @@ def test_landscape_fills_the_title_column_with_taller_buttons_and_a_map(screen_f
     menu.draw(screen, ms, settings)
     assert ms.sketch is not None
     assert ms.rects["start"].h > menu._C_START_H and ms.rects["create_map"].h > menu._C_BTN_H
+
+
+def test_portrait_puts_the_map_under_a_tab_that_leaves_room(screen_for):
+    """In portrait the panel stops where its tab does and the map takes the
+    rest; Combat fills the panel, so it keeps its whole height and no map."""
+    screen = screen_for(False)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    menu.pump(ms, settings)
+    menu.draw(screen, ms, settings)
+    basic = ms.panel_view
+    assert basic is not None and ms.panel_content_h == basic.h
+    assert ms.rects["start"].y - basic.bottom > menu._C_SKETCH_MIN
+    ms.tab = "combat"
+    menu.draw(screen, ms, settings)
+    assert ms.panel_view is not None and ms.panel_view.h > basic.h

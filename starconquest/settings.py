@@ -910,12 +910,14 @@ def _shaped_boards(settings: Settings, seeds) -> list[GameState]:
 @dataclass(frozen=True)
 class MapSketch:
     """A board's shape, for the menu to draw: where its systems sit (world
-    units), its lanes, and each home system's owner."""
+    units), its lanes, and each home system's owner. ``kind`` says what it is:
+    ``"yours"`` the board this setup will play, ``"sample"`` one of its kind
+    (the seed is left to chance), ``"hidden"`` nothing, because fog keeps it."""
 
-    points: dict[int, tuple[float, float]]
-    lanes: list[tuple[int, int]]
-    homes: dict[int, int]
-    actual: bool  # the board this setup will play, not a sample of its kind
+    kind: str
+    points: dict[int, tuple[float, float]] = field(default_factory=dict)
+    lanes: list[tuple[int, int]] = field(default_factory=list)
+    homes: dict[int, int] = field(default_factory=dict)
 
 
 def sketch_key(settings: Settings) -> tuple:
@@ -924,25 +926,25 @@ def sketch_key(settings: Settings) -> tuple:
 
 
 def map_sketch(settings: Settings) -> MapSketch | None:
-    """The board to show beside the menu (the landscape phone's). The real one
-    only when nothing would hide it in play: with fog on, a pinned seed's board
-    is what fog keeps from you (a daily's, a challenge's), so it shows a sample
-    from another seed instead, as it does when the seed is left to chance. A
-    hand map has no other seed to sample: under fog, or unfinished, nothing."""
-    if settings.custom_map is not None:
-        if not fog_off(settings) or settings.custom_map.blockers():
-            return None
-        seed, actual = 0, True
-    elif settings.seed is not None and fog_off(settings):
-        seed, actual = settings.seed, True
+    """The board to show on the phone's menu. A pinned board (a pinned seed's, a
+    hand map) only with fog off: under fog it is what fog keeps from you (a
+    daily's, a challenge's), so it is hidden. A seed left to chance has no board
+    yet, so it is a sample of its kind, which gives nothing away. None for a
+    hand map that can't be played yet."""
+    if settings.custom_map is not None and settings.custom_map.blockers():
+        return None
+    if settings.custom_map is None and settings.seed is None:
+        kind, seed = "sample", 0  # the lane survey's first sample (`lane_lengths`)
+    elif fog_off(settings):
+        kind, seed = "yours", settings.seed or 0
     else:
-        seed, actual = (1 if settings.seed == 0 else 0), False
+        return MapSketch("hidden")
     (state,) = _shaped_boards(settings, [seed])
     return MapSketch(
+        kind,
         points={sid: s.pos for sid, s in state.systems.items()},
         lanes=[(lane.a, lane.b) for lane in state.lanes.values()],
         homes={sid: s.owner_id for sid, s in state.systems.items() if s.owner_id},
-        actual=actual,
     )
 
 
