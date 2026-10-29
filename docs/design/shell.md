@@ -62,8 +62,9 @@ is what switches it:
   Setup menu, New map) from the start, giving the room to the controls in use.
 - **The send popup docks.** Floating over a map a third the size of a
   desktop's, it covered the lane it was about and outgrew the band it was
-  clamped to. Landscape, it takes the side panel's place (the panel's system
-  and lane details duplicate its title); portrait, it is a sheet over the
+  clamped to. Landscape, it takes the side panel's place (its title repeats the
+  panel's system and target, and a row under it the lane's length in ly and
+  turns, which the title alone had dropped); portrait, it is a sheet over the
   controls under the map, so the map stays whole while it is open. Docked, it
   has a *Done*: closing by tapping the map is a desktop idiom a panel doesn't say.
 - **Portrait moves the panel under the map.** A right-hand column on a
@@ -721,7 +722,8 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   tests it as on the strip. Any press closes the list (`input._more_press`).
 - **A docked popup owns its presses** (`render._popup_docked`): the panel
   under it draws nothing and records nothing, a portrait sheet takes End Turn
-  and the strip away, and input tests the popup's controls before End Turn
+  and the strip away (and lifts the zoom buttons onto its top edge, as
+  history's graphs do), and input tests the popup's controls before End Turn
   (`input._popup_press`), since a landscape panel too short for it lets it run
   on down over End Turn.
 - **On touch, closing the popup lets its source go** (`input._cancel`), and a

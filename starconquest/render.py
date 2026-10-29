@@ -118,11 +118,16 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_send_popup(surface, state, ui)
     _draw_film_caption(surface, ui)
     surface.set_clip(None)
-    if not ui.history:
+    sheet = config.portrait and _popup_docked(ui)
+    if not ui.history and not sheet:
         _draw_zoom_controls(surface, ui)
     _draw_hud(surface, state, ui)
     if _popup_docked(ui):
         _draw_send_popup(surface, state, ui)   # over the panel it stands in for
+    if sheet:
+        # the portrait sheet covers the map's foot: the camera cluster rides on
+        # it, as on history's docked graphs
+        _draw_zoom_controls(surface, ui, bottom=ui.popup_rect[1] if ui.popup_rect[3] else None)
     if ui.history:
         # the scrubber owns the bottom bar; suppress the win overlay so a finished
         # game's final-turn snapshot doesn't veil the board being reviewed
@@ -688,8 +693,10 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         w = dock.w
     # Send: tabs, title, effect, stepper, slider, presets, cancel. One forwarding
     # lane adds the hold row; a split swaps stepper and slider for a row per lane,
-    # what stays home and the bar.
-    single_rows = 8
+    # what stays home and the bar. Docked, a lane's popup covers the side panel's
+    # lane readout, so it carries the lane's length under its title.
+    lane_row = docked and not split
+    single_rows = 8 + lane_row
     sh = surface.get_height()
     # On a short screen at touch scale the stack can outgrow the band it is placed
     # in, and since the clamp below pins an oversized panel to the top, what falls
@@ -717,7 +724,7 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
 
     layout = _SplitLayout([], True, True)
     if rule is None:
-        rows = 7
+        rows = 7 + lane_row
     elif split:
         # A split that still doesn't fit sheds what the numbers already say — the
         # bar, then the "stays" row — and then whole lanes, keeping a window round
@@ -816,6 +823,13 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     _text(surface, font, title, accent, midleft=(inner, cy + bh // 2))
     _text(surface, font, ships_lbl, ships_col, midleft=(inner + iw - font.size(ships_lbl)[0], cy + bh // 2))
     cy += bh + gap
+
+    if lane_row:
+        lane = state.lanes.get(lane_key(src.id, dest.id))
+        if lane is not None:
+            trip = f"{lane.length_ly} ly  ·  {state.travel_turns(src.id, dest.id)} turns"
+            _text(surface, font, trip, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
+        cy += bh + gap
 
     s = _tap_size(config.STEPPER_SIZE)
     if rule is not None:
@@ -1452,8 +1466,9 @@ def _draw_zoom_controls(surface, ui: Ui, bottom: int | None = None) -> None:
     """On-map camera cluster — Reset view and zoom −/+, the touch/no-wheel
     equivalent of scroll-to-zoom. Anchored to the map viewport's bottom-right
     corner, just above the HUD bottom bar — or above ``bottom``, the top of
-    history's docked graphs, which cover the map's foot (drawn after the map
-    clip is lifted in ``draw()``, so it's never affected by it)."""
+    whatever covers the map's foot: history's docked graphs, or the send
+    popup's portrait sheet (drawn after the map clip is lifted in ``draw()``, so
+    it's never affected by it)."""
     px, py, pw, ph = config.play_rect()
     s = config.MAP_ZOOM_BTN_SIZE
     gap = config.s(8)
