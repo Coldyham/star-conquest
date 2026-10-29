@@ -652,6 +652,11 @@ a bare "Alcyone").
 - **On touch, closing the popup lets its source go** (`input._cancel`), and a
   tap on another system while it is open selects that system rather than
   sending to it. Desktop is unchanged.
+- **A press goes to the topmost control.** The compact layouts draw things over
+  other controls (the menu's Daily list over Start Game; in portrait, the
+  docked popup over the map's zoom buttons), so `menu._handle_click` tests its
+  rects newest-drawn first, and input tests a docked popup before the HUD.
+  The desktop menu has no overlapping rects, so the order changes nothing there.
 - **A pinch undoes its first finger's press** (`Ui.press_undo`, `Editor.press_undo`)
   and holds the emulated mouse off (`pinch_lock`) until every finger is up.
 - **The compact menu draws widgets as the desktop one does**, through the same

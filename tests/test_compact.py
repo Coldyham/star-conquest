@@ -328,3 +328,47 @@ def test_a_pinch_zooms_and_undoes_its_first_fingers_tap(screen_for):
     assert ui.pending == []
     game_input.handle_event(_finger(pygame.FINGERUP, 2, *other), state, ui)
     assert not ui.pinch_lock and not ui.fingers
+
+
+@pytest.mark.parametrize("landscape", [True, False])
+def test_the_daily_list_takes_presses_over_what_it_covers(screen_for, landscape):
+    """The compact menu's Daily list rises over Start Game: a press on Daily
+    puzzle is the puzzle, not a start with the settings underneath."""
+    screen = screen_for(landscape)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    _menu_click(screen, ms, settings, "daily_menu")
+    assert ms.daily_open
+    menu.draw(screen, ms, settings)
+    under = [k for k, r in ms.rects.items() if k not in ("daily", "puzzle", "daily_menu")
+             and r.colliderect(ms.rects["puzzle"])]
+    assert under, "the case under test: the list over another control"
+    ms.daily_open = True
+    assert _menu_click(screen, ms, settings, "puzzle") == "puzzle"
+    ms.daily_open = True
+    assert _menu_click(screen, ms, settings, "daily") == "daily"
+
+
+def test_the_portrait_sheet_owns_presses_over_the_zoom_buttons(screen_for):
+    """In portrait the docked popup's sheet can rise over the map's zoom buttons;
+    a press on a control of the sheet there is the sheet's, never a zoom."""
+    screen = screen_for(False)
+    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    ui = _make_ui(state)
+    a, b, _c = _own_chain(state)
+    _tap_node(state, ui, a)
+    _tap_node(state, ui, b)
+    ui.set_forward_mode(state, True)
+    render.draw(screen, state, ui)
+    sheet = pygame.Rect(ui.popup_rect)
+    zoom = [pygame.Rect(r) for r in (ui.zoom_plus_rect, ui.zoom_minus_rect, ui.reset_view_rect)]
+    covered = [z for z in zoom if sheet.colliderect(z)]
+    assert covered, "the case under test: the sheet over the zoom buttons"
+    controls = [pygame.Rect(r) for r in (ui.send_tab_rect, ui.forward_tab_rect, ui.hold_minus_rect,
+                                         ui.hold_plus_rect, ui.cancel_rect, ui.done_rect) if r[2]]
+    clash = next(((c, z) for c in controls for z in covered if c.colliderect(z)), None)
+    assert clash is not None
+    zoom_before = ui.view.zoom
+    spot = clash[0].clip(clash[1]).center
+    game_input.handle_event(_press(spot), state, ui)
+    assert ui.view.zoom == zoom_before

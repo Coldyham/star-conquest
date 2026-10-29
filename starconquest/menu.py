@@ -2800,7 +2800,9 @@ def _handle_key(event, ms: MenuState, settings: Settings):
 
 
 def _handle_click(pos, ms: MenuState, settings: Settings):
-    hit = next((key for key, rect in ms.rects.items() if rect.collidepoint(pos)), None)
+    # Topmost first: a widget drawn later sits over any it overlaps, so it is
+    # the one under the finger (the compact menu's Daily list rises over Start).
+    hit = next((key for key, rect in reversed(ms.rects.items()) if rect.collidepoint(pos)), None)
     if hit != "seed_field":
         ms.editing_seed = False
     if hit != "filename_field":

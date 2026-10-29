@@ -955,6 +955,13 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
     handled, action = _more_press(state, ui, pos)
     if handled:
         return action
+    # A docked popup (a compact screen, `render._popup_docked`) is drawn over the
+    # HUD and can cover the map's zoom buttons in portrait, so it is tested
+    # first; a floating one sits under them, in the map layer, and waits its turn.
+    if (config.compact and ui.mode == CHOOSING and ui.popup_rect[2]
+            and _point_in_rect(pos, ui.popup_rect) and not ui.autoplay and not ui.spectating):
+        _popup_press(state, ui, pos)
+        return None
     # Tested before the autoplay early-out so these stay clickable under autoplay
     # (mirroring the keyboard, where H/A/R/M all work regardless of autoplay).
     handled, action = _handle_global_buttons(state, ui, pos)
