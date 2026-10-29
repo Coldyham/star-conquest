@@ -284,13 +284,17 @@ def set_url_fragment(token: str) -> bool:
 
 def copy_to_clipboard(text: str) -> bool:
     """Web only, best-effort: the write is async and fire-and-forget, so True
-    means the call was accepted, not that the paste buffer definitely changed."""
+    means the call was accepted, not that the paste buffer definitely changed.
+
+    The text crosses the bridge as an ASCII-only JS literal (``json.dumps``
+    escapes everything else): handed over as a ``str``, pygbag passes its UTF-8
+    bytes as Latin-1, so a shared result's "·" pasted as "Â·"."""
     if not is_web():
         return False
     import platform as _platform
 
     try:
-        _platform.window.navigator.clipboard.writeText(text)
+        _platform.window.eval(f"navigator.clipboard.writeText({json.dumps(text)}).catch(function(){{}})")
         return True
     except Exception:
         return False
