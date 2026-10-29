@@ -9,12 +9,14 @@ None.
 
 from __future__ import annotations
 
+import copy
+
 import pygame
 
 from . import config, starlore, stats
 from .geometry import dist, point_segment_dist
 from .model import GameState
-from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
+from .viewstate import CHOOSING, FOOTER_RECTS, IDLE, ROUTING, SELECTED, Ui
 
 
 def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> int | None:
@@ -343,8 +345,73 @@ def _track_score_hover(event, ui: Ui) -> None:
     ui.score_hover = next((pid for pid, rect in ui.score_rects if _point_in_rect(event.pos, rect)), None)
 
 
+# What a press can change that a pinch must be able to put back (`_pinch`): the
+# selection and the popup, and the orders and rules a tap can create.
+_PRESS_FIELDS = ("mode", "selected", "dest", "chosen", "sel_order", "sel_forward",
+                 "forward_armed", "forward_replaced", "editing_existing", "popup_pos",
+                 "route_sel", "route_dest", "lore_sid")
+
+
+def _press_snapshot(ui: Ui) -> tuple:
+    return ({name: copy.copy(getattr(ui, name)) for name in _PRESS_FIELDS},
+            list(ui.pending), copy.deepcopy(ui.auto_forward))
+
+
+def _pinch(event, state: GameState, ui: Ui) -> bool:
+    """Two fingers zoom and pan the map. True if ``event`` was spent on it.
+
+    SDL turns the *first* finger into a mouse press, which reached the board
+    before the second finger landed: it may have picked a system, opened the
+    popup or queued a send. So a pinch starts by putting back what that press
+    changed (`press_undo`, taken before every press on a touch screen), and the
+    emulated mouse is ignored until every finger is up again.
+    """
+    if event.type in (pygame.FINGERDOWN, pygame.FINGERMOTION, pygame.FINGERUP):
+        pos = (event.x * config.SCREEN_W, event.y * config.SCREEN_H)
+        if event.type == pygame.FINGERUP:
+            ui.fingers.pop(event.finger_id, None)
+            if len(ui.fingers) < 2:
+                ui.pinch_last = None
+            if not ui.fingers:
+                ui.pinch_lock = False
+            return True
+        ui.fingers[event.finger_id] = pos
+        if len(ui.fingers) != 2:
+            return True
+        (x0, y0), (x1, y1) = ui.fingers.values()
+        spread = max(1.0, ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
+        mid = ((x0 + x1) / 2, (y0 + y1) / 2)
+        if ui.pinch_last is None:
+            if not ui.pinch_lock and ui.press_undo is not None:
+                fields, pending, rules = ui.press_undo
+                for name, value in fields.items():
+                    setattr(ui, name, value)
+                ui.pending[:] = pending
+                ui.auto_forward.clear()
+                ui.auto_forward.update(rules)
+            ui.press_undo = None
+            ui.pinch_lock = True
+            ui.drag_src, ui.drag_active, ui.pan_active = None, False, False
+            ui.dragging_slider = ui.dragging_popup = ui.dragging_scrubber = ui.dragging_graph = False
+            ui.route_press = ui.route_box = False
+        else:
+            last_spread, last_mid = ui.pinch_last
+            ui.view.pan(mid[0] - last_mid[0], mid[1] - last_mid[1], room=_room(ui))
+            ui.view.zoom_at((round(mid[0]), round(mid[1])), spread / last_spread, room=_room(ui))
+        ui.pinch_last = (spread, mid)
+        return True
+    if ui.pinch_lock and event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+                                        pygame.MOUSEMOTION):
+        return True
+    if event.type == pygame.MOUSEBUTTONDOWN and config.touch_ui:
+        ui.press_undo = _press_snapshot(ui)
+    return False
+
+
 def handle_event(event, state: GameState, ui: Ui) -> str | None:
     _track_score_hover(event, ui)
+    if _pinch(event, state, ui):
+        return None
     # Play-by-post's invite overlay is modal too, and ahead of everything below:
     # a match this fresh (right after we created it) can be running no film and
     # holds no history or win to check first.
@@ -671,7 +738,9 @@ def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
 
 def _handle_route_click(state: GameState, ui: Ui, pos) -> str | None:
     """A left-press in route mode: a control, a system, or empty space."""
-    handled, action = _handle_global_buttons(state, ui, pos)
+    handled, action = _more_press(state, ui, pos)
+    if not handled:
+        handled, action = _handle_global_buttons(state, ui, pos)
     if handled:
         return action
     if ui.route_confirm_rect[2] and _point_in_rect(pos, ui.route_confirm_rect):
@@ -784,12 +853,126 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
     return False, None
 
 
+def _more_press(state: GameState, ui: Ui, pos) -> tuple[bool, str | None]:
+    """The footer's overflow button and its list (`render._lay_out_footer`).
+
+    Returns ``(handled, action)`` like `_handle_global_buttons`; a press on a
+    row is left unhandled, for the caller's usual tests to take. The button
+    toggles the list. While it is open, any press closes it: one on a row is that
+    button's (the row recorded its rect under the button's own attribute, so the
+    caller's tests find it), and any other press — between rows, or off the list
+    onto the map — only closes it, as tapping away from an open menu does.
+    """
+    if ui.more_button_rect[2] and _point_in_rect(pos, ui.more_button_rect):
+        ui.more_open = not ui.more_open
+        return True, None
+    if not ui.more_open:
+        return False, None
+    ui.more_open = False
+    on_row = any(_point_in_rect(pos, getattr(ui, attr)) for attr in FOOTER_RECTS
+                 if getattr(ui, attr)[2])
+    if ui.more_menu_rect[2] and _point_in_rect(pos, ui.more_menu_rect) and on_row:
+        return False, None   # the caller's own tests find the row's button
+    return True, None
+
+
+def _popup_press(state: GameState, ui: Ui, pos) -> bool:
+    """A press on the send popup's controls (or its background, which drags it).
+    True if it was one."""
+    # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
+    # Tested before node-picking so a button click adjusts the send rather than
+    # (re)targeting. Zero-width rects (no count being adjusted) never match.
+    if ui.minus_rect[2] and _point_in_rect(pos, ui.minus_rect):
+        ui.step_count(state, -1)
+        return True
+    if ui.plus_rect[2] and _point_in_rect(pos, ui.plus_rect):
+        ui.step_count(state, 1)
+        return True
+
+    # Send popup (CHOOSING): Send/Forward tabs pick the mode, the presets retune
+    # the count, and Cancel discards the active send or forwarding lane.
+    if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
+        if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
+            ui.set_forward_mode(state, False)
+            return True
+        if ui.forward_tab_rect[2] and _point_in_rect(pos, ui.forward_tab_rect):
+            ui.set_forward_mode(state, True)
+            return True
+        # the two preset buttons: Half/All (Send) or 50%/100% (Forward, one lane)
+        if ui.send_half_rect[2] and _point_in_rect(pos, ui.send_half_rect):
+            ui.set_share(50) if ui.forward_armed else ui.send_half(state)
+            return True
+        if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
+            ui.set_share(100) if ui.forward_armed else ui.send_all(state)
+            return True
+        if ui.hold_minus_rect[2] and _point_in_rect(pos, ui.hold_minus_rect):
+            ui.step_hold(-1)
+            return True
+        if ui.hold_plus_rect[2] and _point_in_rect(pos, ui.hold_plus_rect):
+            ui.step_hold(1)
+            return True
+        # a split system's lanes: −/+ retune that lane; anywhere else on its row
+        # makes it the lane the popup (and the map highlight) is about
+        for dest, row, minus, plus in ui.share_rows:
+            if _point_in_rect(pos, minus) or _point_in_rect(pos, plus):
+                ui.focus_lane(dest)
+                ui.step_share(-1 if _point_in_rect(pos, minus) else 1)
+                return True
+            if _point_in_rect(pos, row):
+                ui.focus_lane(dest)
+                return True
+        if ui.even_split_rect[2] and _point_in_rect(pos, ui.even_split_rect):
+            ui.even_split()
+            return True
+        if ui.delete_all_rect[2] and _point_in_rect(pos, ui.delete_all_rect):
+            ui.delete_all_forward()
+            return True
+        if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
+            ui.cancel_send()
+            return True
+        if ui.done_rect[2] and _point_in_rect(pos, ui.done_rect):
+            _cancel(ui)   # what a tap on empty map does: the send stands, the source is let go
+            return True
+        # the count slider: grab it and jump to where the press landed. Must be
+        # tested before the popup-background drag below, which would otherwise
+        # claim the press and move the whole panel instead.
+        if ui.slider_rect[2] and _point_in_rect(pos, ui.slider_rect):
+            ui.dragging_slider = True
+            ui.set_slider_from_x(state, pos[0])
+            return True
+        # a click on the popup background (none of the buttons above) grabs it to
+        # drag — lets the user move it off anything it's covering
+        if ui.popup_rect[2] and _point_in_rect(pos, ui.popup_rect):
+            px, py = ui.popup_rect[0], ui.popup_rect[1]
+            ui.dragging_popup = True
+            ui.popup_drag_off = (pos[0] - px, pos[1] - py)
+            ui.popup_pos = (px, py)
+            return True
+    return False
+
+
 def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> str | None:
+    handled, action = _more_press(state, ui, pos)
+    if handled:
+        return action
+    # A docked popup (a compact screen, `render._popup_docked`) is drawn over the
+    # HUD and can cover the map's zoom buttons in portrait, so it is tested
+    # first; a floating one sits under them, in the map layer, and waits its turn.
+    if (config.compact and ui.mode == CHOOSING and ui.popup_rect[2]
+            and _point_in_rect(pos, ui.popup_rect) and not ui.autoplay and not ui.spectating):
+        _popup_press(state, ui, pos)
+        return None
     # Tested before the autoplay early-out so these stay clickable under autoplay
     # (mirroring the keyboard, where H/A/R/M all work regardless of autoplay).
     handled, action = _handle_global_buttons(state, ui, pos)
     if handled:
         return action
+    # The popup's controls first: docked on a compact screen it can lie over End
+    # Turn (`render._draw_send_popup`). Anywhere else the two never meet.
+    if not ui.autoplay and not ui.spectating:
+        handled = _popup_press(state, ui, pos)
+        if handled:
+            return None
     # Guarded on the width like every other rect test: render zeroes both of these
     # (route mode borrows the End Turn block, a running film takes it away), and a
     # zeroed rect still contains the point (0, 0).
@@ -818,73 +1001,6 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
     if ui.clear_dangerous_rect[2] and _point_in_rect(pos, ui.clear_dangerous_rect):
         ui.clear_dangerous_forward(state)
         return None
-
-    # On-lane −/+ buttons: a scroll-wheel-free way to change the active count.
-    # Tested before node-picking so a button click adjusts the send rather than
-    # (re)targeting. Zero-width rects (no count being adjusted) never match.
-    if ui.minus_rect[2] and _point_in_rect(pos, ui.minus_rect):
-        ui.step_count(state, -1)
-        return None
-    if ui.plus_rect[2] and _point_in_rect(pos, ui.plus_rect):
-        ui.step_count(state, 1)
-        return None
-
-    # Send popup (CHOOSING): Send/Forward tabs pick the mode, the presets retune
-    # the count, and Cancel discards the active send or forwarding lane.
-    if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
-        if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
-            ui.set_forward_mode(state, False)
-            return None
-        if ui.forward_tab_rect[2] and _point_in_rect(pos, ui.forward_tab_rect):
-            ui.set_forward_mode(state, True)
-            return None
-        # the two preset buttons: Half/All (Send) or 50%/100% (Forward, one lane)
-        if ui.send_half_rect[2] and _point_in_rect(pos, ui.send_half_rect):
-            ui.set_share(50) if ui.forward_armed else ui.send_half(state)
-            return None
-        if ui.send_all_rect[2] and _point_in_rect(pos, ui.send_all_rect):
-            ui.set_share(100) if ui.forward_armed else ui.send_all(state)
-            return None
-        if ui.hold_minus_rect[2] and _point_in_rect(pos, ui.hold_minus_rect):
-            ui.step_hold(-1)
-            return None
-        if ui.hold_plus_rect[2] and _point_in_rect(pos, ui.hold_plus_rect):
-            ui.step_hold(1)
-            return None
-        # a split system's lanes: −/+ retune that lane; anywhere else on its row
-        # makes it the lane the popup (and the map highlight) is about
-        for dest, row, minus, plus in ui.share_rows:
-            if _point_in_rect(pos, minus) or _point_in_rect(pos, plus):
-                ui.focus_lane(dest)
-                ui.step_share(-1 if _point_in_rect(pos, minus) else 1)
-                return None
-            if _point_in_rect(pos, row):
-                ui.focus_lane(dest)
-                return None
-        if ui.even_split_rect[2] and _point_in_rect(pos, ui.even_split_rect):
-            ui.even_split()
-            return None
-        if ui.delete_all_rect[2] and _point_in_rect(pos, ui.delete_all_rect):
-            ui.delete_all_forward()
-            return None
-        if ui.cancel_rect[2] and _point_in_rect(pos, ui.cancel_rect):
-            ui.cancel_send()
-            return None
-        # the count slider: grab it and jump to where the press landed. Must be
-        # tested before the popup-background drag below, which would otherwise
-        # claim the press and move the whole panel instead.
-        if ui.slider_rect[2] and _point_in_rect(pos, ui.slider_rect):
-            ui.dragging_slider = True
-            ui.set_slider_from_x(state, pos[0])
-            return None
-        # a click on the popup background (none of the buttons above) grabs it to
-        # drag — lets the user move it off anything it's covering
-        if ui.popup_rect[2] and _point_in_rect(pos, ui.popup_rect):
-            px, py = ui.popup_rect[0], ui.popup_rect[1]
-            ui.dragging_popup = True
-            ui.popup_drag_off = (pos[0] - px, pos[1] - py)
-            ui.popup_pos = (px, py)
-            return None
 
     node = pick_node(state, ui, pos)
     if node is None:
@@ -967,7 +1083,13 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int, int] | None:
 
 def _cancel(ui: Ui) -> None:
     if ui.mode == CHOOSING:
+        source = ui.selected
         ui.close_send()  # close the popup, keeping the committed send
+        # ...and finish with its source, so the next press on its neighbour selects
+        # that system instead of sending it a second fleet. It stays lit as a hover,
+        # and in the side panel, until the pointer moves or the next tap.
+        ui.reset_selection()
+        ui.hover = source
     elif ui.sel_forward is not None:
         ui.sel_forward = None  # deselect a highlighted (dormant) auto-forward rule
     else:

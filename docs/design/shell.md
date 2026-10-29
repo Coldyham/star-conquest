@@ -26,6 +26,119 @@ recorded rect.
 Hence the popup shrinks its rows to their labels first, against a budget
 measured from the placement band rather than the viewport.
 
+## Phones: the compact layout (`config.compact`)
+
+On the web build a phone's framebuffer is its viewport at device resolution
+(about 2300x1080 for a 870x412 CSS px landscape phone), and the scale used to be
+the 1440x960 baseline fitted into *those* pixels, times the touch boost: 1.6x,
+which put a desktop's worth of HUD on a 6" screen, 18px text at 11 CSS px and
+footer buttons 25 CSS px tall. The menu, letterboxed from its 1440x960 canvas,
+was worse (8 CSS px). A touch browser knows its CSS pixel (`main.web_css_px`),
+so its scale is now set in CSS pixels instead.
+
+It was first a whole CSS pixel per baseline pixel (`config.TOUCH_CSS_SCALE`),
+18 CSS px text. That looked right on a tablet, but a phone held landscape under
+its browser's address bar is about 820x320 CSS px, so it got 320 baseline
+units of height: the map was a strip of overlapping systems, and the menu's
+settings panel came out narrower than the desktop's, so its two-column tabs
+stacked into one, the hand-broken text rewrapped, and every tab scrolled
+(Basic included) under a finger that kept landing on sliders. So the scale is
+now the largest, up to that whole pixel, that leaves the screen
+`TOUCH_MIN_W` x `TOUCH_MIN_H` (600x480) baseline units (`main.ui_scale_for`,
+floored at `TOUCH_CSS_MIN`). 480 is what the Basic tab needs under its tabs and
+600 the desktop-width panel in portrait, so that phone draws at ~0.66 (12 CSS
+px text), a tablet still at 1.0, and an installed app, with no address bar,
+somewhere between.
+
+At that size a phone holds about 1250x480 baseline units (portrait 600x1150),
+against the 1440x960 the HUD and menu were drawn for, so the layout itself had
+to change; `config.compact` (touch only, so no desktop window changes shape)
+is what switches it:
+
+- **The footer folds rather than drops.** A strip too narrow for every button
+  used to drop the least essential, which on a phone (no keyboard) lost the
+  control outright; it now folds them behind a "more" button whose list offers
+  them again, on a desktop window too. A compact screen folds the exits (Quit,
+  Setup menu, New map) from the start, giving the room to the controls in use.
+- **The send popup docks.** Floating over a map a third the size of a
+  desktop's, it covered the lane it was about and outgrew the band it was
+  clamped to. Landscape, it takes the side panel's place (its title repeats the
+  panel's system and target, and a row under it the lane's length in ly and
+  turns, which the title alone had dropped); portrait, it is a sheet over the
+  controls under the map, so the map stays whole while it is open. Docked, it
+  has a *Done*: closing by tapping the map is a desktop idiom a panel doesn't say.
+- **Portrait moves the panel under the map.** A right-hand column on a
+  portrait phone left the map a sliver. The band under the map is a fixed
+  few rows (`config.PORTRAIT_PANEL_H`), so the map never moves with the
+  selection: a selected system in four rows (`render._panel_system_compact`),
+  its lane and rule beside it, and with nothing in focus a one-line reminder
+  rather than the how-to prose, which a quarter of the screen spent on was
+  noticed as wasted and which the tutorial already teaches. The regions are `config.play_rect`,
+  `side_panel_rect`, `footer_rect` and `end_turn_rect`, and End Turn crosses
+  the foot of the screen, under a thumb. History keeps End Turn's row (the
+  scrubber takes both) so the map does not move on the way in.
+- **The menu gets a canvas of the screen's shape** (`menu._draw_menu_compact`),
+  in baseline units. Its settings panel keeps the desktop's 560 width
+  (`_C_PANEL_W`), so every tab lays out as on the desktop; landscape gives the
+  rest of the width to the title and the actions, three to a row where their
+  labels fit (`_compact_columns`). That column is taller than its title and
+  actions, so the buttons grow into some of the slack (up to `_C_GROW`) and a
+  sketch of the setup's map fills the rest (`_compact_sketch`,
+  `settings.map_sketch`, made in `pump`). Portrait puts one under the panel,
+  which is as tall as its tallest tab (Combat, jitter matrix and all;
+  `_tallest_tab_h`) whichever tab shows, so neither moves as the tabs change,
+  and its buttons grow the same way, so turning the phone doesn't resize them.
+  The status message takes the map's slot while it shows. It is the real board only with fog off; under
+  fog a pinned board (a daily's, a challenge's, a hand map) is what fog keeps
+  from you, so it is a "?" and "Map hidden". A seed left to chance has no board
+  yet, so it is a sample, captioned so, which gives nothing away. The actions are folded to six, so no row is
+  left with one (`_compact_action_items`): the board's Recently played and
+  Shared matches share a Leaderboard list, as the desktop footer once did; a
+  drawn map's x sits inside Edit map; and there is no Quit, which a browser tab
+  can't do and a phone leaves to its own controls (the game's overflow list
+  keeps it). Tutorial, Daily and Play by post each open something of their
+  own, so none is nested in another. The Basic tab's rows close up a little
+  (`_C_ROW_H`). Basic and Advanced fit whole; a tab that doesn't (Combat, on a
+  short screen) scrolls, and a drag that starts on a slider goes by its
+  direction, up or down to scroll and across to move it. The canvas is upscaled,
+  so its text is softer than the game's. Drawing it at device resolution was
+  built (a surface that multiplied every coordinate out and rendered text from
+  a scaled font, with the desktop path untouched) and backed out: it was
+  sharp, but the scrolling panel's measured height (`get_bounding_rect` over
+  a layer 2.6 times the size) took a frame to ~25 ms natively, slower again
+  in the browser. Measuring that height without the scan would be the way back.
+
+Rules that came with it, from play on a phone:
+
+- **A send is finished once its popup closes**, on every screen. A compose
+  used to keep its source selected after the popup closed, so another send
+  could follow from it; on a phone that made the next tap on a neighbour (often
+  one's own system, tapped to give it orders) a second fleet. Done, a press on
+  empty map, Esc or a right-click lets the source go, leaving it lit as a hover
+  (and in the side panel) until the pointer moves or the next tap. While the
+  popup is open a press on another neighbour is a second send from the same
+  source: that is how a garrison splits, or two forwarding rules are set from
+  one system in a turn, and the open popup says the source is still live. A
+  first cut, touch only, also let the source go on a tap while the popup was
+  open, which made every split start over from the source. Desktop at first
+  kept the source after close, where hover shows what a click will do; one
+  behaviour on both was judged worth more than that, and Done reads as final.
+- **Two fingers pinch and pan the map** (game, history, route mode, map
+  creator). SDL turns the first finger into a mouse press, which reaches the
+  board before the second finger exists, so a pinch puts back what that press
+  changed (`input._pinch`, from a snapshot taken before every touch press) and
+  ignores the emulated mouse until every finger is up. The canvas is
+  `touch-action: none` so the browser never takes the gesture for page zoom.
+- **Nothing on the page is selectable.** Every control is drawn on the canvas,
+  so a long press on one used to start a text selection or the callout menu.
+  `tools/pwa/inject.py` sets `user-select: none`, `-webkit-touch-callout: none`
+  and no tap highlight on the page (inputs excepted, for the soft keyboard's
+  hidden field), and `webstore._CANVAS_STYLE` repeats it on the canvas.
+
+What was rejected: a "rotate your phone" prompt (a phone is mostly held upright,
+and the board opens there from a link), and shrinking the desktop layout's fonts to fit (the problem was
+the layout, not the font).
+
 ## Map viewport margins
 
 The floor at `config.node_clearance()` exists because a node's circle is
@@ -575,7 +688,8 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   at call time, which is what lets a test swap one out (`render._text = spy`) and
   see the drawing code use it, and what keeps `render._FONTS` the same dict a
   test clears. **`menu` deliberately does not use the kit** — it lays out on a
-  fixed 1440x960 canvas and letterbox-blits it, so its fonts must be *unscaled*
+  fixed 1440x960 canvas (a compact screen's own shape, see "The compact
+  layout") and scales the canvas, so its fonts must be *unscaled*
   (`config.FONT_SIZE*` would scale twice) and it keeps its own `_fonts`/`_text`/
   `_button`.
   **The scale follows the window and the player.** `main.ui_scale_for` fits the
@@ -601,6 +715,53 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   `render.confirm_labels`, `menu._resume_labels`), the shortcut lines in the info
   panel's help text and the win overlay, the menu's `Enter: start game` footer —
   and floors tappable controls at `config.TOUCH_MIN_TARGET` (`render._tap_size`).
+
+## The compact layout: the rules in full
+
+- **`config.compact` is set by `apply_ui_scale`**, from the surface it is
+  given: a touch build whose screen is under `COMPACT_MAX_W` x `COMPACT_MAX_H`
+  baseline units. Never on a desktop window. `portrait` is compact and taller
+  than wide. The `COMPACT_*` sizes (smaller systems, a shorter End Turn) are
+  swapped in there, scaled like every other constant.
+- **A touch browser's scale is in CSS pixels**: `main.ui_scale_for` takes
+  `web_css_px`, the framebuffer's device pixels per CSS pixel. Off the web it
+  is None and the old fit-the-device-pixels rule stands (Android). It is at
+  most `TOUCH_CSS_SCALE`, and less where that would leave the screen under
+  `TOUCH_MIN_W` x `TOUCH_MIN_H` baseline units.
+- **The compact menu's settings panel is the desktop's width** wherever the
+  screen has it, so no tab stacks its columns; the narrow single-column
+  fallbacks (`menu._narrow`) are for a screen below the scale's floor. The
+  Basic tab fits without a scroll (`test_the_basic_and_advanced_tabs_need_no_scroll`).
+  In a panel that scrolls, a press on a slider waits (`MenuState.slider_press`)
+  until it moves past `_C_SLOP`: up or down scrolls, across drags, and a
+  release where it began is a tap.
+- **The game screen's regions come from `config`**: `play_rect`,
+  `side_panel_rect`, `footer_rect`, `end_turn_rect`. Nothing in `render` or
+  `input` derives one from `HUD_RIGHT_W` or the bars directly.
+- **The footer never drops a control**: `render._lay_out_footer` folds what
+  doesn't fit behind `Ui.more_button_rect`, and an open list records each
+  folded button under its own attribute (`viewstate.FOOTER_RECTS`), so input
+  tests it as on the strip. Any press closes the list (`input._more_press`).
+- **A docked popup owns its presses** (`render._popup_docked`): the panel
+  under it draws nothing and records nothing, a portrait sheet takes End Turn
+  and the strip away (and lifts the zoom buttons onto its top edge, as
+  history's graphs do), and input tests the popup's controls before End Turn
+  (`input._popup_press`), since a landscape panel too short for it lets it run
+  on down over End Turn.
+- **A press goes to the topmost control.** The compact layouts draw things over
+  other controls (the menu's Daily list over Start Game; in portrait, the
+  docked popup over the map's zoom buttons), so `menu._handle_click` tests its
+  rects newest-drawn first, and input tests a docked popup before the HUD.
+  The desktop menu has no overlapping rects, so the order changes nothing there.
+- **A pinch undoes its first finger's press** (`Ui.press_undo`, `Editor.press_undo`)
+  and holds the emulated mouse off (`pinch_lock`) until every finger is up.
+- **The compact menu draws widgets as the desktop one does**, through the same
+  drawers on a smaller canvas; a tab draws onto a layer whose used height is
+  measured, and its rects are moved and clipped to the window
+  (`menu._compact_settings`). Modals are drawn on a design-sized layer and
+  scaled to fit (`menu._fit_modal`). The map creator's sidebar scrolls the same
+  way (`mapmaker._draw_side`), and its footer takes a second row before it
+  sheds a control.
 
 ## Browser bridges (`softkeyboard`, `webstore`, `share`)
 
@@ -650,6 +811,10 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   `CHOOSING` aimed at that subject. `Ui.editing_existing` records that the
   subject *predates* the popup, and drives the bottom button (Cancel vs
   "Delete order"/"Delete rule") and `_close_send`'s unwind to `IDLE` on edit.
+  - **Closing it lets its source go** (`input._cancel`: Done, empty map, Esc,
+    right-click), leaving the source as `Ui.hover`; while it is open a press on
+    another neighbour is a second send from the same source. Cancel and Delete
+    keep a fresh compose's source, to aim again.
   - **A dormant rule highlights but never opens it** (`Ui.rule_is_live`): the
     popup reads the source's garrison and destination unguarded, and aiming it
     at a system we no longer hold would let the Send tab queue an order out of
@@ -725,7 +890,9 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
     ("Measured layout" above) exists because the *font* scales; the menu canvas is fixed, so a
     runtime wrap would instead make the page's height depend on its text and
     silently overflow the panel. `test_tab_content_stays_inside_the_panel`
-    guards every tab's rects against that 560x496 box.
+    guards every tab's rects against that 560x496 box. The exception is a
+    phone's panel, which scrolls (its height is free) and is narrower than the
+    hand-broken lines: there a line that doesn't fit is reflowed.
 
 ## Route mode: the rules in full
 
