@@ -277,3 +277,18 @@ def test_stepping_the_ui_size_stops_at_either_end():
     assert webstore.step_ui_size(100, -1) == 90
     assert webstore.step_ui_size(first, -1) == first
     assert webstore.step_ui_size(last, +1) == last
+
+
+def test_copy_to_clipboard_sends_only_ascii_across_the_bridge(monkeypatch):
+    """pygbag hands a str's UTF-8 bytes to JS as Latin-1, so a "·" in a daily's
+    result pasted as "Â·". The text must cross as an escaped, ASCII-only literal."""
+    import sys
+    import types
+
+    sent = []
+    window = types.SimpleNamespace(eval=sent.append)
+    monkeypatch.setitem(sys.modules, "platform", types.SimpleNamespace(window=window))
+    monkeypatch.setattr(webstore, "is_web", lambda: True)
+    assert webstore.copy_to_clipboard("Star Conquest daily · Wed 28 Oct\nWon")
+    assert len(sent) == 1 and sent[0].isascii()
+    assert json.dumps("Star Conquest daily · Wed 28 Oct\nWon") in sent[0]

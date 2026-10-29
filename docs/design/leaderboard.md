@@ -702,6 +702,18 @@ in [`campaign.md`](campaign.md).
   `public_watchable_replays` (`leaderboard/schema.sql`) is the `union all` of
   `public_replays` with a winning bot's own log that `leaderboard/netlify/functions/replay.mjs` actually reads,
   keeping that function's one-query, no-branching shape for either kind.
+- **An embargoed map is never replayed until its embargo lifts**
+  (`bot_replay.pending`'s `embargoed`, read off `game_embargoes`; the author,
+  2026-10-29). A winning bot's stored replay is a solution: on a small daily
+  puzzle a player could watch knower's line and copy it move for move, and on a
+  live campaign node a rival could take the node by replaying the bot that
+  beat its holder. So an embargoed map has no bot rows at all, and the hourly
+  run fills them in once the embargo is over. Nothing on the board or in
+  `schema.sql` needed to change: no rows means no table, no Watch link, no
+  *Bot leads* and no difficulty badge. It only stops the board from offering
+  a bot's answer: a player can still put a bot in their own seat on autoplay,
+  much as ironman mode doesn't stop save-scumming. Rows already written on a
+  map under embargo when this shipped were left in place.
 
 ## A replay is never shown as if it still reproduced the game
 

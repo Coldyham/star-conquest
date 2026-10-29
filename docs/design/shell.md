@@ -590,6 +590,48 @@ popup title (both ends together, so a title never mixes forms), `_fit_names` for
 the split panel's column (the whole column at once, so "Bodu (14)" never sits over
 a bare "Alcyone").
 
+## The web build's download (`tools/slim_web.py`, `sw.js`)
+
+Before the first frame a visitor downloads pygbag's runtime (CPython and
+pygame-ce compiled to WebAssembly, from the pygame-web CDN under a versioned
+path) and the game's own archive (`/game/starconquest.tar.gz`), then the
+"Loading, please wait" box stays up while Python compiles the game from source.
+
+**The archive was mostly things the game never reads.** Measured on the deployed
+build (2026-10-28): 938 KB gzipped, of which the two DejaVu Sans Mono files were
+404 KB and comments and docstrings about half of the 538 KB of Python.
+`tools/slim_web.py` runs on the stage dir before pygbag packs it, and takes the
+archive to 427 KB:
+
+- **Comments and docstrings go, every line stays where it was.** A docstring
+  becomes an empty string continued over its lines, so a browser traceback still
+  names the repository's line numbers. Each file's syntax tree must equal the
+  original's with docstrings emptied, or the file ships unstripped (with a
+  warning); `tests/test_slim_web.py` holds every shipped file to that, and the
+  full suite passed against a stripped copy of the tree. Nothing reads
+  `__doc__`. Compile time is unchanged (measured natively): the gain is the
+  download only.
+- **The fonts keep Latin, Greek, Cyrillic and common punctuation and arrows,
+  plus every character in the shipped source, with their hinting** (203 KB to
+  about 66 KB gzipped each). Kept glyphs render byte-identically; a character
+  outside the set draws as the font's box, so a new non-ASCII label is covered
+  automatically, and a new script someone may type belongs in `KEEP_RANGES`.
+- `models/README.md` is not shipped: it is for bot authors.
+
+**The service worker caches the runtime too** (`RUNTIME` in `tools/pwa/sw.js`):
+the same stale-while-revalidate as the game's own files, CORS responses only.
+Before, every cross-origin request passed through, so a returning player waited
+on the CDN to revalidate each runtime file (GitHub Pages allows ten minutes)
+and the game could not start offline. A pygame-web fix published in place
+under the same version reaches a player one visit late, as a redeploy of the
+game already does. Checked in Chromium with a stand-in CDN: the runtime loads
+from the cache with the CDN down.
+
+**Not done.** The runtime's own size is pygbag's, not ours. Shipping `.pyc` to
+skip compiling: pygbag's packer drops `.pyc` (`filtering.SKIP_EXT`). Importing
+modules lazily to start sooner: the whole game imports and loads its bots in
+about 0.2 s natively, small beside fetching and compiling the runtime.
+
 ## Measured layout and `config.touch_ui`: the rules in full
 
 - **Nothing that holds text gets a fixed pixel size.** The measured-layout kit

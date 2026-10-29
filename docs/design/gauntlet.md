@@ -777,6 +777,11 @@ or an alternate route to the end.
   target can be met is the author's to show, by playing it.
 - **The list names each locked way on and what it needs** ("Shortcut: win in
   12"), so a player can see a route is there before they can take it.
+- **A lane may be hidden** (`{"turns": 12, "hidden": true}`): the list shows
+  nothing of it until its target is met, then the bonus stage appears, as
+  Mario Kart unlocks a staff ghost for a fast enough time trial. Proposed
+  2026-10-28, in place of a hidden star on board maps (`other-games.md`, "Star
+  tiers on every map"). `checkBody` learns `hidden` with the rest.
 - **It waits for a page that draws lanes.** The board's gauntlet page edits
   order only, so lanes and their targets would be written by hand or dealt
   until it draws the graph.

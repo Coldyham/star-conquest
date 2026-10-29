@@ -575,7 +575,9 @@ weakest first as the worker plays them:
   `#today`'s `data-kind`.
 - **`tools/try_daily.py --puzzle`** deals and opens a weekday's puzzle.
 - **The embargo matters more here.** A small map's best replay is its
-  solution, so it stays hidden until the day ends, as the board's does.
+  solution, so it stays hidden until the day ends, as the board's does. The
+  bots' too: no bot is replayed on a map while it is embargoed (`leaderboard.md`,
+  "The bot column: the rules in full").
 - **Streaks and badges are per kind** (the author, 2026-10-28): a puzzle
   streak and true streak of its own, and Puzzle done, Puzzle winner of the day
   and Full puzzle week beside the board's three (`badges.mjs`, group "Daily

@@ -14,12 +14,10 @@ ships or is dropped, delete its line here (and add it to
 ## Proposed, not built
 - gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
 - shell.md · The phone's setup menu at device resolution, if the panel's height can be had without a pixel scan; the idle side panel's how-to cut off on a landscape phone; the same send-finishes-its-source rule on desktop. *Phones: the compact layout.*
-- gauntlet.md · Targets on lanes; the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
+- gauntlet.md · Targets on lanes, including hidden ones that reveal a bonus stage only once met (a Mario Kart staff ghost); the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
 - daily.md · First tries: the game counts local attempts at a day's key and stamps the count on the score, and the board marks first-try wins. Also: offering `lane_turns` on the board's gauntlet form. *On the board*, *Ship speed follows the map*.
-- other-games.md · Star tiers on every map from the bot column or probe wins. *Star tiers on every map.*
-- other-games.md · A rating against the bot ladder, with monthly seasons, computed offline. *A rating against the bot ladder.*
 - other-games.md · Racing the record holder's ghost: their systems-held curve beside yours. *Racing the record holder's ghost.*
 - other-games.md · Puzzles from real positions as hand-drawn maps; fleets in flight are not representable. *Puzzles from real positions.*
 - other-games.md · Play-by-post chat, rematch, tournaments and groups. *Play-by-post: chat, rematch, tournaments, groups.*

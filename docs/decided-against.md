@@ -181,6 +181,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - core.md · Reading star names from a data file at runtime: no, they are generated. *Star names.*
 
 ## shell.md
+- shell.md · Shipping `.pyc` in the web archive (pygbag's packer drops them); importing modules lazily to start sooner (about 0.2 s natively, small beside the runtime). *The web build's download.*
 - shell.md · Printing the "subtract the fleets" answer for contrast; the survivor curve (replaced by the jitter matrix); five swings per axis; runtime prose wrap on the menu: all rejected (a phone's scrolling panel does reflow it, since its height is free there). *Combat rules page.*
 - shell.md · On phones: a "rotate your phone" prompt instead of a portrait layout; shrinking the desktop layout's fonts to fit; the setup menu drawn at device resolution (sharp, but ~25 ms a frame from measuring the scrolling panel; backed out). *Phones: the compact layout.*
 - shell.md · A "keep N / send N%" switch on each forwarding rule: "keep N" means "send the rest", so only one lane per system could use it; replaced by a hold per system and a share per lane. Showing the hold on each lane's label: crowded a split's source. Disabling + once the shares reach 100%: dead in the default state. *Forwarding rules.*
@@ -199,6 +200,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - leaderboard.md · A JS replay viewer; a durable client id; a durable IP-based rate limit; a per-model replay floor; sealing forks of a watched replay: all rejected. A full board snapshot per turn: **set aside for now, not ruled out.** *Checked scores.*
 - leaderboard.md · Warming actuary's learner (Style: Learning) from a stored per-player profile: dropped unbuilt. The strike curve it plays from reads the same for every bot and the person, and `decide` would come to depend on more than the board. The profile became the player page's Playstyle panel instead. *Playstyle readings.*
 - leaderboard.md · `outdated` as a fifth verdict: split into a column, since a score can be verified and outdated at once. `schema.md`, *score_checks*.
+- leaderboard.md · Hiding bot replays on an embargoed map in the board (an embargo filter on `public_watchable_replays`, no public read of `bot_scores.log`, no bot names on the page): dropped unbuilt for not replaying the map until the embargo lifts, which needs no schema or page change. *The bot column: the rules in full.*
 - leaderboard.md · Keeping the functions on the old board site behind a `/api/` proxy (the merge brief's option B): rejected for one site with the functions on it, the secret guarded by "Require approval". *The game and the board are one site.*
 - leaderboard.md · A JS include for the board's shared header (menu missing without the script, markup in JS strings); keeping a copy per page pinned by a test: both rejected for Jinja2 at build time. *The pages are templates.*
 
@@ -214,6 +216,9 @@ nor rejected are in [`open.md`](open.md); the file index is
 
 ## par.md (Par search)
 - par.md · A par or floor per map on the board: decided against; the tool stays local. *Not on the board.*
+- other-games.md · Stars on every map (win / every bot / honest par, frozen targets): set aside 2026-10-28. Par times out on knower maps; with bot-only tiers 66% of posted bests already beat every bot (59% on keyed dice), from one main player. Repeat the check when the board has more players. *Set aside: the board's scores.*
+- other-games.md · A rating from pairwise bests on shared maps, bots included (Bradley-Terry): set aside 2026-10-28; only 12 of 190 maps have two people. *A rating against the bot ladder.*
+- par.md · A hidden bonus star for beating lucky par: a second par run per map, nearly unreachable on keyed dice, and where met it marks a short search. Hidden targets go to gauntlet lanes. *Star tiers on every map* (`other-games.md`).
 - par.md · Lucky dice as a ceiling: withdrawn, since rival fights still roll and honest dice beat lucky in 2 of 18 pairs. *Dice modes.*
 
 ## pbp.md (Play-by-post)

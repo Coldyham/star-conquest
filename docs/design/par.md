@@ -322,6 +322,8 @@ tool stays as something to run locally against a map or a score
 (`--game-key`, `--log`). The bot column remains the only computed number the
 board shows.
 
+Reopened on 2026-10-28 as a frozen star target and set aside again ([`other-games.md`](other-games.md), "Star tiers on every map").
+
 ## Next, if it goes further
 
 - **Search quality.** Rolling out with more than one bot is built ("The
