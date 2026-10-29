@@ -406,8 +406,14 @@ def trigger_resize() -> bool:
 
 
 # The canvas fills the page; the framebuffer is then sized from its measured box.
+# touchAction: the game handles every gesture on the canvas itself (a pinch zooms
+# the map, `input._pinch`), so the browser must not take one for page zoom. The
+# rest stop a long press on a drawn button from selecting text or raising the
+# callout menu (the page's own stylesheet says the same, `tools/pwa/inject.py`).
 _CANVAS_STYLE = {"position": "fixed", "left": "0", "top": "0", "right": "0",
-                 "bottom": "0", "margin": "0", "width": "100%", "height": "100%"}
+                 "bottom": "0", "margin": "0", "width": "100%", "height": "100%",
+                 "touchAction": "none", "userSelect": "none", "webkitUserSelect": "none",
+                 "webkitTouchCallout": "none"}
 
 
 def viewport() -> tuple[int, int, float] | None:

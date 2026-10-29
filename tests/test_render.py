@@ -560,7 +560,8 @@ def test_send_popup_stays_inside_the_map_viewport():
     """The popup is drawn clipped to the play area, but input hit-tests the rects it
     recorded — so a row that fell outside would be invisible and still clickable, and
     the bottom row is the destructive Delete. Check it fits at the touch scale and on
-    a screen short enough that the seven rows would otherwise overflow."""
+    a screen short enough that the seven rows would otherwise overflow — where, a
+    compact screen, it docks in the side panel's place instead."""
     pygame.init()
     try:
         # The third case is the one that bites: apply_ui_scale runs once at boot, so
@@ -583,6 +584,14 @@ def test_send_popup_stays_inside_the_map_viewport():
                     ui.popup_pos = corner       # auto-placed, then dragged hard each way
                     render.draw(screen, state, ui)
                     play = pygame.Rect(*config.play_rect())
+                    if config.compact:
+                        # docked: the side panel's column (on down over End Turn
+                        # when the panel is too short), or in portrait a sheet over
+                        # everything under the top bar (`render._popup_docked`)
+                        px, py, pw, _ph = config.side_panel_rect()
+                        play = (pygame.Rect(0, config.HUD_TOP_H, config.SCREEN_W,
+                                            config.SCREEN_H - config.HUD_TOP_H)
+                                if config.portrait else pygame.Rect(px, py, pw, config.SCREEN_H - py))
                     assert play.contains(pygame.Rect(*ui.popup_rect)), (
                         f"{shape} popup escapes the viewport at {config.ui_scale}x: {ui.popup_rect}")
                     rects = _popup_rects(ui)
@@ -1069,9 +1078,9 @@ def test_a_win_short_of_the_stage_target_offers_retry_not_next_stage():
 
 
 def test_the_briefing_card_stays_inside_the_map():
-    """Measured and centred on the play area, never a fixed pixel size: the
-    card's border is drawn wholly inside the map at every scale, a target's
-    line included."""
+    """Measured and centred on the play area (the whole screen on a compact
+    one), never a fixed pixel size: the card's border is drawn wholly inside it
+    at every scale, a target's line included."""
     from starconquest.gauntlet import Target
 
     pygame.init()
@@ -1085,7 +1094,7 @@ def test_the_briefing_card_stays_inside_the_map():
             ui.stage_target = Target(turns=31, lost=12, bot="x" * 24, beat=True)
             screen.fill((0, 0, 0))
             render._draw_briefing(screen, ui)
-            px, py, pw, ph = config.play_rect()
+            px, py, pw, ph = render._card_area()
             teal = pygame.Color(*render._BTN_TEAL[1])
             hits = [(x, y) for x in range(0, screen.get_width(), 4) for y in range(0, screen.get_height(), 4)
                     if screen.get_at((x, y)) == teal]

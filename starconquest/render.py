@@ -13,7 +13,7 @@ import pygame
 from . import config, fog, matchnames, model, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
-from .viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
+from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
 
 # The measured-layout kit lives in `widgets` now that the map creator draws with
 # it too. Bound to module-level names here rather than called qualified, because
@@ -66,7 +66,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.minus_rect = ui.plus_rect = ui.slider_rect = (0, 0, 0, 0)
     ui.popup_rect = (0, 0, 0, 0)
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
-    ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = (0, 0, 0, 0)
+    ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = ui.done_rect = (0, 0, 0, 0)
     ui.hold_minus_rect = ui.hold_plus_rect = (0, 0, 0, 0)
     ui.even_split_rect = ui.delete_all_rect = (0, 0, 0, 0)
     ui.share_rows = []
@@ -112,7 +112,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_drag(surface, state, ui)
     if not ui.history:
         _draw_route_overlay(surface, state, ui)
-    if not ui.history:
+    if not ui.history and not _popup_docked(ui):
         # the send popup draws last of the map layer so nodes/fleets never occlude
         # it (it must stay visible and clickable); it early-outs when closed
         _draw_send_popup(surface, state, ui)
@@ -121,6 +121,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     if not ui.history:
         _draw_zoom_controls(surface, ui)
     _draw_hud(surface, state, ui)
+    if _popup_docked(ui):
+        _draw_send_popup(surface, state, ui)   # over the panel it stands in for
     if ui.history:
         # the scrubber owns the bottom bar; suppress the win overlay so a finished
         # game's final-turn snapshot doesn't veil the board being reviewed
@@ -620,9 +622,9 @@ def _popup_anchor(surface, state: GameState, ui: Ui, mid, w: int, h: int) -> tup
     above, then right/left/below), clamp each into the play area, and pick the one
     covering the fewest system nodes so it stays clear of useful info. The user can
     still drag it elsewhere (see ui.popup_pos)."""
-    sw, sh = surface.get_size()
-    x_lo, x_hi = 0, sw - config.HUD_RIGHT_W - w
-    y_lo, y_hi = config.HUD_TOP_H + 2, sh - config.HUD_BOTTOM_H - h
+    vx, vy, vw, vh = config.play_rect()
+    x_lo, x_hi = vx, vx + vw - w
+    y_lo, y_hi = vy + 2, vy + vh - h
     mx, my = mid
     m = 14
     candidates = (
@@ -678,23 +680,40 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     # rows are tall enough to hold their own label, and to be tapped on a phone
     bh = _tap_size(max(config.SEND_POPUP_BTN_H, font.get_height() + config.ROW_GAP))
     w = config.SPLIT_POPUP_W if split else config.SEND_POPUP_W
+    # Docked (a compact screen): in the side panel's place, at its width, or in
+    # portrait a sheet across the foot of the map rising from the panel's floor.
+    docked = _popup_docked(ui)
+    dock = pygame.Rect(config.side_panel_rect())
+    if docked:
+        w = dock.w
     # Send: tabs, title, effect, stepper, slider, presets, cancel. One forwarding
     # lane adds the hold row; a split swaps stepper and slider for a row per lane,
     # what stays home and the bar.
     single_rows = 8
-    sw, sh = surface.get_size()
+    sh = surface.get_height()
     # On a short screen at touch scale the stack can outgrow the band it is placed
     # in, and since the clamp below pins an oversized panel to the top, what falls
     # off the bottom (and out of draw's clip) is the destructive Delete row — still
     # live, because input hit-tests the recorded rect, not what survived clipping.
     # So give up the tap floor before giving up a row, down to what the labels need.
     # The budget is the placement band itself, not the viewport, so the two agree.
-    y_lo = config.HUD_TOP_H + 2
-    budget = sh - config.HUD_BOTTOM_H - y_lo
+    vx, vy, vw, vh = config.play_rect()
+    y_lo = vy + 2
+    budget = vy + vh - y_lo
+    if docked:
+        # landscape: the panel's column; portrait: a sheet over the controls
+        # under the map (panel, strip, End Turn), which it closes back onto
+        y_lo = dock.y if not config.portrait else vy + config.s(48)
+        budget = (dock.bottom if not config.portrait else sh) - y_lo
     bh_min = font.get_height() + config.ROW_GAP
 
     def fits(n_rows: int) -> bool:
         return pad * 2 + bh_min * n_rows + gap * (n_rows - 1) <= budget
+
+    if docked and not config.portrait and not fits(single_rows):
+        # a panel too short even for label-high rows: run on down over End Turn,
+        # which input tests after the popup's own controls
+        budget = sh - y_lo
 
     layout = _SplitLayout([], True, True)
     if rule is None:
@@ -733,9 +752,12 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     # else auto-anchor to whichever side of the lane covers the fewest nodes. The
     # anchor is chosen for the taller of the two single-lane shapes, so flipping
     # between Send and Forward doesn't make the panel jump to another side.
-    x_lo, x_hi = 0, sw - config.HUD_RIGHT_W - w
-    y_hi = sh - config.HUD_BOTTOM_H - h
-    if ui.popup_pos is not None:
+    x_lo, x_hi = vx, vx + vw - w
+    y_hi = vy + vh - h
+    if docked:
+        # nothing to drag it off: it covers the panel, not the map
+        x, y = dock.x, (sh - h if config.portrait else dock.y)
+    elif ui.popup_pos is not None:
         x = _clamp(ui.popup_pos[0], x_lo, x_hi)
         y = _clamp(ui.popup_pos[1], y_lo, y_hi)
     else:
@@ -745,9 +767,14 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     ui.popup_rect = (x, y, w, h)
 
     panel = pygame.Rect(x, y, w, h)
-    pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=config.s(8))
     accent = _forward_accent() if ui.forward_armed else config.COLOR_SELECT
-    pygame.draw.rect(surface, accent, panel, config.s(1), border_radius=config.s(8))
+    if docked:
+        # square-cornered: it is the panel for now, not a card over the map
+        pygame.draw.rect(surface, (20, 24, 36), dock if not config.portrait else panel)
+        pygame.draw.rect(surface, accent, dock if not config.portrait else panel, config.s(2))
+    else:
+        pygame.draw.rect(surface, (20, 24, 36), panel, border_radius=config.s(8))
+        pygame.draw.rect(surface, accent, panel, config.s(1), border_radius=config.s(8))
 
     inner = x + pad
     iw = w - pad * 2
@@ -873,6 +900,13 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         discard = ("Delete lane" if split else "Delete rule") if ui.forward_armed else "Delete order"
     else:
         discard = "Cancel"
+    if docked:
+        # Docked, the popup is a panel rather than a card on the map, and closing
+        # it by tapping the map isn't something a panel says; Done says it.
+        cancel.w = tw
+        done = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
+        _draw_popup_button(surface, done, "Done", True, accent=_BTN_GREEN[1])
+        ui.done_rect = (done.x, done.y, done.w, done.h)
     _draw_popup_button(surface, cancel, discard, danger=True)
     ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
 
@@ -1458,9 +1492,9 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         surface, ui, w, _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w)))
     _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
 
-    # bottom bar
-    by = h - config.HUD_BOTTOM_H
-    pygame.draw.rect(surface, (18, 20, 30), (0, by, w, config.HUD_BOTTOM_H))
+    # bottom bar (in portrait, the strip and the End Turn row under it)
+    by = config.footer_rect(ui.history)[1]
+    pygame.draw.rect(surface, (18, 20, 30), (0, by, w, h - by))
     if ui.history:
         # the scrubber (drawn by _draw_scrubber, after the HUD) owns the bottom
         # bar in history mode — zero the live buttons (the whole footer strip,
@@ -1469,6 +1503,8 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         ui.end_turn_rect = (0, 0, 0, 0)
         for attr in _FOOTER_RECTS:
             setattr(ui, attr, (0, 0, 0, 0))
+        ui.more_button_rect = ui.more_menu_rect = (0, 0, 0, 0)
+        ui.more_open = False
         # the camera cluster too: `draw` redraws it over a review's map, and
         # full-screen graphs leave no map to point it at
         ui.reset_view_rect = ui.zoom_minus_rect = ui.zoom_plus_rect = (0, 0, 0, 0)
@@ -1478,8 +1514,20 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # full width of the right info panel, reaching up above the ordinary bottom
     # bar (_draw_side_panel reserves the same config.END_TURN_H so the panel's
     # details never draw underneath it).
-    ebw, ebh = config.HUD_RIGHT_W, config.END_TURN_H
-    br = pygame.Rect(w - ebw, h - ebh, ebw, ebh)
+    if config.portrait and _popup_docked(ui):
+        # the popup's sheet covers End Turn and the strip (`_draw_send_popup`):
+        # take them away, as route mode and a film do, so nothing under it answers
+        ui.end_turn_rect = ui.more_button_rect = ui.more_menu_rect = (0, 0, 0, 0)
+        ui.more_open = False
+        for attr in _FOOTER_RECTS:
+            setattr(ui, attr, (0, 0, 0, 0))
+        return
+
+    br = pygame.Rect(config.end_turn_rect())
+    if config.portrait:
+        # a full-width bar at the screen's foot: off the very edges, where a
+        # phone's rounded corners and gesture bar sit
+        br = br.inflate(-2 * config.HUD_PAD, -config.HUD_PAD).move(0, -config.HUD_PAD // 4)
     fill, edge = _BTN_GREEN
 
     # Route mode borrows this slot for its confirm. Taking the button away (rather
@@ -1547,22 +1595,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     _draw_footer_buttons(surface, state, ui, by)
 
 
-# Every hit-rect the footer strip can record, so a frame can zero the lot before
-# drawing whichever survive — a stale rect would otherwise still answer clicks.
-_FOOTER_RECTS = (
-    "quit_button_rect",
-    "clear_button_rect",
-    "menu_button_rect",
-    "restart_live_button_rect",
-    "history_button_rect",
-    "autoplay_button_rect",
-    "play_pause_rect",
-    "fast_forward_rect",
-    "route_button_rect",
-    "route_cancel_rect",
-    "route_mode_rect",
-    "route_auto_rect",
-)
+_FOOTER_RECTS = FOOTER_RECTS
 
 
 def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
@@ -1592,7 +1625,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     """
     font = _fonts()["normal"]
     fbh = config.FOOTER_BTN_H
-    y = by + (config.HUD_BOTTOM_H - fbh) // 2
+    y = by + (config.footer_rect()[3] - fbh) // 2
 
     # (ui attribute, label, fill, edge, how long it survives a squeeze, which
     # cluster it's pinned to), in visual order within its cluster — left to right.
@@ -1677,30 +1710,49 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
     call *doesn't* draw stop answering clicks — that is what lets route mode swap
     the strip out and know nothing from the live-play one is left live.
 
-    The "left" cluster is pinned to the panel's left edge and the "right" cluster
-    packed against the side panel, same as a single right-to-left row would be;
-    what's between them is empty space, not a shared gap, so the two clusters
-    drift apart when there's room and only meet once the strip is squeezed down
-    to needing every pixel. Squeezing itself still treats every button as one
-    list — the gap between clusters costs the same one `BTN_GAP` as any other
-    neighbouring pair, so dropping the least essential button is exactly as
-    likely to come from either cluster.
+    The "left" cluster is pinned to the strip's left edge and the "right" cluster
+    packed against its right end (the side panel); what's between them is empty
+    space, not a shared gap, so the two clusters drift apart when there's room
+    and only meet once the strip is squeezed down to needing every pixel.
+    Squeezing treats every button as one list: the least essential (lowest keep
+    rank) folds first, from either cluster, behind a "more" button at the left
+    end, whose list (`_draw_more_menu`) offers them again — so a narrow strip
+    loses room, never a control. A compact screen folds the left cluster, the
+    ways out of this game, from the start: they are rarely pressed, and the room
+    goes to the controls that are.
     """
-    w = surface.get_width()
+    fx, _fy, fw, _fh = config.footer_rect()
     widths = {spec[0]: _btn_w(font, spec[1]) for spec in specs}
-    avail = w - config.HUD_RIGHT_W - config.HUD_PAD * 2
+    avail = fw - config.HUD_PAD * 2
+    more_w = fbh
 
     def row_w(items) -> int:
         return sum(widths[s[0]] for s in items) + config.BTN_GAP * (len(items) - 1)
 
     shown = list(specs)
-    while shown and row_w(shown) > avail:
-        shown.remove(min(shown, key=lambda s: s[4]))
+    folded = [s for s in shown if s[5] == "left"] if config.compact else []
+    shown = [s for s in shown if s not in folded]
+
+    def need(items) -> int:
+        return row_w(items) + (more_w + config.BTN_GAP if folded else 0)
+
+    while shown and need(shown) > avail:
+        least = min(shown, key=lambda s: s[4])
+        shown.remove(least)
+        folded.append(least)
 
     for attr in _FOOTER_RECTS:
         setattr(ui, attr, (0, 0, 0, 0))
 
-    x = config.HUD_PAD
+    x = fx + config.HUD_PAD
+    if folded:
+        more = pygame.Rect(x, y, more_w, fbh)
+        _draw_more_button(surface, more, ui.more_open)
+        ui.more_button_rect = (more.x, more.y, more.w, more.h)
+        x = more.right + config.BTN_GAP
+    else:
+        ui.more_button_rect = ui.more_menu_rect = (0, 0, 0, 0)
+        ui.more_open = False
     for attr, label, fill, edge, _keep, group in shown:
         if group != "left":
             continue
@@ -1708,13 +1760,61 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
         setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
         x = rect.right + config.BTN_GAP
 
-    right = w - config.HUD_RIGHT_W - config.HUD_PAD
+    right = fx + fw - config.HUD_PAD
     for attr, label, fill, edge, _keep, group in reversed(shown):
         if group != "right":
             continue
         rect = pygame.Rect(right - widths[attr], y, widths[attr], fbh)
         setattr(ui, attr, _btn(surface, rect, label, fill, edge, font))
         right = rect.x - config.BTN_GAP
+
+    if folded and ui.more_open:
+        # in the strip's own order, so the list reads as the strip would
+        _draw_more_menu(surface, ui, [s for s in specs if s in folded], more, font)
+    else:
+        ui.more_menu_rect = (0, 0, 0, 0)
+
+
+# The strip's Menu means the setup screen; in a list under a menu button of its
+# own, it needs saying which menu.
+_MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu")}
+
+
+def _draw_more_button(surface, rect: pygame.Rect, lit: bool) -> None:
+    """The overflow button: three bars, drawn (the font has no ☰ glyph)."""
+    fill, edge = _BTN_ACTIVE if lit else _BTN_BLUE
+    pygame.draw.rect(surface, fill, rect, border_radius=config.s(6))
+    pygame.draw.rect(surface, edge, rect, config.s(2), border_radius=config.s(6))
+    bw = rect.w * 9 // 20
+    t = max(2, config.s(2.5))
+    for k in (-1, 0, 1):
+        cy = rect.centery + k * rect.h // 5
+        pygame.draw.rect(surface, config.COLOR_TEXT, (rect.centerx - bw // 2, cy - t // 2, bw, t),
+                         border_radius=t // 2)
+
+
+def _draw_more_menu(surface, ui: Ui, items, anchor: pygame.Rect, font) -> None:
+    """The folded buttons as a list rising from the "more" button, one full-width
+    row each. Input closes the list on any press; one on a row is that button's,
+    and anything else on or off the list does nothing more (`input._more_press`)."""
+    pad = config.s(6)
+    row_h = anchor.h
+    labels = []
+    for attr, label, *_rest in items:
+        old, new = _MORE_LABELS.get(attr, (None, None))
+        labels.append(label.replace(old, new, 1) if old else label)
+    w = max(_btn_w(font, lab) for lab in labels) + config.s(24)
+    h = pad * 2 + row_h * len(items) + pad * (len(items) - 1)
+    box = pygame.Rect(anchor.x, anchor.y - config.BTN_GAP - h, w, h)
+    box.y = max(config.HUD_TOP_H, box.y)
+    pygame.draw.rect(surface, (20, 24, 36), box, border_radius=config.s(8))
+    pygame.draw.rect(surface, _BTN_BLUE[1], box, config.s(1), border_radius=config.s(8))
+    y = box.y + pad
+    for (attr, _label, fill, edge, *_rest), lab in zip(items, labels):
+        rect = pygame.Rect(box.x + pad, y, box.w - 2 * pad, row_h)
+        setattr(ui, attr, _btn(surface, rect, lab, fill, edge, font))
+        y += row_h + pad
+    ui.more_menu_rect = (box.x, box.y, box.w, box.h)
 
 
 _DEAD_COLOR = (92, 96, 110)
@@ -1814,7 +1914,7 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
     if not seats:
         return
 
-    def label(pid: int, v: str, with_name: bool) -> str:
+    def label(pid: int, v: str, with_name: bool, terse: int = 0) -> str:
         p = state.players[pid]
         # A shared match can seat a person at any colour, so the scoreboard is the
         # one place that says outright which swatch is yours — a solo game has no
@@ -1825,12 +1925,23 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
         name = f"{p.name} " if with_name else ""
         mark = "" if v == "live" else " ?"  # stale, last-known intel
-        return f"{name}{systems}s {ships}sh {prod:.1f}/t{mark}{you}"
+        stats_ = (f"{systems}s {ships}sh {prod:.1f}/t", f"{systems}s {ships}sh", f"{ships}sh",
+                  f"{ships}")[terse]
+        return f"{name}{stats_}{mark}{you}"
 
-    def row_width(with_name: bool) -> int:
-        return sum(sw_w + font.size(label(pid, vis(pid), with_name))[0] + gap for pid in seats)
+    def row_width(with_name: bool, terse: int = 0) -> int:
+        return sum(sw_w + font.size(label(pid, vis(pid), with_name, terse))[0] + gap for pid in seats)
 
-    with_name = row_width(True) <= (w - x0 - config.HUD_PAD)
+    # Shed detail until the row fits: names, then (a phone's top bar) production,
+    # then systems, then the unit — ships, the number a fight turns on, stays. Tapping a seat's
+    # entry still opens its full tooltip (`_draw_score_tooltip`).
+    room = w - x0 - config.HUD_PAD
+    with_name = row_width(True) <= room
+    terse = 0
+    while not with_name and terse < 3 and row_width(False, terse) > room:
+        terse += 1
+    if terse:
+        gap = config.s(14)
     x = x0
     for pid in seats:
         v = vis(pid)
@@ -1839,7 +1950,7 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         pygame.draw.rect(surface, color, sw, border_radius=config.s(3))
         if v == "frozen":
             _hatch_rect(surface, sw, _brighten(color))
-        txt = label(pid, v, with_name)
+        txt = label(pid, v, with_name, terse)
         tcolor = config.COLOR_TEXT_DIM if v == "frozen" else color
         _text(surface, font, txt, tcolor, midleft=(x + sw_w, cy))
         ui.score_rects.append((pid, (x, 0, sw_w + font.size(txt)[0], config.HUD_TOP_H)))
@@ -1909,19 +2020,37 @@ def _player_stats(state: GameState, pid: int) -> tuple[int, int, float]:
 # --------------------------------------------------------------------------- #
 # Info panel (right column)
 # --------------------------------------------------------------------------- #
+def _popup_docked(ui: Ui) -> bool:
+    """Does the send popup sit in the side panel's place rather than over the map?
+    On a compact screen there is no map to spare for it (`config.compact`)."""
+    return config.compact and ui.mode == CHOOSING and not ui.history
+
+
 def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
-    w, h = surface.get_size()
-    px = w - config.HUD_RIGHT_W
-    py = config.HUD_TOP_H
     # The panel's own footer is the big End Turn button (see _draw_hud), not the
     # ordinary bottom bar under the map — it reserves config.END_TURN_H instead.
     # History mode never draws that button (the scrubber owns the bottom bar
     # there instead), so it falls back to the plain HUD_BOTTOM_H reservation.
-    footer_h = config.HUD_BOTTOM_H if ui.history else config.END_TURN_H
-    ph = h - config.HUD_TOP_H - footer_h
-    pygame.draw.rect(surface, (16, 18, 28), (px, py, config.HUD_RIGHT_W, ph))
-    pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), config.s(1))
+    px, py, pw, ph = config.side_panel_rect(ui.history)
+    pygame.draw.rect(surface, (16, 18, 28), (px, py, pw, ph))
+    if config.portrait:
+        pygame.draw.line(surface, (40, 44, 60), (px, py), (px + pw - 1, py), config.s(1))
+    else:
+        pygame.draw.line(surface, (40, 44, 60), (px, py), (px, py + ph - 1), config.s(1))
+    if _popup_docked(ui):
+        return   # the popup draws in this space (`_draw_send_popup`), after the HUD
 
+    # Whatever runs long is cut at the panel's floor rather than drawn over the
+    # bars, which a portrait panel, a fraction of the screen tall, would reach.
+    surface.set_clip((px, py, pw, ph))
+    try:
+        _draw_side_panel_body(surface, state, ui, px, py, pw, ph)
+    finally:
+        surface.set_clip(None)
+
+
+def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> None:
+    global _PANEL_COLUMN_W
     # `content_bottom` is where the details have to stop: the panel's own floor.
     content_bottom = py + ph - config.s(8)
 
@@ -1959,10 +2088,30 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
                       spectating=ui.spectating)
         return
 
-    y = _panel_system(surface, state, ui, x, y, state.systems[focus])
     gap = config.ROW_GAP * 2  # breathing space between sections
-
     dest = _panel_lane_target(state, ui, focus)
+    if config.portrait and (dest is not None or focus in ui.auto_forward):
+        # A full-width band a fifth of the screen tall: the system on the left,
+        # its lane and rule on the right, rather than one column running off the
+        # foot of it.
+        half = pw // 2
+        _PANEL_COLUMN_W = half
+        outer = surface.get_clip()
+        try:
+            surface.set_clip(outer.clip((px, py, half, ph)))
+            _panel_system(surface, state, ui, x, y, state.systems[focus])
+            surface.set_clip(outer.clip((px + half, py, pw - half, ph)))
+            y2 = y - gap
+            if dest is not None:
+                y2 = _panel_lane(surface, state, ui, px + half + config.PANEL_PAD, y2 + gap, focus, dest)
+            if focus in ui.auto_forward:
+                _panel_rule(surface, state, ui, px + half + config.PANEL_PAD, y2 + gap, focus)
+        finally:
+            _PANEL_COLUMN_W = None
+            surface.set_clip(outer)
+        return
+
+    y = _panel_system(surface, state, ui, x, y, state.systems[focus])
     if dest is not None:
         y = _panel_lane(surface, state, ui, x, y + gap, focus, dest)
 
@@ -1976,7 +2125,7 @@ def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     font = _fonts()["small"]
     label = f"Clear all forwarding ({ui.forward_lanes()})"
     h = font.get_height() + config.s(10)
-    r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
+    r = pygame.Rect(px + config.s(12), y, _panel_w() + config.PANEL_PAD * 2 - config.s(24), h)
     pygame.draw.rect(surface, (58, 38, 42), r, border_radius=config.s(5))
     pygame.draw.rect(surface, (170, 96, 104), r, config.s(1), border_radius=config.s(5))
     _text(surface, font, label, config.COLOR_TEXT, center=r.center)
@@ -1991,7 +2140,7 @@ def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -
     font = _fonts()["small"]
     label = f"Clear dangerous ({count})"
     h = font.get_height() + config.s(10)
-    r = pygame.Rect(px + config.s(12), y, config.HUD_RIGHT_W - config.s(24), h)
+    r = pygame.Rect(px + config.s(12), y, _panel_w() + config.PANEL_PAD * 2 - config.s(24), h)
     pygame.draw.rect(surface, _BTN_DANGER[0], r, border_radius=config.s(5))
     pygame.draw.rect(surface, _BTN_DANGER[1], r, config.s(1), border_radius=config.s(5))
     _text(surface, font, label, config.COLOR_TEXT, center=r.center)
@@ -2044,9 +2193,17 @@ def _panel_you_are(surface, ui: Ui, x, y) -> int:
     return _rows_named(surface, x, y, label, config.COLOR_TEXT_DIM) if label else y
 
 
+# Set while a portrait panel draws one of its two columns, so every drawer that
+# reflows to the panel reflows to that column instead (see _draw_side_panel).
+_PANEL_COLUMN_W: int | None = None
+
+
 def _panel_w() -> int:
-    """Width available to panel text: the panel minus its two inner margins."""
-    return config.HUD_RIGHT_W - config.PANEL_PAD * 2
+    """Width available to panel text: the panel (or the column of it being drawn)
+    minus its two inner margins."""
+    if _PANEL_COLUMN_W is not None:
+        return _PANEL_COLUMN_W - config.PANEL_PAD * 2
+    return config.side_panel_rect()[2] - config.PANEL_PAD * 2
 
 
 def _head_named(surface, x, y, text, color, width: int | None = None) -> int:
@@ -2180,12 +2337,12 @@ _LEGEND_TOUCH = """Take every system to win.
 Tap one of your systems, then a neighbour, to send its garrison down that lane
 — or drag between the two.
 
-The popup retunes the count; its Forward tab turns the send into a standing
-rule instead.
+The popup retunes the count, or makes it a standing rule (Forward). Done
+finishes with that system.
 
 Route plans a whole front's worth of rules at once.
 
-Drag to pan, −/+ to zoom."""
+Drag to pan, pinch to zoom."""
 
 _LEGEND_KEYS = """Take every system to win.
 
@@ -2206,7 +2363,7 @@ _LEGEND_SPECTATING_TOUCH = """Watching from no seat: the whole board, and nobody
 Each turn plays out here once every seat is in. The line at the top says who the
 turn is waiting on.
 
-Tap a system to see it. Drag to pan, −/+ to zoom."""
+Tap a system to see it. Drag to pan, pinch to zoom."""
 
 _LEGEND_SPECTATING_KEYS = """Watching from no seat: the whole board, and nobody's orders.
 
@@ -2224,7 +2381,7 @@ _LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here chang
 Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
 Graphs charts every seat's systems, ships, income and losses.
 
-Drag the map to pan, −/+ to zoom.
+Drag the map to pan, pinch to zoom.
 
 Rewind to here restarts play from the turn on screen. Exit returns to the live
 board."""
@@ -2252,7 +2409,7 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     rally = ui.route_rally
     y = _head(surface, x, y, "Rally" if rally else "Route", config.COLOR_TEXT)
     font = _fonts()["small"]
-    width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+    width = _panel_w()
     dest = ui.route_dest
     lines: list[tuple[str, tuple[int, int, int]]] = []
     if rally:
@@ -2319,7 +2476,7 @@ def _panel_legend(surface, x, y, bottom: int, history: bool = False,
     """
     y = _head(surface, x, y, "History" if history else "Star Conquest", config.COLOR_TEXT)
     font = _fonts()["small"]
-    width = config.HUD_RIGHT_W - config.PANEL_PAD * 2
+    width = _panel_w()
     for line in _wrap(font, _legend_text(history, spectating), width):
         if y + _row_h() > bottom:  # a whole row, so the returned y clears it too
             break
@@ -2330,7 +2487,7 @@ def _panel_legend(surface, x, y, bottom: int, history: bool = False,
 def _stage_hint_lines(hint: str) -> list[str]:
     """The stage hint reflowed to the panel, the one place it is measured, so the
     test holding the panel's length counts what is drawn."""
-    return _wrap(_fonts()["small"], hint, config.HUD_RIGHT_W - config.PANEL_PAD * 2)
+    return _wrap(_fonts()["small"], hint, _panel_w())
 
 
 def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
@@ -2346,7 +2503,7 @@ def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
         if y + _row_h() > bottom:
             break
         y = _row(surface, x, y, line, _BTN_TEAL[1])
-    ui.stage_hint_rect = (x, top, config.HUD_RIGHT_W - config.PANEL_PAD * 2, y - top)
+    ui.stage_hint_rect = (x, top, _panel_w(), y - top)
     return y + config.ROW_GAP * 2
 
 
@@ -2392,11 +2549,20 @@ class _CardLayout(NamedTuple):
     fits: bool
 
 
+def _card_area() -> tuple[int, int, int, int]:
+    """Where a card is centred and must fit: over the map — or, on a compact
+    screen, where the map is a fraction of a phone, the whole screen (the card
+    is modal, and its veil covers the bars too)."""
+    if config.compact:
+        return (0, 0, config.SCREEN_W, config.SCREEN_H)
+    return config.play_rect()
+
+
 def _card_layout(paras, close: str, notes=()) -> _CardLayout:
     """Lay a card out on the map. Where the paragraphs would run off it the card
     widens to the map's width, then drops them to the small font; ``fits`` is
     False only if even that doesn't hold them."""
-    widest = config.play_rect()[2] - 2 * config.s(16)
+    widest = _card_area()[2] - 2 * config.s(16)
     lay = _card_at(paras, close, notes, "normal", min(widest, config.s(620)))
     for kind in ("normal", "small"):
         if lay.fits:
@@ -2416,7 +2582,7 @@ def _card_at(paras, close: str, notes, kind: str, width: int) -> _CardLayout:
     lines = [_wrap(_fonts()[kind], text, inner) for text in paras]
     body_h = sum(len(p) * _row_h(kind) for p in lines) + gap * max(0, len(lines) - 1)
     need = pad + _row_h("big") + _row_h() + gap + body_h + gap + tail_h + len(foot) * _row_h() + pad
-    most = config.play_rect()[3] - 2 * config.s(8)
+    most = _card_area()[3] - 2 * config.s(8)
     return _CardLayout(kind, lines, tail, foot, width, min(need, most), need <= most)
 
 
@@ -2429,7 +2595,7 @@ def _draw_card(surface, title: str, label: str, accent, paras, close: str, notes
     paragraph that would still run off the card's floor is cut there rather than
     drawn under the HUD; the notes and the close line always show.
     """
-    px, py, pw, ph = config.play_rect()
+    px, py, pw, ph = _card_area()
     big, small = _fonts()["big"], _fonts()["small"]
     pad, gap = config.s(20), config.s(10)
     lay = _card_layout(paras, close, notes)
@@ -2746,10 +2912,18 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     gap = config.s(12)
     pad = config.s(12)
 
-    result = _result_lines(state, ui)
-    rows = 4 if share else 3
+    # A portrait phone is narrower than the headline and the score line: the
+    # headline steps down a size, and the result lines wrap.
+    room = w - 2 * config.HUD_PAD
+    head_kind = "big" if big.size(msg)[0] <= room else "normal"
+    result = [(kind, line, col) for kind, text, col in _result_lines(state, ui)
+              for line in (_wrap(_fonts()[kind], text, room) or [""])]
+    # the share pair side by side, or stacked where two won't fit across
+    share_w = max(_btn_w(normal, share_label, bw), _btn_w(normal, board_label, bw))
+    stack_share = board and 2 * share_w + gap > room
+    rows = (4 + stack_share) if share else 3
     stack = (
-        _row_h("big")
+        _row_h(head_kind)
         + sum(_row_h(kind) for kind, _t, _c in result)
         + pad
         + rows * (bh + gap)
@@ -2758,8 +2932,9 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     )
     y = (h - stack) // 2
 
-    _text(surface, big, msg, color, center=(w // 2, y + big.get_height() // 2))
-    y += _row_h("big")
+    head_font = _fonts()[head_kind]
+    _text(surface, head_font, msg, color, center=(w // 2, y + head_font.get_height() // 2))
+    y += _row_h(head_kind)
     for kind, text, col in result:
         font = _fonts()[kind]
         _text(surface, font, text, col, center=(w // 2, y + font.get_height() // 2))
@@ -2791,8 +2966,14 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         # width from the wider label — the clipboard link for sending to one
         # person, the leaderboard for posting where anyone can see it.
         button_y = y
-        if board:
-            sw = max(_btn_w(normal, share_label, bw), _btn_w(normal, board_label, bw))
+        if board and stack_share:
+            sw = share_w
+            ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh), share_label, *_BTN_TEAL)
+            y += bh + gap
+            button_y = y
+            ui.leaderboard_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh), board_label, *_BTN_GOLD)
+        elif board:
+            sw = share_w
             ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw - gap // 2, y, sw, bh), share_label, *_BTN_TEAL)
             ui.leaderboard_button_rect = _btn(surface, pygame.Rect(w // 2 + gap // 2, y, sw, bh), board_label, *_BTN_GOLD)
         else:
@@ -2919,12 +3100,17 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     Records hit-rects on ``ui`` for input, mirroring the store-rect-then-test
     handoff used across the HUD."""
     w, h = surface.get_size()
-    by = h - config.HUD_BOTTOM_H
-    cy = by + config.HUD_BOTTOM_H // 2
+    _fx, by, _fw, fh = config.footer_rect(history=True)
     font = _fonts()["small"]
     bh = config.FOOTER_BTN_H
-    y = by + (config.HUD_BOTTOM_H - bh) // 2
     gap = config.BTN_GAP
+    # A portrait phone has two rows for it (the strip's and End Turn's): the
+    # track and the turn on top, the buttons under them. Otherwise it is one row.
+    two_rows = fh >= 2 * config.HUD_BOTTOM_H
+    row = config.HUD_BOTTOM_H
+    y = by + (row - bh) // 2 + (row if two_rows else 0)     # the buttons
+    ty = by + (row - bh) // 2                                # the track
+    cy = ty + bh // 2
 
     # Exit button (far left).
     exit_label = _key_hint("Exit", "Esc")
@@ -2952,10 +3138,10 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # Rewind button (far right). Its footprint is reserved even when hidden so the
     # track width and label position stay fixed as you scrub — the button only
     # appears for turns before the latest (when there is something to leave behind).
-    rewind_label = "Rewind to here"
+    rewind_label = "Rewind" if two_rows else "Rewind to here"
     rww = _btn_w(font, rewind_label)
     rw = pygame.Rect(w - rww - config.HUD_PAD, y, rww, bh)
-    right_limit = rw.x - config.HUD_PAD
+    right_limit = (w if two_rows else rw.x) - config.HUD_PAD
     # Never offered in a shared match: rewinding rebuilds a fresh, un-networked
     # `Ui` (`resume_game`), which would quietly fork the local view away from a
     # match the server and every other seat still think is at a later turn.
@@ -2970,14 +3156,18 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     tag = "revealed" if ui.history_reveal else "as seen"
     label = f"Turn {state.turn}/{ui.history_max}  ·  {tag}"
     widest = f"Turn {ui.history_max}/{ui.history_max}  ·  revealed"
+    if two_rows:
+        label = f"{state.turn}/{ui.history_max} · {tag}"
+        widest = f"{ui.history_max}/{ui.history_max} · revealed"
     label_x = right_limit - font.size(widest)[0]
     _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(right_limit, cy))
 
     # Step-one-turn buttons flank the track — the mouse/touch equivalent of the
     # Left/Right arrow keys, so picking an exact turn doesn't rely on a fiddly drag
     # once a match has run long. Square, sized to the bar's own button height.
-    prev = pygame.Rect((gb.right if gb.w else pp.right) + gap, y, bh, bh)
-    next_ = pygame.Rect(label_x - config.HUD_PAD - bh, y, bh, bh)
+    left_end = config.HUD_PAD - gap if two_rows else (gb.right if gb.w else pp.right)
+    prev = pygame.Rect(left_end + gap, ty, bh, bh)
+    next_ = pygame.Rect(label_x - config.HUD_PAD - bh, ty, bh, bh)
     _draw_h_arrow_button(surface, prev, left=True, enabled=ui.history_turn > 0)
     _draw_h_arrow_button(surface, next_, left=False, enabled=ui.history_turn < ui.history_max)
     ui.history_prev_rect = (prev.x, prev.y, prev.w, prev.h)
@@ -2986,7 +3176,7 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # Track fills the space between the two step buttons.
     track_x = prev.right + gap
     track_w = max(1, next_.x - gap - track_x)
-    track = pygame.Rect(track_x, y, track_w, bh)
+    track = pygame.Rect(track_x, ty, track_w, bh)
     ui.scrubber_rect = (track.x, track.y, track.w, track.h)
     t = 0.0 if ui.history_max <= 0 else ui.history_turn / ui.history_max
     _draw_slider(surface, track, t, _SCRUB_FILL, config.COLOR_TEXT)
@@ -3207,7 +3397,16 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
         tabs.append((tx, line, tw, label))
         tx += tw + tab_gap
     tabs_h = (line + 1) * tab_h + line * tab_gap
-    cols = max(1, min(items, (inner_w + col_gap) // (chrome + name_w + col_gap))) if below else 1
+    # A phone's panel is short as well as narrow: columns sized to the bare names
+    # (a row drops its bot name when its cell is too narrow) and this tab's own
+    # figures leave the plot room, at the price of the legend moving on a tab
+    # change.
+    col_chrome, col_name_w = chrome, name_w
+    if config.compact:
+        col_name_w = bare_w
+        col_chrome = chrome - val_w + max(font.size(_graph_value(key, chart.peak(key, seats)))[0],
+                                          font.size(unit)[0])
+    cols = max(1, min(items, (inner_w + col_gap) // (col_chrome + col_name_w + col_gap))) if below else 1
     legend_h = head_h + -(-items // cols) * row_h if below else 0
     if not ui.graph_full:
         box_h = max(config.s(180), min(int(vh * 0.42), config.s(320))) + legend_h + tabs_h - tab_h

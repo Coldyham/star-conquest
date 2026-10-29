@@ -310,9 +310,15 @@ when to re-run it, is `docs/design/ladder.md`):
 
 - **Nothing that holds text gets a fixed pixel size**: use `widgets.py` and
   `config.s()`; key font caches on `config.ui_scale`. `render`'s `_`-prefixed
-  kit globals stay swappable. `menu` lays out on a fixed 1440x960 canvas.
+  kit globals stay swappable. `menu` lays out on a fixed 1440x960 canvas
+  (on a phone, its own: `_draw_menu_compact`).
 - **`config.touch_ui`**: drop keyboard-only strings; floor targets at
   `config.TOUCH_MIN_TARGET`.
+- **`config.compact`** (a phone): a touch browser is scaled in CSS pixels;
+  screen regions come from `config.play_rect`/`side_panel_rect`/`footer_rect`/
+  `end_turn_rect`; the footer folds, never drops; the popup docks. On touch a
+  closed popup lets its source go, and a pinch undoes its first finger's tap.
+  `docs/design/shell.md`, "The compact layout".
 - **Quitting goes through `main.leave_app()`.**
 - **`viewstate.Ui` holds all transient interaction state**; `main.resolve_turn`
   expands rules into `Order`s.

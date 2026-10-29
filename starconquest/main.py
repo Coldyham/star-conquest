@@ -1541,13 +1541,29 @@ async def _kick_web_resize() -> None:
     webstore.trigger_resize()
 
 
-def ui_scale_for(size: tuple[int, int], touch: bool, pct: int) -> float:
+def ui_scale_for(size: tuple[int, int], touch: bool, pct: int,
+                 css_px: float | None = None) -> float:
     """The UI scale for a surface of ``size``: the baseline design size fitted
     into it (never below 1), then the touch boost or, off touch, the player's UI
-    size. Touch offers no UI size control, so a stored one is ignored there."""
+    size. Touch offers no UI size control, so a stored one is ignored there.
+
+    ``css_px`` is a touch browser's device pixels per CSS pixel (`web_css_px`).
+    With it the fit is taken in CSS pixels and one baseline pixel is
+    ``config.TOUCH_CSS_SCALE`` CSS pixels: a phone's framebuffer is the size of a
+    desktop's, so fitting the baseline into its device pixels drew a desktop's
+    worth of UI at desktop density on a screen a sixth the size."""
     sw, sh = size
+    if touch and css_px:
+        fit = max(1.0, min(sw / css_px / config.BASE_SCREEN_W, sh / css_px / config.BASE_SCREEN_H))
+        return css_px * fit * config.TOUCH_CSS_SCALE
     fit = max(1.0, min(sw / config.BASE_SCREEN_W, sh / config.BASE_SCREEN_H))
     return fit * config.TOUCH_UI_SCALE if touch else fit * pct / 100
+
+
+# Device pixels per CSS pixel of the web canvas, as last fitted (None off the web
+# or before the first fit). `web_framebuffer` caps the framebuffer at a pixel
+# budget, so this is the ratio it chose, not always the browser's DPR.
+web_css_px: float | None = None
 
 
 def web_framebuffer(css_w: int, css_h: int, dpr: float) -> tuple[int, int]:
@@ -1573,10 +1589,12 @@ def fit_web_canvas() -> bool:
     The canvas's on-screen box is ours, not pygbag's (``webstore.viewport``), so
     nothing else needs telling.
     """
+    global web_css_px
     view = webstore.viewport()
     if view is None:
         return False
     size = web_framebuffer(*view)
+    web_css_px = size[0] / max(1, view[0])
     screen = pygame.display.get_surface()
     if screen is not None and screen.get_size() == size:
         return False
@@ -1683,8 +1701,9 @@ async def main() -> None:
     # game board. The menu builds `state`/`ui` on "start"; pressing M in-game
     # drops back to it, and Create/Edit map opens the creator between the two.
     menu_state = MenuState()
-    config.apply_ui_scale(ui_scale_for(pygame.display.get_surface().get_size(), touch,
-                                       menu_state.ui_size), touch=touch)
+    boot_size = pygame.display.get_surface().get_size()
+    config.apply_ui_scale(ui_scale_for(boot_size, touch, menu_state.ui_size, web_css_px),
+                          touch=touch, size=boot_size)
     editor: mapmaker.Editor | None = None      # live only while scene == "maker"
     state: GameState | None = None
     ui: Ui | None = None
@@ -2128,7 +2147,7 @@ async def main() -> None:
                 fit_web_canvas()
         # Reflow to fill the window whenever its size, or the UI size, changes.
         screen = pygame.display.get_surface()
-        scale = ui_scale_for(screen.get_size(), touch, menu_state.ui_size)
+        scale = ui_scale_for(screen.get_size(), touch, menu_state.ui_size, web_css_px)
         if screen.get_size() != (config.SCREEN_W, config.SCREEN_H) or scale != config.ui_scale:
             config.SCREEN_W, config.SCREEN_H = screen.get_size()
             config.apply_ui_scale(scale, touch=touch)

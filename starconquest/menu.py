@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pygame
 
-from . import ai, campaign, combat, config, gauntlet, mapgen, paths, pbp, softkeyboard, uifont, webstore
+from . import ai, campaign, combat, config, gauntlet, mapgen, paths, pbp, softkeyboard, uifont, webstore, widgets
 from .model import AiParams
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -352,6 +352,14 @@ class MenuState:
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
     canvas_scale: float = 1.0
     canvas_offset: tuple[int, int] = (0, 0)
+    # The compact menu's settings panel scrolls (`_draw_menu_compact`): how far,
+    # per tab; the window it shows (canvas space) and the height of what it
+    # holds, both set by draw; and a drag on its blank space, as (press y,
+    # scroll at the press), while one is under way.
+    panel_scroll: dict[str, int] = field(default_factory=dict)
+    panel_view: pygame.Rect | None = None
+    panel_content_h: int = 0
+    scroll_drag: tuple[int, int] | None = None
 
 
 def _strategy_options() -> list[str]:
@@ -399,10 +407,11 @@ def _ai_seats(settings: Settings) -> list[int]:
 _CANVAS: pygame.Surface | None = None
 
 
-def _get_canvas() -> pygame.Surface:
-    """The fixed-size surface the menu is always laid out on (design resolution)."""
+def _get_canvas(size: tuple[int, int] | None = None) -> pygame.Surface:
+    """The surface the menu is laid out on: the fixed design resolution, or on a
+    compact screen the screen's own size in baseline units."""
     global _CANVAS
-    size = (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+    size = size or (config.BASE_SCREEN_W, config.BASE_SCREEN_H)
     if _CANVAS is None or _CANVAS.get_size() != size:
         _CANVAS = pygame.Surface(size)
     return _CANVAS
@@ -412,7 +421,22 @@ def draw(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
     """Render the menu on a fixed design-resolution canvas, then scale it to fit
     the real surface (letterboxed, aspect-preserved). One transform keeps the whole
     menu on-screen and correctly proportioned at any resolution/DPI without
-    per-widget scaling; `handle_event` inverts it so clicks hit the right widgets."""
+    per-widget scaling; `handle_event` inverts it so clicks hit the right widgets.
+
+    A compact screen (a phone, `config.compact`) letterboxed into 1440x960 would
+    draw this menu's 18px text at 8 CSS px, so it gets a canvas of its own shape
+    instead, in baseline units (`config.ui_scale` device pixels each, the game's
+    own scale), laid out for it by `_draw_menu_compact`."""
+    if config.compact:
+        sw, sh = surface.get_size()
+        cw = max(1, round(sw / config.ui_scale))
+        ch = max(1, round(sh / config.ui_scale))
+        canvas = _get_canvas((cw, ch))
+        _draw_menu_compact(canvas, ms, settings)
+        ms.canvas_scale, ms.canvas_offset = sw / cw, (0, 0)
+        surface.blit(pygame.transform.smoothscale(canvas, (sw, sh)), (0, 0))
+        return
+    ms.panel_view = None
     canvas = _get_canvas()
     _draw_menu(canvas, ms, settings)
     sw, sh = surface.get_size()
@@ -517,17 +541,23 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
     moved, and it would make the seed field unusable.
     """
     f = _fonts()
+    for (text, colour), y in zip(_challenge_lines(settings), (124, 144)):
+        _text(surface, f["small"], text, colour, center=(w // 2, y))
+
+
+def _challenge_lines(settings: Settings) -> list[tuple[str, tuple[int, int, int]]]:
+    """The challenge banner's two lines and their colours (`_draw_challenge`);
+    the compact menu wraps them to its column."""
     ch = settings.challenge
     valid = ch.matches(settings)
 
     head = f"CHALLENGE — beat {ch.summary()}"
     if ch.by:
         head += f"   ·   from {ch.by}"
-    _text(surface, f["small"], head, _START_BORDER if valid else _WARN, center=(w // 2, 124))
+    first = (head, _START_BORDER if valid else _WARN)
 
     if not valid:
-        _text(surface, f["small"], "settings changed — your score won't compare", _WARN, center=(w // 2, 144))
-        return
+        return [first, ("settings changed — your score won't compare", _WARN)]
 
     bots = [settings.seat_strategy(s) for s in range(2, settings.players + 1)]
     bits = [f"seed {settings.seed}", f"{settings.system_count()} nodes", settings.mode]
@@ -536,7 +566,7 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
     mine = webstore.best(*settings.challenge_keys())
     if mine is not None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
-    _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))
+    return [first, ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
 
 
 def active_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
@@ -617,23 +647,27 @@ def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> No
     knob has moved, a warning that this is no longer the stage. It warns rather
     than locks, for the reason `_draw_challenge` gives."""
     f = _fonts()
+    for (text, colour), y in zip(_stage_lines(ms, settings), (124, 144)):
+        _text(surface, f["small"], text, colour, center=(w // 2, y))
+
+
+def _stage_lines(ms: MenuState, settings: Settings) -> list[tuple[str, tuple[int, int, int]]]:
+    """The stage banner's two lines and their colours (`_draw_stage_banner`),
+    or none when the stage's gauntlet can't be found."""
     g = gauntlet.find(ms.gauntlets, ms.stage_at[0]) if ms.stage_at else None
     found = active_stage(ms, settings)
     if g is None:
-        return
+        return []
     if found is None:
-        _text(surface, f["small"], f"{g.name.upper()} — settings changed", _WARN, center=(w // 2, 124))
-        _text(surface, f["small"], f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave",
-              _WARN, center=(w // 2, 144))
-        return
+        return [(f"{g.name.upper()} — settings changed", _WARN),
+                (f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave", _WARN)]
     _g, stage = found
     head = f"{g.name.upper()} {g.position(stage.id)}/{len(g.stages)} — {stage.title}"
-    _text(surface, f["small"], head, _START_BORDER, center=(w // 2, 124))
     bits = _stage_bits(settings)
     mine = webstore.best(*settings.challenge_keys())
     if mine is not None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
-    _text(surface, f["small"], "   ·   ".join(bits), config.COLOR_TEXT_DIM, center=(w // 2, 144))
+    return [(head, _START_BORDER), ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
 
 
 def _open_tutorial(ms: MenuState, settings: Settings, pick: str | None = None) -> None:
@@ -1194,10 +1228,20 @@ def _draw_tabs(surface, ms: MenuState, settings: Settings, w: int) -> None:
         x += tw + gap
 
 
+# A settings panel narrower than this (a portrait phone's, `_draw_menu_compact`)
+# stacks what the desktop panel lays out side by side, and reflows its prose.
+_NARROW_PANEL_W = 500
+
+
+def _narrow(panel: pygame.Rect) -> bool:
+    return panel.width < _NARROW_PANEL_W
+
+
 def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
-    left = panel.x + 34
-    right = panel.right - 34
-    y = panel.y + 34
+    inset = 18 if _narrow(panel) else 34
+    left = panel.x + inset
+    right = panel.right - inset
+    y = panel.y + (16 if _narrow(panel) else 34)
 
     drawn = settings.custom_map is not None
 
@@ -1257,6 +1301,8 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     mid = (left + right) // 2
     col_r = mid - 17    # left column's checkboxes end here...
     col_l = mid + 17    # ...and the right column's labels start here
+    if _narrow(panel):  # one column: the labels are wider than half of it
+        col_r, col_l = right, left
     top = y
 
     _row_label(surface, "Autoplay", left, y, _changed(settings, "autoplay"))
@@ -1269,7 +1315,7 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     _row_label(surface, "Fog of war", left, y, fog_changed)
     _checkbox(surface, ms, "fog_of_war", not fog_off(settings), col_r, y)
 
-    y = top
+    y = y + _ROW_H if _narrow(panel) else top
     # Off until switched on — see `webstore.share_games` and `share`.
     _row_label(surface, "Share replays", col_l, y, False)
     _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
@@ -1291,6 +1337,9 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     col_w = (panel.width - pad * 3) // 2
     lx = panel.x + pad
     rx = lx + col_w + pad
+    if _narrow(panel):   # one column, the right one's groups after the left's
+        col_w = panel.width - pad * 2
+        rx = lx
 
     drawn = settings.custom_map is not None
 
@@ -1308,7 +1357,7 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
     _text(surface, _fonts()["small"], "Randomise all", config.COLOR_TEXT_DIM, midleft=(lx, y + _CH // 2))
     _die_button(surface, ms, "randomise_adv", pygame.Rect(lx + col_w - _CH, y, _CH, _CH))
 
-    y = panel.y + 16  # RIGHT: Visibility + Economy
+    y = y + _CH + 16 if _narrow(panel) else panel.y + 16  # RIGHT: Visibility + Economy
     y = _section(surface, "Visibility", rx, y)
     y = _sliders(surface, ms, settings, _ADV_FOG, rx, y, col_w)
     y = _section(surface, "Economy", rx, y)
@@ -1363,26 +1412,45 @@ def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect)
     rx = lx + col_w + pad
     full = col_w * 2 + pad
     f = _fonts()
+    narrow = _narrow(panel)
+    if narrow:
+        # A narrow panel scrolls (`_draw_menu_compact`), so the page's height is
+        # free to follow its text: the prose reflows, and the two slider groups
+        # stack.
+        full = col_w = panel.width - pad * 2
+        rx = lx
 
     y = _section(surface, "How it works", lx, panel.y + 12)
-    for line in _COMBAT_PROSE:
+    prose = _COMBAT_PROSE
+    if max(f["normal"].size(line)[0] for line in prose) > full:
+        # hand-broken for the desktop panel; anything narrower (a phone's, which
+        # scrolls) reflows each line
+        prose = [line for para in _COMBAT_PROSE for line in widgets.wrap(f["normal"], para, full)]
+    for line in prose:
         _text(surface, f["normal"], line, config.COLOR_TEXT, midleft=(lx, y + _PROSE_H // 2))
         y += _PROSE_H
 
     y += 16
-    _section(surface, "The fight", lx, y)
-    y = _section(surface, "The rules", rx, y)
-    # `ms` is both the rect store and the value target here — the demo sliders read
-    # and write MenuState, unlike every other group on every other tab.
-    _sliders(surface, ms, ms, _PREVIEW, lx, y, col_w)
-    y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
+    if narrow:
+        y = _section(surface, "The fight", lx, y)
+        y = _sliders(surface, ms, ms, _PREVIEW, lx, y, col_w)
+        y = _section(surface, "The rules", lx, y)
+        y = _sliders(surface, ms, settings, _ADV_COMBAT, lx, y, col_w)
+    else:
+        _section(surface, "The fight", lx, y)
+        y = _section(surface, "The rules", rx, y)
+        # `ms` is both the rect store and the value target here — the demo sliders
+        # read and write MenuState, unlike every other group on every other tab.
+        _sliders(surface, ms, ms, _PREVIEW, lx, y, col_w)
+        y = _sliders(surface, ms, settings, _ADV_COMBAT, rx, y, col_w)
     y = _draw_lane_battles(surface, ms, settings, lx, y + 6, full)
 
     preview = combat.preview_fight(
         ms.preview_attacker, ms.preview_defender, settings.combat_jitter, settings.defender_advantage
     )
     y = _draw_fight_readout(surface, preview, lx, y + 10, full)
-    y = _section(surface, "Jitter matrix — your swing across, theirs down", lx, y + 10)
+    title = "Jitter matrix" if narrow else "Jitter matrix — your swing across, theirs down"
+    y = _section(surface, title, lx, y + 10)
     _draw_jitter_matrix(surface, preview, lx, y, full)
 
 
@@ -1409,8 +1477,13 @@ def _draw_lane_battles(surface, ms: MenuState, settings: Settings, x: int, y: in
     if _changed(settings, "in_lane_battles"):
         _changed_dot(surface, x - 12, mid)
     _text(surface, f["small"], label, config.COLOR_TEXT_DIM, midleft=(x, mid))
-    _text(surface, f["small"], _LANE_NOTE, _DISABLED_TEXT,
-          midleft=(x + f["small"].size(label)[0] + 16, mid))
+    note_x = x + f["small"].size(label)[0] + 16
+    if note_x + f["small"].size(_LANE_NOTE)[0] > x + width - _CH - 8:
+        # no room beside the label (a narrow panel): the caveat goes under it
+        _checkbox(surface, ms, "in_lane_battles", settings.in_lane_battles, x + width, y)
+        _text(surface, f["small"], _LANE_NOTE, _DISABLED_TEXT, midleft=(x, y + _CH + _NOTE_H // 2))
+        return y + _CH + _NOTE_H
+    _text(surface, f["small"], _LANE_NOTE, _DISABLED_TEXT, midleft=(note_x, mid))
     _checkbox(surface, ms, "in_lane_battles", settings.in_lane_battles, x + width, y)
     return y + _CH
 
@@ -1473,14 +1546,29 @@ def _draw_fight_readout(surface, preview: combat.CombatPreview, x: int, y: int, 
     """The headline outcome, the contrast with what subtraction would say, and how
     far jitter can move it. Returns the y below the box."""
     f = _fonts()
-    box = pygame.Rect(x, y, width, 88)
+    headline, color, detail, band = _readout_lines(preview)
+    inner = width - 28
+    if f["big"].size(headline)[0] <= inner and max(f["small"].size(t)[0] for t in (detail, band)) <= inner:
+        box = pygame.Rect(x, y, width, 88)
+        pygame.draw.rect(surface, _TROUGH, box, border_radius=8)
+        pygame.draw.rect(surface, _PANEL_BORDER, box, 1, border_radius=8)
+        _text(surface, f["big"], headline, color, midleft=(x + 14, y + 25))
+        _text(surface, f["small"], detail, config.COLOR_TEXT, midleft=(x + 14, y + 52))
+        _text(surface, f["small"], band, config.COLOR_TEXT_DIM, midleft=(x + 14, y + 70))
+        return box.bottom
+    # Too narrow for the fixed box (a portrait phone's panel, which scrolls): the
+    # headline drops to the normal size and the lines wrap, the box growing to fit.
+    rows = [(line, f["normal"], color) for line in widgets.wrap(f["normal"], headline, inner)]
+    rows += [(line, f["small"], config.COLOR_TEXT) for line in widgets.wrap(f["small"], detail, inner)]
+    rows += [(line, f["small"], config.COLOR_TEXT_DIM) for line in widgets.wrap(f["small"], band, inner)]
+    h = 20 + sum(font.get_linesize() + 2 for _t, font, _c in rows)
+    box = pygame.Rect(x, y, width, h)
     pygame.draw.rect(surface, _TROUGH, box, border_radius=8)
     pygame.draw.rect(surface, _PANEL_BORDER, box, 1, border_radius=8)
-
-    headline, color, detail, band = _readout_lines(preview)
-    _text(surface, f["big"], headline, color, midleft=(x + 14, y + 25))
-    _text(surface, f["small"], detail, config.COLOR_TEXT, midleft=(x + 14, y + 52))
-    _text(surface, f["small"], band, config.COLOR_TEXT_DIM, midleft=(x + 14, y + 70))
+    ty = y + 10
+    for text, font, colour in rows:
+        _text(surface, font, text, colour, midleft=(x + 14, ty + font.get_linesize() // 2))
+        ty += font.get_linesize() + 2
     return box.bottom
 
 
@@ -1568,13 +1656,21 @@ def _draw_ai(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> 
 
     # edit-all shortcuts, pinned near the top
     y += 44
-    bw = 150
+    name = config.player_name(ms.ai_seat)
+    # measured: "editing Crimson" after the row needs the desktop panel's full width
+    narrow = _narrow(panel) or (x + 2 * 162 + _CH + 12 + _fonts()["small"].size(f"editing {name}")[0]
+                                > panel.right - 12)
+    bw = 130 if narrow else 150
     _button(surface, ms, "copy_all", pygame.Rect(x, y, bw, _CH), "Copy to all", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
     _button(surface, ms, "reset_all", pygame.Rect(x + bw + 12, y, bw, _CH), "Reset all", fill=_BTN_FILL, border=_BTN_BORDER, tcol=config.COLOR_TEXT)
     dice = pygame.Rect(x + 2 * (bw + 12), y, _CH, _CH)
     _die_button(surface, ms, "randomise_ai", dice)
-    name = config.player_name(ms.ai_seat)
-    _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat), midleft=(dice.right + 12, y + _CH // 2))
+    if narrow:   # no room after the die: its own line under the row
+        note_y = y + _CH + 4
+        _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat), midleft=(x, note_y + _NOTE_H // 2))
+        y = note_y + _NOTE_H + 8 - 44   # the strategy row's own step below lands under the note
+    else:
+        _text(surface, _fonts()["small"], f"editing {name}", config.player_color(ms.ai_seat), midleft=(dice.right + 12, y + _CH // 2))
 
     # strategy dropdown (built-in heuristic + any drop-in models/)
     y += 44
@@ -1985,6 +2081,337 @@ def _draw_start(surface, ms: MenuState, settings: Settings, w: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Compact menu — a phone (`config.compact`)
+#
+# The same widgets and tabs on a canvas the shape of the screen, in baseline
+# units, so they read at the size the game does. Landscape: the title and every
+# action in a column on the left, the tabs beside it. Portrait: title, tabs, then
+# the actions along the foot, under a thumb. Either way the settings panel is
+# taller than the room left for it, so it scrolls: it is drawn whole onto a layer
+# (`_PANEL_LAYER`), and a window onto that is what the canvas shows. Its widgets'
+# rects are moved and clipped to the window, so a tap lands on what is shown and
+# never on what is scrolled out of it. A press on its blank space drags it; every
+# widget keeps its press. Modals are drawn as they are anywhere, then shrunk to
+# fit if they don't (`_fit_modal`).
+# --------------------------------------------------------------------------- #
+_C_PAD = 10        # canvas margin, and the gap between columns
+_C_GAP = 6         # between neighbouring buttons
+_C_BTN_H = 38      # an action button: a fingertip
+_C_START_H = 48
+_C_LEFT_W = 330    # landscape: the title-and-actions column
+_LAYER_H = 1600    # the scrolling panel's layer: taller than any tab's content
+_PANEL_LAYER: pygame.Surface | None = None
+
+
+def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Settings) -> None:
+    surface.fill(config.COLOR_BG)
+    ms.rects.clear()
+    w, h = surface.get_size()
+    f = _fonts()
+    pad = _C_PAD
+
+    if w > h:
+        col = pygame.Rect(pad, pad, min(_C_LEFT_W, (w - 3 * pad) * 2 // 5), h - 2 * pad)
+        main = pygame.Rect(col.right + pad, pad, w - col.right - 2 * pad, h - 2 * pad)
+        y = _compact_heading(surface, ms, settings, col, col.y)
+        actions_h = _compact_actions(surface, ms, settings, col.w, None)
+        actions_top = col.bottom - actions_h
+        _compact_status(surface, ms, pygame.Rect(col.x, y, col.w, actions_top - y))
+        _compact_actions(surface, ms, settings, col.w, (col.x, actions_top))
+        _compact_settings(surface, ms, settings, main)
+    else:
+        full = pygame.Rect(pad, pad, w - 2 * pad, h - 2 * pad)
+        y = _compact_heading(surface, ms, settings, full, full.y)
+        actions_h = _compact_actions(surface, ms, settings, full.w, None)
+        actions_top = full.bottom - actions_h
+        status_h = _NOTE_H + 4 if ms.status and pygame.time.get_ticks() < ms.status_until else 0
+        _compact_status(surface, ms, pygame.Rect(full.x, actions_top - status_h - 2, full.w, status_h))
+        _compact_settings(surface, ms, settings,
+                          pygame.Rect(full.x, y, full.w, actions_top - status_h - pad - y))
+        _compact_actions(surface, ms, settings, full.w, (full.x, actions_top))
+
+    _draw_daily_list(surface, ms)
+    if ms.confirm_clear_map:
+        _fit_modal(surface, ms, lambda s, sw, sh: _draw_clear_map(s, ms, sw, sh))
+    if ms.pbp_prompt:
+        _fit_modal(surface, ms, lambda s, sw, sh: _draw_pbp_prompt(s, ms, settings, sw, sh))
+    if ms.tutorial_open:
+        _fit_modal(surface, ms, lambda s, sw, sh: _draw_tutorial(s, ms, settings, sw, sh))
+    if ms.confirm_slow:
+        _fit_modal(surface, ms, lambda s, sw, sh: _draw_slow(s, ms, sw, sh))
+    if ms.confirm_unchallenge:  # last, so the modal veils every widget above
+        _fit_modal(surface, ms, lambda s, sw, sh: _draw_unchallenge(s, ms, settings, sw, sh))
+
+
+def _compact_heading(surface, ms: MenuState, settings: Settings, area: pygame.Rect, y: int) -> int:
+    """The title, then the subtitle's slot — or the challenge or stage banner that
+    takes it — wrapped to ``area``'s width. Returns the y below it."""
+    f = _fonts()
+    _text(surface, f["big"], "STAR CONQUEST", config.COLOR_TEXT,
+          center=(area.centerx, y + f["big"].get_height() // 2))
+    y += f["big"].get_height() + 2
+    if settings.challenge is not None:
+        lines = _challenge_lines(settings)
+    elif ms.stage_at is not None:
+        lines = _stage_lines(ms, settings)
+    else:
+        lines = [("configure your galaxy, then conquer it", config.COLOR_TEXT_DIM)]
+    for text, colour in lines:
+        for line in widgets.wrap(f["small"], text.replace("   ·   ", " · "), area.w):
+            _text(surface, f["small"], line, colour, center=(area.centerx, y + _NOTE_H // 2))
+            y += _NOTE_H
+    return y + 8
+
+
+def _compact_status(surface, ms: MenuState, area: pygame.Rect) -> None:
+    """The transient save/load/link message, wrapped into ``area``."""
+    if not ms.status or pygame.time.get_ticks() >= ms.status_until or area.h <= 0:
+        return
+    f = _fonts()
+    y = area.y
+    for line in widgets.wrap(f["small"], ms.status, area.w):
+        if y + _NOTE_H > area.bottom:
+            break
+        _text(surface, f["small"], line, _START_BORDER if ms.status_ok else _STATUS_ERR,
+              center=(area.centerx, y + _NOTE_H // 2))
+        y += _NOTE_H
+
+
+def _compact_action_items(ms: MenuState, settings: Settings) -> list[tuple[str, str, tuple]]:
+    """The menu's actions other than Start, in the order the grid shows them:
+    ``(key, label, border)``. The same set the desktop rows offer (`_file_control`,
+    `_draw_start`), gated the same way."""
+    items: list[tuple[str, str, tuple]] = []
+    if ms.gauntlets:
+        items.append(("tutorial", _gauntlets_label(ms), _START_BORDER))
+    if paths.LEADERBOARD_ORIGIN:
+        items.append(("daily_menu", _DAILY_LABEL, _START_BORDER))
+    if pbp.configured():
+        items.append(("play_by_post", "Play by post", _HL_BORDER))
+    if is_web():
+        if pbp.configured():
+            items.append(("browse_matches", "Shared matches", _BTN_BORDER))
+        items.append(("get_link", "Get Link", _BTN_BORDER))
+        items.append(("browse_configs", "Recently played", _BTN_BORDER))
+    else:
+        items.append(("save_settings", "Save", _BTN_BORDER))
+        items.append(("load_settings", "Load", _BTN_BORDER))
+    drawn = settings.custom_map is not None
+    items.append(("create_map", "Edit map" if drawn else "Create map", _HL_BORDER))
+    if drawn:
+        items.append(("clear_map", "Clear map", _BTN_BORDER))
+    items.append(("quit", "Quit", _BTN_BORDER))
+    return items
+
+
+def _compact_actions(surface, ms: MenuState, settings: Settings, width: int,
+                     at: tuple[int, int] | None) -> int:
+    """Start Game across ``width``, then every other action two to a row (off the
+    web, the save file's name field first). Draws at ``at``, or only measures when
+    it is None. Returns the height."""
+    items = _compact_action_items(ms, settings)
+    field_h = 0 if is_web() else _C_BTN_H + _C_GAP
+    rows = (len(items) + 1) // 2
+    height = _C_START_H + _C_GAP + field_h + rows * _C_BTN_H + (rows - 1) * _C_GAP
+    if at is None:
+        return height
+    x, y = at
+    f = _fonts()
+    start = pygame.Rect(x, y, width, _C_START_H)
+    _button(surface, ms, "start", start, "Start Game", fill=_START_FILL, border=_START_BORDER,
+            tcol=config.COLOR_TEXT, font=f["normal"])
+    y = start.bottom + _C_GAP
+    if not is_web():
+        field = pygame.Rect(x, y, width, _C_BTN_H)
+        _text_field(surface, f["normal"], field, ms.filename or _DEFAULT_FILENAME, ms.editing_filename,
+                    config.COLOR_TEXT)
+        ms.rects["filename_field"] = field
+        y += _C_BTN_H + _C_GAP
+    bw = (width - _C_GAP) // 2
+    for i, (key, label, border) in enumerate(items):
+        rect = pygame.Rect(x + (i % 2) * (bw + _C_GAP), y + (i // 2) * (_C_BTN_H + _C_GAP),
+                           bw if i % 2 == 0 else width - bw - _C_GAP, _C_BTN_H)
+        font = f["normal"] if f["normal"].size(label)[0] + 24 <= rect.w else f["small"]
+        if key == "daily_menu":
+            _button(surface, ms, key, rect, "", fill=_BTN_FILL,
+                    border=_HL_BORDER if ms.daily_open else border, tcol=config.COLOR_TEXT)
+            _text(surface, font, label, config.COLOR_TEXT, center=(rect.centerx - _CH // 4, rect.centery))
+            _draw_caret(surface, pygame.Rect(rect.right - _CH, rect.y + (rect.h - _CH) // 2, _CH, _CH),
+                        ms.daily_open)
+        else:
+            tcol = config.COLOR_TEXT_DIM if key == "quit" else config.COLOR_TEXT
+            _button(surface, ms, key, rect, label, fill=_BTN_FILL, border=border, tcol=tcol, font=font)
+    return height
+
+
+def _compact_tabs(surface, ms: MenuState, settings: Settings, area: pygame.Rect) -> int:
+    """`_draw_tabs` across ``area``'s width. Returns the y below them."""
+    f = _fonts()
+    gap = _C_GAP
+    tw = (area.w - gap * (len(_TABS) - 1)) // len(_TABS)
+    font = f["normal"] if all(f["normal"].size(lbl)[0] + 12 <= tw for _k, lbl, _e in _TABS) else f["small"]
+    th = _C_BTN_H
+    x = area.x
+    for key, label, enabled in _TABS:
+        rect = pygame.Rect(x, area.y, tw, th)
+        if enabled and ms.tab == key:
+            fill, border, tcol = _HL_FILL, _HL_BORDER, config.COLOR_TEXT
+        elif enabled:
+            fill, border, tcol = _BTN_FILL, _BTN_BORDER, config.COLOR_TEXT
+        else:
+            fill, border, tcol = (22, 24, 34), None, _DISABLED_TEXT
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        if border:
+            pygame.draw.rect(surface, border, rect, 2, border_radius=6)
+        _text(surface, font, label, tcol, center=rect.center)
+        if enabled and _tab_changed(key, settings):
+            _changed_dot(surface, rect.right - 10, rect.y + 9)
+        if enabled:
+            ms.rects[f"tab_{key}"] = rect
+        x += tw + gap
+    return area.y + th + 8
+
+
+def _compact_settings(surface, ms: MenuState, settings: Settings, area: pygame.Rect) -> None:
+    """The tabs, and under them the scrolling window onto the current tab."""
+    global _PANEL_LAYER
+    top = _compact_tabs(surface, ms, settings, area)
+    view = pygame.Rect(area.x, top, area.w, max(0, area.bottom - top))
+    ms.panel_view = view
+    pygame.draw.rect(surface, _PANEL_BG, view, border_radius=10)
+    pygame.draw.rect(surface, _PANEL_BORDER, view, 1, border_radius=10)
+    if view.h <= 4:
+        return
+
+    if _PANEL_LAYER is None or _PANEL_LAYER.get_width() != view.w:
+        _PANEL_LAYER = pygame.Surface((view.w, _LAYER_H))
+    layer = _PANEL_LAYER
+    layer.fill(_PANEL_BG)
+    before = dict(ms.rects)
+    panel = pygame.Rect(0, 0, view.w, _LAYER_H)
+    if ms.tab == "basic":
+        _draw_basic(layer, ms, settings, panel)
+    elif ms.tab == "combat":
+        _draw_combat(layer, ms, settings, panel)
+    elif ms.tab == "advanced":
+        _draw_advanced(layer, ms, settings, panel)
+    elif ms.tab == "ai":
+        _draw_ai(layer, ms, settings, panel)
+    # How far the tab's content runs: whatever was drawn that isn't the panel's
+    # own colour. Measured, so no tab has to report its height.
+    layer.set_colorkey(_PANEL_BG)
+    used = layer.get_bounding_rect()
+    layer.set_colorkey(None)
+    ms.panel_content_h = (used.bottom + 16) if used.h else 0
+    scroll = _clamp_scroll(ms, ms.panel_scroll.get(ms.tab, 0))
+    ms.panel_scroll[ms.tab] = scroll
+
+    inner = view.inflate(-2, -2)
+    surface.blit(layer, inner.topleft, pygame.Rect(1, scroll + 1, inner.w, inner.h))
+    for key, rect in list(ms.rects.items()):
+        if before.get(key) is rect:
+            continue
+        moved = rect.move(view.x, view.y - scroll).clip(inner)
+        if moved.w and moved.h:
+            ms.rects[key] = moved
+        else:
+            del ms.rects[key]
+
+    room = ms.panel_content_h - view.h
+    if room > 0:
+        # a scroll bar, and the foot of whatever is cut off faded, so the panel
+        # says it goes on
+        track = pygame.Rect(view.right - 6, view.y + 6, 3, view.h - 12)
+        thumb_h = max(24, track.h * view.h // ms.panel_content_h)
+        thumb = pygame.Rect(track.x, track.y + (track.h - thumb_h) * scroll // room, 3, thumb_h)
+        pygame.draw.rect(surface, _TROUGH, track, border_radius=2)
+        pygame.draw.rect(surface, _HL_BORDER, thumb, border_radius=2)
+        if scroll < room:
+            fade = pygame.Surface((inner.w - 10, 18), pygame.SRCALPHA)
+            for i in range(18):
+                fade.fill((*_PANEL_BG, i * 12), pygame.Rect(0, i, fade.get_width(), 1))
+            surface.blit(fade, (inner.x, inner.bottom - 18))
+
+
+def _clamp_scroll(ms: MenuState, scroll: int) -> int:
+    view = ms.panel_view
+    room = ms.panel_content_h - (view.h if view is not None else 0)
+    return max(0, min(int(scroll), max(0, room)))
+
+
+def _compact_scroll(event, ms: MenuState) -> bool:
+    """A drag on the settings panel's blank space, or the wheel, scrolls it.
+    Returns True if ``event`` was that, and so is spent."""
+    view = ms.panel_view
+    if view is None:
+        return False
+    if event.type == pygame.MOUSEWHEEL:
+        ms.panel_scroll[ms.tab] = _clamp_scroll(ms, ms.panel_scroll.get(ms.tab, 0) - event.y * 40)
+        return True
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        if not view.collidepoint(event.pos) or any(r.collidepoint(event.pos) for r in ms.rects.values()):
+            return False
+        # what a press on nothing does elsewhere: drop the caret and any open list
+        ms.editing_seed = ms.editing_filename = False
+        ms.strategy_open = ms.daily_open = False
+        ms.scroll_drag = (event.pos[1], ms.panel_scroll.get(ms.tab, 0))
+        return True
+    if event.type == pygame.MOUSEMOTION and ms.scroll_drag is not None:
+        y0, s0 = ms.scroll_drag
+        ms.panel_scroll[ms.tab] = _clamp_scroll(ms, s0 - (event.pos[1] - y0))
+        return True
+    if event.type == pygame.MOUSEBUTTONUP and ms.scroll_drag is not None:
+        ms.scroll_drag = None
+        return True
+    return False
+
+
+_MODAL_LAYER: pygame.Surface | None = None
+
+
+def _fit_modal(surface, ms: MenuState, draw_modal) -> None:
+    """Draw a menu modal over the compact canvas, shrunk to fit if it is bigger.
+
+    The modals are measured to their content (`_draw_menu_modal`), which a
+    phone's canvas can be smaller than in either direction. So the modal draws
+    onto a design-sized layer first, the panel it drew is cut out, and that is
+    scaled into the canvas, its rects with it — the menu's widgets under the
+    veil keep theirs, as they do on the desktop canvas.
+    """
+    global _MODAL_LAYER
+    w, h = surface.get_size()
+    big = (max(w, config.BASE_SCREEN_W), max(h, config.BASE_SCREEN_H))
+    if _MODAL_LAYER is None or _MODAL_LAYER.get_size() != big:
+        _MODAL_LAYER = pygame.Surface(big)
+    layer = _MODAL_LAYER
+    layer.fill(config.COLOR_BG)
+    before = dict(ms.rects)
+    draw_modal(layer, *big)
+    # the veil each modal lays down is uniform; the panel is what differs from it
+    key = layer.get_at((0, 0))
+    layer.set_colorkey(key)
+    panel = layer.get_bounding_rect()
+    layer.set_colorkey(None)
+    if not panel.w:
+        return
+    k = min(1.0, (w - 2 * _C_PAD) / panel.w, (h - 2 * _C_PAD) / panel.h)
+    dw, dh = round(panel.w * k), round(panel.h * k)
+    dest = pygame.Rect((w - dw) // 2, (h - dh) // 2, dw, dh)
+
+    veil = pygame.Surface((w, h), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 200))
+    surface.blit(veil, (0, 0))
+    cut = layer.subsurface(panel)
+    surface.blit(cut if k == 1.0 else pygame.transform.smoothscale(cut, (dw, dh)), dest)
+    for name, rect in list(ms.rects.items()):
+        if before.get(name) is rect:
+            continue
+        ms.rects[name] = pygame.Rect(dest.x + round((rect.x - panel.x) * k),
+                                     dest.y + round((rect.y - panel.y) * k),
+                                     max(1, round(rect.w * k)), max(1, round(rect.h * k)))
+
+
+# --------------------------------------------------------------------------- #
 # Resume prompt — a boot-time modal offered when the last game was left unfinished
 # --------------------------------------------------------------------------- #
 def _resume_labels() -> tuple[str, str]:
@@ -2280,6 +2707,8 @@ def _dispatch(event, ms: MenuState, settings: Settings):
         return _handle_pbp_prompt(event, ms, settings)
     if ms.tutorial_open:  # modal: a stage, the picker, Leave or Close
         return _handle_tutorial(event, ms, settings)
+    if config.compact and _compact_scroll(event, ms):
+        return None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)
     if event.type == pygame.MOUSEMOTION and ms.drag_key is not None:
