@@ -150,6 +150,20 @@ class Editor:
     # strongest form of "guard every rect test", with no zeroed rect to leak.
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     problem_rows: list[tuple[int, pygame.Rect]] = field(default_factory=list)
+    # A compact screen's sidebar is shorter than what it holds, so it scrolls
+    # (`_draw_side`): how far, how tall its content ran last frame, and a drag on
+    # its blank space as (press y, scroll at the press) while one is under way.
+    side_scroll: int = 0
+    side_content_h: int = 0
+    side_drag: tuple[int, int] | None = None
+    # Two-finger pinch and pan of the canvas (`_pinch`), as in the game: fingers
+    # down, the last (spread, midpoint), a lock until every finger is up, and the
+    # recipe from before the latest press, put back if that press was a pinch's
+    # first finger (it may have placed a system).
+    fingers: dict = field(default_factory=dict)
+    pinch_last: tuple | None = None
+    pinch_lock: bool = False
+    press_undo: tuple | None = None
 
     def problems(self) -> list[Problem]:
         return self.recipe.problems()
@@ -300,8 +314,31 @@ def _palette_h() -> int:
     )
 
 
+def _footer_rows() -> int:
+    """How many rows the footer strip takes: one, or two where every control
+    won't fit across one (a phone) — the map-replacing and history pair on the
+    first, the file cluster and *Play now* on the second. Measured from the
+    labels alone, which don't change with the editor's state."""
+    font = widgets.fonts()["small"]
+    widths = [widgets.btn_w(font, "M" * 10) if key == "filename" else widgets.btn_w(font, label)
+              for key, label, *_rest in _footer_specs(None)]
+    avail = _strip_w() - 2 * config.HUD_PAD
+    return 1 if sum(widths) + config.BTN_GAP * (len(widths) - 1) <= avail else 2
+
+
+def _strip_w() -> int:
+    """Width of the bands under the map (palette, footer): the map's own, beside
+    the sidebar, or the screen's in portrait, where the sidebar is a band too."""
+    return config.SCREEN_W if config.portrait else config.SCREEN_W - config.EDIT_SIDE_W
+
+
 def _footer_h() -> int:
-    return widgets.tap_size(config.FOOTER_BTN_H) + 2 * config.HUD_PAD
+    rows = _footer_rows()
+    return rows * widgets.tap_size(config.FOOTER_BTN_H) + (rows - 1) * config.BTN_GAP + 2 * config.HUD_PAD
+
+
+# The sidebar's share of a portrait screen, where it is a band under the palette.
+_PORTRAIT_SIDE_FRAC = 0.3
 
 
 def _view_rect() -> tuple[int, int, int, int]:
@@ -309,15 +346,19 @@ def _view_rect() -> tuple[int, int, int, int]:
     which reserves ``HUD_RIGHT_W`` and both HUD bars for a HUD this scene has
     none of."""
     top = config.EDIT_TOP_H
+    side_h = _side_rect().h if config.portrait else 0
     return (
         0,
         top,
-        max(1, config.SCREEN_W - config.EDIT_SIDE_W),
-        max(1, config.SCREEN_H - top - _palette_h() - _footer_h()),
+        max(1, _strip_w()),
+        max(1, config.SCREEN_H - top - _palette_h() - _footer_h() - side_h),
     )
 
 
 def _side_rect() -> pygame.Rect:
+    if config.portrait:
+        h = round(config.SCREEN_H * _PORTRAIT_SIDE_FRAC)
+        return pygame.Rect(0, config.SCREEN_H - _footer_h() - h, config.SCREEN_W, h)
     return pygame.Rect(
         config.SCREEN_W - config.EDIT_SIDE_W,
         config.EDIT_TOP_H,
@@ -327,19 +368,15 @@ def _side_rect() -> pygame.Rect:
 
 
 def _palette_rect() -> pygame.Rect:
-    return pygame.Rect(
-        0,
-        config.SCREEN_H - _footer_h() - _palette_h(),
-        config.SCREEN_W - config.EDIT_SIDE_W,
-        _palette_h(),
-    )
+    bottom = _side_rect().y if config.portrait else config.SCREEN_H - _footer_h()
+    return pygame.Rect(0, bottom - _palette_h(), _strip_w(), _palette_h())
 
 
 def _footer_rect() -> pygame.Rect:
     return pygame.Rect(
         0,
         config.SCREEN_H - _footer_h(),
-        config.SCREEN_W - config.EDIT_SIDE_W,
+        _strip_w(),
         _footer_h(),
     )
 
@@ -628,13 +665,124 @@ def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
 def _draw_side(surface, ed: Editor, settings: Settings) -> None:
     panel = _side_rect()
     pygame.draw.rect(surface, _PANEL_BG, panel)
-    pygame.draw.line(surface, _PANEL_EDGE, (panel.x, panel.y), (panel.x, panel.bottom))
+    if config.portrait:   # a band under the palette
+        pygame.draw.line(surface, _PANEL_EDGE, (panel.x, panel.y), (panel.right, panel.y))
+    else:
+        pygame.draw.line(surface, _PANEL_EDGE, (panel.x, panel.y), (panel.x, panel.bottom))
+    if not config.compact:
+        _draw_side_body(surface, ed, settings, panel)
+        return
+    # A phone's sidebar holds more than it has room for, so it scrolls: drawn
+    # shifted up by the scroll, cut at its edges, and whatever it recorded
+    # outside them dropped, so a tap lands on what shows and nothing scrolled
+    # off it. `_side_scroll_event` moves it.
+    ed.side_scroll = max(0, min(ed.side_scroll, ed.side_content_h - panel.h))
+    before = dict(ed.rects)
+    rows = len(ed.problem_rows)
+    surface.set_clip(panel)
+    try:
+        bottom = _draw_side_body(surface, ed, settings, panel, -ed.side_scroll)
+    finally:
+        surface.set_clip(None)
+    ed.side_content_h = bottom + ed.side_scroll - panel.y + config.PANEL_PAD
+    for key, rect in list(ed.rects.items()):
+        if before.get(key) is not rect:
+            cut = rect.clip(panel)
+            if cut.w and cut.h:
+                ed.rects[key] = cut
+            else:
+                del ed.rects[key]
+    ed.problem_rows[rows:] = [(i, r.clip(panel)) for i, r in ed.problem_rows[rows:] if r.colliderect(panel)]
+    room = ed.side_content_h - panel.h
+    if room > 0:
+        track = pygame.Rect(panel.right - config.s(5), panel.y + config.s(6), config.s(3), panel.h - config.s(12))
+        thumb_h = max(config.s(24), track.h * panel.h // ed.side_content_h)
+        thumb = pygame.Rect(track.x, track.y + (track.h - thumb_h) * ed.side_scroll // room, track.w, thumb_h)
+        pygame.draw.rect(surface, _PANEL_EDGE, track)
+        pygame.draw.rect(surface, widgets.BTN_BLUE[1], thumb)
+
+
+def _pinch(event, ed: Editor) -> bool:
+    """Two fingers zoom and pan the canvas; True if ``event`` was spent on it.
+    The first finger's emulated press has already been handled (in the Systems
+    tool it places a system), so a pinch puts back the recipe and selection from
+    before it, and the emulated mouse is ignored until every finger is up. The
+    same gesture `input._pinch` reads in the game."""
+    if event.type in (pygame.FINGERDOWN, pygame.FINGERMOTION, pygame.FINGERUP):
+        pos = (event.x * config.SCREEN_W, event.y * config.SCREEN_H)
+        if event.type == pygame.FINGERUP:
+            ed.fingers.pop(event.finger_id, None)
+            if len(ed.fingers) < 2:
+                ed.pinch_last = None
+            if not ed.fingers:
+                ed.pinch_lock = False
+            return True
+        ed.fingers[event.finger_id] = pos
+        if len(ed.fingers) != 2:
+            return True
+        (x0, y0), (x1, y1) = ed.fingers.values()
+        spread = max(1.0, ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
+        mid = ((x0 + x1) / 2, (y0 + y1) / 2)
+        if ed.pinch_last is None:
+            if not ed.pinch_lock and ed.press_undo is not None:
+                recipe, sel_node, sel_lane, depth = ed.press_undo
+                ed.recipe, ed.sel_node, ed.sel_lane = recipe, sel_node, sel_lane
+                del ed.undo_stack[depth:]
+            ed.press_undo = None
+            ed.pinch_lock = True
+            ed.drag_node = ed.drag_slider = ed.lane_src = None
+            ed.pan_active = ed.box_press = ed.box_active = ed.lane_drag = False
+        else:
+            last_spread, last_mid = ed.pinch_last
+            ed.view.pan(mid[0] - last_mid[0], mid[1] - last_mid[1])
+            ed.view.zoom_at((round(mid[0]), round(mid[1])), spread / last_spread)
+        ed.pinch_last = (spread, mid)
+        return True
+    if ed.pinch_lock and event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+                                        pygame.MOUSEMOTION):
+        return True
+    if event.type == pygame.MOUSEBUTTONDOWN and config.touch_ui:
+        ed.press_undo = (ed.recipe.copy(), ed.sel_node, ed.sel_lane, len(ed.undo_stack))
+    return False
+
+
+def _side_scroll_event(event, ed: Editor) -> bool:
+    """Scroll a compact sidebar: the wheel over it, or a drag that starts on its
+    blank space (every control in it keeps its own press). True if spent."""
+    if not config.compact:
+        return False
+    panel = _side_rect()
+    if event.type == pygame.MOUSEWHEEL:
+        if not panel.collidepoint(pygame.mouse.get_pos()):
+            return False
+        ed.side_scroll = max(0, ed.side_scroll - event.y * config.s(40))
+        return True
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        if (not panel.collidepoint(event.pos) or _hit(ed, event.pos) is not None
+                or any(r.collidepoint(event.pos) for _i, r in ed.problem_rows)):
+            return False
+        ed.side_drag = (event.pos[1], ed.side_scroll)
+        return True
+    if event.type == pygame.MOUSEMOTION and ed.side_drag is not None:
+        y0, s0 = ed.side_drag
+        ed.side_scroll = max(0, s0 - (event.pos[1] - y0))
+        return True
+    if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and ed.side_drag is not None:
+        ed.side_drag = None
+        return True
+    return False
+
+
+def _draw_side_body(surface, ed: Editor, settings: Settings, panel: pygame.Rect,
+                    shift: int = 0) -> int:
+    """The sidebar's content, ``shift`` px down (a scrolled one's is negative).
+    Returns the y it ran to."""
 
     f = widgets.fonts()
     pad = config.PANEL_PAD
     x = panel.x + pad
     inner_w = panel.w - 2 * pad
-    y = panel.y + pad
+    y = panel.y + pad + shift
 
     if ed.tool == LANES:
         y = _draw_lane_selection(surface, ed, f, x, y, inner_w)
@@ -658,7 +806,9 @@ def _draw_side(surface, ed: Editor, settings: Settings) -> None:
             y += config.ROW_GAP
         y = _draw_sliders(surface, ed, settings, f, x, y, inner_w,
                           "New system rolls", econ_specs())
-    _draw_problems(surface, ed, f, x, y, inner_w, panel.bottom - pad)
+    # scrolled, the list runs its full length; fixed, it stops at the floor
+    floor = 10 ** 6 if config.compact else panel.bottom - pad
+    return _draw_problems(surface, ed, f, x, y, inner_w, floor)
 
 
 def _draw_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
@@ -887,18 +1037,24 @@ def _draw_sliders(surface, ed: Editor, settings: Settings, f, x: int, y: int, w:
     widgets.text(surface, f["small"], heading, config.COLOR_TEXT_DIM, topleft=(x, y))
     y += widgets.row_h("small") + config.ROW_GAP
 
-    for key, label, attr, lo, hi, _step, is_int in specs:
+    # A portrait band is the screen's width and a fraction of its height: two
+    # sliders to a row there.
+    cols = 2 if config.portrait else 1
+    gap = config.s(16)
+    cw = (w - gap * (cols - 1)) // cols
+    for i, (key, label, attr, lo, hi, _step, is_int) in enumerate(specs):
+        cx = x + (i % cols) * (cw + gap)
         value = getattr(settings, attr)
         shown = f"{int(value)}" if is_int else f"{value:g}"
-        widgets.text(surface, f["small"], label, config.COLOR_TEXT_DIM, topleft=(x, y))
+        widgets.text(surface, f["small"], label, config.COLOR_TEXT_DIM, topleft=(cx, y))
         widgets.text(surface, f["small"], shown, config.COLOR_TEXT,
-                     midright=(x + w, y + widgets.row_h("small") // 2))
-        y += widgets.row_h("small")
-        track = pygame.Rect(x, y, w, widgets.tap_size(config.SLIDER_KNOB_R * 2))
+                     midright=(cx + cw, y + widgets.row_h("small") // 2))
+        track = pygame.Rect(cx, y + widgets.row_h("small"), cw, widgets.tap_size(config.SLIDER_KNOB_R * 2))
         t = 0.0 if hi == lo else (value - lo) / (hi - lo)
         widgets.slider(surface, track, t, *widgets.BTN_BLUE)
         ed.rects[key] = track
-        y += track.h + config.ROW_GAP
+        if i % cols == cols - 1 or i == len(specs) - 1:
+            y = track.bottom + config.ROW_GAP
     return y + config.ROW_GAP
 
 
@@ -921,7 +1077,7 @@ def econ_specs():
     return econ_sliders()
 
 
-def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) -> None:
+def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) -> int:
     """The live validator's output, one clickable row each.
 
     Clickable because a warning you cannot find is a warning you ignore: a press
@@ -939,7 +1095,7 @@ def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) 
         block_h = widgets.row_h("small") * len(lines)
         if y + block_h > bottom:
             widgets.text(surface, f["small"], "...", config.COLOR_TEXT_DIM, topleft=(x, y))
-            return
+            return y + widgets.row_h("small")
         rect = pygame.Rect(x, y, w, block_h)
         color = _BAD if problem.blocks else _WARN
         for line in lines:
@@ -947,6 +1103,7 @@ def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) 
             y += widgets.row_h("small")
         ed.problem_rows.append((index, rect))
         y += config.ROW_GAP
+    return y
 
 
 _DEAD_PALETTE = ((38, 42, 52), (78, 84, 98))
@@ -959,7 +1116,9 @@ _DEAD_PALETTE = ((38, 42, 52), (78, 84, 98))
 # Left to right: the two that replace the whole map, then the two that step
 # through its history, then the file cluster and *Play now*. *Menu* is not here —
 # it sits in the tool strip (see `_draw_top`).
-def _footer_specs(ed: Editor) -> list[tuple[str, str, tuple, tuple, int, str]]:
+def _footer_specs(ed: Editor | None) -> list[tuple[str, str, tuple, tuple, int, str]]:
+    """The strip's controls; ``ed`` only colours *Play now* (None: measuring)."""
+    playable = ed is not None and ed.can_play()
     return [
         ("generate", "Generate", *widgets.BTN_AMBER, 35, "left"),
         ("new", "New (blank)", *widgets.BTN_AMBER, 40, "left"),
@@ -968,7 +1127,7 @@ def _footer_specs(ed: Editor) -> list[tuple[str, str, tuple, tuple, int, str]]:
         ("filename", "", (0, 0, 0), (0, 0, 0), 45, "right"),
         ("open", "Open", *widgets.BTN_BLUE, 50, "right"),
         ("save", "Save", *widgets.BTN_BLUE, 55, "right"),
-        ("play", "Play now", *(widgets.BTN_BLUE if ed.can_play() else _DEAD_PALETTE), 100, "right"),
+        ("play", "Play now", *(widgets.BTN_BLUE if playable else _DEAD_PALETTE), 100, "right"),
     ]
 
 
@@ -994,12 +1153,21 @@ def _draw_footer(surface, ed: Editor) -> None:
     def row_w(items) -> int:
         return sum(widths[s[0]] for s in items) + config.BTN_GAP * (len(items) - 1)
 
-    shown = list(specs)
-    while shown and row_w(shown) > avail:
-        shown.remove(min(shown, key=lambda s: s[4]))
+    # Two rows (`_footer_rows`) put each cluster on its own; either way a row
+    # still too narrow sheds its least essential control.
+    rows = _footer_rows()
+    groups = [specs] if rows == 1 else [[s for s in specs if s[5] == "left"],
+                                        [s for s in specs if s[5] == "right"]]
+    shown = []
+    for group in groups:
+        group = list(group)
+        while group and row_w(group) > avail:
+            group.remove(min(group, key=lambda s: s[4]))
+        shown += group
 
     bh = widgets.tap_size(config.FOOTER_BTN_H)
-    y = bar.y + (bar.h - bh) // 2
+    y = bar.y + config.HUD_PAD
+    y_right = y + (bh + config.BTN_GAP if rows == 2 else 0)
 
     x = bar.x + config.HUD_PAD
     for key, label, fill, edge, _rank, group in shown:
@@ -1014,7 +1182,7 @@ def _draw_footer(surface, ed: Editor) -> None:
     for key, label, fill, edge, _rank, group in reversed(shown):
         if group != "right":
             continue
-        rect = pygame.Rect(right - widths[key], y, widths[key], bh)
+        rect = pygame.Rect(right - widths[key], y_right, widths[key], bh)
         if key == "filename":
             _text_field(surface, font, rect, ed.filename or _DEFAULT_FILENAME, ed.editing_filename)
         else:
@@ -1072,6 +1240,10 @@ def handle_event(event, ed: Editor, settings: Settings) -> str | None:
     action for ``main`` — ``"play"``, ``"menu"``, or ``None``."""
     if ed.confirm is not None:
         _handle_confirm(event, ed, settings)
+        return None
+    if _pinch(event, ed):
+        return None
+    if _side_scroll_event(event, ed):
         return None
 
     if event.type == pygame.TEXTINPUT:

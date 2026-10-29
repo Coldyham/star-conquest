@@ -182,7 +182,8 @@ nor rejected are in [`open.md`](open.md); the file index is
 
 ## shell.md
 - shell.md · Shipping `.pyc` in the web archive (pygbag's packer drops them); importing modules lazily to start sooner (about 0.2 s natively, small beside the runtime). *The web build's download.*
-- shell.md · Printing the "subtract the fleets" answer for contrast; the survivor curve (replaced by the jitter matrix); five swings per axis; runtime prose wrap on the menu: all rejected. *Combat rules page.*
+- shell.md · Printing the "subtract the fleets" answer for contrast; the survivor curve (replaced by the jitter matrix); five swings per axis; runtime prose wrap on the menu: all rejected (a phone's scrolling panel does reflow it, since its height is free there). *Combat rules page.*
+- shell.md · On phones: a "rotate your phone" prompt instead of a portrait layout; shrinking the desktop layout's fonts to fit; the setup menu drawn at device resolution (sharp, but ~25 ms a frame from measuring the scrolling panel; backed out); one whole CSS pixel per baseline pixel on every touch browser (a phone under its address bar got 320 units of height, and the menu panel narrower than the desktop's). *Phones: the compact layout.*
 - shell.md · A "keep N / send N%" switch on each forwarding rule: "keep N" means "send the rest", so only one lane per system could use it; replaced by a hold per system and a share per lane. Showing the hold on each lane's label: crowded a split's source. Disabling + once the shares reach 100%: dead in the default state. *Forwarding rules.*
 - shell.md · Rally tie-break by ships/turn toward the rally point drawing less: built, then replaced by an even split once rules could split. *Route mode.*
 - shell.md · A side-panel list of every queued order and rule (capped, scrolled, a × per row): built and removed once the popup opened on edit too. *Send popup and spectating.*

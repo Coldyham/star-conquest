@@ -41,6 +41,15 @@ HEAD_BLOCK = """
     <link rel="icon" type="image/png" href="/icon-512.png" sizes="512x512">
     <style>
         html, body { background: #0a0c14 !important; }
+        /* Every button is drawn on the canvas, so a long press must never start
+           a text selection, the callout menu or the tap flash: the page holds
+           nothing to select. The soft keyboard's hidden input stays editable. */
+        html, body, canvas {
+            -webkit-user-select: none; user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        input, textarea { -webkit-user-select: text; user-select: text; }
         #status {
             color: #c8cdd7 !important;
             font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;

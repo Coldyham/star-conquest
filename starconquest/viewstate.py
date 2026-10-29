@@ -32,6 +32,24 @@ ROUTING = "routing"
 SPECTATE_ROW = -1
 
 
+# Every hit-rect the footer strip can record, so a frame can zero the lot before
+# drawing whichever survive — a stale rect would otherwise still answer clicks.
+FOOTER_RECTS = (
+    "quit_button_rect",
+    "clear_button_rect",
+    "menu_button_rect",
+    "restart_live_button_rect",
+    "history_button_rect",
+    "autoplay_button_rect",
+    "play_pause_rect",
+    "fast_forward_rect",
+    "route_button_rect",
+    "route_cancel_rect",
+    "route_mode_rect",
+    "route_auto_rect",
+)
+
+
 @dataclass(frozen=True)
 class FadingFight:
     """A fight, interpreted once at the moment it fired and aged every frame
@@ -325,6 +343,9 @@ class Ui:
     send_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     send_half_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Done: closes a docked popup (`render._popup_docked`) keeping its send or
+    # rule, as a tap on empty map does; the floating one has no need of it.
+    done_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Send-popup placement. By default render auto-anchors it to the side of the
     # lane that covers the fewest system nodes; once the user drags it, popup_pos
     # pins the top-left (cleared on a new target so auto-placement resumes).
@@ -481,6 +502,25 @@ class Ui:
     # menu_button_rect above; clear_button_rect is live-play only.
     quit_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The footer's overflow: a strip too narrow for every button folds the least
+    # essential behind one "more" button (and a compact screen always folds the
+    # exits), and opening it draws them as a list above it. A folded button
+    # records its rect under its own attribute while the list is open, so input
+    # tests it exactly as it would on the strip; closed, the rect is zero.
+    more_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    more_menu_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    more_open: bool = False
+    # Two-finger pinch and pan on a touch screen (`input._pinch`). `fingers` maps
+    # each finger down to its screen position; `pinch_last` is the previous
+    # (spread, midpoint) while two are down; `pinch_lock` holds until every
+    # finger is up after a pinch, so the emulated mouse of the first finger
+    # can't pan, drag or tap on its way off. `press_undo` is the selection state
+    # from just before the latest press, put back when that press turns out to
+    # be the first finger of a pinch rather than a tap.
+    fingers: dict = field(default_factory=dict)
+    pinch_last: tuple | None = None
+    pinch_lock: bool = False
+    press_undo: tuple | None = None
     # Route-mode hit-rects, rebuilt by render each frame and tested by input (same
     # store-rect-then-test handoff as end_turn_rect). `route_button_rect` is the
     # live-play toggle into the mode; the rest are live only while it is on, and

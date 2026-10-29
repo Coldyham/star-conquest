@@ -114,6 +114,36 @@ def test_popup_presets_retune_committed_order():
         pygame.quit()
 
 
+@pytest.mark.parametrize("touch", [False, True])
+def test_the_open_popup_keeps_its_source_and_done_lets_it_go(monkeypatch, touch):
+    """While the popup is open a press on another neighbour is a second send from
+    the same source; Done finishes with it, leaving it lit only as a hover, so
+    the next press on a neighbour selects that system rather than sending to it.
+    Desktop and touch behave alike."""
+    monkeypatch.setattr(config, "touch_ui", touch)
+    state, ui = _setup()
+    try:
+        home = next(s.id for s in state.systems.values() if len(s.neighbors) >= 2)
+        a, b = state.systems[home].neighbors[:2]
+        state.systems[home].owner_id, state.systems[home].ships = 1, 10
+        _click(state, ui, home)
+        _click(state, ui, a)
+        ui.set_send_count(state, 4)
+
+        _click(state, ui, b)
+        assert ui.mode == CHOOSING and ui.selected == home and ui.dest == b
+        assert [(o.source_id, o.dest_id) for o in ui.pending] == [(home, a), (home, b)]
+
+        ui.done_rect = (300, 100, 20, 20)
+        _click_pos(state, ui, (310, 110))
+        assert ui.mode == IDLE and ui.selected is None and ui.hover == home
+
+        _click(state, ui, a)
+        assert ui.mode == SELECTED and ui.selected == a and len(ui.pending) == 2
+    finally:
+        pygame.quit()
+
+
 def test_popup_tabs_switch_between_send_and_forward():
     """The Send/Forward tabs convert the active send between one-shot and rule.
     Forwarding defaults to keep 0 (forward everything)."""

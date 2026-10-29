@@ -1396,3 +1396,35 @@ def test_an_unplayable_map_still_greys_the_play_button(scene):
     ed.recipe.lanes = []                   # disconnected: a blocker
     palettes = {spec[0]: (spec[2], spec[3]) for spec in mapmaker._footer_specs(ed)}
     assert palettes["play"] == mapmaker._DEAD_PALETTE
+
+
+def test_a_pinch_zooms_the_canvas_and_takes_back_its_first_fingers_system(scene):
+    """On a touch screen the first finger of a pinch arrives as a press, which on
+    empty canvas places a system; the second finger puts it back, and the spread
+    zooms the canvas."""
+    screen, ed, settings = scene
+    config.apply_ui_scale(1.0, touch=True)
+    try:
+        vx, vy, vw, vh = mapmaker._view_rect()
+        at = (vx + vw // 2 + 37, vy + vh // 2 + 23)     # empty canvas
+        before = len(ed.recipe.nodes)
+        _press(screen, ed, settings, at)
+        _release(ed, settings, at)
+        assert len(ed.recipe.nodes) == before + 1
+
+        def finger(kind, fid, x, y):
+            return pygame.event.Event(kind, finger_id=fid, touch_id=1, x=x / config.SCREEN_W,
+                                      y=y / config.SCREEN_H, dx=0, dy=0)
+
+        _press(screen, ed, settings, (at[0] + 60, at[1] + 60))   # finger one: another system
+        mapmaker.handle_event(finger(pygame.FINGERDOWN, 1, at[0] + 60, at[1] + 60), ed, settings)
+        mapmaker.handle_event(finger(pygame.FINGERDOWN, 2, at[0] + 160, at[1] + 60), ed, settings)
+        assert len(ed.recipe.nodes) == before + 1          # the second was taken back
+        zoom = ed.view.zoom
+        mapmaker.handle_event(finger(pygame.FINGERMOTION, 2, at[0] + 300, at[1] + 60), ed, settings)
+        assert ed.view.zoom > zoom
+        for fid in (1, 2):
+            mapmaker.handle_event(finger(pygame.FINGERUP, fid, 0, 0), ed, settings)
+        assert not ed.pinch_lock
+    finally:
+        config.apply_ui_scale(1.0)

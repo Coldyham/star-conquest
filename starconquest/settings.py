@@ -882,26 +882,70 @@ def lane_lengths(settings: Settings) -> list[float]:
     the survey and put back after it: the menu asking a question must leave
     nothing behind for whatever reads ``config`` next.
     """
+    if settings.custom_map is not None and settings.custom_map.blockers():
+        return []
+    seeds = [settings.seed] if settings.seed is not None else range(config.LANE_SURVEY_SEEDS)
+    return [
+        math.dist(st.systems[lane.a].pos, st.systems[lane.b].pos) * config.LY_PER_WORLD_UNIT
+        for st in _shaped_boards(settings, seeds)
+        for lane in st.lanes.values()
+    ]
+
+
+def _shaped_boards(settings: Settings, seeds) -> list[GameState]:
+    """The boards this setup generates from ``seeds`` (a hand map's one board,
+    whatever the seeds), leaving ``config`` as it found it (`lane_lengths`)."""
     saved = [(const, getattr(config, const)) for _attr, const in _GLOBAL_KNOBS]
     _apply_globals(settings)
     try:
         if settings.custom_map is not None:
-            if settings.custom_map.blockers():
-                return []
-            states = [mapgen.generate_custom(0, settings.custom_map)]
-        else:
-            seeds = [settings.seed] if settings.seed is not None else range(config.LANE_SURVEY_SEEDS)
-            states = [mapgen.generate(s, settings.mode, settings.nodes, settings.players,
-                                    settings.layout)
-                      for s in seeds]
+            return [mapgen.generate_custom(0, settings.custom_map)]
+        return [mapgen.generate(s, settings.mode, settings.nodes, settings.players, settings.layout)
+                for s in seeds]
     finally:
         for const, value in saved:
             setattr(config, const, value)
-    return [
-        math.dist(st.systems[lane.a].pos, st.systems[lane.b].pos) * config.LY_PER_WORLD_UNIT
-        for st in states
-        for lane in st.lanes.values()
-    ]
+
+
+@dataclass(frozen=True)
+class MapSketch:
+    """A board's shape, for the menu to draw: where its systems sit (world
+    units), its lanes, and each home system's owner. ``kind`` says what it is:
+    ``"yours"`` the board this setup will play, ``"sample"`` one of its kind
+    (the seed is left to chance), ``"hidden"`` nothing, because fog keeps it."""
+
+    kind: str
+    points: dict[int, tuple[float, float]] = field(default_factory=dict)
+    lanes: list[tuple[int, int]] = field(default_factory=list)
+    homes: dict[int, int] = field(default_factory=dict)
+
+
+def sketch_key(settings: Settings) -> tuple:
+    """Everything `map_sketch` reads: the lane shapers, and whether fog is on."""
+    return lane_survey_key(settings) + (fog_off(settings),)
+
+
+def map_sketch(settings: Settings) -> MapSketch | None:
+    """The board to show on the phone's menu. A pinned board (a pinned seed's, a
+    hand map) only with fog off: under fog it is what fog keeps from you (a
+    daily's, a challenge's), so it is hidden. A seed left to chance has no board
+    yet, so it is a sample of its kind, which gives nothing away. None for a
+    hand map that can't be played yet."""
+    if settings.custom_map is not None and settings.custom_map.blockers():
+        return None
+    if settings.custom_map is None and settings.seed is None:
+        kind, seed = "sample", 0  # the lane survey's first sample (`lane_lengths`)
+    elif fog_off(settings):
+        kind, seed = "yours", settings.seed or 0
+    else:
+        return MapSketch("hidden")
+    (state,) = _shaped_boards(settings, [seed])
+    return MapSketch(
+        kind,
+        points={sid: s.pos for sid, s in state.systems.items()},
+        lanes=[(lane.a, lane.b) for lane in state.lanes.values()],
+        homes={sid: s.owner_id for sid, s in state.systems.items() if s.owner_id},
+    )
 
 
 def lane_turns(lengths: list[float], speed: float) -> tuple[int, int, int] | None:

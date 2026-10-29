@@ -387,6 +387,22 @@ MAX_FRAME_MS = 50
 BASE_SCREEN_W = 1440
 BASE_SCREEN_H = 960
 TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android)
+# A touch *browser* knows its CSS pixel (the framebuffer is the viewport at its
+# device resolution, `main.web_framebuffer`), so its scale is set in CSS pixels
+# rather than guessed from the framebuffer: one baseline pixel is at most this
+# many CSS pixels (FONT_SIZE at 18 CSS px, a tablet's size)...
+TOUCH_CSS_SCALE = 1.0
+# ...and less on a screen that would then hold fewer baseline units than this,
+# down to TOUCH_CSS_MIN. 480 tall is what the menu's Basic tab needs under its
+# tabs; 600 wide is the settings panel and its margins in portrait. So a
+# landscape phone under its address bar (~820x320 CSS px) is drawn at ~0.66,
+# 12 CSS px text, and the same phone as an installed app, with more height, a
+# little bigger. Fitting the 1440x960 baseline into a phone's *device* pixels
+# instead (what Android still does) drew 8 CSS px text; a whole CSS pixel each
+# left that phone 320 units of height, a third of the desktop's.
+TOUCH_MIN_W = 600
+TOUCH_MIN_H = 480
+TOUCH_CSS_MIN = 0.5
 
 # Browser (pygbag) framebuffer: the boot size, matching the pygbag canvas
 # (--width/--height passed to `pygbag --build` in tools/build_web.sh), and the
@@ -413,6 +429,26 @@ ui_scale = 1.0              # current factor; 1.0 == the baseline above
 # pushes those labels out of their boxes at touch scale.
 touch_ui = False
 
+# Is the screen too small, in baseline units, for the desktop layout? Set by
+# `apply_ui_scale` on a touch build only (a desktop window keeps its layout at
+# any size). A landscape phone is ~870x410 baseline units against the 1440x960
+# the HUD and menu were drawn for, so the shell folds things away: the footer
+# keeps its exits behind one menu button, the send popup docks into the side
+# panel instead of floating over a map with no room for it, and the setup menu
+# lays out in columns with a scrolling settings panel. `portrait` (compact and
+# taller than wide) moves the side panel under the map.
+compact = False
+portrait = False
+COMPACT_MAX_W = 1100         # baseline units: narrower than this is compact...
+COMPACT_MAX_H = 720          # ...and so is shorter than this
+# Compact-only overrides, in baseline units (scaled like the rest). A phone's
+# map is a third of a desktop's area, so its systems are drawn smaller, and the
+# End Turn block shrinks from a quarter of a landscape phone's height.
+COMPACT_NODE_SCALE = 0.8
+COMPACT_END_TURN_H = 64
+COMPACT_HUD_RIGHT_W = 236
+COMPACT_TOUCH_MIN_TARGET = 40
+
 # Pixel/point constants that scale with the UI. Snapshotted at import so repeated
 # `apply_ui_scale()` calls always scale from the baseline and never compound.
 _SCALABLE = (
@@ -435,7 +471,8 @@ _SCALABLE = (
 _BASE_VALUES = {name: globals()[name] for name in _SCALABLE}
 
 
-def apply_ui_scale(factor: float, touch: bool = False) -> None:
+def apply_ui_scale(factor: float, touch: bool = False,
+                   size: tuple[int, int] | None = None) -> None:
     """Rescale every UI pixel/point constant to ``factor``× its baseline value.
 
     The result depends only on ``factor``, not on how many times this runs — each
@@ -444,11 +481,26 @@ def apply_ui_scale(factor: float, touch: bool = False) -> None:
     right after ``set_mode``). ``touch`` records the input modality in
     ``touch_ui``; it is set here because it comes from the same boot-time probe as
     the scale, and callers that don't care get the desktop default.
+
+    ``size`` is the surface the layout is for (default ``SCREEN_W/H``); a touch
+    build that comes out too small for the desktop layout in baseline units is
+    ``compact`` (see there), which swaps in the ``COMPACT_*`` sizes.
     """
-    global ui_scale, touch_ui
+    global ui_scale, touch_ui, compact, portrait
     ui_scale = max(0.1, factor)
     touch_ui = touch
-    for name, base in _BASE_VALUES.items():
+    w, h = size if size is not None else (SCREEN_W, SCREEN_H)
+    lw, lh = w / ui_scale, h / ui_scale
+    compact = touch and (lw < COMPACT_MAX_W or lh < COMPACT_MAX_H)
+    portrait = compact and lh > lw
+    values = dict(_BASE_VALUES)
+    if compact:
+        values["NODE_MIN_RADIUS"] *= COMPACT_NODE_SCALE
+        values["NODE_MAX_RADIUS"] *= COMPACT_NODE_SCALE
+        values["END_TURN_H"] = COMPACT_END_TURN_H
+        values["HUD_RIGHT_W"] = COMPACT_HUD_RIGHT_W
+        values["TOUCH_MIN_TARGET"] = COMPACT_TOUCH_MIN_TARGET
+    for name, base in values.items():
         globals()[name] = max(1, round(base * ui_scale))
 
 
@@ -535,8 +587,55 @@ def map_pan_padding() -> int:
     return max(MAP_PAN_PADDING, node_clearance())
 
 
+# The game screen's regions. Landscape (every desktop window, and a phone held
+# sideways): the map left of a right-hand column that holds the info panel over
+# the End Turn block, the button strip under the map. Portrait (`portrait`): a
+# column that narrow would leave the map a sliver, so the panel goes under the
+# map at full width, then the strip, then End Turn across the foot, where a
+# thumb rests. History mode drops End Turn; in portrait its slot is kept (the
+# scrubber takes both rows) so the map doesn't move on the way in or out.
+# The portrait panel's height in baseline units: a heading and three rows, the
+# compact system readout (`render._panel_system_compact`). Fixed, so the map
+# above it never moves as the selection changes.
+PORTRAIT_PANEL_H = 118
+
+
+def side_panel_rect(history: bool = False) -> tuple[int, int, int, int]:
+    """The info panel: the right-hand column above End Turn (above the bottom bar
+    while reviewing history, which has no End Turn), or, in portrait, the band
+    between the map and the button strip."""
+    if portrait:
+        h = s(PORTRAIT_PANEL_H)
+        return (0, SCREEN_H - END_TURN_H - HUD_BOTTOM_H - h, SCREEN_W, h)
+    foot = HUD_BOTTOM_H if history else END_TURN_H
+    return (SCREEN_W - HUD_RIGHT_W, HUD_TOP_H, HUD_RIGHT_W, SCREEN_H - HUD_TOP_H - foot)
+
+
+def footer_rect(history: bool = False) -> tuple[int, int, int, int]:
+    """The button strip (the history scrubber's bar while reviewing): under the
+    map, or the screen's full width in history. In portrait it sits above End
+    Turn, and in history spans both rows."""
+    if portrait:
+        y = SCREEN_H - END_TURN_H - HUD_BOTTOM_H
+        return (0, y, SCREEN_W, SCREEN_H - y if history else HUD_BOTTOM_H)
+    if history:
+        return (0, SCREEN_H - HUD_BOTTOM_H, SCREEN_W, HUD_BOTTOM_H)
+    return (0, SCREEN_H - HUD_BOTTOM_H, SCREEN_W - HUD_RIGHT_W, HUD_BOTTOM_H)
+
+
+def end_turn_rect() -> tuple[int, int, int, int]:
+    """The End Turn block: the foot of the right-hand column, or the full width
+    of a portrait screen's foot."""
+    if portrait:
+        return (0, SCREEN_H - END_TURN_H, SCREEN_W, END_TURN_H)
+    return (SCREEN_W - HUD_RIGHT_W, SCREEN_H - END_TURN_H, HUD_RIGHT_W, END_TURN_H)
+
+
 def play_rect() -> tuple[int, int, int, int]:
-    """The map viewport rectangle: full width minus the info panel, between the bars."""
+    """The map viewport rectangle: full width minus the info panel, between the
+    bars (in portrait, full width down to the panel)."""
+    if portrait:
+        return (0, HUD_TOP_H, SCREEN_W, side_panel_rect()[1] - HUD_TOP_H)
     return (
         0,
         HUD_TOP_H,
