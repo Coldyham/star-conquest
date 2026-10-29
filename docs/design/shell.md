@@ -81,7 +81,13 @@ is what switches it:
   in baseline units. Its settings panel keeps the desktop's 560 width
   (`_C_PANEL_W`), so every tab lays out as on the desktop; landscape gives the
   rest of the width to the title and the actions, three to a row where their
-  labels fit (`_compact_columns`). The actions are folded to six, so no row is
+  labels fit (`_compact_columns`). That column is taller than its title and
+  actions, so the buttons grow into some of the slack (up to `_C_GROW`) and a
+  sketch of the setup's map fills the rest (`_compact_sketch`,
+  `settings.map_sketch`, made in `pump`). It is the real board only with fog
+  off and a pinned seed; under fog a pinned board (a daily's, a challenge's) is
+  what fog keeps from you, so it is a sample from another seed, captioned so,
+  and a hand map under fog shows nothing. The actions are folded to six, so no row is
   left with one (`_compact_action_items`): the board's Recently played and
   Shared matches share a Leaderboard list, as the desktop footer once did; a
   drawn map's x sits inside Edit map; and there is no Quit, which a browser tab

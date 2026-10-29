@@ -1089,3 +1089,20 @@ def test_a_roll_never_lands_below_its_floor_but_the_slider_still_reaches_it():
         rolled.add(target.fog_sight)
     assert min(rolled) == ROLL_FLOORS["fog_sight"]
     assert max(rolled) == config.FOG_MAX_HOPS
+
+
+def test_a_map_sketch_never_shows_a_board_fog_would_hide():
+    """The menu's map is the real board only when fog is off and the seed is
+    pinned; under fog (a daily's, a challenge's) it is a sample from another seed."""
+    from starconquest.settings import map_sketch
+    s = Settings.defaults()
+    s.seed = 42
+    s.fog_sight = s.fog_scout = config.FOG_MAX_HOPS
+    clear = map_sketch(s)
+    assert clear is not None and clear.actual
+    assert clear.points == {sid: sys.pos for sid, sys in build_state(s, 42).systems.items()}
+    s.fog_sight, s.fog_scout = 2, 3
+    fogged = map_sketch(s)
+    assert fogged is not None and not fogged.actual and fogged.points != clear.points
+    s.seed = None
+    assert not map_sketch(s).actual

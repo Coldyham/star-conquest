@@ -456,3 +456,15 @@ def test_the_zoom_buttons_ride_above_the_portrait_sheet(screen_for):
     zoom_before = ui.view.zoom
     game_input.handle_event(_press(pygame.Rect(ui.zoom_plus_rect).center), state, ui)
     assert ui.view.zoom > zoom_before
+
+
+def test_landscape_fills_the_title_column_with_taller_buttons_and_a_map(screen_for):
+    """Held sideways, the column under the title is slack: the buttons grow
+    into some of it and a sketch of the setup's map takes the rest."""
+    screen = screen_for(True)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    menu.pump(ms, settings)
+    menu.draw(screen, ms, settings)
+    assert ms.sketch is not None
+    assert ms.rects["start"].h > menu._C_START_H and ms.rects["create_map"].h > menu._C_BTN_H
