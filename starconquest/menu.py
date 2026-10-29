@@ -355,11 +355,14 @@ class MenuState:
     # The compact menu's settings panel scrolls (`_draw_menu_compact`): how far,
     # per tab; the window it shows (canvas space) and the height of what it
     # holds, both set by draw; and a drag on its blank space, as (press y,
-    # scroll at the press), while one is under way.
+    # scroll at the press), while one is under way. A press on a slider there
+    # waits as (slider key, press position) until it moves: up or down it is a
+    # scroll, across it is the slider's drag, and let go where it was, a tap.
     panel_scroll: dict[str, int] = field(default_factory=dict)
     panel_view: pygame.Rect | None = None
     panel_content_h: int = 0
     scroll_drag: tuple[int, int] | None = None
+    slider_press: tuple[str, tuple[int, int]] | None = None
 
 
 def _strategy_options() -> list[str]:
@@ -1241,7 +1244,8 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     inset = 18 if _narrow(panel) else 34
     left = panel.x + inset
     right = panel.right - inset
-    y = panel.y + (16 if _narrow(panel) else 34)
+    y = panel.y + (16 if _narrow(panel) or config.compact else 34)
+    row_h = _C_ROW_H if config.compact else _ROW_H
 
     drawn = settings.custom_map is not None
 
@@ -1253,14 +1257,14 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
         _derived(surface, f"{settings.players} (from the map)", right, y)
     else:
         _stepper(surface, ms, "players", str(settings.players), right, y)
-    y += _ROW_H
+    y += row_h
 
     _row_label(surface, "Systems", left, y, _changed(settings, "nodes"))
     if drawn:
         _derived(surface, f"{settings.nodes} (from the map)", right, y)
     else:
         _stepper(surface, ms, "nodes", str(settings.system_count()), right, y)
-    y += _ROW_H
+    y += row_h
 
     _row_label(surface, "Map type", left, y, _changed(settings, "mode"))
     if drawn:
@@ -1276,7 +1280,7 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
                 ("mode_symmetric", "Symmetric", settings.mode == "symmetric"),
             ],
         )
-    y += _ROW_H
+    y += row_h
 
     # How a symmetric map's sectors meet. Offered only where it shapes the map;
     # elsewhere the row says why, rather than vanishing and shifting every row
@@ -1288,11 +1292,11 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
         _derived(surface, "symmetric maps only", right, y)
     else:
         _stepper(surface, ms, "layout", settings.layout.title(), right, y, value_w=96)
-    y += _ROW_H
+    y += row_h
 
     _row_label(surface, "Seed", left, y, _changed(settings, "seed"))
     _seed_control(surface, ms, settings, right, y)
-    y += _ROW_H
+    y += row_h
 
     # The checkboxes sit in two columns. Left: this game's setup. Right: the rows
     # that are *not* Settings fields — they belong to this installation, never
@@ -1307,7 +1311,7 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
 
     _row_label(surface, "Autoplay", left, y, _changed(settings, "autoplay"))
     _checkbox(surface, ms, "autoplay", settings.autoplay, col_r, y)
-    y += _ROW_H
+    y += row_h
 
     # Fog of war: a one-click on/off here; the Advanced tab has the fine ranges.
     # State is derived from the sliders, so it tracks Advanced edits automatically.
@@ -1315,16 +1319,16 @@ def _draw_basic(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) 
     _row_label(surface, "Fog of war", left, y, fog_changed)
     _checkbox(surface, ms, "fog_of_war", not fog_off(settings), col_r, y)
 
-    y = y + _ROW_H if _narrow(panel) else top
+    y = y + row_h if _narrow(panel) else top
     # Off until switched on — see `webstore.share_games` and `share`.
     _row_label(surface, "Share replays", col_l, y, False)
     _checkbox(surface, ms, "share_games", webstore.share_games(), right, y)
-    y += _ROW_H
+    y += row_h
 
     # How a turn is *drawn* cannot move a result.
     _row_label(surface, "Animate turns", col_l, y, False)
     _checkbox(surface, ms, "animate_turns", webstore.animate_turns(), right, y)
-    y += _ROW_H
+    y += row_h
 
     # An honour code kept by this installation. It hides History (and so
     # rewind) until a game is decided (`Ui.can_review`).
@@ -2098,7 +2102,11 @@ _C_PAD = 10        # canvas margin, and the gap between columns
 _C_GAP = 6         # between neighbouring buttons
 _C_BTN_H = 38      # an action button: a fingertip
 _C_START_H = 48
-_C_LEFT_W = 330    # landscape: the title-and-actions column
+_C_LEFT_MIN = 300  # landscape: the title-and-actions column at its narrowest
+_C_PANEL_W = 560   # ...and the settings panel at its widest, the desktop's
+_C_ROW_H = 46      # the Basic tab's row pitch, so it fits without a scroll
+_C_COLS = 3        # actions to a row, where their labels fit
+_C_SLOP = 10       # how far a press on a slider moves before it is a drag
 _LAYER_H = 1600    # the scrolling panel's layer: taller than any tab's content
 _PANEL_LAYER: pygame.Surface | None = None
 
@@ -2111,8 +2119,9 @@ def _draw_menu_compact(surface: pygame.Surface, ms: MenuState, settings: Setting
     pad = _C_PAD
 
     if w > h:
-        col = pygame.Rect(pad, pad, min(_C_LEFT_W, (w - 3 * pad) * 2 // 5), h - 2 * pad)
-        main = pygame.Rect(col.right + pad, pad, w - col.right - 2 * pad, h - 2 * pad)
+        panel_w = max(0, min(_C_PANEL_W, w - 3 * pad - _C_LEFT_MIN))
+        col = pygame.Rect(pad, pad, w - 3 * pad - panel_w, h - 2 * pad)
+        main = pygame.Rect(col.right + pad, pad, panel_w, h - 2 * pad)
         y = _compact_heading(surface, ms, settings, col, col.y)
         actions_h = _compact_actions(surface, ms, settings, col.w, None)
         actions_top = col.bottom - actions_h
@@ -2206,14 +2215,22 @@ def _compact_action_items(ms: MenuState, settings: Settings) -> list[tuple[str, 
     return items
 
 
+def _compact_columns(items, width: int) -> int:
+    """How many actions to a row: up to `_C_COLS`, as many as leave each one
+    room for the longest label, and never fewer than two."""
+    label_w = max(_fonts()["normal"].size(label)[0] for _k, label, _b in items) + 24
+    return max(2, min(_C_COLS, (width + _C_GAP) // (label_w + _C_GAP)))
+
+
 def _compact_actions(surface, ms: MenuState, settings: Settings, width: int,
                      at: tuple[int, int] | None) -> int:
-    """Start Game across ``width``, then every other action two to a row (off the
-    web, the save file's name field first). Draws at ``at``, or only measures when
-    it is None. Returns the height."""
+    """Start Game across ``width``, then every other action in rows (off the web,
+    the save file's name field first). Draws at ``at``, or only measures when it
+    is None. Returns the height."""
     items = _compact_action_items(ms, settings)
     field_h = 0 if is_web() else _C_BTN_H + _C_GAP
-    rows = (len(items) + 1) // 2
+    cols = _compact_columns(items, width)
+    rows = (len(items) + cols - 1) // cols
     height = _C_START_H + _C_GAP + field_h + rows * _C_BTN_H + (rows - 1) * _C_GAP
     if at is None:
         return height
@@ -2229,10 +2246,11 @@ def _compact_actions(surface, ms: MenuState, settings: Settings, width: int,
                     config.COLOR_TEXT)
         ms.rects["filename_field"] = field
         y += _C_BTN_H + _C_GAP
-    bw = (width - _C_GAP) // 2
+    bw = (width - _C_GAP * (cols - 1)) // cols
     for i, (key, label, border) in enumerate(items):
-        rect = pygame.Rect(x + (i % 2) * (bw + _C_GAP), y + (i // 2) * (_C_BTN_H + _C_GAP),
-                           bw if i % 2 == 0 else width - bw - _C_GAP, _C_BTN_H)
+        c = i % cols
+        rect = pygame.Rect(x + c * (bw + _C_GAP), y + (i // cols) * (_C_BTN_H + _C_GAP),
+                           bw if c < cols - 1 else width - c * (bw + _C_GAP), _C_BTN_H)
         font = f["normal"] if f["normal"].size(label)[0] + 24 <= rect.w else f["small"]
         if key == "daily_menu":
             _button(surface, ms, key, rect, "", fill=_BTN_FILL,
@@ -2341,8 +2359,10 @@ def _clamp_scroll(ms: MenuState, scroll: int) -> int:
     return max(0, min(int(scroll), max(0, room)))
 
 
-def _compact_scroll(event, ms: MenuState) -> bool:
-    """A drag on the settings panel's blank space, or the wheel, scrolls it.
+def _compact_scroll(event, ms: MenuState, settings: Settings) -> bool:
+    """A drag on the settings panel's blank space, or the wheel, scrolls it, and
+    so does an upward or downward drag from a slider when the panel has more
+    than it shows: sliders fill most of a tab, so a finger can hardly miss one.
     Returns True if ``event`` was that, and so is spent."""
     view = ms.panel_view
     if view is None:
@@ -2351,19 +2371,39 @@ def _compact_scroll(event, ms: MenuState) -> bool:
         ms.panel_scroll[ms.tab] = _clamp_scroll(ms, ms.panel_scroll.get(ms.tab, 0) - event.y * 40)
         return True
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-        if not view.collidepoint(event.pos) or any(r.collidepoint(event.pos) for r in ms.rects.values()):
+        if not view.collidepoint(event.pos):
+            return False
+        hit = next((key for key, rect in reversed(ms.rects.items()) if rect.collidepoint(event.pos)), None)
+        scrolls = ms.panel_content_h > view.h
+        if hit is not None and not (scrolls and hit in _SLIDER_SPECS):
             return False
         # what a press on nothing does elsewhere: drop the caret and any open list
         ms.editing_seed = ms.editing_filename = False
         ms.strategy_open = ms.daily_open = False
         ms.scroll_drag = (event.pos[1], ms.panel_scroll.get(ms.tab, 0))
+        ms.slider_press = (hit, event.pos) if hit is not None else None
         return True
+    if event.type == pygame.MOUSEMOTION and ms.slider_press is not None:
+        key, (x0, y0) = ms.slider_press
+        dx, dy = event.pos[0] - x0, event.pos[1] - y0
+        if abs(dx) > _C_SLOP and abs(dx) > abs(dy):     # across: the slider's own drag
+            ms.slider_press = ms.scroll_drag = None
+            ms.drag_key = key
+            _apply_slider(key, ms, settings, event.pos)
+            return True
+        if abs(dy) > _C_SLOP:                            # up or down: a scroll
+            ms.slider_press = None
+        else:
+            return True
     if event.type == pygame.MOUSEMOTION and ms.scroll_drag is not None:
         y0, s0 = ms.scroll_drag
         ms.panel_scroll[ms.tab] = _clamp_scroll(ms, s0 - (event.pos[1] - y0))
         return True
     if event.type == pygame.MOUSEBUTTONUP and ms.scroll_drag is not None:
-        ms.scroll_drag = None
+        if ms.slider_press is not None:                  # never moved: a tap jumps it
+            key, pos = ms.slider_press
+            _apply_slider(key, ms, settings, pos)
+        ms.scroll_drag = ms.slider_press = None
         return True
     return False
 
@@ -2709,7 +2749,7 @@ def _dispatch(event, ms: MenuState, settings: Settings):
         return _handle_pbp_prompt(event, ms, settings)
     if ms.tutorial_open:  # modal: a stage, the picker, Leave or Close
         return _handle_tutorial(event, ms, settings)
-    if config.compact and _compact_scroll(event, ms):
+    if config.compact and _compact_scroll(event, ms, settings):
         return None
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return _handle_click(event.pos, ms, settings)

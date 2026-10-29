@@ -68,12 +68,18 @@ def _press(pos):
 
 
 def test_a_touch_browser_is_scaled_in_css_pixels():
-    """One baseline pixel is TOUCH_CSS_SCALE CSS pixels on a phone, whatever its
-    device pixel ratio — not the baseline fitted into its device pixels, which
-    drew 18px text at 11 CSS px."""
-    fb = main.web_framebuffer(870, 412, _DPR)
-    px = fb[0] / 870
-    assert main.ui_scale_for(fb, True, 100, px) == pytest.approx(px * config.TOUCH_CSS_SCALE)
+    """A touch browser's scale is set in CSS pixels, whatever its device pixel
+    ratio: a whole one per baseline pixel where the screen has room for it (a
+    tablet), and less on a phone, just enough to leave it TOUCH_MIN_W x
+    TOUCH_MIN_H baseline units."""
+    tablet = main.web_framebuffer(1280, 800, 2.0)
+    assert main.ui_scale_for(tablet, True, 100, 2.0) == pytest.approx(2.0 * config.TOUCH_CSS_SCALE)
+    # a phone either way up, and under its address bar
+    for css_w, css_h, dpr in ((870, 412, _DPR), (412, 870, _DPR), (822, 316, 3.0)):
+        fb = main.web_framebuffer(css_w, css_h, dpr)
+        scale = main.ui_scale_for(fb, True, 100, fb[0] / css_w)
+        assert scale < dpr * config.TOUCH_CSS_SCALE
+        assert min(fb[0] / scale / config.TOUCH_MIN_W, fb[1] / scale / config.TOUCH_MIN_H) == pytest.approx(1.0)
     # past the baseline the fit still grows it, as on the desktop
     assert main.ui_scale_for((2880, 1920), True, 100, 1.0) == pytest.approx(2.0 * config.TOUCH_CSS_SCALE)
     # no CSS ratio known (Android, or the desktop) keeps the old rule
@@ -222,14 +228,57 @@ def test_the_compact_menu_fits_its_canvas_and_still_starts(screen_for, landscape
     assert _menu_click(screen, ms, settings, "start") == "start"
 
 
+@pytest.mark.parametrize("landscape", [True, False])
+def test_the_basic_and_advanced_tabs_need_no_scroll(screen_for, landscape):
+    """The settings panel keeps the desktop's width, so nothing on it stacks or
+    rewraps, and the two tabs a game is set up from fit it whole."""
+    screen = screen_for(landscape)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    for tab in ("basic", "advanced"):
+        ms.tab = tab
+        menu.draw(screen, ms, settings)
+        assert ms.panel_view.w >= menu._C_PANEL_W
+        assert ms.panel_content_h <= ms.panel_view.h, tab
+
+
+def _drag(ms, settings, start, end):
+    k = ms.canvas_scale
+    for kind, pos in ((pygame.MOUSEBUTTONDOWN, start), (pygame.MOUSEMOTION, end), (pygame.MOUSEBUTTONUP, end)):
+        data = {"pos": (round(pos[0] * k), round(pos[1] * k)), "button": 1}
+        if kind == pygame.MOUSEMOTION:
+            data = {"pos": data["pos"], "rel": (0, 0), "buttons": (1, 0, 0)}
+        menu.handle_event(pygame.event.Event(kind, data), ms, settings)
+
+
+def test_a_drag_up_from_a_slider_scrolls_and_one_across_moves_it(screen_for):
+    """Sliders fill most of a scrolling tab, so a drag that starts on one goes by
+    its direction: up or down scrolls the panel and leaves the value alone,
+    across is the slider's own drag."""
+    screen = screen_for(True)
+    menu._FONTS.clear()
+    ms, settings = menu.MenuState(), Settings.defaults()
+    ms.tab = "combat"
+    menu.draw(screen, ms, settings)
+    assert ms.panel_content_h > ms.panel_view.h
+    rect = ms.rects["preview_attacker"]
+    before = ms.preview_attacker
+    _drag(ms, settings, rect.center, (rect.centerx + 4, rect.centery - 60))
+    assert ms.panel_scroll["combat"] > 0 and ms.preview_attacker == before
+    menu.draw(screen, ms, settings)
+    rect = ms.rects["preview_attacker"]
+    _drag(ms, settings, (rect.x + 4, rect.centery), (rect.x + 4 + rect.w // 2, rect.centery + 3))
+    assert ms.preview_attacker != before and ms.drag_key is None
+
+
 def test_the_settings_panel_scrolls_and_shows_only_what_is_in_view(screen_for):
     """The panel is shorter than a tab: a drag on its blank space scrolls it, the
     scroll stops at the content's end, and no widget's rect strays outside the
     window onto what is scrolled away."""
-    screen = screen_for(False)
+    screen = screen_for(True)
     menu._FONTS.clear()
     ms, settings = menu.MenuState(), Settings.defaults()
-    ms.tab = "advanced"
+    ms.tab = "combat"
     menu.draw(screen, ms, settings)
     view = ms.panel_view
     assert ms.panel_content_h > view.h
@@ -243,13 +292,10 @@ def test_the_settings_panel_scrolls_and_shows_only_what_is_in_view(screen_for):
                                   rel=(0, 0), buttons=(1, 0, 0)),
                pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(round(x * k), round((y - 5000) * k)), button=1)):
         menu.handle_event(ev, ms, settings)
-    assert ms.panel_scroll["advanced"] == ms.panel_content_h - view.h
+    assert ms.panel_scroll["combat"] == ms.panel_content_h - view.h
     menu.draw(screen, ms, settings)
     inner = view.inflate(-2, -2)
-    for key in ("adv_fog_sight", "neutral_produces", "randomise_adv"):
-        if key in ms.rects:
-            assert inner.contains(ms.rects[key]), key
-    panel_keys = [key for key in ms.rects if key.startswith("adv_")]
+    panel_keys = [key for key in ms.rects if key.startswith(("adv_", "preview_")) or key == "in_lane_battles"]
     assert panel_keys and all(inner.contains(ms.rects[key]) for key in panel_keys)
 
 

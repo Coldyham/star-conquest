@@ -389,12 +389,20 @@ BASE_SCREEN_H = 960
 TOUCH_UI_SCALE = 1.4        # extra multiplier applied on touch devices (Android)
 # A touch *browser* knows its CSS pixel (the framebuffer is the viewport at its
 # device resolution, `main.web_framebuffer`), so its scale is set in CSS pixels
-# rather than guessed from the framebuffer: one baseline pixel is this many CSS
-# pixels, so FONT_SIZE reads at 18 CSS px and a footer button stands 40 CSS px
-# tall, the sizes a phone's own UI uses. Fitting the 1440x960 baseline into a
-# phone's *device* pixels instead (what Android still does) laid a desktop's
-# worth of UI onto a 6" screen: 11 CSS px text and 25 px buttons.
+# rather than guessed from the framebuffer: one baseline pixel is at most this
+# many CSS pixels (FONT_SIZE at 18 CSS px, a tablet's size)...
 TOUCH_CSS_SCALE = 1.0
+# ...and less on a screen that would then hold fewer baseline units than this,
+# down to TOUCH_CSS_MIN. 480 tall is what the menu's Basic tab needs under its
+# tabs; 600 wide is the settings panel and its margins in portrait. So a
+# landscape phone under its address bar (~820x320 CSS px) is drawn at ~0.66,
+# 12 CSS px text, and the same phone as an installed app, with more height, a
+# little bigger. Fitting the 1440x960 baseline into a phone's *device* pixels
+# instead (what Android still does) drew 8 CSS px text; a whole CSS pixel each
+# left that phone 320 units of height, a third of the desktop's.
+TOUCH_MIN_W = 600
+TOUCH_MIN_H = 480
+TOUCH_CSS_MIN = 0.5
 
 # Browser (pygbag) framebuffer: the boot size, matching the pygbag canvas
 # (--width/--height passed to `pygbag --build` in tools/build_web.sh), and the

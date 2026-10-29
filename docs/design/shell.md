@@ -34,10 +34,23 @@ the 1440x960 baseline fitted into *those* pixels, times the touch boost: 1.6x,
 which put a desktop's worth of HUD on a 6" screen, 18px text at 11 CSS px and
 footer buttons 25 CSS px tall. The menu, letterboxed from its 1440x960 canvas,
 was worse (8 CSS px). A touch browser knows its CSS pixel (`main.web_css_px`),
-so its scale is now set in CSS pixels instead (`config.TOUCH_CSS_SCALE`), and
-the text reads at the size the phone's own UI uses.
+so its scale is now set in CSS pixels instead.
 
-At that size a phone holds about 870x410 baseline units (portrait 410x870),
+It was first a whole CSS pixel per baseline pixel (`config.TOUCH_CSS_SCALE`),
+18 CSS px text. That looked right on a tablet, but a phone held landscape under
+its browser's address bar is about 820x320 CSS px, so it got 320 baseline
+units of height: the map was a strip of overlapping systems, and the menu's
+settings panel came out narrower than the desktop's, so its two-column tabs
+stacked into one, the hand-broken text rewrapped, and every tab scrolled
+(Basic included) under a finger that kept landing on sliders. So the scale is
+now the largest, up to that whole pixel, that leaves the screen
+`TOUCH_MIN_W` x `TOUCH_MIN_H` (600x480) baseline units (`main.ui_scale_for`,
+floored at `TOUCH_CSS_MIN`). 480 is what the Basic tab needs under its tabs and
+600 the desktop-width panel in portrait, so that phone draws at ~0.66 (12 CSS
+px text), a tablet still at 1.0, and an installed app, with no address bar,
+somewhere between.
+
+At that size a phone holds about 1250x480 baseline units (portrait 600x1150),
 against the 1440x960 the HUD and menu were drawn for, so the layout itself had
 to change; `config.compact` (touch only, so no desktop window changes shape)
 is what switches it:
@@ -64,7 +77,13 @@ is what switches it:
   the foot of the screen, under a thumb. History keeps End Turn's row (the
   scrubber takes both) so the map does not move on the way in.
 - **The menu gets a canvas of the screen's shape** (`menu._draw_menu_compact`),
-  in baseline units, and its settings panel scrolls. The canvas is upscaled,
+  in baseline units. Its settings panel keeps the desktop's 560 width
+  (`_C_PANEL_W`), so every tab lays out as on the desktop; landscape gives the
+  rest of the width to the title and the actions, three to a row where their
+  labels fit (`_compact_columns`), and the Basic tab's rows close up a little
+  (`_C_ROW_H`). Basic and Advanced fit whole; a tab that doesn't (Combat, on a
+  short screen) scrolls, and a drag that starts on a slider goes by its
+  direction, up or down to scroll and across to move it. The canvas is upscaled,
   so its text is softer than the game's. Drawing it at device resolution was
   built (a surface that multiplied every coordinate out and rendered text from
   a scaled font, with the desktop path untouched) and backed out: it was
@@ -683,7 +702,16 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   swapped in there, scaled like every other constant.
 - **A touch browser's scale is in CSS pixels**: `main.ui_scale_for` takes
   `web_css_px`, the framebuffer's device pixels per CSS pixel. Off the web it
-  is None and the old fit-the-device-pixels rule stands (Android).
+  is None and the old fit-the-device-pixels rule stands (Android). It is at
+  most `TOUCH_CSS_SCALE`, and less where that would leave the screen under
+  `TOUCH_MIN_W` x `TOUCH_MIN_H` baseline units.
+- **The compact menu's settings panel is the desktop's width** wherever the
+  screen has it, so no tab stacks its columns; the narrow single-column
+  fallbacks (`menu._narrow`) are for a screen below the scale's floor. The
+  Basic tab fits without a scroll (`test_the_basic_and_advanced_tabs_need_no_scroll`).
+  In a panel that scrolls, a press on a slider waits (`MenuState.slider_press`)
+  until it moves past `_C_SLOP`: up or down scrolls, across drags, and a
+  release where it began is a tap.
 - **The game screen's regions come from `config`**: `play_rect`,
   `side_panel_rect`, `footer_rect`, `end_turn_rect`. Nothing in `render` or
   `input` derives one from `HUD_RIGHT_W` or the bars directly.
