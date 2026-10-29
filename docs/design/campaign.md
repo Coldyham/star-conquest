@@ -334,21 +334,14 @@ map. Measure the real distribution of lane lengths on a few generated weeks
 before choosing the scale. Homes sit `HOME_OFFSET` out, which is longer than many
 field lanes, so they may want their own fixed time.
 
-### The open problem: identity
+### Identity: claimed names
 
-Names are not identities ("Known limitations, accepted on purpose" in
-`leaderboard/README.md`), and today that is nearly harmless: a score forged in
-your name can only help you. A forged *launch* does real damage. It spends your
-one fleet and sends it where you didn't want it to go, and the window it opens
-blocks your next launch.
-
-A candidate, not a decision: a per-week campaign token, minted on your first
-home claim, kept in browser storage the way the game keeps `sc_pbp_seats`, and
-stored hashed on the server. Launches would go through a Netlify function that
-checks it, holding the only write key the way `pbp.mjs` and `log.mjs` do. The
-cost is that it would be the board's first per-person credential, with the
-device-bound trade play-by-post already makes: a lost token is a lost fleet
-until the week ends, unless `tools/admin.py` learns to reissue it.
+Names were not identities, and a forged *launch* was the case that made that
+matter (a fleet spent where you didn't send it). Claimed names close it for
+anyone who wants it closed; the full design is "Claimed names" in
+[`leaderboard.md`](leaderboard.md). A campaign launch is a posted score, so the
+same check covers it, and the per-week campaign token once proposed here is no
+longer needed.
 
 ### What building it would touch
 

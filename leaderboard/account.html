@@ -1,0 +1,43 @@
+{% extends "templates/base.html" %}
+{% set title = "Your name" %}
+{% set script = "js/account-page.mjs" %}
+
+{% block main %}
+  <a class="back" href="index.html">← All maps</a>
+  <h1>Claim your name</h1>
+  <!-- Optional, and said so first: every unclaimed name still works without an
+       account. What signing in buys is that nobody else can post a score, make
+       a campaign move or take a play-by-post seat under the name you claim. -->
+  <p class="lede">
+    You never need to sign in to play or post. Signing in with Google lets you
+    claim one name, so nobody else can post scores, make campaign moves or take
+    a shared-match seat under it.
+  </p>
+  <p class="lede">
+    Only a name nobody has used on the board yet can be claimed here. If you
+    have already been posting under a name, ask the board's owner to assign it
+    to you once you have signed in.
+  </p>
+
+  <div class="form">
+    <p class="hint" id="who">Checking…</p>
+    <button id="sign-in" type="button" hidden>Sign in with Google</button>
+    <p class="hint">
+      Signing in shares your Google email with this site.
+      <a href="privacy.html">What is stored, and why</a>.
+    </p>
+
+    <form id="claim" class="form" autocomplete="off" hidden>
+      <label for="name">Name to claim</label>
+      <input id="name" name="name" type="text" maxlength="60" placeholder="Name">
+      <button id="claim-go" type="submit">Claim</button>
+    </form>
+
+    <button id="release" type="button" hidden>Release this name</button>
+    <button id="sign-out" type="button" class="ghost" hidden>Sign out</button>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+  </div>
+{% endblock %}
+
+{% block footer %}No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>{% endblock %}

@@ -202,6 +202,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - leaderboard.md · `outdated` as a fifth verdict: split into a column, since a score can be verified and outdated at once. `schema.md`, *score_checks*.
 - leaderboard.md · Hiding bot replays on an embargoed map in the board (an embargo filter on `public_watchable_replays`, no public read of `bot_scores.log`, no bot names on the page): dropped unbuilt for not replaying the map until the embargo lifts, which needs no schema or page change. *The bot column: the rules in full.*
 - leaderboard.md · Keeping the functions on the old board site behind a `/api/` proxy (the merge brief's option B): rejected for one site with the functions on it, the secret guarded by "Require approval". *The game and the board are one site.*
+- leaderboard.md · A per-week campaign token for launches: superseded by claimed names (opt-in, one name per Google account, owner uuid never public, which is why it is not the rejected durable client id). Claiming a used name on first sign-in; a pending email for `assign-name`; a JWT check inside `pbp.mjs`: all rejected. *Claimed names.*
 - leaderboard.md · A JS include for the board's shared header (menu missing without the script, markup in JS strings); keeping a copy per page pinned by a test: both rejected for Jinja2 at build time. *The pages are templates.*
 
 ## campaign.md (the weekly campaign)
