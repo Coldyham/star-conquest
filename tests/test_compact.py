@@ -314,10 +314,10 @@ def _tap_node(state, ui, sid):
     return game_input.handle_event(_press(ui.view.to_screen(state.systems[sid].pos)), state, ui)
 
 
-def test_on_touch_a_send_is_finished_once_made(screen_for):
-    """The misfire: send A to B, then tap A's other neighbour C meaning to give C
-    orders. On a touch screen that selects C; it never queues A to C as well.
-    Done (or a tap on empty map) lets A go."""
+def test_on_touch_a_send_is_finished_once_its_popup_closes(screen_for):
+    """While the popup is open a tap on A's other neighbour C is a second send
+    from A (a split). Done lets A go, lit only as the hover, so the misfire is
+    gone: a tap on C then selects C and never queues A to C again."""
     screen = screen_for(True)
     state = mapgen.generate_random(1, num_nodes=18, num_players=3)
     ui = _make_ui(state)
@@ -326,19 +326,18 @@ def test_on_touch_a_send_is_finished_once_made(screen_for):
     _tap_node(state, ui, a)
     _tap_node(state, ui, b)
     assert ui.mode == CHOOSING and len(ui.pending) == 1
+    ui.set_send_count(state, 4)
     render.draw(screen, state, ui)
     _tap_node(state, ui, c)
-    assert [(o.source_id, o.dest_id) for o in ui.pending] == [(a, b)]
-    assert ui.selected == c and ui.mode != CHOOSING
+    assert [(o.source_id, o.dest_id) for o in ui.pending] == [(a, b), (a, c)]
+    assert ui.selected == a and ui.mode == CHOOSING
 
-    # Done: the send stands and nothing stays selected
-    ui.reset_selection()
-    ui.pending.clear()      # A's ten ships went to B above
-    _tap_node(state, ui, a)
-    _tap_node(state, ui, c)
+    # Done: the sends stand and nothing stays selected
     render.draw(screen, state, ui)
     game_input.handle_event(_press(pygame.Rect(ui.done_rect).center), state, ui)
-    assert ui.selected is None and (a, c) in [(o.source_id, o.dest_id) for o in ui.pending]
+    assert ui.selected is None and ui.hover == a and len(ui.pending) == 2
+    _tap_node(state, ui, c)
+    assert ui.selected == c and ui.mode != CHOOSING and len(ui.pending) == 2
 
 
 def _finger(kind, fid, x, y):

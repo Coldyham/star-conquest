@@ -98,15 +98,21 @@ is what switches it:
   a layer 2.6 times the size) took a frame to ~25 ms natively, slower again
   in the browser. Measuring that height without the scan would be the way back.
 
-Two touch-only rules came with it, from play on a phone:
+Rules that came with it, from play on a phone:
 
-- **A send is finished once made.** A compose used to keep its source selected
-  after the popup closed, so another send could follow from it; on a phone that
-  made the next tap on a neighbour (often one's own system, tapped to give it
-  orders) a second fleet. On touch, Done or a tap on empty map lets the source
-  go, and while the popup is open a tap on another system selects that system.
-  Splitting a garrison means tapping the source again. Desktop keeps the old
-  flow, where hover shows what a click will do.
+- **A send is finished once its popup closes**, on every screen. A compose
+  used to keep its source selected after the popup closed, so another send
+  could follow from it; on a phone that made the next tap on a neighbour (often
+  one's own system, tapped to give it orders) a second fleet. Done, a press on
+  empty map, Esc or a right-click lets the source go, leaving it lit as a hover
+  (and in the side panel) until the pointer moves or the next tap. While the
+  popup is open a press on another neighbour is a second send from the same
+  source: that is how a garrison splits, or two forwarding rules are set from
+  one system in a turn, and the open popup says the source is still live. A
+  first cut, touch only, also let the source go on a tap while the popup was
+  open, which made every split start over from the source. Desktop at first
+  kept the source after close, where hover shows what a click will do; one
+  behaviour on both was judged worth more than that, and Done reads as final.
 - **Two fingers pinch and pan the map** (game, history, route mode, map
   creator). SDL turns the first finger into a mouse press, which reaches the
   board before the second finger exists, so a pinch puts back what that press
@@ -732,9 +738,6 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   history's graphs do), and input tests the popup's controls before End Turn
   (`input._popup_press`), since a landscape panel too short for it lets it run
   on down over End Turn.
-- **On touch, closing the popup lets its source go** (`input._cancel`), and a
-  tap on another system while it is open selects that system rather than
-  sending to it. Desktop is unchanged.
 - **A press goes to the topmost control.** The compact layouts draw things over
   other controls (the menu's Daily list over Start Game; in portrait, the
   docked popup over the map's zoom buttons), so `menu._handle_click` tests its
@@ -798,6 +801,10 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   `CHOOSING` aimed at that subject. `Ui.editing_existing` records that the
   subject *predates* the popup, and drives the bottom button (Cancel vs
   "Delete order"/"Delete rule") and `_close_send`'s unwind to `IDLE` on edit.
+  - **Closing it lets its source go** (`input._cancel`: Done, empty map, Esc,
+    right-click), leaving the source as `Ui.hover`; while it is open a press on
+    another neighbour is a second send from the same source. Cancel and Delete
+    keep a fresh compose's source, to aim again.
   - **A dormant rule highlights but never opens it** (`Ui.rule_is_live`): the
     popup reads the source's garrison and destination unguarded, and aiming it
     at a system we no longer hold would let the Send tab queue an order out of

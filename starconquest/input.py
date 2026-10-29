@@ -1023,15 +1023,6 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
             ui.reset_selection()  # deselect the source
         elif ui.mode == CHOOSING and node == ui.dest:
             return None  # already targeting it; adjust via popup
-        elif ui.mode == CHOOSING and config.touch_ui:
-            # On a touch screen a send is done with once it's made: the next
-            # system tapped is the next one to give orders to, never a second
-            # target from the same source — that was the easy misfire, a tap on
-            # your own neighbour queuing a fleet into it. To split a garrison,
-            # tap the source again.
-            ui.reset_selection()
-            ui.selected = node
-            ui.mode = SELECTED
         elif ui.source(state) is not None and state.are_adjacent(ui.selected, node):
             # commit a send-all to this neighbour and open the popup. Arm it as a
             # forward rule when Shift is held (desktop), when the source has no
@@ -1092,9 +1083,13 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int, int] | None:
 
 def _cancel(ui: Ui) -> None:
     if ui.mode == CHOOSING:
+        source = ui.selected
         ui.close_send()  # close the popup, keeping the committed send
-        if config.touch_ui:
-            ui.reset_selection()   # ...and finish with its source (see `_handle_left_click`)
+        # ...and finish with its source, so the next press on its neighbour selects
+        # that system instead of sending it a second fleet. It stays lit as a hover,
+        # and in the side panel, until the pointer moves or the next tap.
+        ui.reset_selection()
+        ui.hover = source
     elif ui.sel_forward is not None:
         ui.sel_forward = None  # deselect a highlighted (dormant) auto-forward rule
     else:

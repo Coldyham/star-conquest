@@ -317,15 +317,17 @@ when to re-run it, is `docs/design/ladder.md`):
   `config.TOUCH_MIN_TARGET`.
 - **`config.compact`** (a phone): a touch browser is scaled in CSS pixels;
   screen regions come from `config.play_rect`/`side_panel_rect`/`footer_rect`/
-  `end_turn_rect`; the footer folds, never drops; the popup docks. On touch a
-  closed popup lets its source go, and a pinch undoes its first finger's tap.
+  `end_turn_rect`; the footer folds, never drops; the popup docks. A pinch
+  undoes its first finger's tap.
   `docs/design/shell.md`, "The compact layout".
 - **Quitting goes through `main.leave_app()`.**
 - **`viewstate.Ui` holds all transient interaction state**; `main.resolve_turn`
   expands rules into `Order`s.
 - **The send popup is the only ship-count editor.** Orders and rules are reached
   from the map. Forwarding-rule share arithmetic lives in `model` only
-  (`Ui.forward_this_turn` is the one formula).
+  (`Ui.forward_this_turn` is the one formula). Closing it lets its source go,
+  left as the hover (`input._cancel`); while open, another neighbour is a second
+  send from the source.
 - **The Combat tab** uses `combat.preview_fight` (no `config`, no rng);
   `test_tab_content_stays_inside_the_panel` guards it.
 - **Route mode** is the one control that doesn't commit as you go.
