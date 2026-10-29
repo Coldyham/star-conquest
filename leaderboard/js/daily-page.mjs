@@ -40,6 +40,15 @@ const isToday = day === today;
 const dayHref = (d) => (d === today ? page : `${page}?day=${d}`);
 const playHref = (d) => (d === today ? `../game/#${fragment}` : `../game/#${fragment}=${d}`);
 
+/** The Board/Puzzle tabs keep the day being looked at. */
+function keepDayInTabs() {
+  if (isToday) return;
+  for (const a of document.querySelectorAll('nav[aria-label="Dailies"] a')) {
+    const target = a.getAttribute("href");
+    if (target === "daily.html" || target === "puzzle.html") a.setAttribute("href", `${target}?day=${day}`);
+  }
+}
+
 function drawDays() {
   clear(daysNav).append(
     el("a", { class: "btn", href: dayHref(addDays(day, -1)), "aria-label": "Previous day", text: "‹" }),
@@ -139,6 +148,7 @@ function drawStreaks(list) {
 async function load() {
   mountNav();
   mountMyScores();
+  keepDayInTabs();
   drawDays();
   if (!configured()) {
     showError(todayBox, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
