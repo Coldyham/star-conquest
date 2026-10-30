@@ -658,15 +658,15 @@ def pump_generation(menu_state: MenuState, settings: Settings,
     if g is None:
         menu.set_status(menu_state, GAUNTLET_GEN_EMPTY_MSG, False)
         return None
-    menu.set_status(menu_state, f"Generated {g.name}: {len(g.stages)} stages", True)
     menu.open_gauntlet(menu_state, settings, g.id)
+    menu.say_gauntlet(menu_state, g.id, f"Generated {g.name}: {len(g.stages)} stages", True)
     return None
 
 
-def ask_listing(menu_state: MenuState, job: gauntletgen.Job) -> tuple[str, pbp.Request] | None:
+def ask_listing(menu_state: MenuState, job: gauntletgen.Job) -> tuple[str, str, pbp.Request] | None:
     """A finished run whose link ticked "Ask for it to be listed publicly":
     start saving it to the board under the author's name, and answer the
-    gauntlet's name with the save for the loop to poll. Nothing is sent for any
+    gauntlet's id and name with the save for the loop to poll. Nothing is sent for any
     other run, or when there is no board."""
     data = job.result() if job.done and job.listing is not None else None
     if data is None:
@@ -674,16 +674,17 @@ def ask_listing(menu_state: MenuState, job: gauntletgen.Job) -> tuple[str, pbp.R
     pending = gauntlet.ask_listing(data, job.listing or "")
     if pending is None:
         return None
-    menu.set_status(menu_state, GAUNTLET_LISTING_MSG.format(name=data["name"]), True)
-    return data["name"], pending
+    menu.say_gauntlet(menu_state, data["id"], GAUNTLET_LISTING_MSG.format(name=data["name"]), True)
+    return data["id"], data["name"], pending
 
 
-def land_listing(menu_state: MenuState, name: str, state: str) -> None:
-    """The board answered the listing save: say whether it took."""
+def land_listing(menu_state: MenuState, gid: str, name: str, state: str) -> None:
+    """The board answered the listing save: say whether it took, in the
+    Gauntlets list if it is still open (`menu.say_gauntlet`)."""
     if state == pbp.OK:
-        menu.set_status(menu_state, GAUNTLET_LISTED_MSG.format(name=name), True)
+        menu.say_gauntlet(menu_state, gid, GAUNTLET_LISTED_MSG.format(name=name), True)
     else:
-        menu.set_status(menu_state, GAUNTLET_LISTING_FAILED_MSG.format(name=name), False)
+        menu.say_gauntlet(menu_state, gid, GAUNTLET_LISTING_FAILED_MSG.format(name=name), False)
 
 
 def replay_request() -> str:
@@ -1885,7 +1886,7 @@ async def main() -> None:
             pending_daily = open_daily(menu_state, asked_day, pending_daily_kind)
 
     gen_job: gauntletgen.Job | None = None
-    pending_listing: tuple[str, pbp.Request] | None = None   # (name, save) once a run ends
+    pending_listing: tuple[str, str, pbp.Request] | None = None   # (id, name, save) once a run ends
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         gen_job = start_generation(menu_state, spec_request(args.gauntlet_spec))
         linked_gauntlet = gen_job is not None
@@ -1923,9 +1924,9 @@ async def main() -> None:
         dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
         pbp_idle += dt
         if pending_listing is not None:
-            lstate, _lbody = pending_listing[1].poll()
+            lstate, _lbody = pending_listing[2].poll()
             if lstate != pbp.PENDING:
-                land_listing(menu_state, pending_listing[0], lstate)
+                land_listing(menu_state, pending_listing[0], pending_listing[1], lstate)
                 pending_listing = None
         if pending_gauntlet is not None:
             gstate, gbody = pending_gauntlet.poll()

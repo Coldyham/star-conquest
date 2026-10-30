@@ -539,6 +539,11 @@ every seed.
   done). It pauses while a game is played. Done, the
   file is kept (`gauntlet.remember`) and the Tutorial list opens on it, as a
   `#g=` link does.
+- **The list covers the status line, so it says its own news.** What is said
+  about a gauntlet while the list is open ("Generated ...", the listing save,
+  Copy link) goes to a line in the list under that gauntlet
+  (`menu.say_gauntlet`, `MenuState.gauntlet_note`, cleared when the list
+  reopens); with the list closed it goes to the status line.
 - **A probe's balance never leaks into the menu.** A probe game goes through
   `build_state`, which pushes its setup's knobs into `config`;
   `pump_generation` pushes the menu's own setup back after every slice
@@ -606,8 +611,8 @@ consent to that send, and nothing else is. Ticked, the spec link carries
 `wants_listing: true` and `by_name`; unticked it carries neither, and a name
 alone is never read (`job_from_link`, `Job.listing`). Once the run is done,
 `main.ask_listing` saves the file through `/api/gauntlet` (`gauntlet.ask_listing`,
-a `pbp.request` POST) with `wants_listing` set, and the menu's status line says
-whether it took. The board mints its own `<slug>-<hash>` id; the copy kept in the
+a `pbp.request` POST) with `wants_listing` set, and the Gauntlets list (or the
+status line, once the list is closed) says whether it took. The board mints its own `<slug>-<hash>` id; the copy kept in the
 browser keeps its `gen-<hash>` one, so the two are the same gauntlet under two
 ids, and an admin lists it with `tools/admin.py list-gauntlet` as any other.
 Opening the same seeded link again saves the same file, which is the same row.
