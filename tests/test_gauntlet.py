@@ -429,3 +429,16 @@ def test_a_fetch_needs_a_board_and_a_well_formed_id(monkeypatch):
     assert gauntlet.fetch("../etc") is None
     monkeypatch.setattr(gauntlet.webstore, "leaderboard_url", lambda path: "")
     assert gauntlet.fetch("hard-mode-0123456789ab") is None
+
+
+def test_asking_for_a_listing_saves_the_file_under_the_authors_name(monkeypatch):
+    sent = []
+    monkeypatch.setattr(gauntlet.pbp, "request", lambda url, body=None: sent.append((url, body)) or "req")
+    monkeypatch.setattr(gauntlet.webstore, "leaderboard_url", lambda path: f"https://site.test{path}")
+    data = _fixture()["body"]
+    assert gauntlet.ask_listing(data, "Ann") == "req"
+    [(url, body)] = sent
+    assert url == "https://site.test/api/gauntlet"
+    assert json.loads(body) == {"gauntlet": data, "by_name": "Ann", "wants_listing": True}
+    monkeypatch.setattr(gauntlet.webstore, "leaderboard_url", lambda path: "")
+    assert gauntlet.ask_listing(data, "Ann") is None and len(sent) == 1

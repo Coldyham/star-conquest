@@ -417,6 +417,8 @@ LINK_FRAGMENT = "g="
 INLINE_FRAGMENT = "gauntlet="
 # `gauntlets.gauntlet_id`'s check in schema.sql (and gauntlet-build.mjs).
 _ID_RE = re.compile(r"^[a-z0-9-]{1,19}-[0-9a-f]{12}$")
+# `checkByName`'s limit in gauntlet-build.mjs: past it the board refuses the save.
+BY_NAME_MAX = 32
 # How many opened gauntlets the store keeps. Up to 64 KiB each, so a few hundred
 # KiB at most, well inside a browser's localStorage.
 REMEMBER_MAX = 8
@@ -491,6 +493,19 @@ def fetch(gid: str) -> pbp.Request | None:
     if not endpoint or not _ID_RE.match(gid):
         return None
     return pbp.request(f"{endpoint}?id={gid}")
+
+
+def ask_listing(data: dict, by_name: str) -> pbp.Request | None:
+    """Save a generated gauntlet to the board, asking for it to be listed: the
+    one send a gauntlet makes from the game, and only when the board's generate
+    form had "Ask for it to be listed publicly" ticked (``gauntletgen.Job.
+    listing``). The board mints its own id; saving the same file twice is the
+    same row. None when there is no board to ask."""
+    endpoint = webstore.leaderboard_url(paths.LEADERBOARD_GAUNTLET_PATH)
+    if not endpoint:
+        return None
+    body = {"gauntlet": data, "by_name": by_name, "wants_listing": True}
+    return pbp.request(endpoint, json.dumps(body, separators=(",", ":")))
 
 
 def from_reply(body: str) -> dict | None:

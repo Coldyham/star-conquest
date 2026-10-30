@@ -1,7 +1,8 @@
 // The generate form on gauntlet.html: read the form, build the spec
 // (gauntlet-spec.mjs, which decides everything), and hand out the game link that
 // generates it. The form is kept in localStorage between visits, as the
-// builder's draft is.
+// builder's draft is. The name, author and listing box at the top of the page
+// are shared with the builder, which keeps them in its draft; this reads them.
 
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
@@ -15,8 +16,11 @@ import { SETUP_DEFAULTS } from "./config.mjs";
 const FORM_KEY = "sc_gauntlet_gen_form";
 const $ = (id) => document.getElementById(id);
 
+// The page's shared fields, read as the builder leaves them (gauntlet-page.mjs).
+const SHARED = { name: ["g-name", "text"], byName: ["g-by", "text"], wantsListing: ["g-listing", "check"] };
+
 const FIELDS = {
-  name: ["gen-name", "text"], stages: ["gen-stages", "text"], mode: ["gen-mode", "text"],
+  stages: ["gen-stages", "text"], mode: ["gen-mode", "text"],
   playersMin: ["gen-players-min", "text"], playersMax: ["gen-players-max", "text"],
   systemsMin: ["gen-systems-min", "text"], systemsMax: ["gen-systems-max", "text"],
   fog: ["gen-fog", "text"],
@@ -26,7 +30,7 @@ const FIELDS = {
 
 function read() {
   const form = {};
-  for (const [key, [id, kind]] of Object.entries(FIELDS)) {
+  for (const [key, [id, kind]] of Object.entries({ ...FIELDS, ...SHARED })) {
     form[key] = kind === "check" ? $(id).checked : $(id).value;
   }
   form.opponents = OPPONENTS.filter((bot) => $(`gen-bot-${bot}`).checked);
@@ -146,8 +150,10 @@ function showKnobs(form) {
 }
 
 function keep(form) {
+  // The shared fields are the builder's draft's to keep, not this form's.
+  const own = Object.fromEntries(Object.entries(form).filter(([key]) => !(key in SHARED)));
   try {
-    localStorage.setItem(FORM_KEY, JSON.stringify(form));
+    localStorage.setItem(FORM_KEY, JSON.stringify(own));
   } catch {
     // storage blocked: the form still works, it just won't remember
   }
@@ -184,6 +190,7 @@ async function make(event) {
   const link = await specLink(GAME_URL, spec, deflate);
   $("gen-link").value = link;
   $("gen-open").href = link;
+  $("gen-listing-note").hidden = spec.wants_listing !== true;
   $("gen-result").hidden = false;
 }
 
@@ -206,6 +213,10 @@ function main() {
   write(stored() || emptyForm());
   $("gen-form").addEventListener("input", check);
   $("gen-form").addEventListener("change", check);
+  for (const [id] of Object.values(SHARED)) {
+    $(id).addEventListener("input", check);
+    $(id).addEventListener("change", check);
+  }
   $("gen-form").addEventListener("submit", make);
   $("gen-copy").addEventListener("click", copy);
   check();
