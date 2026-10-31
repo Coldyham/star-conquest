@@ -2106,8 +2106,10 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
     if not focused:
         if ui.stage_hint and not ui.history:
             y = _panel_stage_hint(surface, ui, x, y, content_bottom)
-            if config.portrait:
-                return   # the hint is the band's one job in a stage
+            if config.compact:
+                # The hint is a phone panel's one job in a stage: with it, no
+                # legend fits whole, and the briefing has taught the rules.
+                return
         if config.portrait:
             # The rules in full are the tutorial's to teach; the band keeps a
             # reminder, so the map gets the room.
@@ -2442,6 +2444,24 @@ Route (G) plans a whole front's worth of rules at once.
 
 Drag to pan, wheel to zoom."""
 
+# A landscape phone (`config.compact`) has a narrower, shorter panel: about 14
+# rows of 24 characters against the touch build's 23 rows, so the two scenes
+# whose legend runs longer get a cut of their own. What goes is what a control
+# already says at the point of use: Done, route mode, the Exit button.
+_LEGEND_COMPACT_TOUCH = """Take every system to win.
+
+Tap your system, then a neighbour, to send ships, or drag between them.
+
+The popup sets the count; Forward makes it a standing rule.
+
+Drag to pan, pinch to zoom."""
+
+_LEGEND_HISTORY_COMPACT_TOUCH = """Reviewing turns already played: nothing here changes the game.
+
+Scrub or ◀/▶ to step a turn; Play runs it back. Graphs charts every seat.
+
+Rewind to here replays from this turn."""
+
 # A spectator has nothing to send, so none of the live legend's verbs are theirs:
 # only what the screen is for, and how to look around it.
 _LEGEND_SPECTATING_TOUCH = """Watching from no seat: the whole board, and nobody's orders.
@@ -2544,9 +2564,13 @@ def _legend_text(history: bool, spectating: bool = False) -> str:
     variants are chosen between, so the test that measures whether a legend fits
     the panel measures the same string the panel draws."""
     if history:
+        if config.compact:
+            return _LEGEND_HISTORY_COMPACT_TOUCH
         return _LEGEND_HISTORY_TOUCH if config.touch_ui else _LEGEND_HISTORY_KEYS
     if spectating:
         return _LEGEND_SPECTATING_TOUCH if config.touch_ui else _LEGEND_SPECTATING_KEYS
+    if config.compact:
+        return _LEGEND_COMPACT_TOUCH
     return _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS
 
 

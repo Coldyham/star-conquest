@@ -116,12 +116,19 @@ function drawStandings(rows) {
       el("a", { class: "tally-name", href: userHref([row.user_name]), text: `${i + 1}. ${row.user_name}` }),
       el("span", { class: "tally-figs" }, [
         `${row.turns} turns · ${row.lost} lost`,
-        winner && winner.user_name === row.user_name
-          ? el("span", { class: "at-reveal", title: "The best score posted on the day, before its replays were out", text: "Best on the day" })
-          : null,
+        // "later" describes the figures beside it, so it comes first.
         postedOn(row.submitted_at, day)
           ? null
           : el("span", { class: "daily-later", title: "Posted after the day, once its replays were out", text: "later" }),
+        // A winner who has since bettered their score shows that later score
+        // above, so the mark names the figures that won the day.
+        winner && winner.user_name === row.user_name
+          ? el("span", {
+            class: "at-reveal",
+            title: "The best score posted on the day, before its replays were out",
+            text: winner === row ? "Best on the day" : `Best on the day: ${winner.turns} turns · ${winner.lost} lost`,
+          })
+          : null,
       ].filter(Boolean)),
     ])))
     : el("p", { class: "empty", text: "Nobody has posted a win on that day's map yet. It is still playable." }));
