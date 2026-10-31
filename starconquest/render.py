@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, matchnames, model, paths, starlore, stats, widgets
+from . import coach, combat, config, fog, matchnames, model, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
@@ -82,6 +82,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.graph_plot_rect = ui.graph_full_rect = ui.graph_all_rect = (0, 0, 0, 0)
     ui.graph_tab_rects = []
     ui.graph_trace_rects = []
+    ui.coach_tab_rect = (0, 0, 0, 0)
+    ui.coach_rows = []
     if ui.history and ui.history_graph and ui.graph_full:
         # the graphs fill everything between the bars: no map to draw under them
         _draw_hud(surface, state, ui)
@@ -102,10 +104,13 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     if not ui.history:
         _draw_forward_rules(surface, state, ui)  # standing auto-forward (chevron flow)
         _draw_pending(surface, state, ui)  # queued one-shot sends (solid)
+        _draw_hint(surface, state, ui)  # the advisor's suggested sends (dashed)
         _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
         _draw_route_preview(surface, state, ui)  # the route plan being composed
     _draw_fleets(surface, state, ui)
     _draw_systems(surface, state, ui)
+    if ui.history:
+        _draw_coach_marks(surface, state, ui)
     _draw_film_flashes(surface, state, ui)
     _draw_node_names(surface, state, ui)
     if not ui.history and ui.drag_active and ui.drag_src is not None:
@@ -431,6 +436,48 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT, center=(lx, ly - config.s(10)))
 
 
+def _draw_dashed(surface, pa, pb, color, width: int) -> None:
+    """A dashed segment from ``pa`` to ``pb``: a suggestion, not a plan."""
+    ux, uy, length = _lane_unit(pa, pb)
+    dash, gap = config.s(9), config.s(6)
+    d = 0.0
+    while d < length:
+        e = min(length, d + dash)
+        pygame.draw.line(surface, color, (pa[0] + ux * d, pa[1] + uy * d),
+                         (pa[0] + ux * e, pa[1] + uy * e), width)
+        d = e + gap
+
+
+def _draw_hint(surface, state: GameState, ui: Ui) -> None:
+    """The advisor's sends for this turn (`main.take_hint`): dashed arrows in
+    the hint colour, the count 60% of the way along — the far side of the lane
+    from a queued order's label (`_draw_pending`), so the two can be compared."""
+    if not ui.hint_live(state):
+        return
+    n = len(ui.hint_orders)
+    caption = (f"Hint: {n} send{'s' if n != 1 else ''} (K hides)" if n
+               else "Hint: hold this turn (K hides)")
+    if config.touch_ui:
+        caption = caption.replace(" (K hides)", "")
+    vx, vy, vw, _vh = config.play_rect()
+    _label_pill(surface, _fonts()["small"], caption, config.COLOR_HINT,
+                (vx + vw // 2, vy + config.s(18)))
+    width = config.s(2)
+    for o in ui.hint_orders:
+        if o.source_id not in state.systems or o.dest_id not in state.systems:
+            continue
+        pa = ui.view.to_screen(state.systems[o.source_id].pos)
+        pb = ui.view.to_screen(state.systems[o.dest_id].pos)
+        ux, uy, _ = _lane_unit(pa, pb)
+        inset = config.node_radius(state.systems[o.dest_id].production) + config.ARROW_GAP
+        tip = (pb[0] - ux * inset, pb[1] - uy * inset)
+        _draw_dashed(surface, pa, tip, config.COLOR_HINT, width)
+        _draw_arrowhead(surface, tip, (ux, uy), config.COLOR_HINT, width)
+        lx = int(pa[0] + (pb[0] - pa[0]) * 0.6)
+        ly = int(pa[1] + (pb[1] - pa[1]) * 0.6)
+        _label_pill(surface, _fonts()["small"], str(o.ships), config.COLOR_HINT, (lx, ly - config.s(10)))
+
+
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
     """Standing auto-forward rules as a persistent chevron flow (human colour), one
     per lane labelled with its share where that is less than everything, and a
@@ -724,7 +771,8 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
 
     layout = _SplitLayout([], True, True)
     if rule is None:
-        rows = 7 + lane_row
+        # ...plus the forecast row: what the ships will meet when they land
+        rows = 8 + lane_row
     elif split:
         # A split that still doesn't fit sheds what the numbers already say — the
         # bar, then the "stays" row — and then whole lanes, keeping a window round
@@ -866,6 +914,12 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
             effect = f"send {ui.chosen}  ·  {max(0, garrison - ui.chosen)} home"
         _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
         cy += bh + gap
+        if not ui.forward_armed:
+            # the forecast: the odds of the fight these ships land in
+            line = _forecast_line(state, ui, font, iw)
+            if line is not None:
+                _text(surface, font, line[0], line[1], center=(inner + iw // 2, cy + bh // 2))
+            cy += bh + gap
 
         # stepper row: [−]  value  [+]  — the send count, or (Forward) the lane's share
         minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
@@ -923,6 +977,51 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         ui.done_rect = (done.x, done.y, done.w, done.h)
     _draw_popup_button(surface, cancel, discard, danger=True)
     ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
+
+
+def _forecast_line(state: GameState, ui: Ui, font, width: int) -> tuple[str, tuple] | None:
+    """The send popup's forecast: our ships landing on ``ui.dest`` that turn
+    (this send and any other landing with it) against the garrison they will
+    find, with the odds of taking it (`combat.forecast_landing`). The longest
+    wording that fits ``width``; green for a sure capture, amber for a likely
+    one, red for a gamble. Only what the player can see goes in: a destination
+    out of full view says so instead of reading its garrison."""
+    src, dest = ui.selected, ui.dest
+    turns = state.travel_turns(src, dest) if src is not None and dest is not None else None
+    if turns is None:
+        return None
+    if not ui.sees(dest):
+        forms = [f"lands in {turns} turns · garrison unseen", f"in {turns} · unseen"]
+        colour = config.COLOR_TEXT_DIM
+    else:
+        landing = ui.landing_at(state, dest, turns)
+        fc = combat.forecast_landing(state, ui.human_id, dest, turns, landing)
+        if fc.reinforce:
+            there = fc.garrison + fc.landing
+            forms = [f"lands in {turns} turns: {there} there", f"in {turns}: {there} there"]
+            colour = config.COLOR_TEXT_DIM
+        else:
+            odds = fc.odds
+            assert odds is not None
+            g = fc.garrison
+            if odds.sure:
+                long = f"sure, ~{round(odds.survivors)} left"
+                short = f"sure ~{round(odds.survivors)}"
+                colour = _BTN_GREEN[1]
+            else:
+                # never "100%" for what a roll can still lose, nor "0%" for a chance
+                pct = min(99, max(1, round(odds.capture * 100))) if odds.capture > 0 else 0
+                long = f"{pct}% win · {fc.sure_at} is sure"
+                short = f"{pct}% · {fc.sure_at} sure"
+                colour = _BTN_AMBER[1] if odds.capture >= 0.5 else _BTN_DANGER[1]
+            forms = [f"{landing} vs {g} in {turns} turns: {long}",
+                     f"{landing} vs {g} in {turns}: {long}",
+                     f"{landing} vs {g}: {long}", f"{landing} vs {g}: {short}",
+                     f"{landing}v{g} {short}", short]
+    for text in forms:
+        if font.size(text)[0] <= width:
+            return text, colour
+    return forms[-1], colour
 
 
 def _draw_mini_stepper(surface, font, row: pygame.Rect, s: int, label: str, value: str,
@@ -1695,6 +1794,16 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # drawn exactly when the mode means something.
     if ui.can_route(state):
         specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
+    # Hint: a bot's suggested sends, as training help. Its first press in a game
+    # not yet hinted asks, since a hinted game is never posted (`Ui.can_post`).
+    if ui.can_hint(state):
+        if ui.hint_armed:
+            label, colours = "Hint: no posting?", _BTN_AMBER
+        elif ui.hint_live(state):
+            label, colours = "Hide hint", _BTN_ACTIVE
+        else:
+            label, colours = "Hint", _BTN_GOLD
+        specs.append(("hint_button_rect", _key_hint(label, "K"), *colours, 3, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -2465,7 +2574,8 @@ Point at a system to see it. Drag to pan, wheel or −/+ to zoom."""
 _LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
 
 Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
-Graphs charts every seat's systems, ships, income and losses.
+Graphs charts every seat's systems, ships, income and losses. After the game,
+its Coach tab lists turns worth a second look: tap one to go there.
 
 Drag the map to pan, pinch to zoom.
 
@@ -2479,7 +2589,8 @@ plays it back.
 
 Point at a system to see it as it was then; drag to pan, wheel to zoom. G
 shows graphs of every seat's systems, ships, income and losses; Tab changes
-graph, F makes it full screen.
+graph, F makes it full screen. After the game, the Coach tab lists turns worth
+a second look: click one, or Up/Down, to go there.
 
 Rewind to here restarts play from the turn on screen. Esc returns to the live
 board."""
@@ -2983,7 +3094,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # last one: the stage's seed is pinned, so a new map would leave the stage.
     nxt = ui.offers_next_stage(state)
     second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
-    labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("Review history", "H")]
+    labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("Coach & history", "H")]
     quit_label = _key_hint("Quit", "Esc")
     # A daily's result goes out as a line, not a link: everyone has its map.
     share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
@@ -3030,7 +3141,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Retry replays this exact match from the opening position (a fork of the
     # finished log, so the completed record stays intact) — the main way back
     # in after a loss, so it leads and sits beside New map's fresh seed.
-    # Setup menu and Review history follow; Challenge a friend (when offered)
+    # Setup menu and Coach & history follow; Challenge a friend (when offered)
     # comes next; Quit is always last, opening the same confirm modal as Esc.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
     ui.restart_button_rect = (0, 0, 0, 0)
@@ -3075,6 +3186,68 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         ui.leaderboard_button_rect = (0, 0, 0, 0)
 
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
+
+
+_COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is
+    coach.GAMBLE: _BTN_DANGER[1],
+    coach.SURPRISE: _BTN_AMBER[1],
+    coach.EMPTIED: _BTN_DANGER[1],
+    coach.IDLE: _BTN_AMBER[1],
+    coach.TURN: _BTN_VIOLET[1],
+}
+
+
+def _draw_coach_notes(surface, ui: Ui, review: coach.Review, body: pygame.Rect, font) -> None:
+    """The Coach tab's body: the tally, then one row per note, its turn on the
+    left in the colour of its kind and its text wrapped beside it. The rows are
+    a window kept round the selected note, so Up/Down walks the whole list
+    without a scrollbar. Records ``ui.coach_rows``."""
+    _text(surface, font, review.summary, config.COLOR_TEXT_DIM, topleft=(body.x, body.y))
+    top = body.y + _row_h()
+    if not review.notes:
+        _text(surface, font, "Nothing to flag: no failed attacks, emptied systems or idle ships.",
+              config.COLOR_TEXT, topleft=(body.x, top + config.s(6)))
+        return
+    label_w = font.size(f"T{max(n.turn for n in review.notes)}")[0] + config.s(12)
+    text_w = max(config.s(80), body.w - label_w - config.s(12))
+    line_h = font.get_height() + config.s(2)
+    row_pad = config.s(6)
+    lines = [_wrap(font, n.text, text_w) or [""] for n in review.notes]
+    heights = [max(_tap_size(0), len(ls) * line_h + 2 * row_pad) for ls in lines]
+    room = body.bottom - top
+    sel = max(0, ui.coach_sel)
+    start, used = sel, heights[sel]
+    while start > 0 and used + heights[start - 1] <= room:
+        start -= 1
+        used += heights[start]
+    y = top
+    for i in range(start, len(review.notes)):
+        if y + heights[i] > body.bottom:
+            break
+        row = pygame.Rect(body.x, y, body.w, heights[i])
+        if i == ui.coach_sel:
+            pygame.draw.rect(surface, (40, 46, 66), row, border_radius=config.s(5))
+            pygame.draw.rect(surface, config.COLOR_HINT, row, config.s(1), border_radius=config.s(5))
+        n = review.notes[i]
+        _text(surface, font, f"T{n.turn}", _COACH_KIND.get(n.kind, config.COLOR_TEXT),
+              topleft=(row.x + config.s(6), row.y + row_pad))
+        for k, text in enumerate(lines[i]):
+            _text(surface, font, text, config.COLOR_TEXT,
+                  topleft=(row.x + label_w, row.y + row_pad + k * line_h))
+        ui.coach_rows.append((i, (row.x, row.y, row.w, row.h)))
+        y += heights[i] + config.s(2)
+
+
+def _draw_coach_marks(surface, state: GameState, ui: Ui) -> None:
+    """Ring the systems the selected coach note is about, on the board it names."""
+    note = ui.coach_note()
+    if note is None or not ui.coach_open or ui.history_turn != note.turn:
+        return
+    for sid in note.systems:
+        if sid in state.systems:
+            node = state.systems[sid]
+            r = config.node_radius(node.production) + config.s(9)
+            pygame.draw.circle(surface, config.COLOR_HINT, ui.view.to_screen(node.pos), r, max(2, config.s(2)))
 
 
 def _winner_label(state: GameState, ui: Ui) -> str:
@@ -3476,7 +3649,9 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     tab_gap = config.s(6)
     tab_room = inner_w - tab_h - pad
     tabs, tx, line = [], 0, 0
-    for _k, label, _u in stats.METRICS:
+    coaching = ui.coach_review is not None
+    tab_labels = [label for _k, label, _u in stats.METRICS] + (["Coach"] if coaching else [])
+    for label in tab_labels:
         tw = _btn_w(font, label)
         if tx and tx + tw > tab_room:
             tx, line = 0, line + 1
@@ -3508,7 +3683,10 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     rects = []
     for i, (x, line, tw, label) in enumerate(tabs):
         r = pygame.Rect(box.x + pad + x, ty + line * (tab_h + tab_gap), tw, tab_h)
-        on = i == ui.graph_metric % len(stats.METRICS)
+        if i == len(stats.METRICS):   # the Coach tab, after the charts
+            ui.coach_tab_rect = _btn(surface, r, label, *(_BTN_ACTIVE if ui.coach_open else _BTN_GOLD), font)
+            continue
+        on = i == ui.graph_metric % len(stats.METRICS) and not ui.coach_open
         rects.append(_btn(surface, r, label, *(_BTN_ACTIVE if on else _BTN_BLUE), font))
     ui.graph_tab_rects = rects
     caret = pygame.Rect(box.right - pad - tab_h, ty, tab_h, tab_h)
@@ -3516,12 +3694,17 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     ui.graph_full_rect = (caret.x, caret.y, caret.w, caret.h)
     note = ("" if ui.history_reveal else "Rivals only while in sight")
     if not note and not config.touch_ui:
-        note = "Tab: next graph  ·  1-9 or click a seat: show/hide  ·  F: " + (
+        note = ("Up/Down: step notes  ·  Tab: graphs" if ui.coach_open else
+                "Tab: next graph  ·  1-9 or click a seat: show/hide") + "  ·  F: " + (
             "dock" if ui.graph_full else "full screen")
     if note and line == 0 and box.x + pad + tx + font.size(note)[0] <= caret.x - pad:
         _text(surface, font, note, config.COLOR_TEXT_DIM, midright=(caret.x - pad, ty + tab_h // 2))
 
     body_top = ty + tabs_h + pad
+    if ui.coach_open and ui.coach_review is not None:
+        _draw_coach_notes(surface, ui, ui.coach_review, pygame.Rect(box.x + pad, body_top, inner_w,
+                                                                     box.bottom - pad - body_top), font)
+        return box
     label_room = font.get_height() + config.s(4)   # the turn numbers under the plot
     if below:
         # under the plot: a header line (Show all, the unit over the values),

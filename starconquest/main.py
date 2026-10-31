@@ -22,6 +22,7 @@ import pygame
 from starconquest import (
     ai,
     campaign,
+    coach,
     config,
     daily,
     engine,
@@ -45,7 +46,7 @@ from starconquest import (
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
-from starconquest.model import GameState, Order
+from starconquest.model import AiParams, GameState, Order
 from starconquest.replay import GameLog
 from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_globals, build_state,
                                    fog_off, random_seed, resolve_seed)
@@ -319,6 +320,7 @@ def resume_game(log: GameLog, settings: Settings, seat: int = 1) -> tuple[GameSt
     ui.player_intel = intel
     ui.reset_view(state)      # re-frame now seen includes the whole replayed history
     ui.hand_turns = hand_turns(log)        # the log is the record of who drove
+    ui.hinted = log.hinted_from is not None  # ...and of whether a bot helped
     if log.turn_count:
         # The rules the last replayed turn was played with, put through the same
         # prune that turn's resolution gave them — a rule whose system was lost on
@@ -1194,6 +1196,15 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
         ui.history_chart = stats.masked(ui.history_chart, known)
     ui.history_graph = ui.history_reveal
+    # The coach: only on a decided game, when nothing is hidden any more, and
+    # opened first when it has something to say. A spectator holds no seat.
+    ui.coach_review = None
+    ui.coach_open, ui.coach_sel = False, -1
+    if ui.history_reveal and ui.human_id in state.players and ui.human_id != 0:
+        ui.coach_review = coach.review(history_states,
+                                       [log.orders_for(i) for i in range(log.turn_count)],
+                                       ui.human_id)
+        ui.coach_open = bool(ui.coach_review.notes)
     ui.graph_full = False
     ui.graph_hidden = set()
     ui.dragging_graph = False
@@ -1244,6 +1255,56 @@ def apply_rewind(log: GameLog, settings: Settings, turn: int) -> tuple[GameState
     except OSError:
         pass
     return resume_game(log, settings)
+
+
+HINT_STRATEGY = "marshal"  # the advisor: strong, fast, deterministic, and reads only the board
+
+
+def hint_orders(state: GameState, seat: int, strategy: str = HINT_STRATEGY) -> list[Order]:
+    """What ``strategy`` would send for ``seat`` from this board, ignoring the
+    player's own queued orders: the start of the turn, as every seat decides.
+
+    Asked of a deep copy with the seat re-dealt to the advisor at its default
+    knob, so nothing the bot reads or keeps can reach the live game, and through
+    `engine.decide_seat`, so it draws nothing from the rng the turn will use. An
+    advisor that is not loaded falls back to the heuristic, as any seat would
+    (`ai.decide`). Like every bot it reads the whole board, fog or not: a hint
+    is training help, which is why taking one takes the game off the board.
+    """
+    board = copy.deepcopy(state)
+    player = board.players[seat]
+    player.ai_strategy, player.ai_params = strategy, AiParams()
+    orders = engine.decide_seat(board, seat, ai.decide)
+    return [o for o in orders if o.owner_id == seat and o.ships > 0]
+
+
+def take_hint(state: GameState, ui: Ui, log: GameLog | None) -> None:
+    """The Hint control (K): show the advisor's sends for this turn as arrows.
+
+    In a game that has had no hint yet the first press only asks
+    (`Ui.hint_armed`): a hinted result is never posted (`Ui.can_post`), and
+    that is said before it happens, not after. Pressing again with the arrows
+    up hides them. The hint is stamped into the log at once (`hinted_from`), so
+    resuming the game keeps it hinted.
+    """
+    if not ui.can_hint(state):
+        return
+    if ui.hint_live(state):
+        ui.hint_turn, ui.hint_orders = -1, []
+        return
+    if not ui.hinted and not ui.hint_armed:
+        ui.hint_armed = True
+        return
+    ui.hint_armed = False
+    ui.hint_orders = hint_orders(state, ui.human_id)
+    ui.hint_turn = state.turn
+    ui.hinted = True
+    if log is not None and log.hinted_from is None:
+        log.hinted_from = state.turn
+        try:
+            log.save()
+        except OSError:
+            pass  # a save failure must never interrupt play
 
 
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
@@ -2392,7 +2453,11 @@ async def main() -> None:
             # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
             assert state is not None and ui is not None and log is not None
             action = game_input.handle_event(event, state, ui)
-            if action == "quit":
+            if action != "hint" and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                ui.hint_armed = False   # the ask is answered by the next press only
+            if action == "hint":
+                take_hint(state, ui, log)
+            elif action == "quit":
                 confirm_quit = True
             elif action == "menu":
                 scene = "menu"
@@ -2496,6 +2561,7 @@ async def main() -> None:
                     ui.dragging_scrubber = False
                     ui.dragging_graph = False
                     ui.history_chart = None
+                    ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
                     ui.history_graph = ui.graph_full = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended

@@ -3,7 +3,7 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
+'toggle_route', 'hint', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
 None.
 """
 
@@ -100,13 +100,23 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             ui.dragging_graph = False
             return None
         if event.key == pygame.K_TAB and ui.history_graph:
+            # the chart tabs, then Coach (when there is one), round and round
             step = -1 if event.mod & pygame.KMOD_SHIFT else 1
-            ui.graph_metric = (ui.graph_metric + step) % len(stats.METRICS)
+            n = len(stats.METRICS) + (ui.coach_review is not None)
+            at = len(stats.METRICS) if ui.coach_open else ui.graph_metric % len(stats.METRICS)
+            at = (at + step) % n
+            ui.coach_open = at == len(stats.METRICS)
+            if not ui.coach_open:
+                ui.graph_metric = at
+            return None
+        if event.key in (pygame.K_UP, pygame.K_DOWN) and ui.history_graph and ui.coach_open:
+            ui.select_note(ui.coach_sel + (1 if event.key == pygame.K_DOWN else -1)
+                           if ui.coach_sel >= 0 else 0)
             return None
         if event.key == pygame.K_f and ui.history_graph:
             ui.graph_full = not ui.graph_full
             return None
-        if ui.history_graph and pygame.K_1 <= event.key <= pygame.K_9:
+        if ui.history_graph and not ui.coach_open and pygame.K_1 <= event.key <= pygame.K_9:
             # the legend's rows, top to bottom
             seats = ui.graph_seats()
             n = event.key - pygame.K_1
@@ -166,6 +176,14 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
             for i, rect in enumerate(ui.graph_tab_rects):
                 if rect[2] and _point_in_rect(event.pos, rect):
                     ui.graph_metric = i
+                    ui.coach_open = False
+                    return None
+            if ui.coach_tab_rect[2] and _point_in_rect(event.pos, ui.coach_tab_rect):
+                ui.coach_open = True
+                return None
+            for i, rect in ui.coach_rows:
+                if _point_in_rect(event.pos, rect):
+                    ui.select_note(i)
                     return None
             for pid, rect in ui.graph_trace_rects:
                 if rect[2] and _point_in_rect(event.pos, rect):
@@ -672,6 +690,9 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         return "toggle_history"
     if event.key == pygame.K_g:
         return "toggle_route"
+    if event.key == pygame.K_k:
+        # main gates this on `Ui.can_hint`, the same call that draws the button
+        return "hint"
     if event.key == pygame.K_ESCAPE:
         if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
             _cancel(ui)
@@ -850,6 +871,8 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, None
     if ui.route_button_rect[2] and _point_in_rect(pos, ui.route_button_rect):
         return True, "toggle_route"
+    if ui.hint_button_rect[2] and _point_in_rect(pos, ui.hint_button_rect):
+        return True, "hint"
     return False, None
 
 

@@ -39,6 +39,12 @@ line gives only the verdict. Ideas that lost are in
 - shell.md · **The web build's download.** `tools/slim_web.py` strips comments/docstrings (lines kept) and subsets the fonts: archive 938 KB to 427 KB; `sw.js` caches pygbag's CDN runtime. *Not done*: `.pyc`, lazy imports.
 - shell.md · **Rules in full:** measured layout and `touch_ui`; the compact layout; browser bridges (`softkeyboard`, `webstore`, `share`, quitting); send popup and spectating; viewport margins; the Combat tab; route mode.
 
+
+## training.md
+- training.md · **The send forecast (`combat.forecast_landing`).** What lands that turn (`Ui.landing_at`), the garrison it meets with production on the way (`garrison_after`), the odds over the jitter square (`fight_odds`, cached), `sure_count`; fog hides it; reinforcing is not a fight.
+- training.md · **The hint (`main.take_hint`).** Marshal's sends for the human seat on a deep copy through `decide_seat`; dashed arrows; first press asks; `Ui.hinted` blocks `can_post`; `GameLog.hinted_from` saved at once, kept by fork/truncate by board; the verifier rejects it; not in play-by-post or autoplay.
+- training.md · **The post-game coach (`coach.review`).** Decided games only; gamble, surprise, emptied, idle and the turning point; the costliest 24 kept; the Coach tab, `Ui.select_note`, rings on the board.
+- training.md · **Proposed, not built.** Drill and per-bot stages; choosing the advisor.
 ## turnfilm.md
 - turnfilm.md · **Animated end of turn**, organised by bold lead sentences: why it exists; it plays back the past; events carry results; why its own module; the crossing sort key; the launch tick; production as a mark.
 - turnfilm.md · (same section, continued) combat's two speeds (`linger`); marks outlive their film; fog as the union of both turns; the deferred camera snap; pause; chaining turns; `_primed`; the frame cap.

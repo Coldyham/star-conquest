@@ -97,6 +97,17 @@ def test_a_score_that_the_replay_contradicts_is_a_mismatch(posted, field):
     assert check.verdict == "mismatch" and "replay gives" in check.detail
 
 
+def test_a_game_played_with_a_bots_hint_is_a_mismatch(posted):
+    """The game never offers to post a hinted win (`Ui.can_post`); a score that
+    arrives with one anyway is not counted."""
+    score, blob, setup = posted
+    log = replay.GameLog.decode(blob)
+    log.hinted_from = 2
+    with _preserve_config():
+        check = verify_scores.verify(score, log.encoded(), setup)
+    assert check.verdict == "mismatch" and "hint" in check.detail
+
+
 def test_a_replay_of_another_map_cannot_back_a_score(posted):
     """The attack the setup check exists for: an easy map's log attached to a hard
     map's score would otherwise replay perfectly and verify."""

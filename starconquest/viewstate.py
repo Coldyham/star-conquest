@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from . import config, model, stats, turnfilm
+from . import coach, config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
@@ -47,6 +47,7 @@ FOOTER_RECTS = (
     "route_cancel_rect",
     "route_mode_rect",
     "route_auto_rect",
+    "hint_button_rect",
 )
 
 
@@ -269,6 +270,17 @@ class Ui:
     history_graph: bool = False
     graph_full: bool = False
     graph_metric: int = 0
+    # The post-game coach (`coach.review`), read off the history boards once
+    # on entering review of a decided game, and dropped on leaving it; None mid-game,
+    # where it would give away what fog hid. `coach_open` puts its notes in the
+    # graph panel in place of a chart (the Coach tab), `coach_sel` is the note
+    # being looked at (-1: none yet), and render rebuilds `coach_rows` as
+    # ``(note index, rect)`` and `coach_tab_rect` every frame.
+    coach_review: coach.Review | None = None
+    coach_open: bool = False
+    coach_sel: int = -1
+    coach_rows: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
+    coach_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     graph_hidden: set[int] = field(default_factory=set)
     dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
@@ -412,6 +424,17 @@ class Ui:
     # somebody else's, so none of the sharing below is offered for it: watching a
     # replay must not be one press away from posting its score as your own.
     watched: bool = False
+    # Training help (`main.take_hint`): a bot's suggested sends for the live turn,
+    # drawn as dashed arrows while `hint_turn` is the board's turn. `hinted` is
+    # sticky — read back from the log on resume (`GameLog.hinted_from`) — and
+    # takes the result off the leaderboard (`can_post`). `hint_armed` is the
+    # first press of the button in a game not yet hinted: it asks, the second
+    # press takes the hint, anything else (`main`) disarms it.
+    hint_orders: list[Order] = field(default_factory=list)
+    hint_turn: int = -1
+    hinted: bool = False
+    hint_armed: bool = False
+    hint_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play-by-post: this match is shared, and this seat is ours. `pbp_match` is
     # the match id, `pbp_waiting` the seats still to move for the live turn, and
     # `pbp_submitted` whether we have sent ours — which is what puts the waiting
@@ -697,6 +720,21 @@ class Ui:
         """The seats whose lines the graphs draw: offered and not hidden."""
         return tuple(pid for pid in self.graph_seats() if pid not in self.graph_hidden)
 
+    def coach_note(self) -> coach.Note | None:
+        """The coach's note being looked at, if any."""
+        if self.coach_review is None or not 0 <= self.coach_sel < len(self.coach_review.notes):
+            return None
+        return self.coach_review.notes[self.coach_sel]
+
+    def select_note(self, i: int) -> None:
+        """Look at the coach's note ``i``: History jumps to the board it names."""
+        if self.coach_review is None or not self.coach_review.notes:
+            return
+        self.coach_sel = max(0, min(i, len(self.coach_review.notes) - 1))
+        self.history_turn = max(0, min(self.coach_review.notes[self.coach_sel].turn, self.history_max))
+        self.playing = False
+        self.clear_fading_marks()   # a jump, as with the scrubber
+
     def toggle_trace(self, pid: int) -> None:
         """Show or hide ``pid``'s line on the graphs."""
         if pid in self.graph_hidden:
@@ -779,7 +817,20 @@ class Ui:
         from any replay on the board.
         """
         return (state.winner == self.human_id and self.hand_turns > 0
-                and not self.watched and not self.in_pbp)
+                and not self.watched and not self.in_pbp and not self.hinted)
+
+    def can_hint(self, state: GameState) -> bool:
+        """Is the Hint control offered? Only on our own live turn: not in a shared
+        match (a bot's advice against friends), not while reviewing, under
+        autoplay or spectating, and not once the game is decided or we are out."""
+        return (not self.in_pbp and not self.history and not self.autoplay
+                and not self.watched and state.winner is None
+                and self.human_id in state.players and self.human_id != 0
+                and not state.is_defeated(self.human_id))
+
+    def hint_live(self, state: GameState) -> bool:
+        """Whether the hint arrows are for the board on screen."""
+        return self.hint_turn == state.turn and not self.history
 
     @property
     def in_stage(self) -> bool:
@@ -813,6 +864,17 @@ class Ui:
         if self.history:
             return 0
         return sum(o.ships for o in self.pending if o.source_id == sid)
+
+    def landing_at(self, state: GameState, dest: int, turns: int) -> int:
+        """Our ships landing on ``dest`` in ``turns`` turns: queued sends whose
+        lane takes exactly that long, and fleets already that far out. They
+        land together, so they fight as one (`combat.resolve_arrival`)."""
+        queued = sum(o.ships for o in self.pending
+                     if o.dest_id == dest and state.travel_turns(o.source_id, dest) == turns)
+        flying = sum(f.ships for f in state.fleets
+                     if f.owner_id == self.human_id and f.dest_id == dest
+                     and f.turns_remaining == turns)
+        return queued + flying
 
     def available(self, state: GameState, sid: int) -> int:
         """Ships still free to deploy from a system this turn."""
