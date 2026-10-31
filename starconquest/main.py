@@ -22,6 +22,7 @@ import pygame
 from starconquest import (
     ai,
     campaign,
+    coach,
     config,
     daily,
     engine,
@@ -1195,6 +1196,15 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
         ui.history_chart = stats.masked(ui.history_chart, known)
     ui.history_graph = ui.history_reveal
+    # The coach: only on a decided game, when nothing is hidden any more, and
+    # opened first when it has something to say. A spectator holds no seat.
+    ui.coach_review = None
+    ui.coach_open, ui.coach_sel = False, -1
+    if ui.history_reveal and ui.human_id in state.players and ui.human_id != 0:
+        ui.coach_review = coach.review(history_states,
+                                       [log.orders_for(i) for i in range(log.turn_count)],
+                                       ui.human_id)
+        ui.coach_open = bool(ui.coach_review.notes)
     ui.graph_full = False
     ui.graph_hidden = set()
     ui.dragging_graph = False
@@ -2551,6 +2561,7 @@ async def main() -> None:
                     ui.dragging_scrubber = False
                     ui.dragging_graph = False
                     ui.history_chart = None
+                    ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
                     ui.history_graph = ui.graph_full = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended

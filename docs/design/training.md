@@ -1,10 +1,11 @@
-# Training help: the send forecast and the hint
+# Training help: the send forecast, the hint and the coach
 
-Two aids for a player learning the game, built 2026-10-31 on a player's
+Three aids for a player learning the game, built 2026-10-31 on a player's
 request ("I'm not very good at this game and I'm finding it hard to get
 better"). The forecast is arithmetic the player could already do on the
 Combat page, so it is on everywhere. The hint is a bot's move, so taking one
-takes the game off the leaderboard.
+takes the game off the leaderboard. The coach reads a decided game and
+points at the turns worth a second look.
 
 ## The send forecast (`combat.forecast_landing`, `render._forecast_line`)
 
@@ -72,15 +73,48 @@ hide.
   stage or a daily may be hinted, and then is not cleared or posted, because
   `stage_cleared` goes through `can_post`.
 
+## The post-game coach (`coach.review`, the Coach tab)
+
+A pure core module that reads the history boards (`main.build_history`) and the
+log's orders (`GameLog.orders_for`) once, when History opens on a **decided**
+game (`Ui.history_reveal`), and never mid-game, where it would give away what
+fog hid. Ironman is unaffected: History is closed until the game is decided
+anyway. The win overlay's button reads "Coach & history".
+
+Its notes, each naming the board to jump to (the turn the decision was made
+on) and the systems to ring there:
+
+- **Gamble** (red): our ships landing together on a system they did not take,
+  fewer than `combat.sure_count` of the garrison they could expect
+  (`garrison_after` from the latest launch's board). Ships landing on the same
+  board from any lane or turn are one group, as they fight as one.
+- **Surprise** (amber): the same, at or above the sure count. The owner
+  reinforced, or a rival landed too.
+- **Emptied** (red): a system lost within `EMPTIED_WINDOW` turns of our sending at
+  least `EMPTIED_SHARE` of its garrison out.
+- **Idle** (amber): `IDLE_TURNS`+ turns of a system holding the sure count for a
+  neutral next door and sending nothing, with no rival next door (holding a
+  border is not idleness). One note per streak.
+- **The turning point** (violet): from a loss, the first board of the last
+  stretch a rival's income stayed above ours; from a win, the first board of the
+  stretch ours stayed above every rival's. Income is `stats.chart`'s, so the note
+  agrees with the Income tab.
+
+At most 24 notes, the costliest kept (ships thrown away, ship-turns idle), and
+the turning point always. They are shown in turn order under a tally ("12
+captures · 3 failed attacks · 4 systems lost").
+
+The Coach tab sits after the chart tabs in the graph panel, opens first when
+there are notes, and takes the panel's body in place of the plot and legend.
+Click a note, or press Up/Down, to select it (`Ui.select_note`): History jumps
+to its board and rings its systems (`render._draw_coach_marks`). The rows are a
+window kept around the selected note, so a long list needs no scrollbar. Tab
+cycles the charts and then Coach. A watched replay is coached for its human seat
+too. A spectator holds no seat and gets no coach.
+
 ## Proposed, not built
 
 Listed in `docs/open.md`:
-
-- **A post-game coach.** After the game is decided (so Ironman is fine), replay
-  the log and flag turns by rule: a system emptied next to a rival and lost; a
-  launch under the sure count that lost or annihilated; ships idle for more than
-  5 turns with neutrals in reach; income falling behind. Each flag jumps into
-  History.
 - **Drill and per-bot tutorial stages.** Small gauntlet stages (data only): hold
   a border against rusherplus, time an arrival against production, converge two
   lanes on one turn, counter-strike an emptied system, a three-way pile-up. Also

@@ -86,7 +86,7 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -335,6 +335,7 @@ when to re-run it, is `docs/design/ladder.md`):
 - **Training help** (`docs/design/training.md`): the send popup's forecast reads only
   what the player can see (`combat.forecast_landing`). The Hint (K) runs marshal on a
   deep copy; a hinted game is never posted (`Ui.hinted`, `GameLog.hinted_from`).
+  The coach (`coach.review`) reads only a decided game's history, never mid-game.
 
 ### Map generation (mapgen.py)
 

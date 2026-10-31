@@ -260,7 +260,7 @@ for every map ever shared. `main.new_ui` stamps it onto `Ui.ironman` so nothing
 reads the store once a frame, and `Ui.can_review` is the one gate render's
 footer button and main's `toggle_history` both ask. A spectator who has been
 knocked out still can't open History, or they could rewind and play on; once
-the game has a winner, *Review history* on the win overlay is offered as usual.
+the game has a winner, *Coach & history* on the win overlay is offered as usual.
 
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and

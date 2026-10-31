@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from . import config, model, stats, turnfilm
+from . import coach, config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
@@ -270,6 +270,17 @@ class Ui:
     history_graph: bool = False
     graph_full: bool = False
     graph_metric: int = 0
+    # The post-game coach (`coach.review`), read off the history boards once
+    # on entering review of a decided game, and dropped on leaving it; None mid-game,
+    # where it would give away what fog hid. `coach_open` puts its notes in the
+    # graph panel in place of a chart (the Coach tab), `coach_sel` is the note
+    # being looked at (-1: none yet), and render rebuilds `coach_rows` as
+    # ``(note index, rect)`` and `coach_tab_rect` every frame.
+    coach_review: coach.Review | None = None
+    coach_open: bool = False
+    coach_sel: int = -1
+    coach_rows: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
+    coach_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     graph_hidden: set[int] = field(default_factory=set)
     dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
@@ -708,6 +719,21 @@ class Ui:
     def graph_traces(self) -> tuple[int, ...]:
         """The seats whose lines the graphs draw: offered and not hidden."""
         return tuple(pid for pid in self.graph_seats() if pid not in self.graph_hidden)
+
+    def coach_note(self) -> coach.Note | None:
+        """The coach's note being looked at, if any."""
+        if self.coach_review is None or not 0 <= self.coach_sel < len(self.coach_review.notes):
+            return None
+        return self.coach_review.notes[self.coach_sel]
+
+    def select_note(self, i: int) -> None:
+        """Look at the coach's note ``i``: History jumps to the board it names."""
+        if self.coach_review is None or not self.coach_review.notes:
+            return
+        self.coach_sel = max(0, min(i, len(self.coach_review.notes) - 1))
+        self.history_turn = max(0, min(self.coach_review.notes[self.coach_sel].turn, self.history_max))
+        self.playing = False
+        self.clear_fading_marks()   # a jump, as with the scrubber
 
     def toggle_trace(self, pid: int) -> None:
         """Show or hide ``pid``'s line on the graphs."""
