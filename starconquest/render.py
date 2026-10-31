@@ -2622,8 +2622,12 @@ def _draw_briefing(surface, ui: Ui) -> None:
     the stage's title, which stage it is, then the briefing's paragraphs, and its
     target as a note, which the card always shows, so the target is never a
     surprise on the win overlay."""
-    close = ("Tap anywhere to begin · tap the hint at the right to read this again"
-             if config.touch_ui else "Press any key to begin · B shows this again")
+    if config.touch_ui:
+        # The hint sits in the side panel: under the map in portrait.
+        where = "below the map" if config.portrait else "at the right"
+        close = f"Tap anywhere to begin · tap the hint {where} to read this again"
+    else:
+        close = "Press any key to begin · B shows this again"
     notes = (f"Target: {ui.stage_target.text()}",) if ui.stage_target is not None else ()
     _draw_card(surface, ui.stage_title, ui.stage_label or "", _BTN_TEAL[1], ui.briefing, close, notes)
 
