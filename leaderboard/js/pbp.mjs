@@ -480,7 +480,7 @@ async function renderDetail(node, matchId, mine) {
   if (open.length && !entry) {
     const section = el("section", { class: "claims" }, [
       el("h2", { text: "Take a seat" }),
-      el("p", { class: "lede", text: "The name is optional and shows beside your colour. The seat is kept in this browser, beside the game's own, so this page can always reopen it — copy its link to play from another device." }),
+      el("p", { class: "lede", text: "The name is optional and shows beside your colour. This browser keeps the seat; copy its link to play from another device." }),
     ]);
     const controls = open.map((seat) => claimControl(match, seat, mine, (taken) => {
       for (const other of controls) if (other !== taken) other.remove();
