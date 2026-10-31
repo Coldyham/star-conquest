@@ -18,6 +18,7 @@ actually in force.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections import defaultdict
 from dataclasses import dataclass
@@ -309,6 +310,106 @@ def preview_fight(attacker: int, defender: int, jitter: float, advantage: float)
         best=_preview_roll(attacker, defender, +j, -j, advantage),
         worst=_preview_roll(attacker, defender, -j, +j, advantage),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Odds: how likely a fight is, for the send popup's forecast
+#
+# The preview's corners say what *can* happen; a player choosing a ship count
+# also wants to know how likely it is. Each side's swing is an independent
+# uniform draw (`resolve_fight`), so the chance is the share of the jitter square
+# the attacker wins — measured on a grid of the same `_preview_roll` the menu
+# draws, so the odds cannot drift from the fight either. No rng, no state.
+# --------------------------------------------------------------------------- #
+_ODDS_GRID = 40  # cells a side: 1,600 rolls, cached, so a popup redraw is free
+
+
+@dataclass(frozen=True)
+class Odds:
+    """The attacker's prospects in one fight, over every roll of the dice."""
+
+    capture: float  # share of rolls the attacker takes the system
+    survivors: float  # mean ships the attacker keeps, over the rolls it captures in
+    sure: bool  # no roll can lose it: the worst corner already captures
+
+
+def fight_odds(attacker: int, defender: int, jitter: float, advantage: float) -> Odds:
+    """``attacker`` ships against a garrison of ``defender``, over the whole
+    jitter square. ``jitter``/``advantage`` are parameters, as for
+    `preview_fight`; `forecast_landing` passes the live `config` values."""
+    return _fight_odds(max(0, int(attacker)), max(0, int(defender)),
+                       round(max(0.0, float(jitter)), 6), round(float(advantage), 6))
+
+
+@functools.lru_cache(maxsize=4096)
+def _fight_odds(attacker: int, defender: int, jitter: float, advantage: float) -> Odds:
+    if attacker <= 0:
+        return Odds(0.0, 0.0, False)
+    if defender <= 0:
+        return Odds(1.0, float(attacker), True)
+    sure = preview_fight(attacker, defender, jitter, advantage).worst.winner == ATTACKER
+    n = _ODDS_GRID
+    wins, kept = 0, 0
+    for i in range(n):
+        a_roll = jitter * (-1.0 + (2 * i + 1) / n)
+        for k in range(n):
+            d_roll = jitter * (-1.0 + (2 * k + 1) / n)
+            roll = _preview_roll(attacker, defender, a_roll, d_roll, advantage)
+            if roll.winner == ATTACKER:
+                wins += 1
+                kept += roll.survivors
+    capture = 1.0 if sure else wins / (n * n)
+    return Odds(capture, kept / wins if wins else 0.0, sure)
+
+
+def sure_count(defender: int, jitter: float, advantage: float) -> int:
+    """The fewest ships that take a garrison of ``defender`` on every roll."""
+    a = max(1, defender + 1)
+    while not fight_odds(a, defender, jitter, advantage).sure:
+        a += 1
+    return a
+
+
+@dataclass(frozen=True)
+class Forecast:
+    """What ships landing on a system some turns from now will meet there.
+
+    A teaching aid, not an oracle: it counts the garrison the target holds now
+    and what it will build on the way, and our own ships landing the same turn —
+    never a rival's moves, which nobody can know.
+    """
+
+    turns: int  # turns until the ships land
+    landing: int  # our ships landing that turn, all lanes together
+    garrison: int  # what the system will hold when they land, if nobody moves
+    reinforce: bool  # it is ours already: the ships add to the garrison
+    odds: Odds | None  # None when reinforcing
+    sure_at: int  # the fewest landing ships that take it on every roll (0 when reinforcing)
+
+
+def garrison_after(state: GameState, sid: int, turns: int) -> int:
+    """System ``sid``'s garrison ``turns`` turns from now if nothing lands or
+    leaves: production runs before arrivals every turn (`engine._production`),
+    so a fleet ``turns`` out meets every hull built on the way, including the
+    one finished on the turn it lands."""
+    node = state.systems[sid]
+    if node.production <= 0 or (node.owner_id == 0 and not config.NEUTRAL_PRODUCES):
+        return node.ships
+    built = ((node.prod_progress + max(0, turns)) // node.production
+             - node.prod_progress // node.production)
+    return node.ships + built
+
+
+def forecast_landing(state: GameState, owner: int, dest_id: int, turns: int, landing: int) -> Forecast:
+    """``landing`` of ``owner``'s ships reaching ``dest_id`` in ``turns`` turns,
+    priced against the garrison they will find, under the rules in force."""
+    garrison = garrison_after(state, dest_id, turns)
+    if state.systems[dest_id].owner_id == owner:
+        return Forecast(turns, landing, garrison, True, None, 0)
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+    return Forecast(turns, landing, garrison, False,
+                    fight_odds(landing, garrison, jitter, advantage),
+                    sure_count(garrison, jitter, advantage))
 
 
 def _record_losses(state: GameState, forces: dict[int, int], owner_id: int, ships: int) -> None:

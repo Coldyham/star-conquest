@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import config, fog, matchnames, model, paths, starlore, stats, widgets
+from . import combat, config, fog, matchnames, model, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
@@ -102,6 +102,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     if not ui.history:
         _draw_forward_rules(surface, state, ui)  # standing auto-forward (chevron flow)
         _draw_pending(surface, state, ui)  # queued one-shot sends (solid)
+        _draw_hint(surface, state, ui)  # the advisor's suggested sends (dashed)
         _draw_choosing_preview(surface, state, ui)  # the arrow you're adjusting now
         _draw_route_preview(surface, state, ui)  # the route plan being composed
     _draw_fleets(surface, state, ui)
@@ -431,6 +432,48 @@ def _draw_pending(surface, state: GameState, ui: Ui) -> None:
         _text(surface, _fonts()["small"], str(o.ships), config.COLOR_TEXT, center=(lx, ly - config.s(10)))
 
 
+def _draw_dashed(surface, pa, pb, color, width: int) -> None:
+    """A dashed segment from ``pa`` to ``pb``: a suggestion, not a plan."""
+    ux, uy, length = _lane_unit(pa, pb)
+    dash, gap = config.s(9), config.s(6)
+    d = 0.0
+    while d < length:
+        e = min(length, d + dash)
+        pygame.draw.line(surface, color, (pa[0] + ux * d, pa[1] + uy * d),
+                         (pa[0] + ux * e, pa[1] + uy * e), width)
+        d = e + gap
+
+
+def _draw_hint(surface, state: GameState, ui: Ui) -> None:
+    """The advisor's sends for this turn (`main.take_hint`): dashed arrows in
+    the hint colour, the count 60% of the way along — the far side of the lane
+    from a queued order's label (`_draw_pending`), so the two can be compared."""
+    if not ui.hint_live(state):
+        return
+    n = len(ui.hint_orders)
+    caption = (f"Hint: {n} send{'s' if n != 1 else ''} (K hides)" if n
+               else "Hint: hold this turn (K hides)")
+    if config.touch_ui:
+        caption = caption.replace(" (K hides)", "")
+    vx, vy, vw, _vh = config.play_rect()
+    _label_pill(surface, _fonts()["small"], caption, config.COLOR_HINT,
+                (vx + vw // 2, vy + config.s(18)))
+    width = config.s(2)
+    for o in ui.hint_orders:
+        if o.source_id not in state.systems or o.dest_id not in state.systems:
+            continue
+        pa = ui.view.to_screen(state.systems[o.source_id].pos)
+        pb = ui.view.to_screen(state.systems[o.dest_id].pos)
+        ux, uy, _ = _lane_unit(pa, pb)
+        inset = config.node_radius(state.systems[o.dest_id].production) + config.ARROW_GAP
+        tip = (pb[0] - ux * inset, pb[1] - uy * inset)
+        _draw_dashed(surface, pa, tip, config.COLOR_HINT, width)
+        _draw_arrowhead(surface, tip, (ux, uy), config.COLOR_HINT, width)
+        lx = int(pa[0] + (pb[0] - pa[0]) * 0.6)
+        ly = int(pa[1] + (pb[1] - pa[1]) * 0.6)
+        _label_pill(surface, _fonts()["small"], str(o.ships), config.COLOR_HINT, (lx, ly - config.s(10)))
+
+
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
     """Standing auto-forward rules as a persistent chevron flow (human colour), one
     per lane labelled with its share where that is less than everything, and a
@@ -724,7 +767,8 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
 
     layout = _SplitLayout([], True, True)
     if rule is None:
-        rows = 7 + lane_row
+        # ...plus the forecast row: what the ships will meet when they land
+        rows = 8 + lane_row
     elif split:
         # A split that still doesn't fit sheds what the numbers already say — the
         # bar, then the "stays" row — and then whole lanes, keeping a window round
@@ -866,6 +910,12 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
             effect = f"send {ui.chosen}  ·  {max(0, garrison - ui.chosen)} home"
         _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
         cy += bh + gap
+        if not ui.forward_armed:
+            # the forecast: the odds of the fight these ships land in
+            line = _forecast_line(state, ui, font, iw)
+            if line is not None:
+                _text(surface, font, line[0], line[1], center=(inner + iw // 2, cy + bh // 2))
+            cy += bh + gap
 
         # stepper row: [−]  value  [+]  — the send count, or (Forward) the lane's share
         minus = pygame.Rect(inner, cy + (bh - s) // 2, s, s)
@@ -923,6 +973,51 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         ui.done_rect = (done.x, done.y, done.w, done.h)
     _draw_popup_button(surface, cancel, discard, danger=True)
     ui.cancel_rect = (cancel.x, cancel.y, cancel.w, cancel.h)
+
+
+def _forecast_line(state: GameState, ui: Ui, font, width: int) -> tuple[str, tuple] | None:
+    """The send popup's forecast: our ships landing on ``ui.dest`` that turn
+    (this send and any other landing with it) against the garrison they will
+    find, with the odds of taking it (`combat.forecast_landing`). The longest
+    wording that fits ``width``; green for a sure capture, amber for a likely
+    one, red for a gamble. Only what the player can see goes in: a destination
+    out of full view says so instead of reading its garrison."""
+    src, dest = ui.selected, ui.dest
+    turns = state.travel_turns(src, dest) if src is not None and dest is not None else None
+    if turns is None:
+        return None
+    if not ui.sees(dest):
+        forms = [f"lands in {turns} turns · garrison unseen", f"in {turns} · unseen"]
+        colour = config.COLOR_TEXT_DIM
+    else:
+        landing = ui.landing_at(state, dest, turns)
+        fc = combat.forecast_landing(state, ui.human_id, dest, turns, landing)
+        if fc.reinforce:
+            there = fc.garrison + fc.landing
+            forms = [f"lands in {turns} turns: {there} there", f"in {turns}: {there} there"]
+            colour = config.COLOR_TEXT_DIM
+        else:
+            odds = fc.odds
+            assert odds is not None
+            g = fc.garrison
+            if odds.sure:
+                long = f"sure, ~{round(odds.survivors)} left"
+                short = f"sure ~{round(odds.survivors)}"
+                colour = _BTN_GREEN[1]
+            else:
+                # never "100%" for what a roll can still lose, nor "0%" for a chance
+                pct = min(99, max(1, round(odds.capture * 100))) if odds.capture > 0 else 0
+                long = f"{pct}% win · {fc.sure_at} is sure"
+                short = f"{pct}% · {fc.sure_at} sure"
+                colour = _BTN_AMBER[1] if odds.capture >= 0.5 else _BTN_DANGER[1]
+            forms = [f"{landing} vs {g} in {turns} turns: {long}",
+                     f"{landing} vs {g} in {turns}: {long}",
+                     f"{landing} vs {g}: {long}", f"{landing} vs {g}: {short}",
+                     f"{landing}v{g} {short}", short]
+    for text in forms:
+        if font.size(text)[0] <= width:
+            return text, colour
+    return forms[-1], colour
 
 
 def _draw_mini_stepper(surface, font, row: pygame.Rect, s: int, label: str, value: str,
@@ -1695,6 +1790,16 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # drawn exactly when the mode means something.
     if ui.can_route(state):
         specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
+    # Hint: a bot's suggested sends, as training help. Its first press in a game
+    # not yet hinted asks, since a hinted game is never posted (`Ui.can_post`).
+    if ui.can_hint(state):
+        if ui.hint_armed:
+            label, colours = "Hint: no posting?", _BTN_AMBER
+        elif ui.hint_live(state):
+            label, colours = "Hide hint", _BTN_ACTIVE
+        else:
+            label, colours = "Hint", _BTN_GOLD
+        specs.append(("hint_button_rect", _key_hint(label, "K"), *colours, 3, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no

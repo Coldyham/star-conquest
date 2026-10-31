@@ -12,6 +12,7 @@ ships or is dropped, delete its line here (and add it to
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
+- training.md · A post-game coach (rule-based flags on a decided game, each a jump into History); drill stages and a tutorial stage each for rusherplus, evolved and knower; choosing the hint's advisor. *Proposed, not built.*
 - gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
 - shell.md · The phone's setup menu at device resolution, if the panel's height can be had without a pixel scan; the idle side panel's how-to cut off on a landscape phone; the same send-finishes-its-source rule on desktop. *Phones: the compact layout.*
 - gauntlet.md · Targets on lanes, including hidden ones that reveal a bonus stage only once met (a Mario Kart staff ghost); the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*

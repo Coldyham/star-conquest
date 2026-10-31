@@ -47,6 +47,7 @@ FOOTER_RECTS = (
     "route_cancel_rect",
     "route_mode_rect",
     "route_auto_rect",
+    "hint_button_rect",
 )
 
 
@@ -412,6 +413,17 @@ class Ui:
     # somebody else's, so none of the sharing below is offered for it: watching a
     # replay must not be one press away from posting its score as your own.
     watched: bool = False
+    # Training help (`main.take_hint`): a bot's suggested sends for the live turn,
+    # drawn as dashed arrows while `hint_turn` is the board's turn. `hinted` is
+    # sticky — read back from the log on resume (`GameLog.hinted_from`) — and
+    # takes the result off the leaderboard (`can_post`). `hint_armed` is the
+    # first press of the button in a game not yet hinted: it asks, the second
+    # press takes the hint, anything else (`main`) disarms it.
+    hint_orders: list[Order] = field(default_factory=list)
+    hint_turn: int = -1
+    hinted: bool = False
+    hint_armed: bool = False
+    hint_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play-by-post: this match is shared, and this seat is ours. `pbp_match` is
     # the match id, `pbp_waiting` the seats still to move for the live turn, and
     # `pbp_submitted` whether we have sent ours — which is what puts the waiting
@@ -779,7 +791,20 @@ class Ui:
         from any replay on the board.
         """
         return (state.winner == self.human_id and self.hand_turns > 0
-                and not self.watched and not self.in_pbp)
+                and not self.watched and not self.in_pbp and not self.hinted)
+
+    def can_hint(self, state: GameState) -> bool:
+        """Is the Hint control offered? Only on our own live turn: not in a shared
+        match (a bot's advice against friends), not while reviewing, under
+        autoplay or spectating, and not once the game is decided or we are out."""
+        return (not self.in_pbp and not self.history and not self.autoplay
+                and not self.watched and state.winner is None
+                and self.human_id in state.players and self.human_id != 0
+                and not state.is_defeated(self.human_id))
+
+    def hint_live(self, state: GameState) -> bool:
+        """Whether the hint arrows are for the board on screen."""
+        return self.hint_turn == state.turn and not self.history
 
     @property
     def in_stage(self) -> bool:
@@ -813,6 +838,17 @@ class Ui:
         if self.history:
             return 0
         return sum(o.ships for o in self.pending if o.source_id == sid)
+
+    def landing_at(self, state: GameState, dest: int, turns: int) -> int:
+        """Our ships landing on ``dest`` in ``turns`` turns: queued sends whose
+        lane takes exactly that long, and fleets already that far out. They
+        land together, so they fight as one (`combat.resolve_arrival`)."""
+        queued = sum(o.ships for o in self.pending
+                     if o.dest_id == dest and state.travel_turns(o.source_id, dest) == turns)
+        flying = sum(f.ships for f in state.fleets
+                     if f.owner_id == self.human_id and f.dest_id == dest
+                     and f.turns_remaining == turns)
+        return queued + flying
 
     def available(self, state: GameState, sid: int) -> int:
         """Ships still free to deploy from a system this turn."""

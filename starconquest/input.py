@@ -3,7 +3,7 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
+'toggle_route', 'hint', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
 None.
 """
 
@@ -672,6 +672,9 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         return "toggle_history"
     if event.key == pygame.K_g:
         return "toggle_route"
+    if event.key == pygame.K_k:
+        # main gates this on `Ui.can_hint`, the same call that draws the button
+        return "hint"
     if event.key == pygame.K_ESCAPE:
         if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
             _cancel(ui)
@@ -850,6 +853,8 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, None
     if ui.route_button_rect[2] and _point_in_rect(pos, ui.route_button_rect):
         return True, "toggle_route"
+    if ui.hint_button_rect[2] and _point_in_rect(pos, ui.hint_button_rect):
+        return True, "hint"
     return False, None
 
 

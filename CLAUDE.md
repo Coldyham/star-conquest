@@ -332,6 +332,9 @@ when to re-run it, is `docs/design/ladder.md`):
 - **The Combat tab** uses `combat.preview_fight` (no `config`, no rng);
   `test_tab_content_stays_inside_the_panel` guards it.
 - **Route mode** is the one control that doesn't commit as you go.
+- **Training help** (`docs/design/training.md`): the send popup's forecast reads only
+  what the player can see (`combat.forecast_landing`). The Hint (K) runs marshal on a
+  deep copy; a hinted game is never posted (`Ui.hinted`, `GameLog.hinted_from`).
 
 ### Map generation (mapgen.py)
 

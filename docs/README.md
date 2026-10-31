@@ -47,6 +47,7 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/core.md`](design/core.md) | Settings tokens, the random seat, challenge links and stable digests, ship-speed growth, in-lane battles, the replay log and dice streams, star names, symmetric layouts |
 | [`design/shell.md`](design/shell.md) | Text sizing and touch, viewport margins, the send popup, forwarding rules, the Combat page, spectating, ironman, graphs, route mode |
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn |
+| [`design/training.md`](design/training.md) | Training help: the send popup's odds forecast and the bot hint (K) that takes a game off the board |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, generated gauntlets, stage targets, the proposed run and carry-over |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, versioning, playstyle readings, one site with templated pages |
