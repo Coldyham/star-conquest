@@ -796,7 +796,8 @@ test bot within a turn cap that grows from 80 to 110.
   for its week): replays and every score but the leader stay hidden, so the
   best score posted on the day is the day's winner. The map page marks it *Led
   at reveal*, and the daily page *Best on the day*; later scores rank too, marked
-  *later*.
+  *later*. A winner who has since bettered their score is ranked by the later
+  one, and the mark gives the figures that won the day.
 - **The page derives the rest**: the day's standings (each player's best
   counted win) and streaks from `counted_scores` through
   `daily_games` (seed plus the setup compared as jsonb, as `campaign_games`

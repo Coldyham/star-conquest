@@ -1097,6 +1097,9 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 /* -- the daily challenge (daily.html) ------------------------------------- */
 /* A score posted after its day, once the replays were out (daily-page.mjs). */
 .daily-later { margin-left: 0.6em; color: var(--dim); cursor: help; border-bottom: 1px dotted currentColor; }
+/* The daily winner's mark can carry its figures; it moves to a line of its own
+   rather than running off a phone's width. */
+.tally-figs .at-reveal { display: inline-block; white-space: normal; }
 /* A streak whose title holds the true streak: hover or tap reads it. */
 .tally-figs[title] { cursor: help; }
 
