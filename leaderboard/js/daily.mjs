@@ -132,3 +132,36 @@ export function bestOnTheDay(rows, day) {
 export function postedOn(submittedAt, day) {
   return dayParam(submittedAt) === day;
 }
+
+/**
+ * One player's running streak of each kind, as the daily page counts them.
+ * `scores` are the player's counted scores (`{game_key, hand, submitted_at}`),
+ * `dailyGames` the `daily_games` rows (`{day, game_key, kind}`) of those maps.
+ * Returns `{board, puzzle}`, each `{days, onTheDay}` (0 when none is running).
+ */
+export function playerStreaks(scores, dailyGames, today) {
+  const out = {};
+  for (const kind of KINDS) {
+    const dayOf = new Map(dailyGames.filter((g) => (g.kind || "board") === kind).map((g) => [g.game_key, g.day]));
+    const wins = scores
+      .filter((s) => s.hand > 0 && dayOf.has(s.game_key))
+      .map((s) => ({ name: "", day: dayOf.get(s.game_key), onTheDay: postedOn(s.submitted_at, dayOf.get(s.game_key)) }));
+    const [run] = streaks(wins, today);
+    out[kind] = run ? { days: run.days, onTheDay: run.onTheDay } : { days: 0, onTheDay: 0 };
+  }
+  return out;
+}
+
+/**
+ * A map that was a day's daily (a `daily_games` row, `{day, kind}`), for
+ * game.html's badge and button: `{label, button, href}`, the day's own page.
+ */
+export function dailyMark(entry, today) {
+  const puzzle = entry.kind === "puzzle";
+  const page = puzzle ? "puzzle.html" : "daily.html";
+  return {
+    label: `${puzzle ? "Daily puzzle" : "Daily"} · ${entry.day === today ? "Today" : shortDate(entry.day)}`,
+    button: puzzle ? "Daily puzzle page" : "Daily page",
+    href: entry.day === today ? page : `${page}?day=${entry.day}`,
+  };
+}

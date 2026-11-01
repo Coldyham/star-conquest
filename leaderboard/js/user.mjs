@@ -1,5 +1,6 @@
 import { configured, inList, select } from "./api.mjs";
 import { drawBadges } from "./badges-card.mjs";
+import { drawStreaks } from "./streaks-card.mjs";
 import {
   clear, el, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
@@ -24,6 +25,7 @@ const tallyBox = document.getElementById("tally");
 const target = document.getElementById("scores");
 const playstyleBox = document.getElementById("playstyle");
 const badgesBox = document.getElementById("badges");
+const streaksBox = document.getElementById("streaks");
 const form = document.getElementById("compare");
 const nameField = document.getElementById("rival");
 const extras = document.getElementById("extras");
@@ -298,8 +300,11 @@ async function load() {
     setHeading(roster.map((player) => player.name));
 
     // One player's card only: a comparison is about the maps, and four panels of
-    // badges would bury them. Drawn on its own, so a slow read never holds the list.
-    if (roster.length === 1) drawBadges(badgesBox, roster[0].key);
+    // badges would bury them. Drawn on their own, so a slow read never holds the list.
+    if (roster.length === 1) {
+      drawStreaks(streaksBox, roster[0].key);
+      drawBadges(badgesBox, roster[0].key);
+    }
 
     const entries = rows.map(asEntry);
     // rows arrive newest first, so first mention is most-recently-played order.

@@ -2,10 +2,12 @@ import { configured, eq, select } from "./api.mjs";
 import { attemptLines, attemptStatus, campaignMark, fold, weekQueries } from "./campaign.mjs";
 import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { weekStart } from "./crowns.mjs";
+import { dailyMark, dayParam } from "./daily.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
-  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, difficultyBadge, el,
-  embargoNote, fogBadge, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
+  botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, dailyBadge,
+  difficultyBadge, el, embargoNote, fogBadge, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime,
+  showError, userHref,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -271,13 +273,15 @@ async function renderBots(rows, best, gameSettings) {
 /**
  * The ways on from this map: back into the game, and — while the map is a node
  * on this week's campaign — back to that node, to see what is open next, with
- * `note` (campaignNote) saying first whether a win here would be a move.
+ * `note` (campaignNote) saying first whether a win here would be a move —
+ * and, for a map that was a day's daily (`dailyMark`), to that day's page.
  */
-function mapActions(link, campaign, note) {
+function mapActions(link, campaign, note, daily) {
   const back = campaign && campaign.current
     ? el("a", { class: "btn", href: campaign.href, text: "Campaign map" })
     : null;
-  const buttons = [link, back].filter(Boolean);
+  const day = daily ? el("a", { class: "btn", href: daily.href, text: daily.button }) : null;
+  const buttons = [link, back, day].filter(Boolean);
   return [note, buttons.length ? el("div", { class: "map-actions" }, buttons) : null].filter(Boolean);
 }
 
@@ -397,7 +401,7 @@ async function replayVersions(scores) {
  * very lost/hand/by fields this view is holding back, sitting right there in
  * the page's own HTML whether or not they're ever rendered as text.
  */
-async function renderEmbargoed(game, embargoText, bots, campaign, note) {
+async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
   subtitle.textContent = [
     game.score_count
       ? `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} posted`
@@ -419,7 +423,7 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note) {
       : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
   const link = await freshPlayLink(game);
-  clear(target).append(lede, ...mapActions(link, campaign, await note));
+  clear(target).append(lede, ...mapActions(link, campaign, await note, daily));
 
   const best = ranked ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);
@@ -462,7 +466,7 @@ async function load() {
           `&order=week_start.desc&limit=1`,
       ).catch(() => []),
       // Quiet too: the day this map was the daily of, if it was one.
-      select(`daily_games?select=day&game_key=${eq(gameKey)}&order=day.desc&limit=1`).catch(() => []),
+      select(`daily_games?select=day,kind&game_key=${eq(gameKey)}&order=day.desc&limit=1`).catch(() => []),
     ]);
     target.classList.remove("loading");
 
@@ -486,14 +490,15 @@ async function load() {
     const game = games[0];
     const campaign = nodes.length ? campaignMark(nodes[0], weekStart(new Date())) : null;
     const note = campaignNote(nodes[0], campaign);
+    const daily = dailies.length ? dailyMark(dailies[0], dayParam(Date.now())) : null;
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(
-      ...[difficultyBadge(game), configBadge(game), fogBadge(game), campaignBadge(campaign)].filter(Boolean),
+      ...[difficultyBadge(game), configBadge(game), fogBadge(game), campaignBadge(campaign), dailyBadge(daily)].filter(Boolean),
       ...botChips(game));
 
     const embargo = embargoNote(game.embargo_until);
     if (embargo) {
-      await renderEmbargoed(game, embargo, bots, campaign, note);
+      await renderEmbargoed(game, embargo, bots, campaign, note, daily);
       return;
     }
 
@@ -536,7 +541,7 @@ async function load() {
     clear(target).append(
       ...[liftNote(lift, leader)].filter(Boolean),
       el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays, lift))),
-      ...mapActions(link, campaign, await note),
+      ...mapActions(link, campaign, await note, daily),
     );
 
     // After the human table, and off the same fetch: the bots are context for

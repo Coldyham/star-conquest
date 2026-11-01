@@ -21,7 +21,7 @@ root `netlify.toml` bundles
 |---|---|
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
-| [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
+| [`user.html?u=…`](user.html) | one player's card, with their running daily streaks and badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`puzzle.html?day=…`](puzzle.html), [`daily.html?day=…`](daily.html) | the daily puzzle (the menu's default) and board: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
 | [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/game/#puzzle`), standings and its own streaks — see "Daily" |
@@ -814,7 +814,8 @@ test bot within a turn cap that grows from 80 to 110.
 
 ## Badges
 
-A player card for one name (`user.html?u=…`) opens with its badges: one-off
+A player card for one name (`user.html?u=…`) opens with its running daily streaks (puzzle and board, counted as
+the daily pages count them, `daily.mjs`'s `playerStreaks`), then its badges: one-off
 milestones, most of them pointing at a part of the game the player hasn't tried
 yet. A locked badge stays on the card with what earns it, which is the point.
 

@@ -1141,6 +1141,7 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 /* -- the Badges panel (user.html) ----------------------------------------- */
 /* Earned badges in gold; locked ones dimmed but still readable, since the hint
  * on a locked badge is the point: it says what to try next. */
+.streaks-panel { margin: 2rem 0 1rem; }
 .badges-panel { margin: 2rem 0 1rem; }
 .medals {
   display: grid;
