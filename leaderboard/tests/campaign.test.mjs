@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  attemptLines, attemptStatus, campaignMark, canAttempt, fold, GRACE_MS, nodeRadius, playerHue, waitLabel,
-  weekQueries,
+  attemptLines, attemptStatus, campaignMark, canAttempt, fieldCounts, fold, GRACE_MS, nodeRadius, playerHue, waitLabel,
+  weekHistory, weekQueries,
 } from "../js/campaign.mjs";
 
 // Homes 10 and 11 hang off field nodes 0 and 2; the field is a line 0 - 1 - 2.
@@ -269,4 +269,30 @@ test("a week is read as its graph and its moves in fold's order", () => {
     scores: "campaign_scores?select=node_id,score_id,user_name,turns,lost,submitted_at,campaign_start" +
       "&week_start=eq.2026-09-28&order=submitted_at.asc,score_id.asc",
   });
+});
+
+test("the replay has a frame per move, each the map as it stood then", () => {
+  const scores = [
+    win("ann", 10, 40), win("ann", 0, 30), win("ann", 1, 30),
+    win("ann", 1, 20),                      // bettering her own: not a move
+    win("bo", 11, 40), win("bo", 2, 30), win("bo", 1, 15),
+  ];
+  const frames = weekHistory(graph, scores);
+  const final = fold(graph, scores);
+  assert.deepEqual(frames.map((f) => f.move), final.captures);
+  assert.equal(frames[2].holders.get(1).name, "ann");
+  assert.equal(frames[2].holders.has(2), false);
+  assert.equal(frames.at(-1).holders.get(1).name, "bo");
+  for (const [node, held] of final.holders) assert.equal(frames.at(-1).holders.get(node).key, held.key);
+});
+
+test("the territory chart counts field nodes per player, in the order asked", () => {
+  const scores = [win("ann", 10, 40), win("ann", 0, 30), win("ann", 1, 30),
+    win("Bo", 11, 40), win("bo", 2, 30), win("bo", 1, 25)];
+  const frames = weekHistory(graph, scores);
+  const bands = fieldCounts(graph, frames, ["bo"]);
+  assert.deepEqual(bands.map((b) => b.key), ["bo", "ann"]);
+  assert.deepEqual(bands[0].counts, [0, 0, 0, 0, 1, 2]);   // homes don't count
+  assert.deepEqual(bands[1].counts, [0, 1, 2, 2, 2, 1]);
+  assert.equal(bands[0].name, "bo");                       // the latest spelling
 });
