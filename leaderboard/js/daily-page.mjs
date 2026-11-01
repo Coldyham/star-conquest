@@ -19,7 +19,7 @@ import { mountMyScores } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
 // How far back streaks are read. A streak reaching back that far shows as
-// "≥" its count, since it may run further.
+// "60+", since it may run further.
 const STREAK_DAYS = 60;
 
 const daysNav = document.getElementById("days");
@@ -139,9 +139,10 @@ function drawStandings(rows) {
 
 /** Streaks: the mended count, with the true one (days won on the day itself)
  * in the title, which a mouse shows on hover and a tap opens (tip.mjs). A
- * count that reaches back to the first day read is "≥" it (STREAK_DAYS). */
+ * count that reaches back to the first day read shows as "60+" (STREAK_DAYS). */
 function drawStreaks(list) {
-  const days = (n, atLeast = false) => `${atLeast ? "≥ " : ""}${n} ${n === 1 ? "day" : "days"}`;
+  const count = (n, atLeast) => (atLeast ? `${STREAK_DAYS}+` : `${n}`);
+  const days = (n, atLeast = false) => `${count(n, atLeast)} ${n === 1 && !atLeast ? "day" : "days"}`;
   clear(streaksBox).append(list.length
     ? el("div", { class: "tally" }, list.map((row) => el("div", { class: "tally-row" }, [
       el("a", { class: "tally-name", href: userHref([row.name]), text: row.name }),
@@ -153,7 +154,7 @@ function drawStreaks(list) {
             + "the rest won later from the archive",
         text: row.onTheDay === row.days
           ? days(row.days, row.daysAtLeast)
-          : `${days(row.days, row.daysAtLeast)} (${row.onTheDayAtLeast ? "≥ " : ""}${row.onTheDay} true)`,
+          : `${days(row.days, row.daysAtLeast)} (${count(row.onTheDay, row.onTheDayAtLeast)} true)`,
       }),
     ])))
     : el("p", { class: "empty", text: "No streaks running. Win today's map to start one, or a missed day's to mend one." }));
