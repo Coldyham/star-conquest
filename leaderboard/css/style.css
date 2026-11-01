@@ -1133,7 +1133,13 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 
 /* Field nodes held over the week (under the standings). */
 .campaign-territory { position: relative; margin: 1.25rem 0 0; }
-.territory-title { margin: 0 0 0.4rem; font-size: 0.95rem; color: var(--ink); }
+.territory-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap;
+  margin: 0 0 0.4rem;
+}
+.territory-title { margin: 0; font-size: 0.95rem; color: var(--ink); }
+.axis-switch { display: flex; gap: 0.3rem; }
+.axis-switch .btn { padding: 0.3rem 0.6rem; font-size: 0.6rem; }
 .campaign-territory svg { display: block; max-width: 100%; cursor: crosshair; touch-action: pan-y; }
 .campaign-territory .band { stroke: var(--bg); stroke-width: 1.5; stroke-linejoin: round; }
 .campaign-territory .band-name {
@@ -1144,7 +1150,7 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-territory .cursor { stroke: var(--gold); stroke-width: 2; }
 .campaign-territory .hover { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; }
 .territory-tip {
-  position: absolute; top: 2rem; z-index: 2; pointer-events: none;
+  position: absolute; top: 3.6rem; z-index: 2; pointer-events: none;
   padding: 0.4rem 0.6rem; background: var(--panel); border: 1px solid var(--line);
   font-size: 0.85rem; white-space: nowrap;
 }

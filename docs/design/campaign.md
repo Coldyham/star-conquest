@@ -127,6 +127,12 @@ held over time. Both are worked out from the same `fold`, never stored:
   the standings' order and each player's map colour (`playerHue`), and carry
   their names where they are tall enough. Hovering reads a moment; a click
   moves the scrubber there.
+- **The chart's x-axis is switchable, Time or Moves**, remembered per viewer
+  in `localStorage` (`campaign.chartAxis`; a convenience, so it falls back to
+  Time). Time shows when the week moved: a quiet Tuesday is a long flat run,
+  a busy evening a short staircase. Moves gives every move one even step, the
+  same steps as the scrubber, so a flurry can be read move by move. The
+  scrubber itself always steps by move.
 - *Not built:* a 3D map with height for score. Height on a projected map
   can't be read against a baseline, nodes hide one another, and the score that
   holds a node is already in its panel. Time is what the week was missing.

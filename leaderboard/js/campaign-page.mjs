@@ -42,7 +42,12 @@ let frames = [];
 let pos = 0;
 let playing = null;
 const live = () => pos === frames.length;
-/** Who held what pos the scrubber's moment. */
+// The territory chart's x-axis, "time" or "move": a per-viewer preference.
+const AXIS_KEY = "campaign.chartAxis";
+let axis = (() => {
+  try { return localStorage.getItem(AXIS_KEY) === "move" ? "move" : "time"; } catch { return "time"; }
+})();
+/** Who held what at the scrubber's moment. */
 const holdersNow = () => (live() ? state.holders : pos ? frames[pos - 1].holders : new Map());
 
 const dayLabel = (date) =>
@@ -269,7 +274,7 @@ function drawReplay() {
   );
 }
 
-/** The latest frame pos or before `ms`: what the map showed then. */
+/** The latest frame at or before `ms`: what the map showed then. */
 const frameAt = (ms) => {
   let index = 0;
   while (index < frames.length && frames[index].move.at <= ms) index += 1;
@@ -278,7 +283,7 @@ const frameAt = (ms) => {
 
 /**
  * Field nodes held over the week, one stacked band per player in the
- * standings' order and their map colour, a step pos each move. The unclaimed
+ * standings' order and their map colour, a step at each move. The unclaimed
  * rest is the empty space above, so the full height is the whole field.
  * Hovering reads a moment; a click or tap takes the map there.
  */
@@ -291,27 +296,39 @@ function drawTerritory() {
   const height = 170;
   const pad = { left: 28, right: 8, top: 10, bottom: 22 };
   const [t0, t1] = span();
-  const x = (ms) => pad.left + ((ms - t0) / (t1 - t0)) * (width - pad.left - pad.right);
+  const plotW = width - pad.left - pad.right;
   const y = (n) => height - pad.bottom - (n / field) * (height - pad.top - pad.bottom);
-  // Frame i holds from its move until the next one (the last: until the chart's end).
-  const edges = [t0, ...frames.map((f) => f.move.at), t1];
   const counts = (band, i) => (i === 0 ? 0 : band.counts[i - 1]);
+  const n = frames.length;
+  // Frame i spans edges[i] to edges[i + 1] in plot pixels. By time, from its
+  // move to the next (the last: to the chart's end); by move, one even step
+  // each, so a busy evening is as wide as a quiet day.
+  const byTime = (ms) => pad.left + ((ms - t0) / (t1 - t0)) * plotW;
+  const byMove = (i) => pad.left + (i / (n + 1)) * plotW;
+  const edges = axis === "time"
+    ? [t0, ...frames.map((f) => f.move.at), t1].map(byTime)
+    : Array.from({ length: n + 2 }, (_, i) => byMove(i));
+  /** The frame under plot pixel `px`. */
+  const frameAtPx = (px) => {
+    if (axis === "time") return frameAt(t0 + ((px - pad.left) / plotW) * (t1 - t0));
+    return Math.max(0, Math.min(n, Math.floor(((px - pad.left) / plotW) * (n + 1))));
+  };
 
-  const below = new Array(frames.length + 1).fill(0);
+  const below = new Array(n + 1).fill(0);
   const names = [];
   const paths = bands.map((band) => {
     const top = [];
     const bottom = [];
-    for (let i = 0; i <= frames.length; i += 1) {
+    for (let i = 0; i <= n; i += 1) {
       const lo = below[i];
       const hi = lo + counts(band, i);
-      top.push(`${x(edges[i])},${y(hi)}`, `${x(edges[i + 1])},${y(hi)}`);
-      bottom.push(`${x(edges[i])},${y(lo)}`, `${x(edges[i + 1])},${y(lo)}`);
+      top.push(`${edges[i]},${y(hi)}`, `${edges[i + 1]},${y(hi)}`);
+      bottom.push(`${edges[i]},${y(lo)}`, `${edges[i + 1]},${y(lo)}`);
       below[i] = hi;
     }
     // Each band's name at its right-hand end where it is tall enough to hold it,
     // so a player is never told from another by colour alone.
-    const lo = below.at(-1) - counts(band, frames.length);
+    const lo = below.at(-1) - counts(band, n);
     if (y(lo) - y(below.at(-1)) >= 14) {
       names.push(svg("text", {
         class: "band-name", x: width - pad.right - 4, y: (y(lo) + y(below.at(-1))) / 2,
@@ -323,55 +340,69 @@ function drawTerritory() {
     }, [svg("title", {}, [document.createTextNode(band.name)])]);
   });
 
-  // Gridlines pos half and all of the field, and Monday-to-Sunday ticks in UTC like the week itself.
+  // Gridlines at half and all of the field.
   const grid = [0.5, 1].map((share) => {
-    const n = Math.round(field * share);
+    const k = Math.round(field * share);
     return [
-      svg("line", { class: "grid", x1: pad.left, x2: width - pad.right, y1: y(n), y2: y(n) }),
-      svg("text", { class: "axis", x: pad.left - 4, y: y(n), "text-anchor": "end", "dominant-baseline": "central" },
-        [document.createTextNode(String(n))]),
+      svg("line", { class: "grid", x1: pad.left, x2: width - pad.right, y1: y(k), y2: y(k) }),
+      svg("text", { class: "axis", x: pad.left - 4, y: y(k), "text-anchor": "end", "dominant-baseline": "central" },
+        [document.createTextNode(String(k))]),
     ];
   }).flat();
-  const days = [];
-  for (let d = 0; d < 7; d += 1) {
-    const ms = t0 + d * 86400000;
-    if (ms > t1) break;
-    days.push(svg("text", { class: "axis", x: x(ms) + 2, y: height - 6 }, [document.createTextNode(
-      new Date(ms).toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" }))]));
-    if (d) days.push(svg("line", { class: "grid", x1: x(ms), x2: x(ms), y1: pad.top, y2: height - pad.bottom }));
+  // Ticks: Monday to Sunday in UTC like the week itself, or every few moves.
+  const ticks = [];
+  const tick = (px, label, line, at = px + 2, anchor = "start") => {
+    ticks.push(svg("text", { class: "axis", x: at, y: height - 6, "text-anchor": anchor },
+      [document.createTextNode(label)]));
+    if (line) ticks.push(svg("line", { class: "grid", x1: px, x2: px, y1: pad.top, y2: height - pad.bottom }));
+  };
+  if (axis === "time") {
+    for (let d = 0; d < 7 && t0 + d * 86400000 <= t1; d += 1) {
+      const ms = t0 + d * 86400000;
+      tick(byTime(ms), new Date(ms).toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" }), d > 0);
+    }
+  } else {
+    const fit = Math.max(1, Math.floor(plotW / 48));    // labels about 48px apart at most
+    const every = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find((e) => (n + 1) / e <= fit) ?? 1000;
+    // A move's number sits under the middle of its step, where the cursor stands on it.
+    for (let i = 0; i <= n; i += every) tick(byMove(i), String(i), i > 0, (byMove(i) + byMove(i + 1)) / 2, "middle");
   }
 
-  // Where the replay stands: the start of its frame, or now.
-  const cursorMs = live() ? t1 : pos ? frames[pos - 1].move.at : t0;
+  // Where the replay stands: by time, the moment of its move (or now); by move, the middle of its step.
+  const cursorX = axis === "time"
+    ? (live() ? byTime(t1) : edges[pos])
+    : (edges[pos] + edges[pos + 1]) / 2;
   const cursor = svg("line", {
-    class: "cursor", x1: x(cursorMs), x2: x(cursorMs), y1: pad.top - 4, y2: height - pad.bottom,
+    class: "cursor", x1: cursorX, x2: cursorX, y1: pad.top - 4, y2: height - pad.bottom,
   });
   const hover = svg("line", { class: "hover", x1: 0, x2: 0, y1: pad.top - 4, y2: height - pad.bottom, visibility: "hidden" });
   const chart = svg("svg", {
     width, height, viewBox: `0 0 ${width} ${height}`, role: "img",
-    "aria-label": `Field nodes held over the week, out of ${field}. ` +
+    "aria-label": `Field nodes held over the week ${axis === "time" ? "by time" : "move by move"}, out of ${field}. ` +
       bands.map((band) => `${band.name}: ${band.counts.at(-1)} now, most ${Math.max(...band.counts)}`).join("; "),
-  }, [...grid, ...paths, ...names, ...days, cursor, hover]);
+  }, [...grid, ...paths, ...names, ...ticks, cursor, hover]);
 
   const tip = el("div", { class: "territory-tip", hidden: "" });
-  const msAt = (event) => {
+  const pxAt = (event) => {
     const box = chart.getBoundingClientRect();
-    const px = ((event.clientX - box.left) / box.width) * width;
-    return t0 + ((px - pad.left) / (width - pad.left - pad.right)) * (t1 - t0);
+    return Math.max(pad.left, Math.min(width - pad.right, ((event.clientX - box.left) / box.width) * width));
   };
   chart.addEventListener("pointermove", (event) => {
-    const ms = Math.max(t0, Math.min(t1, msAt(event)));
-    const index = frameAt(ms);
-    hover.setAttribute("x1", x(ms));
-    hover.setAttribute("x2", x(ms));
+    const px = pxAt(event);
+    const index = frameAtPx(px);
+    hover.setAttribute("x1", px);
+    hover.setAttribute("x2", px);
     hover.setAttribute("visibility", "visible");
-    const held = bands.map((band) => [band, counts(band, index)]).filter(([, n]) => n);
+    const title = axis === "time"
+      ? momentLabel(t0 + ((px - pad.left) / plotW) * (t1 - t0))
+      : index ? `Move ${index} · ${momentLabel(frames[index - 1].move.at)}` : "Before the first move";
+    const held = bands.map((band) => [band, counts(band, index)]).filter(([, k]) => k);
     clear(tip).append(
-      el("strong", { text: momentLabel(ms) }),
+      el("strong", { text: title }),
       ...(held.length
-        ? held.sort((a, b) => b[1] - a[1]).map(([band, n]) => el("div", {}, [
+        ? held.sort((a, b) => b[1] - a[1]).map(([band, k]) => el("div", {}, [
           el("span", { class: "swatch", style: `background:${fillFor(band)}`, "aria-hidden": "true" }),
-          `${band.name} ${n}`]))
+          `${band.name} ${k}`]))
         : [el("div", { text: "Nothing taken yet" })]),
     );
     tip.hidden = false;
@@ -379,10 +410,24 @@ function drawTerritory() {
     tip.style.left = `${Math.min(left + 12, territoryBox.clientWidth - tip.offsetWidth)}px`;
   });
   chart.addEventListener("pointerleave", () => { tip.hidden = true; hover.setAttribute("visibility", "hidden"); });
-  chart.addEventListener("click", (event) => seek(frameAt(msAt(event))));
+  chart.addEventListener("click", (event) => seek(frameAtPx(pxAt(event))));
+
+  const switcher = el("div", { class: "axis-switch", role: "group", "aria-label": "Chart across" },
+    [["time", "Time"], ["move", "Moves"]].map(([value, label]) => {
+      const button = el("button", {
+        type: "button", class: `btn${axis === value ? "" : " ghost"}`, "aria-pressed": String(axis === value), text: label,
+      });
+      button.addEventListener("click", () => {
+        axis = value;
+        try { localStorage.setItem(AXIS_KEY, value); } catch { /* storage blocked: back to time next visit */ }
+        drawTerritory();
+      });
+      return button;
+    }));
 
   clear(territoryBox).append(
-    el("h3", { class: "territory-title", text: `Field nodes held, of ${field}` }),
+    el("div", { class: "territory-head" }, [
+      el("h3", { class: "territory-title", text: `Field nodes held, of ${field}` }), switcher]),
     chart, tip,
     el("p", { class: "territory-note", text: "Hover to read a moment; click to show it on the map." }),
   );
