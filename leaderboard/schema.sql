@@ -673,8 +673,10 @@ left join lateral (
   limit 1
 ) best on true
 left join lateral (
-  -- Counted scores tied with the best on turns and lost: 2+ is a shared record.
-  select count(*) as holders
+  -- Players with a counted score tied with the best on turns and lost: 2+ is a
+  -- shared record. Players, not scores: one player posting the same figures
+  -- twice is not "& 1 other".
+  select count(distinct s.user_id) as holders
   from public.counted_scores s
   where s.game_key = g.game_key and s.turns = best.turns and s.lost = best.lost
 ) tied on true
