@@ -1778,3 +1778,39 @@ def test_the_daily_list_closes_on_its_button_or_esc():
         assert not ms.daily_open
     finally:
         pygame.quit()
+
+
+def test_the_stage_list_says_what_happened_to_its_gauntlet_since_it_covers_the_status_line(
+        monkeypatch, tmp_path):
+    """`say_gauntlet` while the list is open draws in the list, under the
+    picked gauntlet only, and the list still fits; closed, it is the status line."""
+    monkeypatch.setattr(menu.webstore, "_file_path", lambda: tmp_path / "kv.json")
+    monkeypatch.setattr(menu, "is_web", lambda: True)
+    drawn = []
+    real = menu._text
+
+    def spy(surface, font, s, *a, **k):
+        drawn.append(s)
+        return real(surface, font, s, *a, **k)
+
+    monkeypatch.setattr(menu, "_text", spy)
+    screen, ms, settings = _setup()
+    try:
+        _click_key(screen, ms, settings, "tutorial")
+        said = "Generated a very long gauntlet name: sent to the board, asking for it to be listed"
+        menu.say_gauntlet(ms, "tutorial", said, True)
+        assert ms.status != said
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert said in drawn and menu._PROGRESS_NOTE in drawn
+        canvas = pygame.Rect(0, 0, config.BASE_SCREEN_W, config.BASE_SCREEN_H)
+        assert all(canvas.contains(r) for k, r in ms.rects.items() if k.startswith(menu._TUTORIAL_KEYS))
+        menu.say_gauntlet(ms, "some-other-0123456789ab", "not this one", False)
+        drawn.clear()
+        menu.draw(screen, ms, settings)
+        assert "not this one" not in drawn
+        ms.tutorial_open = False
+        menu.say_gauntlet(ms, "tutorial", said, True)
+        assert ms.status == said
+    finally:
+        pygame.quit()

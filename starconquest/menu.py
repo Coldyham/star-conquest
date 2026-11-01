@@ -353,6 +353,10 @@ class MenuState:
     # The gauntlets opened from a link or generated here, read with the list for
     # the same reason: those are the ones Copy link can send on.
     kept_ids: frozenset[str] = frozenset()
+    # A line about one gauntlet, shown in the list while it is picked:
+    # `(gauntlet id, text, ok)`. The list covers the status line, so what is said
+    # while it is open is said here (`say_gauntlet`); cleared when it reopens.
+    gauntlet_note: tuple[str, str, bool] | None = None
     rects: dict[str, pygame.Rect] = field(default_factory=dict)
     # Transform from real-screen coords to the fixed menu canvas, set by draw() and
     # inverted by handle_event so clicks land on the widget rects (in canvas space).
@@ -683,6 +687,7 @@ def _open_tutorial(ms: MenuState, settings: Settings, pick: str | None = None) -
     ms.gauntlets = gauntlet.every()     # a user gauntlet dropped in since shows now
     ms.stage_bests = {}
     ms.kept_ids = frozenset(g.id for g in gauntlet.remembered())
+    ms.gauntlet_note = None
     ids = [g.id for g in ms.gauntlets]
     if pick is None and ms.stage_at:
         pick = ms.stage_at[0]
@@ -696,6 +701,16 @@ def open_gauntlet(ms: MenuState, settings: Settings, gid: str) -> None:
     """Open the Tutorial list on gauntlet ``gid``: what a ``#g=`` link does once
     the gauntlet is in hand (``main``, after ``gauntlet.remember``)."""
     _open_tutorial(ms, settings, pick=gid)
+
+
+def say_gauntlet(ms: MenuState, gid: str, text: str, ok: bool) -> None:
+    """Tell the player something about gauntlet ``gid``: in the list while it is
+    open, since the list covers the status line, else on the status line. Public
+    because ``main`` reports a generated gauntlet's run and listing here."""
+    if ms.tutorial_open:
+        ms.gauntlet_note = (gid, text, ok)
+    else:
+        set_status(ms, text, ok)
 
 
 def _picked(ms: MenuState) -> gauntlet.Gauntlet | None:
@@ -736,9 +751,9 @@ def _copy_gauntlet(ms: MenuState, g: gauntlet.Gauntlet) -> None:
     data = gauntlet.kept(g.id) if _shareable(ms, g) else None
     url = webstore.link_url(gauntlet.link_fragment(data)) if data is not None else ""
     if url and webstore.copy_to_clipboard(url):
-        set_status(ms, f"Link to {g.name} copied", True)
+        say_gauntlet(ms, g.id, f"Link to {g.name} copied", True)
     else:
-        set_status(ms, "Couldn't copy the gauntlet's link", False)
+        say_gauntlet(ms, g.id, "Couldn't copy the gauntlet's link", False)
 
 
 _STAGE_ROW_H = 36
@@ -786,8 +801,12 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     note = _PROGRESS_NOTE if is_web() else ""
     if note:
         pw = max(pw, f["small"].size(note)[0] + 2 * pad)
+    said = ms.gauntlet_note if ms.gauntlet_note is not None and ms.gauntlet_note[0] == g.id else None
+    if said is not None:
+        pw = max(pw, f["small"].size(said[1])[0] + 2 * pad)
     ph = (pad + f["normal"].get_height() + gap + (_CH + gap if picker else 0)
-          + len(g.stages) * _STAGE_ROW_H + gap + (_NOTE_H + gap if note else 0) + bh + pad)
+          + len(g.stages) * _STAGE_ROW_H + gap + (_NOTE_H + gap if note else 0)
+          + (_NOTE_H + gap if said is not None else 0) + bh + pad)
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
 
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -836,6 +855,10 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
 
     if note:
         _text(surface, f["small"], note, config.COLOR_TEXT_DIM,
+              center=(panel.centerx, y + gap + _NOTE_H // 2))
+        y += _NOTE_H + gap
+    if said is not None:
+        _text(surface, f["small"], said[1], _START_BORDER if said[2] else _WARN,
               center=(panel.centerx, y + gap + _NOTE_H // 2))
 
     # The bottom row, centred: Leave (while playing a stage), Copy link (a

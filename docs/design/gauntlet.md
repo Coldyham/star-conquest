@@ -539,6 +539,11 @@ every seed.
   done). It pauses while a game is played. Done, the
   file is kept (`gauntlet.remember`) and the Tutorial list opens on it, as a
   `#g=` link does.
+- **The list covers the status line, so it says its own news.** What is said
+  about a gauntlet while the list is open ("Generated ...", the listing save,
+  Copy link) goes to a line in the list under that gauntlet
+  (`menu.say_gauntlet`, `MenuState.gauntlet_note`, cleared when the list
+  reopens); with the list closed it goes to the status line.
 - **A probe's balance never leaks into the menu.** A probe game goes through
   `build_state`, which pushes its setup's knobs into `config`;
   `pump_generation` pushes the menu's own setup back after every slice
@@ -563,7 +568,9 @@ every seed.
 
 ### On the board
 
-The generate form sits on `gauntlet.html`, folded under the builder's lede.
+The generate form sits on `gauntlet.html`, one of two ways under the page's
+shared name, author and listing box (Generate, or Build from game links; the
+page remembers which it showed, and a `#<id>` remix opens on Build).
 `leaderboard/js/gauntlet-spec.mjs` turns it into a spec (`buildSpec`, pure,
 `leaderboard/tests/gauntlet-spec.test.mjs`) and `gauntlet-gen-page.mjs` is the
 DOM around it. Each choice becomes one dealer rule: map type (either, random,
@@ -591,9 +598,26 @@ benchmark depends on how the probes play, and bots are free to move
 a bot changes would pick a different gauntlet. The result is an ordinary
 gauntlet file, kept with `gauntlet.remember` and shared by the existing
 `#gauntlet=<payload>` link, or saved to the board through `/api/gauntlet`.
-Uploading from the game would be a new send path (the game sends only on *Post
-to leaderboard* or *Share replays*), so a copied `#gauntlet=` link, which needs
-no server, comes first.
+Uploading from the game is a new send path (otherwise the game sends only on
+*Post to leaderboard* or *Share replays*), so a copied `#gauntlet=` link, which
+needs no server, came first.
+
+**Saved to the board only when asked to be listed** (2026-10-29, the author's
+call). The name, author and "Ask for it to be listed publicly" are the same
+question for both ways of making a gauntlet, so the page asks them once, at the
+top. A generated gauntlet is made in the game, so for its author and listing
+request to mean anything the game has to send it: ticking the box is the
+consent to that send, and nothing else is. Ticked, the spec link carries
+`wants_listing: true` and `by_name`; unticked it carries neither, and a name
+alone is never read (`job_from_link`, `Job.listing`). Once the run is done,
+`main.ask_listing` saves the file through `/api/gauntlet` (`gauntlet.ask_listing`,
+a `pbp.request` POST) with `wants_listing` set, and the Gauntlets list (or the
+status line, once the list is closed) says whether it took. The board mints its own `<slug>-<hash>` id; the copy kept in the
+browser keeps its `gen-<hash>` one, so the two are the same gauntlet under two
+ids, and an admin lists it with `tools/admin.py list-gauntlet` as any other.
+Opening the same seeded link again saves the same file, which is the same row.
+A dealt stage already passes `checkBody` (stages carry an integer `seed`, the
+briefing lines are short), so the server needs no change.
 
 ## The gauntlet: proposed, not built
 

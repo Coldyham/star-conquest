@@ -374,6 +374,15 @@ export function campaignBadge(mark) {
   return el("a", { class: "badge campaign", href: mark.href, text: mark.label });
 }
 
+/**
+ * This map was a day's daily (`dailyMark`, daily.mjs) — a link to that day's
+ * page, or null for a map that never was.
+ */
+export function dailyBadge(mark) {
+  if (!mark) return null;
+  return el("a", { class: "badge campaign", href: mark.href, text: mark.label });
+}
+
 export function showError(node, message) {
   node.classList.remove("loading");
   clear(node).append(el("p", { class: "error", text: message }));

@@ -1864,8 +1864,48 @@ def test_a_spec_link_generates_a_frame_at_a_time_then_opens_the_list(_gauntlet_s
         assert main.config.HOME_PRODUCTION == 5
     assert frames > 1 and ms.tutorial_open and ms.status_ok
     picked = ms.gauntlets[ms.gauntlet_pick]
-    assert picked.id.startswith("gen-") and ms.status == f"Generated {picked.name}: {len(picked.stages)} stages"
+    # Said in the list, which covers the status line.
+    assert picked.id.startswith("gen-")
+    assert ms.gauntlet_note == (picked.id, f"Generated {picked.name}: {len(picked.stages)} stages", True)
     assert [g.id for g in main.gauntlet.remembered()] == [picked.id]
+
+
+def _run(ms, settings, spec):
+    job = main.start_generation(ms, main.gauntletgen.spec_fragment(spec))
+    assert job is not None
+    while (left := main.pump_generation(ms, settings, job)) is not None:
+        job = left
+    return job
+
+
+def test_a_generated_gauntlet_goes_to_the_board_only_when_listing_was_asked(_gauntlet_store, monkeypatch):
+    ms, settings = _gauntlet_store, Settings()
+    sent = []
+    monkeypatch.setattr(main.gauntlet, "ask_listing", lambda data, by: sent.append((data, by)) or "req")
+    assert main.ask_listing(ms, _run(ms, settings, {**_SPEC, "by_name": "Ann"})) is None
+    assert sent == []
+    job = _run(ms, settings, {**_SPEC, "name": "Climb", "by_name": "Ann", "wants_listing": True})
+    assert main.ask_listing(ms, job) == (job.gid, "Climb", "req")
+    [(data, by)] = sent
+    assert by == "Ann" and data == job.result() and data["name"] == "Climb"
+    assert ms.gauntlet_note == (job.gid, main.GAUNTLET_LISTING_MSG.format(name="Climb"), True)
+
+
+def test_a_listing_save_says_whether_it_took_in_the_list_while_it_is_open(_gauntlet_store, monkeypatch):
+    ms = _gauntlet_store
+    ms.tutorial_open = True
+    main.land_listing(ms, "gen-0123456789ab", "Climb", main.pbp.OK)
+    assert ms.gauntlet_note == ("gen-0123456789ab", main.GAUNTLET_LISTED_MSG.format(name="Climb"), True)
+    main.land_listing(ms, "gen-0123456789ab", "Climb", main.pbp.ERROR)
+    assert ms.gauntlet_note == ("gen-0123456789ab", main.GAUNTLET_LISTING_FAILED_MSG.format(name="Climb"), False)
+    # Closed by the time the board answers: the status line says it.
+    ms.tutorial_open, ms.status = False, ""
+    main.land_listing(ms, "gen-0123456789ab", "Climb", main.pbp.OK)
+    assert ms.status == main.GAUNTLET_LISTED_MSG.format(name="Climb") and ms.status_ok
+    # With no board there is nothing to send, and nothing is said about it.
+    monkeypatch.setattr(main.gauntlet.webstore, "leaderboard_url", lambda path: "")
+    job = _run(ms, Settings(), {**_SPEC, "wants_listing": True})
+    assert main.ask_listing(ms, job) is None
 
 
 def test_a_spec_link_that_can_never_deal_says_why(_gauntlet_store):
@@ -1888,7 +1928,11 @@ def test_copy_link_sends_a_kept_gauntlet_as_a_whole_file(_gauntlet_store, monkey
     assert not main.menu._shareable(ms, main.gauntlet.builtin()[0])
     main.menu._copy_gauntlet(ms, g)
     token = copied[0].split("#", 1)[1]
-    assert main.gauntlet.inline_data(token) == _linked_gauntlet() and ms.status_ok
+    assert main.gauntlet.inline_data(token) == _linked_gauntlet()
+    assert ms.gauntlet_note == (g.id, f"Link to {g.name} copied", True)
+    # Reopening the list starts it with nothing said.
+    main.menu.open_gauntlet(ms, Settings(), g.id)
+    assert ms.gauntlet_note is None
 
 
 def test_the_list_button_says_tutorial_until_there_is_another_gauntlet(_gauntlet_store, monkeypatch):

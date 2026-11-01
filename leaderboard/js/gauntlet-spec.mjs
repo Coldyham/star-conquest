@@ -13,7 +13,9 @@
 // pins on the game's default, a switch Off) is left out, so the game keeps that
 // field at its default (`roll` false) or rolls it (`roll` true). The run's own options
 // (`candidates`, `targets`, `slack`, `name`, `unwon_last`) ride beside it, read by
-// `gauntletgen.job_from_link`. `candidates` is the most rounds the game deals, one
+// `gauntletgen.job_from_link`. So do `wants_listing` and `by_name`, and only when
+// "Ask for it to be listed publicly" is ticked: that box is the consent for the
+// game to send what it makes to the board (`gauntlet.ask_listing`). `candidates` is the most rounds the game deals, one
 // map per stage each; it stops at the first round its pick settles.
 
 import { SETUP_DEFAULTS } from "./config.mjs";
@@ -32,6 +34,7 @@ export const LIMITS = Object.freeze({
   slack: [0, 99],
   seed: 999999,
   name: 32,
+  byName: 32,
 });
 /** Opponents a form offers, weakest first (the ladder is strongest first). */
 export const OPPONENTS = Object.freeze([...LADDER_ORDER].reverse());
@@ -122,6 +125,8 @@ export function isSet(form, attr) {
 export function emptyForm() {
   return {
     name: "",
+    byName: "",
+    wantsListing: false,
     stages: 6,
     mode: "any",              // any | random | symmetric
     playersMin: 2,
@@ -210,6 +215,12 @@ export function buildSpec(form, rollSeed = () => Math.floor(Math.random() * LIMI
   const name = String(form.name ?? "").split(/\s+/).filter(Boolean).join(" ");
   if ([...name].length > LIMITS.name) return `the name is over ${LIMITS.name} characters`;
   if (name) spec.name = name;
+  if (form.wantsListing === true) {
+    const byName = String(form.byName ?? "").split(/\s+/).filter(Boolean).join(" ");
+    if ([...byName].length > LIMITS.byName) return `your name is over ${LIMITS.byName} characters`;
+    spec.wants_listing = true;
+    if (byName) spec.by_name = byName;
+  }
   return spec;
 }
 

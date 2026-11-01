@@ -673,6 +673,18 @@ def _touch_scale():
     render._FONTS.clear()
 
 
+def _phone_landscape_scale(css=(740, 360), dpr=2.0):
+    """The compact geometry: a phone held sideways in a touch browser, whose
+    side panel is narrower and shorter than any of the three above. 740x360 CSS
+    px is a small phone; `test_compact` covers the layout at a larger one."""
+    from starconquest import main
+    fb = main.web_framebuffer(*css, dpr)
+    config.SCREEN_W, config.SCREEN_H = fb
+    config.apply_ui_scale(main.ui_scale_for(fb, True, 100, fb[0] / css[0]), touch=True)
+    render._FONTS.clear()
+    assert config.compact and not config.portrait
+
+
 def _desktop_scale():
     config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H
     config.apply_ui_scale(1.0)
@@ -906,7 +918,8 @@ def test_help_text_fits_the_empty_panel_whole():
     pygame.init()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
-        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
+        for scale in (_desktop_scale, _web_desktop_scale, _touch_scale, _phone_landscape_scale,
+                      lambda: _phone_landscape_scale((870, 412), 2.625)):
             scale()
             # what `_draw_side_panel` passes when nothing is queued
             ph = config.SCREEN_H - config.HUD_TOP_H - config.END_TURN_H
@@ -984,7 +997,8 @@ def test_a_stage_hint_fits_the_empty_panel():
     fit an empty panel whole — the longest hint `gauntlet.from_dict` lets
     through, as well as every hint the tutorial ships. The touch build is the
     binding case, which is why the hint carries no "tap to reread" line of its
-    own (the briefing card says so instead)."""
+    own (the briefing card says so instead). A phone's panel shows the hint
+    alone (`_draw_side_panel_body`), so the compact geometry isn't measured."""
     from starconquest import gauntlet
 
     pygame.init()

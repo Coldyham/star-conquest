@@ -58,7 +58,7 @@ line gives only the verdict. Ideas that lost are in
 - gauntlet.md · **Gauntlets made on the board.** `/api/gauntlet`, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, `gauntlet.remember`, `#gauntlet=`, remixing, admin listing.
 - gauntlet.md · **Relation to the weekly campaign.** Uncontested, so no server; graph and bordering rule shared in spirit; gauntlet lanes run one way.
 - gauntlet.md · **Generated gauntlets.** A spec (`fix`/`range`/`in`/`not`, opponents, `roll`) dealt by `dealer.deal`, probed and picked by `tools/gauntlet_gen.py`; where it runs; the first run; the last stage may be unwon by every probe.
-- gauntlet.md · *In the game / on the board:* `#gauntlet-spec=`, a slice per menu frame, budgets not lifted; the generate form, `gauntlet-spec.mjs`; sharing the file, not spec and seed.
+- gauntlet.md · *In the game / on the board:* `#gauntlet-spec=`, a slice per menu frame, budgets not lifted; the generate form, `gauntlet-spec.mjs`, under the page's shared name, author and listing box; sharing the file, not spec and seed; saved to the board only when asked to be listed (`gauntlet.ask_listing`).
 - gauntlet.md · *Dealing fewer candidates* (shipped 2026-10-24): round-robin depths; four probes (lean heuristic, thinker, `evolved:0`, marshal); `tools/gauntlet_pool_bench.py`. The web build is untimed.
 - gauntlet.md · **The gauntlet: proposed, not built.** A seeded run graph (`tools/campaign.py` `_layout`/`cut_nodes`), stages dealt like `_from_family`/`_mystery`, difficulty by `LADDER_ORDER`.
 - gauntlet.md · **Carry-over.** Boons via `custommap.from_state` and their cost on the board; decided against for stage targets.
@@ -78,6 +78,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## campaign.md (split from leaderboard.md)
 - campaign.md · **Crowns, the weekly campaign and embargoes** (rules in full). `counted_scores`, `crown_holders`, `crown_steals`; the 24-hour unverified grace; the campaign map, `fold`, `attemptStatus`; embargoes.
+- campaign.md · **The week's replay.** `weekHistory` (a frame per move via `fold`'s `onMove`), the scrubber, live only at "now", `fieldCounts` and the territory chart (Time / Moves axis); 3D height-for-score not built; `playerHue` collisions.
 - campaign.md · **The grace period.** Half an hour after losing a node or its neighbour, derived in `fold`, for a game started with access (`scores.campaign_start`). *In the game*: confirm before Start, a top-bar countdown.
 - campaign.md · *Decided against:* an "able to capture" flag on its own; a cooldown between moves.
 - campaign.md · **Campaign fleets (decided against).** Real-time lanes on the meta-map: a launch locks a claim; holders see inbound fleets; collisions go to the better score; lane length; identity (now covered by claimed names). The grace period answers it.

@@ -31,6 +31,9 @@ import { encodeToken } from "./token-encode.mjs";
 
 const ENDPOINT = "/api/gauntlet";
 const DRAFT_KEY = "sc_gauntlet_draft";
+// Which way of making one the page last showed: "gen" or "build".
+const WAY_KEY = "sc_gauntlet_way";
+const WAYS = ["gen", "build"];
 
 let draft = emptyDraft();
 
@@ -392,9 +395,34 @@ function requestedId() {
   return GAUNTLET_ID.test(id) ? id : null;
 }
 
+/** Show one way of making a gauntlet (generate, or build from links) and remember it. */
+function showWay(way) {
+  for (const w of WAYS) {
+    $(`way-${w}`).hidden = w !== way;
+    const tab = $(`way-${w}-tab`);
+    tab.classList.toggle("ghost", w !== way);
+    tab.setAttribute("aria-pressed", String(w === way));
+  }
+  try {
+    localStorage.setItem(WAY_KEY, way);
+  } catch {
+    // storage blocked: the page opens on Generate next time
+  }
+}
+
+function storedWay() {
+  try {
+    const way = localStorage.getItem(WAY_KEY);
+    return WAYS.includes(way) ? way : "gen";
+  } catch {
+    return "gen";
+  }
+}
+
 async function load() {
   const id = requestedId();
   if (id) {
+    showWay("build");   // a stored gauntlet opens as a draft to remix
     say("Opening…");
     try {
       const response = await fetch(`${ENDPOINT}?id=${id}`);
@@ -422,6 +450,8 @@ async function load() {
 
 function main() {
   mountNav();
+  for (const w of WAYS) $(`way-${w}-tab`).addEventListener("click", () => showWay(w));
+  showWay(requestedId() ? "build" : storedWay());
   $("g-name").addEventListener("input", () => {
     draft.name = $("g-name").value;
     counter($("g-name-count"), draft.name, LIMITS.name);

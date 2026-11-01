@@ -61,8 +61,11 @@ Run the tests a change can reach, not the whole suite each time. A docs-only
 change needs none unless a test reads the file (`tests/test_bot_brief.py` reads
 `docs/bot-brief.md`, `tests/test_botio.py` reads `bots/README.md`). A change to
 one bot or tool runs its own `tests/test_<name>.py` (knower's Council stop also
-has `tests/test_council.py`). Run the full suite after a change to
-`starconquest/`, and before opening a PR on a code change.
+has `tests/test_council.py`). Wording, a string choice or an asset's text runs
+the tests that read it (grep `tests/` for the file or string), not the suite.
+Run the full suite after a change to `starconquest/` logic (rules, engine,
+mapgen, replay, settings, AI, input or layout), and once before opening a PR on
+such a change, not again for later wording fixes on it.
 
 **Every tool or script that runs for more than a minute records as it goes.**
 Append each finished game or unit to a file under `results/` the moment it
@@ -229,7 +232,8 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   until its embargo lifts.
 - **Replays are uploaded; scores are checked against them**
   (`tools/verify_scores.py`). Only *Post to leaderboard* and *Share replays*
-  send; an autoplay demo never does. `game_logs` is not publicly readable or
+  send (and a generated gauntlet whose link ticked "Ask for it to be listed
+  publicly"); an autoplay demo never does. `game_logs` is not publicly readable or
   writable. A new column the board posts to `scores` joins the column grant
   (`test_schema_grants`), never `submitted_at`. `Ui.can_post` gates sharing.
 - **Playstyle readings are keyed by match, never by name**;
@@ -369,5 +373,7 @@ matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
 **A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
 `/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
 page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but
-for `listed` (admin only). Never store one in `campaigns`. The game fetches
+for `listed` (admin only). Never store one in `campaigns`. **A generated
+gauntlet is sent to the board only when its link asked to be listed**
+(`wants_listing`, `gauntlet.ask_listing`): that ticked box is the consent. The game fetches
 `#g=<id>` once and keeps the file (`gauntlet.remember`).

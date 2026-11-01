@@ -738,6 +738,14 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
 - **The game screen's regions come from `config`**: `play_rect`,
   `side_panel_rect`, `footer_rect`, `end_turn_rect`. Nothing in `render` or
   `input` derives one from `HUD_RIGHT_W` or the bars directly.
+- **A landscape phone's panel gets its own legend** (`render._LEGEND_COMPACT_TOUCH`,
+  `_LEGEND_HISTORY_COMPACT_TOUCH`): the column is about 14 rows of 24
+  characters against the touch build's 23 rows, and the legend is cut silently
+  at the panel's floor, so the full one lost its last third. What was dropped
+  is what a control already says (Done, route mode, Exit).
+  `test_help_text_fits_the_empty_panel_whole` measures it at two phone sizes.
+  A gauntlet stage's hint stands in for the legend on a phone, as it does in
+  portrait.
 - **The footer never drops a control**: `render._lay_out_footer` folds what
   doesn't fit behind `Ui.more_button_rect`, and an open list records each
   folded button under its own attribute (`viewstate.FOOTER_RECTS`), so input

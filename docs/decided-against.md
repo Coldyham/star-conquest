@@ -206,6 +206,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - leaderboard.md · A JS include for the board's shared header (menu missing without the script, markup in JS strings); keeping a copy per page pinned by a test: both rejected for Jinja2 at build time. *The pages are templates.*
 
 ## campaign.md (the weekly campaign)
+- campaign.md · A 3D campaign map, height for the score holding a node: not built, since projected height reads against no baseline and nodes hide one another; the replay scrubber and territory chart show the week's ebb and flow instead. *The week's replay.*
 - campaign.md · A one-hour cooldown between campaign moves, with wins posted during it queued: built and removed, since two clocks side by side ("post within 12 min", "plays in 40") read as nonsense. *The grace period*.
 - campaign.md · An "able to capture" flag in a campaign game's link, honoured on its own: rejected, since a kept link is a standing permit. Built instead as a stamp that only narrows the grace. *The grace period*.
 - campaign.md · Counting every score but a `mismatch` toward crowns and the campaign: replaced from 2026-10-15 by verified only, with 24 hours' grace, since anyone can insert a score; older scores keep the old rule. `schema.md`, *counted_scores and the crowns*.

@@ -294,15 +294,17 @@ def test_a_maps_record_is_its_best_counted_score(board):
       insert into scores (game_key, user_id, turns, lost, hand, by_name, raw_token, submitted_at, match_id)
         values ('record', 1, 40, 0, 40, 'Al', '', now() - interval '3 days', 'd000000000000001'),
                ('record', 2, 40, 0, 40, '', '', now() - interval '2 days', 'd000000000000002'),
+               ('record', 2, 40, 0, 40, '', '', now() - interval '1 days', 'd000000000000003'),
                ('record', 3, 10, 0, 10, '', '', now() - interval '2 days', ''),
                ('nothing', 3, 10, 0, 10, '', '', now() - interval '2 days', '');
       insert into score_checks (score_id, verdict)
-        select id, 'verified' from scores where match_id in ('d000000000000001', 'd000000000000002');
+        select id, 'verified' from scores
+        where match_id in ('d000000000000001', 'd000000000000002', 'd000000000000003');
     """, board)
     rows = _psql("select game_key, best_turns, best_by_name, best_user_name, best_holders,"
                  " score_count from game_summary where game_key in ('record', 'nothing')"
                  " order by game_key", board)
-    assert rows.splitlines() == ["nothing||||0|1", "record|40|Al|alice|2|3"]
+    assert rows.splitlines() == ["nothing||||0|1", "record|40|Al|alice|2|4"]
 
 
 def test_the_public_cannot_choose_when_a_score_was_posted(board):

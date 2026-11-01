@@ -6,7 +6,8 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind } from "../netlify/functions/daily.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, opponents, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
+  addDays, bestOnTheDay, dailyMark, dayParam, opponents, playerStreaks, postedOn, shortDate, standings, streaks, validDay,
+  weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -126,4 +127,45 @@ test("opponents name each bot once, at its stop, and the lean heuristic", () => 
     ai: [{}, { reserve_fraction: 0, reserve_floor: 0, aux: 1 }] };
   assert.deepEqual(opponents(lean), ["heuristic+lean"]);
   assert.deepEqual(opponents({ players: 2, ai_strategy: ["heuristic", "actuary"] }), ["actuary"]);
+});
+
+test("a player's streaks are counted per kind, mended and true", () => {
+  const games = [
+    { day: "2026-10-30", game_key: "p30", kind: "puzzle" },
+    { day: "2026-10-31", game_key: "p31", kind: "puzzle" },
+    { day: "2026-11-01", game_key: "p01", kind: "puzzle" },
+    { day: "2026-10-29", game_key: "b29", kind: "board" },
+  ];
+  const scores = [
+    { game_key: "p30", hand: 1, submitted_at: "2026-10-30T12:00:00Z" },
+    { game_key: "p31", hand: 1, submitted_at: "2026-11-01T09:00:00Z" },   // from the archive
+    { game_key: "p01", hand: 1, submitted_at: "2026-11-01T10:00:00Z" },
+    { game_key: "b29", hand: 1, submitted_at: "2026-10-29T10:00:00Z" },   // lapsed
+    { game_key: "other", hand: 1, submitted_at: "2026-11-01T10:00:00Z" },
+  ];
+  assert.deepEqual(playerStreaks(scores, games, "2026-11-01"),
+    { board: { days: 0, onTheDay: 0 }, puzzle: { days: 3, onTheDay: 1 } });
+  const autoplayed = scores.map((s) => ({ ...s, hand: 0 }));
+  assert.deepEqual(playerStreaks(autoplayed, games, "2026-11-01").puzzle, { days: 0, onTheDay: 0 });
+});
+
+test("a daily's map links to its day's page", () => {
+  assert.deepEqual(dailyMark({ day: "2026-11-01", kind: "puzzle" }, "2026-11-01"),
+    { label: "Daily puzzle · Today", button: "Daily puzzle page", href: "puzzle.html" });
+  assert.deepEqual(dailyMark({ day: "2026-10-28", kind: "board" }, "2026-11-01"),
+    { label: "Daily · Wed 28 Oct", button: "Daily page", href: "daily.html?day=2026-10-28" });
+});
+
+test("a streak that reaches back to the first day read is only a lower bound", () => {
+  const on = (name, day, onTheDay = true) => ({ name, day, onTheDay });
+  const wins = [
+    on("ann", "2026-10-29"), on("ann", "2026-10-30"), on("ann", "2026-10-31", false),
+    on("bo", "2026-10-30"), on("bo", "2026-10-31"),
+  ];
+  assert.deepEqual(streaks(wins, "2026-11-01", "2026-10-29"), [
+    { name: "ann", days: 3, onTheDay: 0, daysAtLeast: true, onTheDayAtLeast: false },
+    { name: "bo", days: 2, onTheDay: 2, daysAtLeast: false, onTheDayAtLeast: false },
+  ]);
+  assert.deepEqual(streaks([on("cy", "2026-10-31"), on("cy", "2026-11-01")], "2026-11-01", "2026-10-31"),
+    [{ name: "cy", days: 2, onTheDay: 2, daysAtLeast: true, onTheDayAtLeast: true }]);
 });

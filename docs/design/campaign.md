@@ -106,6 +106,40 @@ campaign fleets proposal (decided against). Split out of
     so `game_summary` never scans every past campaign. Counted by today's
     verdicts, so a score whose replay later fails its check was never ahead.
 
+## The week's replay
+
+The campaign page can play the week back. Under the map are a scrubber and
+play/step buttons, and under the standings is a stacked chart of field nodes
+held over time. Both are worked out from the same `fold`, never stored:
+
+- **One frame per move** (`campaign.weekHistory`): `fold`'s `onMove` hook
+  snapshots `holders` after each capture. `fold` replaces a holder's entry
+  rather than editing it, so a shallow copy of the map is the whole snapshot.
+  A holder bettering their own score is not a move and makes no frame. The
+  last frame is the live map, so the replay can't disagree with it.
+- **"Now" is the end of the scrubber, and only there is the page live**: the
+  cyan "you can attempt" rings and the attempt note appear only at "now". A
+  past frame shows who held what then, rings the node that move changed in
+  gold, and captions the move.
+- **The chart counts field nodes, not homes** (`campaign.fieldCounts`), as the
+  standings do, since field nodes win the week. It is out of the whole field,
+  so the empty space above the bands is what's still unclaimed. Bands follow
+  the standings' order and each player's map colour (`playerHue`), and carry
+  their names where they are tall enough. Hovering reads a moment; a click
+  moves the scrubber there.
+- **The chart's x-axis is switchable, Time or Moves**, remembered per viewer
+  in `localStorage` (`campaign.chartAxis`; a convenience, so it falls back to
+  Time). Time shows when the week moved: a quiet Tuesday is a long flat run,
+  a busy evening a short staircase. Moves gives every move one even step, the
+  same steps as the scrubber, so a flurry can be read move by move. The
+  scrubber itself always steps by move.
+- *Not built:* a 3D map with height for score. Height on a projected map
+  can't be read against a baseline, nodes hide one another, and the score that
+  holds a node is already in its panel. Time is what the week was missing.
+- *Known weakness:* `playerHue` hashes a name to a hue, so two players can
+  get nearly the same colour, on the map and the chart alike. The chart's
+  names and the standings' swatches make up for it; the map does not yet.
+
 ## The grace period
 
 One timer in `js/campaign.mjs`, derived like everything else in the
