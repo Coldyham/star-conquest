@@ -81,15 +81,15 @@ export function standings(rows) {
 
 /** Consecutive days in `days` (a Set) ending on `today`, or on the day
  * before when `today` is not in it yet (a streak not yet extended today is
- * still alive). */
-function run(days, today) {
+ * still alive), and the day before the run's first. */
+function walk(days, today) {
   let day = days.has(today) ? today : addDays(today, -1);
   let n = 0;
   while (days.has(day)) {
     n += 1;
     day = addDays(day, -1);
   }
-  return n;
+  return { n, before: day };
 }
 
 /**
@@ -102,8 +102,12 @@ function run(days, today) {
  * itself, while the map was new and its replays still embargoed.
  * Returns `[{name, days, onTheDay}]` with `days` > 0, longest first, then the
  * longer true streak, then by name.
+ *
+ * `from`, when given, is the earliest day `wins` were read from: each row then
+ * also says whether either streak runs back to it (`daysAtLeast`,
+ * `onTheDayAtLeast`), so it may be longer than counted.
  */
-export function streaks(wins, today) {
+export function streaks(wins, today, from = null) {
   const byName = new Map();
   for (const { name, day, onTheDay } of wins) {
     if (!byName.has(name)) byName.set(name, { any: new Set(), onDay: new Set() });
@@ -113,8 +117,15 @@ export function streaks(wins, today) {
   }
   const out = [];
   for (const [name, sets] of byName) {
-    const days = run(sets.any, today);
-    if (days > 0) out.push({ name, days, onTheDay: run(sets.onDay, today) });
+    const any = walk(sets.any, today);
+    if (any.n === 0) continue;
+    const onDay = walk(sets.onDay, today);
+    const row = { name, days: any.n, onTheDay: onDay.n };
+    if (from != null) {
+      row.daysAtLeast = any.before < from;
+      row.onTheDayAtLeast = onDay.n > 0 && onDay.before < from;
+    }
+    out.push(row);
   }
   return out.sort((a, b) => b.days - a.days || b.onTheDay - a.onTheDay || a.name.localeCompare(b.name));
 }
@@ -131,4 +142,37 @@ export function bestOnTheDay(rows, day) {
 /** Whether a score posted at `submittedAt` was posted within `day` (UTC). */
 export function postedOn(submittedAt, day) {
   return dayParam(submittedAt) === day;
+}
+
+/**
+ * One player's running streak of each kind, as the daily page counts them.
+ * `scores` are the player's counted scores (`{game_key, hand, submitted_at}`),
+ * `dailyGames` the `daily_games` rows (`{day, game_key, kind}`) of those maps.
+ * Returns `{board, puzzle}`, each `{days, onTheDay}` (0 when none is running).
+ */
+export function playerStreaks(scores, dailyGames, today) {
+  const out = {};
+  for (const kind of KINDS) {
+    const dayOf = new Map(dailyGames.filter((g) => (g.kind || "board") === kind).map((g) => [g.game_key, g.day]));
+    const wins = scores
+      .filter((s) => s.hand > 0 && dayOf.has(s.game_key))
+      .map((s) => ({ name: "", day: dayOf.get(s.game_key), onTheDay: postedOn(s.submitted_at, dayOf.get(s.game_key)) }));
+    const [run] = streaks(wins, today);
+    out[kind] = run ? { days: run.days, onTheDay: run.onTheDay } : { days: 0, onTheDay: 0 };
+  }
+  return out;
+}
+
+/**
+ * A map that was a day's daily (a `daily_games` row, `{day, kind}`), for
+ * game.html's badge and button: `{label, button, href}`, the day's own page.
+ */
+export function dailyMark(entry, today) {
+  const puzzle = entry.kind === "puzzle";
+  const page = puzzle ? "puzzle.html" : "daily.html";
+  return {
+    label: `${puzzle ? "Daily puzzle" : "Daily"} · ${entry.day === today ? "Today" : shortDate(entry.day)}`,
+    button: puzzle ? "Daily puzzle page" : "Daily page",
+    href: entry.day === today ? page : `${page}?day=${entry.day}`,
+  };
 }

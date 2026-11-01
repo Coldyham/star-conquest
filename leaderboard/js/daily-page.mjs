@@ -18,7 +18,8 @@ import { clear, el, leaderCredit, setupSummary, showError, userHref } from "./fo
 import { mountMyScores } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
-// How far back streaks are read. A longer streak shows as this many days.
+// How far back streaks are read. A streak reaching back that far shows as
+// "60+", since it may run further.
 const STREAK_DAYS = 60;
 
 const daysNav = document.getElementById("days");
@@ -92,12 +93,14 @@ function drawLeader(summaries) {
   const ranked = summaries.filter((s) => s.best_turns != null)
     .sort((a, b) => a.best_turns - b.best_turns || (a.best_lost ?? 0) - (b.best_lost ?? 0));
   const posted = summaries.reduce((n, s) => n + (s.score_count || 0), 0);
+  const players = summaries.reduce((n, s) => n + (s.player_count || 0), 0);
   const hidden = "Every other score, and every replay, stays hidden until the day ends at midnight UTC; "
     + "whoever is ahead then is the day's winner.";
   clear(standingsBox).append(ranked.length
     ? el("p", { class: "lede" }, [
       "Currently ahead: ", el("strong", { text: leaderCredit(ranked[0]) }),
-      ` — ${ranked[0].best_turns} turns, of ${posted} ${posted === 1 ? "score" : "scores"} posted. ${hidden}`,
+      ` — ${ranked[0].best_turns} turns, of ${posted} ${posted === 1 ? "score" : "scores"} posted`
+        + ` by ${players} ${players === 1 ? "player" : "players"}. ${hidden}`,
     ])
     : el("p", { class: "empty", text: posted
       ? `No verified score yet. ${hidden}`
@@ -135,18 +138,23 @@ function drawStandings(rows) {
 }
 
 /** Streaks: the mended count, with the true one (days won on the day itself)
- * in the title, which a mouse shows on hover and a tap opens (tip.mjs). */
+ * in the title, which a mouse shows on hover and a tap opens (tip.mjs). A
+ * count that reaches back to the first day read shows as "60+" (STREAK_DAYS). */
 function drawStreaks(list) {
-  const days = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+  const count = (n, atLeast) => (atLeast ? `${STREAK_DAYS}+` : `${n}`);
+  const days = (n, atLeast = false) => `${count(n, atLeast)} ${n === 1 && !atLeast ? "day" : "days"}`;
   clear(streaksBox).append(list.length
     ? el("div", { class: "tally" }, list.map((row) => el("div", { class: "tally-row" }, [
       el("a", { class: "tally-name", href: userHref([row.name]), text: row.name }),
       el("span", {
         class: "tally-figs",
         title: row.onTheDay === row.days
-          ? `True streak: every one of the ${days(row.days)} won on the day itself`
-          : `True streak: ${days(row.onTheDay)} won on the day itself; the rest won later from the archive`,
-        text: row.onTheDay === row.days ? days(row.days) : `${days(row.days)} (${row.onTheDay} true)`,
+          ? `True streak: every one of the ${days(row.days, row.daysAtLeast)} won on the day itself`
+          : `True streak: ${days(row.onTheDay, row.onTheDayAtLeast)} won on the day itself; `
+            + "the rest won later from the archive",
+        text: row.onTheDay === row.days
+          ? days(row.days, row.daysAtLeast)
+          : `${days(row.days, row.daysAtLeast)} (${count(row.onTheDay, row.onTheDayAtLeast)} true)`,
       }),
     ])))
     : el("p", { class: "empty", text: "No streaks running. Win today's map to start one, or a missed day's to mend one." }));
@@ -182,7 +190,7 @@ async function load() {
         ? select(`counted_scores?select=game_key,user_name,hand,submitted_at&game_key=${inList(todayKeys)}`)
         : [],
       isToday && todayKeys.length
-        ? select(`game_summary?select=game_key,best_turns,best_lost,best_user_name,best_holders,score_count&game_key=${inList(todayKeys)}`)
+        ? select(`game_summary?select=game_key,best_turns,best_lost,best_user_name,best_holders,score_count,player_count&game_key=${inList(todayKeys)}`)
         : [],
     ]);
     if (isToday) drawLeader(summaries);
@@ -191,7 +199,7 @@ async function load() {
       .filter((s) => s.hand > 0)
       .map((s) => ({ name: s.user_name, day: dayOfKey.get(s.game_key),
         onTheDay: postedOn(s.submitted_at, dayOfKey.get(s.game_key)) }));
-    drawStreaks(streaks(wins, today));
+    drawStreaks(streaks(wins, today, from));
   } catch (err) {
     todayBox.classList.remove("loading");
     showError(todayBox, err.message);
