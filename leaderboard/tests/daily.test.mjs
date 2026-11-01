@@ -155,3 +155,17 @@ test("a daily's map links to its day's page", () => {
   assert.deepEqual(dailyMark({ day: "2026-10-28", kind: "board" }, "2026-11-01"),
     { label: "Daily · Wed 28 Oct", button: "Daily page", href: "daily.html?day=2026-10-28" });
 });
+
+test("a streak that reaches back to the first day read is only a lower bound", () => {
+  const on = (name, day, onTheDay = true) => ({ name, day, onTheDay });
+  const wins = [
+    on("ann", "2026-10-29"), on("ann", "2026-10-30"), on("ann", "2026-10-31", false),
+    on("bo", "2026-10-30"), on("bo", "2026-10-31"),
+  ];
+  assert.deepEqual(streaks(wins, "2026-11-01", "2026-10-29"), [
+    { name: "ann", days: 3, onTheDay: 0, daysAtLeast: true, onTheDayAtLeast: false },
+    { name: "bo", days: 2, onTheDay: 2, daysAtLeast: false, onTheDayAtLeast: false },
+  ]);
+  assert.deepEqual(streaks([on("cy", "2026-10-31"), on("cy", "2026-11-01")], "2026-11-01", "2026-10-31"),
+    [{ name: "cy", days: 2, onTheDay: 2, daysAtLeast: true, onTheDayAtLeast: true }]);
+});

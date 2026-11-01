@@ -18,7 +18,8 @@ import { clear, el, leaderCredit, setupSummary, showError, userHref } from "./fo
 import { mountMyScores } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
-// How far back streaks are read. A longer streak shows as this many days.
+// How far back streaks are read. A streak reaching back that far shows as
+// "≥" its count, since it may run further.
 const STREAK_DAYS = 60;
 
 const daysNav = document.getElementById("days");
@@ -137,18 +138,22 @@ function drawStandings(rows) {
 }
 
 /** Streaks: the mended count, with the true one (days won on the day itself)
- * in the title, which a mouse shows on hover and a tap opens (tip.mjs). */
+ * in the title, which a mouse shows on hover and a tap opens (tip.mjs). A
+ * count that reaches back to the first day read is "≥" it (STREAK_DAYS). */
 function drawStreaks(list) {
-  const days = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+  const days = (n, atLeast = false) => `${atLeast ? "≥ " : ""}${n} ${n === 1 ? "day" : "days"}`;
   clear(streaksBox).append(list.length
     ? el("div", { class: "tally" }, list.map((row) => el("div", { class: "tally-row" }, [
       el("a", { class: "tally-name", href: userHref([row.name]), text: row.name }),
       el("span", {
         class: "tally-figs",
         title: row.onTheDay === row.days
-          ? `True streak: every one of the ${days(row.days)} won on the day itself`
-          : `True streak: ${days(row.onTheDay)} won on the day itself; the rest won later from the archive`,
-        text: row.onTheDay === row.days ? days(row.days) : `${days(row.days)} (${row.onTheDay} true)`,
+          ? `True streak: every one of the ${days(row.days, row.daysAtLeast)} won on the day itself`
+          : `True streak: ${days(row.onTheDay, row.onTheDayAtLeast)} won on the day itself; `
+            + "the rest won later from the archive",
+        text: row.onTheDay === row.days
+          ? days(row.days, row.daysAtLeast)
+          : `${days(row.days, row.daysAtLeast)} (${row.onTheDayAtLeast ? "≥ " : ""}${row.onTheDay} true)`,
       }),
     ])))
     : el("p", { class: "empty", text: "No streaks running. Win today's map to start one, or a missed day's to mend one." }));
@@ -193,7 +198,7 @@ async function load() {
       .filter((s) => s.hand > 0)
       .map((s) => ({ name: s.user_name, day: dayOfKey.get(s.game_key),
         onTheDay: postedOn(s.submitted_at, dayOfKey.get(s.game_key)) }));
-    drawStreaks(streaks(wins, today));
+    drawStreaks(streaks(wins, today, from));
   } catch (err) {
     todayBox.classList.remove("loading");
     showError(todayBox, err.message);
