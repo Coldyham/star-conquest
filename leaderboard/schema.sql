@@ -656,7 +656,11 @@ select
   runs.bot_wins,
   runs.bot_runs,
   case when runs.bot_runs > 0
-    then round(1 - runs.bot_wins::numeric / runs.bot_runs, 3) end as difficulty
+    then round(1 - runs.bot_wins::numeric / runs.bot_runs, 3) end as difficulty,
+  -- player_count: distinct players behind score_count, counted or not
+  -- (daily-page.mjs: "of 4 scores posted by 3 players").
+  (select count(distinct s.user_id) from public.scores s
+    where s.game_key = g.game_key)::integer as player_count
 from public.games g
 join public.game_embargoes e on e.game_key = g.game_key
 left join lateral (
@@ -669,8 +673,10 @@ left join lateral (
   limit 1
 ) best on true
 left join lateral (
-  -- Counted scores tied with the best on turns and lost: 2+ is a shared record.
-  select count(*) as holders
+  -- Players with a counted score tied with the best on turns and lost: 2+ is a
+  -- shared record. Players, not scores: one player posting the same figures
+  -- twice is not "& 1 other".
+  select count(distinct s.user_id) as holders
   from public.counted_scores s
   where s.game_key = g.game_key and s.turns = best.turns and s.lost = best.lost
 ) tied on true

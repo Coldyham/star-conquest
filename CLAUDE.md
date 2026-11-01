@@ -61,8 +61,11 @@ Run the tests a change can reach, not the whole suite each time. A docs-only
 change needs none unless a test reads the file (`tests/test_bot_brief.py` reads
 `docs/bot-brief.md`, `tests/test_botio.py` reads `bots/README.md`). A change to
 one bot or tool runs its own `tests/test_<name>.py` (knower's Council stop also
-has `tests/test_council.py`). Run the full suite after a change to
-`starconquest/`, and before opening a PR on a code change.
+has `tests/test_council.py`). Wording, a string choice or an asset's text runs
+the tests that read it (grep `tests/` for the file or string), not the suite.
+Run the full suite after a change to `starconquest/` logic (rules, engine,
+mapgen, replay, settings, AI, input or layout), and once before opening a PR on
+such a change, not again for later wording fixes on it.
 
 **Every tool or script that runs for more than a minute records as it goes.**
 Append each finished game or unit to a file under `results/` the moment it

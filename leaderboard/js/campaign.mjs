@@ -68,8 +68,11 @@ function inOrder(scores) {
  * @returns {holders: Map<nodeId, {key, name, turns, lost, since}>,
  *           homes: Map<playerKey, nodeId>, captures: [{nodeId, taker, from, turns, at}],
  *           lostAt: Map<"key|nodeId", ms>, standings: [{key, name, fields, home}]}
+ *
+ * `onMove(capture, holders)` is called after each capture, with `holders` as
+ * it stands then (weekHistory's hook; nothing else needs it).
  */
-export function fold(graph, scores) {
+export function fold(graph, scores, { onMove = null } = {}) {
   const kind = new Map(graph.nodes.map((node) => [node.id, node.kind]));
   const links = neighbours(graph);
   const holders = new Map();
@@ -102,6 +105,7 @@ export function fold(graph, scores) {
       holders.set(nodeId, entry);
       homes.set(key, nodeId);
       captures.push({ nodeId, taker: score.user_name, from: null, turns: score.turns, at });
+      onMove?.(captures.at(-1), holders);
       continue;
     }
 
@@ -123,6 +127,7 @@ export function fold(graph, scores) {
       lostAt.set(`${held.key}|${nodeId}`, at);
     }
     captures.push({ nodeId, taker: score.user_name, from: held ? held.name : null, turns: score.turns, at });
+    onMove?.(captures.at(-1), holders);
   }
 
   const players = new Set([...homes.keys(), ...[...fields].filter(([, n]) => n > 0).map(([k]) => k)]);
@@ -132,6 +137,45 @@ export function fold(graph, scores) {
       b.fields - a.fields || (reached.get(a.key) || 0) - (reached.get(b.key) || 0) ||
       a.name.localeCompare(b.name));
   return { holders, homes, captures, lostAt, standings };
+}
+
+/**
+ * The week move by move, for the page's replay: one frame per capture, each
+ * `{move, holders}` with `holders` the map as it stood just after that move.
+ * Derived from the same fold, so the replay can never disagree with the map,
+ * and nothing about it is stored. A holder bettering their own score is not a
+ * move and makes no frame.
+ */
+export function weekHistory(graph, scores) {
+  const frames = [];
+  // fold replaces a holder's entry rather than editing it, so a shallow copy is a snapshot.
+  fold(graph, scores, { onMove: (move, holders) => frames.push({ move, holders: new Map(holders) }) });
+  return frames;
+}
+
+/**
+ * Field nodes each player holds in every frame: `[{key, name, counts}]`,
+ * `counts[i]` being after frame i, in the order `keys` gives (the standings',
+ * so a band keeps its place), anyone else after them. Homes are left out, as
+ * the standings leave them out: field nodes are what wins the week.
+ */
+export function fieldCounts(graph, frames, keys = []) {
+  const field = new Set(graph.nodes.filter((n) => n.kind !== "home").map((n) => n.id));
+  const order = [...keys];
+  const names = new Map();
+  const perFrame = frames.map(({ holders }) => {
+    const counts = new Map();
+    for (const [nodeId, holder] of holders) {
+      names.set(holder.key, holder.name);
+      if (!field.has(nodeId)) continue;
+      counts.set(holder.key, (counts.get(holder.key) || 0) + 1);
+      if (!order.includes(holder.key)) order.push(holder.key);
+    }
+    return counts;
+  });
+  return order
+    .filter((key) => perFrame.some((counts) => counts.has(key)))
+    .map((key) => ({ key, name: names.get(key), counts: perFrame.map((counts) => counts.get(key) || 0) }));
 }
 
 /**
