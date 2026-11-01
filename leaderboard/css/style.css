@@ -1119,6 +1119,47 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   text-anchor: middle; dominant-baseline: central; pointer-events: none;
 }
 .campaign-map .node.neutral text { fill: var(--ink); }
+/* The replay's last move: a gold ring round the node it changed. */
+.campaign-map .node.moved circle.ring { fill: none; stroke: var(--gold); stroke-width: 3; }
+
+/* The replay bar under the map. The box and the tip toggle `hidden`, so neither
+ * sets `display` (see the note on `hidden` at the top). */
+.campaign-replay { margin: 0.75rem 0 0; }
+.replay-controls { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.replay-controls .btn { min-width: 2.4rem; text-align: center; }
+.replay-controls .btn:disabled { opacity: 0.4; cursor: default; }
+.replay-controls input[type="range"] { flex: 1 1 10rem; min-width: 8rem; accent-color: var(--gold); }
+.replay-caption { margin: 0.4rem 0 0; color: var(--dim); min-height: 1.4em; overflow-wrap: anywhere; }
+
+/* Field nodes held over the week (under the standings). */
+.campaign-territory { position: relative; margin: 1.25rem 0 0; }
+.territory-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap;
+  margin: 0 0 0.4rem;
+}
+.territory-title { margin: 0; font-size: 0.95rem; color: var(--ink); }
+.axis-switch { display: flex; gap: 0.3rem; }
+.axis-switch .btn { padding: 0.3rem 0.6rem; font-size: 0.6rem; }
+.campaign-territory svg { display: block; max-width: 100%; cursor: crosshair; touch-action: pan-y; }
+.campaign-territory .band { stroke: var(--bg); stroke-width: 1.5; stroke-linejoin: round; }
+.campaign-territory .band-name {
+  fill: #0b0f1d; font-family: var(--mono); font-size: 11px; font-weight: bold; pointer-events: none;
+}
+.campaign-territory .grid { stroke: #1c2140; stroke-width: 1; }
+.campaign-territory .axis { fill: var(--dim); font-family: var(--mono); font-size: 11px; }
+.campaign-territory .cursor { stroke: var(--gold); stroke-width: 2; }
+.campaign-territory .hover { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; }
+.territory-tip {
+  position: absolute; top: 3.6rem; z-index: 2; pointer-events: none;
+  padding: 0.4rem 0.6rem; background: var(--panel); border: 1px solid var(--line);
+  font-size: 0.85rem; white-space: nowrap;
+}
+.territory-tip div { margin-top: 0.15rem; }
+.territory-note { margin: 0.3rem 0 0; color: var(--dim); font-size: 0.85rem; }
+.swatch {
+  display: inline-block; width: 0.7em; height: 0.7em; margin-right: 0.4em;
+  border-radius: 2px; vertical-align: baseline;
+}
 .campaign-detail {
   margin: 1rem 0 0;
   padding: 0.9rem 1rem;
