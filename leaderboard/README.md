@@ -23,7 +23,7 @@ root `netlify.toml` bundles
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card, with their badges — see below and "Badges" |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
-| [`daily.html?day=…`](daily.html) | the daily challenge: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
+| [`puzzle.html?day=…`](puzzle.html), [`daily.html?day=…`](daily.html) | the daily puzzle (the menu's default) and board: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
 | [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/game/#puzzle`), standings and its own streaks — see "Daily" |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |

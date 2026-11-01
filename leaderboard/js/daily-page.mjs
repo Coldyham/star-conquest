@@ -92,12 +92,14 @@ function drawLeader(summaries) {
   const ranked = summaries.filter((s) => s.best_turns != null)
     .sort((a, b) => a.best_turns - b.best_turns || (a.best_lost ?? 0) - (b.best_lost ?? 0));
   const posted = summaries.reduce((n, s) => n + (s.score_count || 0), 0);
+  const players = summaries.reduce((n, s) => n + (s.player_count || 0), 0);
   const hidden = "Every other score, and every replay, stays hidden until the day ends at midnight UTC; "
     + "whoever is ahead then is the day's winner.";
   clear(standingsBox).append(ranked.length
     ? el("p", { class: "lede" }, [
       "Currently ahead: ", el("strong", { text: leaderCredit(ranked[0]) }),
-      ` — ${ranked[0].best_turns} turns, of ${posted} ${posted === 1 ? "score" : "scores"} posted. ${hidden}`,
+      ` — ${ranked[0].best_turns} turns, of ${posted} ${posted === 1 ? "score" : "scores"} posted`
+        + ` by ${players} ${players === 1 ? "player" : "players"}. ${hidden}`,
     ])
     : el("p", { class: "empty", text: posted
       ? `No verified score yet. ${hidden}`
@@ -182,7 +184,7 @@ async function load() {
         ? select(`counted_scores?select=game_key,user_name,hand,submitted_at&game_key=${inList(todayKeys)}`)
         : [],
       isToday && todayKeys.length
-        ? select(`game_summary?select=game_key,best_turns,best_lost,best_user_name,best_holders,score_count&game_key=${inList(todayKeys)}`)
+        ? select(`game_summary?select=game_key,best_turns,best_lost,best_user_name,best_holders,score_count,player_count&game_key=${inList(todayKeys)}`)
         : [],
     ]);
     if (isToday) drawLeader(summaries);
