@@ -212,6 +212,9 @@ nor rejected are in [`open.md`](open.md); the file index is
 - campaign.md · Counting every score but a `mismatch` toward crowns and the campaign: replaced from 2026-10-15 by verified only, with 24 hours' grace, since anyone can insert a score; older scores keep the old rule. `schema.md`, *counted_scores and the crowns*.
 - campaign.md · A play-by-post duel to settle two campaign fleets meeting at one node: set aside for the best-score rule, since the duel is a different game on a different map and needs both players to turn up. *Campaign fleets (decided against).*
 - campaign.md · Campaign fleets: real-time lanes on the meta-map, a launch as a stored claim. The grace period answers the stolen neighbour, and fleets' remaining case (the Monday sweep, a warning) does not justify a stored table and a per-person credential. *Campaign fleets (decided against).*
+- campaign.md · A probe win within a turn cap (the daily's check) as the test of a playable node: rejected, since no probe won the liked fog-and-1-turn-lanes maze or two other rolled nodes in 110 turns. *A node you can start on.*
+- campaign.md · Turns until a sure `edge_attacking` capture of the home's cheapest neighbour, on the built map: set aside for the settings-only average-garrison rule, which needs no map and isn't passed by one cheap neighbour. *A node you can start on.*
+- campaign.md · Flagging a config first dealt as a "?" so later weeks show it as one: rejected, since it still deals the slow ones and flags the playable ones. *A node you can start on.*
 
 ## gauntlet.md (Gauntlets)
 - gauntlet.md · Boons carried between a run's stages (a hand-map edit of the stage): a boon-modified stage scores as a different setup, and the bookkeeping is complicated. Stage targets give a run its pressure instead. *Carry-over.*

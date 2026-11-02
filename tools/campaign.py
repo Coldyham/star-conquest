@@ -59,6 +59,7 @@ HOME_OFFSET = 110.0           # world units a home sits outside its edge node
 MYSTERY_MAX_NODES = config.STANDARD_MAX_NODES
 FAMILY_MAX_NODES = config.STANDARD_MAX_NODES   # a config past this is never a node
 SEED_TRIES = 50
+FIRST_MOVE_TURNS = 10         # a node's home must match the average neutral garrison by then
 # Extra lanes past the MST, as a fraction of it: half again a game board's 0.4.
 # At 0.4 a 12-node field averaged 4.5 cut nodes (a node every route through it
 # must cross, so one par-tight score walls off what lies behind it) and a 36-node
@@ -102,7 +103,8 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
     is any config past ``FAMILY_MAX_NODES`` systems: a big map is a long sitting,
     and one played once as a test would otherwise turn up week after week. A
     config below a ``settings.ROLL_FLOORS`` entry is left out too: the dice never
-    deal it, so neither does the week."""
+    deal it, so neither does the week, and so is one that fails
+    ``starts_in_time``."""
     cutoff = dt.datetime.combine(before, dt.time(), dt.timezone.utc)
     out: dict[str, Family] = {}
     for row in games:
@@ -114,6 +116,8 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
         parsed = Settings.from_dict(dict(setup))
         if any(getattr(parsed, attr) < floor for attr, floor in ROLL_FLOORS.items()):
             continue
+        if not starts_in_time(parsed):
+            continue
         seen = dt.datetime.fromisoformat(str(row["first_seen_at"]).replace("Z", "+00:00"))
         if seen >= cutoff:
             continue
@@ -122,6 +126,17 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
         mode = setup.get("mode", "random")
         family.plays[mode] = family.plays.get(mode, 0) + 1
     return sorted(out.values(), key=lambda f: family_key(f.setup))
+
+
+def starts_in_time(settings: Settings) -> bool:
+    """Whether a home, on its starting ships and its production, matches the
+    average neutral garrison within ``FIRST_MOVE_TURNS`` turns. Read from the
+    settings alone: the average is the one ``config.garrison_for`` deals over
+    ``config.PRODUCTION_WEIGHTS``."""
+    weights = config.PRODUCTION_WEIGHTS
+    scaled = sum(w * round(settings.garrison_k / p) for p, w in weights.items()) / sum(weights.values())
+    neutral = settings.garrison_base + scaled + settings.garrison_jitter / 2
+    return settings.home_start_ships + FIRST_MOVE_TURNS // settings.home_production >= neutral
 
 
 def _fresh_seed(rng: random.Random, taken: set[tuple[str, int]], mode: str) -> int:
@@ -169,9 +184,15 @@ def _symmetric_layout(rng: random.Random) -> str:
 
 def _mystery(rng: random.Random, taken: set[tuple[str, int]]) -> tuple[dict, int]:
     """A "?" node: default settings with every Advanced knob rolled, and random
-    players, systems, map type and opponents."""
+    players, systems, map type and opponents. The knobs are rolled again until
+    they pass ``starts_in_time``."""
     settings = Settings.defaults()
-    randomise_knobs(settings, ADV_MAP + ADV_TRAVEL + ADV_ECON + ADV_FOG, rng)
+    for _ in range(SEED_TRIES):
+        randomise_knobs(settings, ADV_MAP + ADV_TRAVEL + ADV_ECON + ADV_FOG, rng)
+        if starts_in_time(settings):
+            break
+    else:
+        raise RuntimeError('no "?" roll started in time')   # about one in 10^26
     settings.players = rng.randint(config.MIN_PLAYERS, config.MAX_PLAYERS)
     settings.nodes = rng.randint(settings.min_nodes(), MYSTERY_MAX_NODES)
     settings.mode = rng.choice(("random", "symmetric"))
