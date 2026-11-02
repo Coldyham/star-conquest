@@ -101,6 +101,7 @@ line gives only the verdict. Ideas that lost are in
 ## par.md
 - par.md · **Par search (a local check).** Why it is less random than it looks; the floor; lucky vs honest dice (lucky is no ceiling); the beam search; rollouts with marshal and actuary.
 - par.md · *Readings (2026-10-14, keyed dice):* honest dice match the best human score on the live board, but lose to wins played on keyed dice.
+- par.md · *evolved as a candidate (2026-11-02):* won the puzzle daily `e60a6d946d4a010b` (15 → 11) but a wash across par.md's maps (6 better, 9 worse, 15 same); a by-hand `--candidates` option, not a default.
 - par.md · **A gap this exposes in `verify_scores`.** The dice half closed for keyed turns; the bot-orders half open by design.
 - par.md · **Next, if it goes further.** Wider beams, candidates that aren't a bot's idea, a budget for knower rivals.
 
