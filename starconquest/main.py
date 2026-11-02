@@ -1197,14 +1197,15 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         ui.history_chart = stats.masked(ui.history_chart, known)
     ui.history_graph = ui.history_reveal
     # The coach: only on a decided game, when nothing is hidden any more, and
-    # opened first when it has something to say. A spectator holds no seat.
+    # opened first when it has something to say beyond the turning point, which
+    # every decided game has. A spectator holds no seat.
     ui.coach_review = None
     ui.coach_open, ui.coach_sel = False, -1
     if ui.history_reveal and ui.human_id in state.players and ui.human_id != 0:
         ui.coach_review = coach.review(history_states,
                                        [log.orders_for(i) for i in range(log.turn_count)],
                                        ui.human_id)
-        ui.coach_open = bool(ui.coach_review.notes)
+        ui.coach_open = any(n.kind != coach.TURN for n in ui.coach_review.notes)
     ui.graph_full = False
     ui.graph_hidden = set()
     ui.dragging_graph = False

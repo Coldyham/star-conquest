@@ -112,7 +112,7 @@ A pure core module that reads the history boards (`main.build_history`) and the
 log's orders (`GameLog.orders_for`) once, when History opens on a **decided**
 game (`Ui.history_reveal`), and never mid-game, where it would give away what
 fog hid. Ironman is unaffected: History is closed until the game is decided
-anyway. The win overlay's button reads "Coach & history".
+anyway. The win overlay's button reads "History & coach".
 
 Its notes, each naming the board to jump to (the turn the decision was made
 on) and the systems to ring there:
@@ -138,7 +138,7 @@ the turning point always. They are shown in turn order under a tally ("12
 captures · 3 failed attacks · 4 systems lost").
 
 The Coach tab sits after the chart tabs in the graph panel, opens first when
-there are notes, and takes the panel's body in place of the plot and legend.
+it has a note besides the turning point (which every decided game has), and takes the panel's body in place of the plot and legend.
 Click a note, or press Up/Down, to select it (`Ui.select_note`): History jumps
 to its board and rings its systems (`render._draw_coach_marks`). The rows are a
 window kept around the selected note, so a long list needs no scrollbar. Tab

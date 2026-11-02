@@ -126,7 +126,9 @@ def test_the_coach_tab_steps_through_its_notes(tmp_path, monkeypatch):
     try:
         screen, states, ui = _decided_review(tmp_path, monkeypatch)
         review = ui.coach_review
-        assert review is not None and review.notes and ui.coach_open
+        assert review is not None and review.notes
+        assert ui.coach_open == any(n.kind != coach.TURN for n in review.notes)
+        ui.coach_open = True
         render.draw(screen, states[ui.history_turn], ui)
         assert ui.coach_tab_rect[2] and ui.coach_rows and not ui.graph_trace_rects
         # Down selects the first note, and History jumps to its board

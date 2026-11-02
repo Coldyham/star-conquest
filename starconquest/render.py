@@ -3334,7 +3334,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # last one: the stage's seed is pinned, so a new map would leave the stage.
     nxt = ui.offers_next_stage(state)
     second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
-    labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("Coach & history", "H")]
+    labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("History & coach", "H")]
     quit_label = _key_hint("Quit", "Esc")
     # A daily's result goes out as a line, not a link: everyone has its map.
     share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
@@ -3381,7 +3381,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Retry replays this exact match from the opening position (a fork of the
     # finished log, so the completed record stays intact) — the main way back
     # in after a loss, so it leads and sits beside New map's fresh seed.
-    # Setup menu and Coach & history follow; Challenge a friend (when offered)
+    # Setup menu and History & coach follow; Challenge a friend (when offered)
     # comes next; Quit is always last, opening the same confirm modal as Esc.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
     ui.restart_button_rect = (0, 0, 0, 0)
