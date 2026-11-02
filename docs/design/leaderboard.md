@@ -601,6 +601,41 @@ the site that builds fork previews, but left two sites to deploy and put a
 proxy between the rate limit and the client's IP. The functions moved instead,
 and the fork-preview risk is held by the "Require approval" policy.
 
+### Quick post
+
+**One press posts a win, without the entry form.** Built 2026-11-02. Once
+this browser has a posting name (`sc_pbp_name`, set by posting once through
+the form or by claiming a play-by-post seat), the win overlay's leaderboard
+button reads *Post as <name>*. Pressing it uploads the log as the form's
+button does, then imports the board's own `leaderboard/js/post.mjs` into the
+page and calls `quickPost(token, name)` (`share.quick_post`, through
+`pbp.settle`'s mailbox). That module is also what the submit page posts with
+(`postScore`), so the game re-implements none of filing a score: the twin
+lookup, user lookup and grant-checked insert are written once.
+- **What it reports is what an embargoed map shows anyone.** That is the
+  score count and who holds the best (`game_summary`), never the score list,
+  so the line reads the same whether or not the map is embargoed
+  (`share.post_summary`). After that the button becomes *View on board*.
+- **Failure falls back to the form.** If the post can't start (desktop, no
+  bridge), the press opens the form. If it is refused, the button becomes
+  *Enter on leaderboard*. Once the score is in, the summary read is quiet
+  (`.catch(() => [])`), so a later failure can never send the player to the
+  form to post a second time.
+- **No embargo, no tags, no other name.** The form still covers those. If
+  the setter of a brand-new map wants an embargo, they use *Challenge a
+  friend* and paste the link into the form. The button only becomes quick
+  post once a name is remembered, so a browser that has never posted still
+  goes through the form.
+- **Web only.** Desktop has no page to run the module in, and keeps opening
+  the form. `/board/js/*` is served with `Access-Control-Allow-Origin: *`, so
+  a game on a local server or a custom domain can import the module from the
+  production origin.
+
+**Decided against: an `/api/score` function.** It would have worked from the
+desktop too, but it moves score writes off the public insert path that
+`schema.sql`'s grants are built around, and it means a function deploy for
+something the browser already does.
+
 ### The pages are templates
 
 Every page carried an identical copy of the head and the menu, so adding a page

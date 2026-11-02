@@ -262,8 +262,8 @@ def test_the_public_cannot_choose_when_a_score_was_posted():
     assert grant is not None and revoke < grant.start()
     columns = {c.strip() for c in grant.group(1).split(",")}
     assert "submitted_at" not in columns
-    submit = (ROOT / "leaderboard" / "js" / "submit.mjs").read_text()
+    submit = (ROOT / "leaderboard" / "js" / "post.mjs").read_text()
     body = re.search(r'insert\("scores", \{(.*?)\n\s*\}, \{', submit, re.DOTALL)
-    assert body is not None, "the submit page's score insert has moved"
+    assert body is not None, "the score insert (post.mjs) has moved"
     sent = set(re.findall(r"^\s*(\w+):", body.group(1), re.MULTILINE))
     assert sent and sent <= columns, f"not granted: {sorted(sent - columns)}"

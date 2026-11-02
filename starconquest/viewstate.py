@@ -516,6 +516,13 @@ class Ui:
     # no `paths.LEADERBOARD_ORIGIN` is configured.
     leaderboard_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_msg: str = ""  # outcome of the last share, drawn under the buttons
+    # Quick post (`share.quick_post`): the name the leaderboard button posts under
+    # without the entry form ("" for the form), and how far the post has got:
+    # "", "posting", "posted" (the button then opens the map's page, `posted_key`)
+    # or "failed" (the button falls back to the form).
+    post_as: str = ""
+    post_state: str = ""
+    posted_key: str = ""
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
     # actions (A: autoplay, N: new map, F: fast forward). menu_button_rect above is
     # shared with the game-over overlay — the two scenes never draw at the same
@@ -823,6 +830,18 @@ class Ui:
         """
         return (state.winner == self.human_id and self.hand_turns > 0
                 and not self.watched and not self.in_pbp and not self.hinted)
+
+    def board_action(self) -> str:
+        """What the leaderboard button does now: "view" the posted map's page,
+        nothing while "posting", "post" under `post_as`, or "enter" a result on
+        the entry form. Render labels the button by it and main acts on it."""
+        if self.post_state == "posted":
+            return "view"
+        if self.post_state == "posting":
+            return "posting"
+        if self.post_as and self.post_state != "failed":
+            return "post"
+        return "enter"
 
     def can_hint(self, state: GameState) -> bool:
         """Is the Hint control offered? Only on our own live turn: not in a shared

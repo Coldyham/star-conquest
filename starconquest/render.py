@@ -3338,7 +3338,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     quit_label = _key_hint("Quit", "Esc")
     # A daily's result goes out as a line, not a link: everyone has its map.
     share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
-    board_label = _key_hint("Enter on leaderboard", "L")
+    board_label = _board_label(ui)
     share = ui.can_post(state)
     # The constant, not a resolved URL: a blank one disables the feature
     # everywhere (see `paths`), and resolving one costs a DOM read that this must
@@ -3358,6 +3358,8 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # the share pair side by side, or stacked where two won't fit across
     share_w = max(_btn_w(normal, share_label, bw), _btn_w(normal, board_label, bw))
     stack_share = board and 2 * share_w + gap > room
+    # A quick post's summary can outrun a phone's width, so it wraps.
+    notes = _wrap(_fonts()["small"], ui.share_msg, room) if (share and ui.share_msg) else []
     rows = (4 + stack_share) if share else 3
     stack = (
         _row_h(head_kind)
@@ -3365,7 +3367,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         + pad
         + rows * (bh + gap)
         - gap
-        + (_row_h() if (share and ui.share_msg) else 0)
+        + len(notes) * _row_h()
     )
     y = (h - stack) // 2
 
@@ -3418,14 +3420,35 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
             ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh), share_label, *_BTN_TEAL)
             ui.leaderboard_button_rect = (0, 0, 0, 0)
         y += bh + gap
-        if ui.share_msg:
-            _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM, center=(w // 2, button_y + bh + _row_h() // 2))
-            y += _row_h()
+        for i, note in enumerate(notes):
+            _text(surface, _fonts()["small"], note, config.COLOR_TEXT_DIM,
+                  center=(w // 2, button_y + bh + i * _row_h() + _row_h() // 2))
+        y += len(notes) * _row_h()
     else:
         ui.share_button_rect = (0, 0, 0, 0)
         ui.leaderboard_button_rect = (0, 0, 0, 0)
 
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
+
+
+# How much of a name the leaderboard button shows.
+_POST_NAME_SHOWN = 16
+
+
+def _board_label(ui: Ui) -> str:
+    """The win overlay's leaderboard button, by what it does now
+    (``Ui.board_action``)."""
+    action = ui.board_action()
+    if action == "view":
+        return _key_hint("View on board", "L")
+    if action == "posting":
+        return "Posting…"
+    if action == "post":
+        name = ui.post_as.strip()
+        if len(name) > _POST_NAME_SHOWN:
+            name = name[:_POST_NAME_SHOWN - 1].rstrip() + "…"
+        return _key_hint(f"Post as {name}", "L")
+    return _key_hint("Enter on leaderboard", "L")
 
 
 _COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is
