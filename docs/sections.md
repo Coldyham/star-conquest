@@ -82,6 +82,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## campaign.md (split from leaderboard.md)
 - campaign.md · **Crowns, the weekly campaign and embargoes** (rules in full). `counted_scores`, `crown_holders`, `crown_steals`; the 24-hour unverified grace; the campaign map, `fold`, `attemptStatus`; embargoes.
+- campaign.md · **A node you can start on.** `starts_in_time`: starting ships plus `FIRST_MOVE_TURNS` (10) turns of home production must match the average neutral garrison, read from the setup alone; `families` drops a failing config, `_mystery` re-rolls; the slow node of 2026-11-02; a probe win, an `edge_attacking` first capture and flagging old "?" configs decided against.
 - campaign.md · **The week's replay.** `weekHistory` (a frame per move via `fold`'s `onMove`), the scrubber, live only at "now", `fieldCounts` and the territory chart (Time / Moves axis); 3D height-for-score not built; `playerHue` collisions.
 - campaign.md · **The grace period.** Half an hour after losing a node or its neighbour, derived in `fold`, for a game started with access (`scores.campaign_start`). *In the game*: confirm before Start, a top-bar countdown.
 - campaign.md · *Decided against:* an "able to capture" flag on its own; a cooldown between moves.

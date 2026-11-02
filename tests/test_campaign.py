@@ -193,3 +193,20 @@ def test_no_node_is_dealt_sight_zero():
         graph = _graph(games=GAMES + blind, seed=seed)
         for node in graph["nodes"]:
             assert Settings.from_dict(dict(node["settings"])).fog_sight >= ROLL_FLOORS["fog_sight"]
+
+
+
+SLOW = {"home_production": 7, "home_start_ships": 5, "garrison_base": 16, "garrison_k": 35, "garrison_jitter": 6}
+
+
+def test_a_config_whose_home_cannot_match_the_neutrals_in_time_is_never_a_node():
+    """A home making a ship every 7 turns from 5 can't match neutrals of 25-30
+    for well over a hundred turns: a "?" never rolls it, and a played config
+    with it is never a node."""
+    slow = _game("s", 9, **SLOW)
+    assert not campaign.starts_in_time(Settings.from_dict(dict(slow["settings_json"])))
+    assert campaign.starts_in_time(Settings.defaults())
+    assert campaign.families([slow], START) == []
+    for seed in range(40):
+        for node in _graph(games=GAMES + [slow], seed=seed)["nodes"]:
+            assert campaign.starts_in_time(Settings.from_dict(dict(node["settings"])))
