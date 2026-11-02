@@ -580,8 +580,9 @@ weakest first as the worker plays them:
   "The bot column: the rules in full").
 - **Streaks and badges are per kind** (the author, 2026-10-28): a puzzle
   streak and true streak of its own, and Puzzle done, Puzzle winner of the day
-  and Full puzzle week beside the board's three (`badges.mjs`, group "Daily
-  puzzle"; `dailyRecord` is run once per kind).
+  and Full puzzle week beside the board's three (`badges.mjs`, groups "Daily
+  puzzle" then "Daily board", the puzzle first since it became the default;
+  `dailyRecord` is run once per kind).
 - **The board starts bigger** (the author, 2026-10-28): 11 systems and 3
   players on Monday, never a duel, so the two never overlap (see "The board
   grows through the week").

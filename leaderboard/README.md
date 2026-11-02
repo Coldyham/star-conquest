@@ -826,8 +826,8 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 | Gauntlets | a win on the tutorial's last stage · a win on the last stage of a listed gauntlet · a gauntlet saved under this name |
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
 | Bots | a win with each `LADDER_ORDER` bot in a seat |
-| Daily | a daily won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
-| Daily puzzle | the same three, on the daily puzzle |
+| Daily puzzle | a daily puzzle won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
+| Daily board | the same three, on the daily board |
 | Play-by-post | a turn played in a match · a match won |
 
 **Derived, never stored**, like crowns and the campaign. Wins count only through
