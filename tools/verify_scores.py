@@ -345,6 +345,9 @@ def _outcome(score: dict, log: replay.GameLog, state, audit: _DiceAudit) -> Chec
         return Check(sid, "unreadable", "the replay has no human seat")
     if state.winner != human.id:
         return Check(sid, "mismatch", "the replay is not a win for the human seat")
+    if log.hinted_from is not None:
+        # the game never offers to post a hinted result (`Ui.can_post`)
+        return Check(sid, "mismatch", f"the player took a bot's hint on turn {log.hinted_from}")
 
     claimed = (int(score["turns"]), int(score["lost"]), int(score["hand"]))
     actual = (state.turn, human.ships_lost, log.hand_turns)

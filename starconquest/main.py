@@ -22,6 +22,7 @@ import pygame
 from starconquest import (
     ai,
     campaign,
+    coach,
     config,
     daily,
     engine,
@@ -45,7 +46,7 @@ from starconquest import (
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
-from starconquest.model import GameState, Order
+from starconquest.model import AiParams, GameState, Order
 from starconquest.replay import GameLog
 from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_globals, build_state,
                                    fog_off, random_seed, resolve_seed)
@@ -319,6 +320,7 @@ def resume_game(log: GameLog, settings: Settings, seat: int = 1) -> tuple[GameSt
     ui.player_intel = intel
     ui.reset_view(state)      # re-frame now seen includes the whole replayed history
     ui.hand_turns = hand_turns(log)        # the log is the record of who drove
+    ui.hinted = log.hinted_from is not None  # ...and of whether a bot helped
     if log.turn_count:
         # The rules the last replayed turn was played with, put through the same
         # prune that turn's resolution gave them — a rule whose system was lost on
@@ -1201,6 +1203,16 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
         ui.history_chart = stats.masked(ui.history_chart, known)
     ui.history_graph = ui.history_reveal
+    # The coach: only on a decided game, when nothing is hidden any more, and
+    # opened first when it has something to say beyond the turning point, which
+    # every decided game has. A spectator holds no seat.
+    ui.coach_review = None
+    ui.coach_open, ui.coach_sel = False, -1
+    if ui.history_reveal and ui.human_id in state.players and ui.human_id != 0:
+        ui.coach_review = coach.review(history_states,
+                                       [log.orders_for(i) for i in range(log.turn_count)],
+                                       ui.human_id)
+        ui.coach_open = any(n.kind != coach.TURN for n in ui.coach_review.notes)
     ui.graph_full = False
     ui.graph_hidden = set()
     ui.dragging_graph = False
@@ -1253,24 +1265,65 @@ def apply_rewind(log: GameLog, settings: Settings, turn: int) -> tuple[GameState
     return resume_game(log, settings)
 
 
-def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
-    """Turn standing auto-forward rules into this turn's orders for the human.
+HINT_STRATEGY = "marshal"  # the advisor: strong, fast, deterministic, and reads only the board
 
-    A rule holds back its ``hold`` and sends each lane its share of the rest
-    (`Ui.forward_this_turn`, the same figures the popup shows). Ships already
-    promised by manually-queued orders from the same source are not counted as
-    free, so a rule cooperates with (rather than double-counts) manual sends.
+
+def hint_orders(state: GameState, seat: int, strategy: str = HINT_STRATEGY) -> list[Order]:
+    """What ``strategy`` would send for ``seat`` from this board, ignoring the
+    player's own queued orders: the start of the turn, as every seat decides.
+
+    Asked of a deep copy with the seat re-dealt to the advisor at its default
+    knob, so nothing the bot reads or keeps can reach the live game, and through
+    `engine.decide_seat`, so it draws nothing from the rng the turn will use. An
+    advisor that is not loaded falls back to the heuristic, as any seat would
+    (`ai.decide`). Like every bot it reads the whole board, fog or not: a hint
+    is training help, which is why taking one takes the game off the board.
     """
-    orders: list[Order] = []
-    for src in ui.auto_forward:
-        # the same test that decides whether the rule is drawn, pickable, editable
-        # and (at the end of this turn, in `Ui.prune_forward`) kept at all
-        if not ui.rule_is_live(state, src):
-            continue
-        for dest, send in ui.forward_this_turn(state, src).items():
-            if send > 0 and state.are_adjacent(src, dest):
-                orders.append(Order(ui.human_id, src, dest, send))
-    return orders
+    board = copy.deepcopy(state)
+    player = board.players[seat]
+    player.ai_strategy, player.ai_params = strategy, AiParams()
+    orders = engine.decide_seat(board, seat, ai.decide)
+    return [o for o in orders if o.owner_id == seat and o.ships > 0]
+
+
+def press_hint(state: GameState, ui: Ui, log: GameLog | None) -> bool:
+    """The Hint control (K): show the advisor's sends, or hide them when up.
+
+    True when the press must ask first (`main`'s hint modal, then `take_hint`):
+    in a game not yet hinted, since a hinted result is never posted
+    (`Ui.can_post`), and that is said before it happens, not after.
+    """
+    if not ui.can_hint(state):
+        return False
+    if ui.hint_live(state):
+        ui.hide_hint()
+        return False
+    if not ui.hinted:
+        return True
+    take_hint(state, ui, log)
+    return False
+
+
+def take_hint(state: GameState, ui: Ui, log: GameLog | None) -> None:
+    """Show the advisor's sends for this turn as arrows. The hint is stamped into
+    the log at once (`hinted_from`), so resuming the game keeps it hinted."""
+    if not ui.can_hint(state):
+        return
+    ui.hint_orders = hint_orders(state, ui.human_id)
+    ui.hint_turn = state.turn
+    ui.hinted = True
+    if log is not None and log.hinted_from is None:
+        log.hinted_from = state.turn
+        try:
+            log.save()
+        except OSError:
+            pass  # a save failure must never interrupt play
+
+
+def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
+    """Turn standing auto-forward rules into this turn's orders for the human
+    (`Ui.forward_orders`, which the hint also reads to see what we already send)."""
+    return ui.forward_orders(state)
 
 
 def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
@@ -1908,6 +1961,7 @@ async def main() -> None:
     running = True
     confirm_quit = False   # showing the "are you sure?" modal; gates every quit path
     confirm_rewind = False  # showing the destructive mid-game rewind confirm modal
+    confirm_hint = False    # asking before the first hint, which takes the game off the board
     # History-review snapshots, built on entering history mode and dropped on exit;
     # `live_fog` stashes the live fog triple so it survives a history visit intact.
     reel: turnfilm.Reel | None = None   # the turn being played back, if any
@@ -2300,6 +2354,28 @@ async def main() -> None:
                     auto_accum = 0
                 continue
 
+            if confirm_hint:
+                # Modal: what a hint is, and that the game can't be posted after one.
+                do_hint = False
+                if event.type == pygame.QUIT:
+                    confirm_hint, confirm_quit = False, True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                        do_hint = True
+                    elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                        confirm_hint = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    show_r, cancel_r = render.confirm_hint_buttons(screen)
+                    if show_r.collidepoint(event.pos):
+                        do_hint = True
+                    elif cancel_r.collidepoint(event.pos):
+                        confirm_hint = False
+                if do_hint:
+                    assert state is not None and ui is not None   # confirm_hint ⇒ in-game
+                    take_hint(state, ui, log)
+                    confirm_hint = False
+                continue
+
             if resume_prompt is not None:
                 # Boot modal: resume the last unfinished game, or dismiss to the menu.
                 accept = False
@@ -2399,7 +2475,9 @@ async def main() -> None:
             # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
             assert state is not None and ui is not None and log is not None
             action = game_input.handle_event(event, state, ui)
-            if action == "quit":
+            if action == "hint":
+                confirm_hint = press_hint(state, ui, log)
+            elif action == "quit":
                 confirm_quit = True
             elif action == "menu":
                 scene = "menu"
@@ -2503,6 +2581,7 @@ async def main() -> None:
                     ui.dragging_scrubber = False
                     ui.dragging_graph = False
                     ui.history_chart = None
+                    ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
                     ui.history_graph = ui.graph_full = False
                     ui.playing = False   # replay playback must not carry into live play
                     ui.clear_fading_marks()   # they belonged to a review that just ended
@@ -2558,7 +2637,7 @@ async def main() -> None:
             elif reel is None and ui.film is not None:
                 land_film(state, ui)        # unreachable, but a stranded film would
                                             # hide the End Turn button for good
-            elif reel is not None and not confirm_quit and not confirm_rewind:
+            elif reel is not None and not confirm_quit and not confirm_rewind and not confirm_hint:
                 # Frozen rather than advanced while paused (see `Ui.film_paused`),
                 # so pausing keeps showing what the turn did instead of losing it.
                 if not ui.film_paused:
@@ -2603,7 +2682,7 @@ async def main() -> None:
                         _carry_into(ui, reel, carry)
 
             if (reel is None and ui.history and ui.playing
-                    and not confirm_quit and not confirm_rewind):
+                    and not confirm_quit and not confirm_rewind and not confirm_hint):
                 # Replay playback: one turn per PLAY_MS, stopping when it reaches
                 # the final recorded turn (like a video reaching the end). With
                 # turn animation on, the step becomes a film and the scrubber
@@ -2620,7 +2699,7 @@ async def main() -> None:
                         if ui.history_turn >= ui.history_max:
                             ui.playing = False
             elif (reel is None and state.winner is None
-                    and not confirm_quit and not confirm_rewind and not ui.history
+                    and not confirm_quit and not confirm_rewind and not confirm_hint and not ui.history
                     and ui.mode != viewstate.ROUTING):
                 if ui.autoplay:
                     # Same shape as play mode just below: with turn animation on,
@@ -2689,6 +2768,8 @@ async def main() -> None:
                 render.draw(screen, reel.board if reel is not None else state, ui)
             if confirm_rewind:   # only ever set in-game, so ui is live here
                 render.draw_confirm_rewind(screen, ui.history_turn)
+            if confirm_hint:
+                render.draw_confirm_hint(screen, ui, HINT_STRATEGY.title())
         if confirm_quit:
             render.draw_confirm_quit(screen)
         pygame.display.flip()

@@ -161,6 +161,7 @@ COLOR_SELECT = (250, 240, 150)
 COLOR_FOG = (58, 62, 82)            # fogged systems/lanes — cool grey, distinct from NEUTRAL
 COLOR_ROUTE = (250, 120, 200)       # route-mode planning accent — magenta, the one hue no seat uses
 COLOR_CAMPAIGN = (255, 210, 63)     # the weekly campaign's timers — the board's own gold (--gold)
+COLOR_HINT = (235, 240, 250)        # the advisor's suggested sends — near-white, no seat's hue
 
 # Index 0 is neutral; 1 is the human by convention; 2+ are AI opponents.
 PLAYER_COLORS = [

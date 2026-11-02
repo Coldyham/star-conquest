@@ -230,6 +230,12 @@ class GameLog:
     strategies: dict[int, str] = field(default_factory=dict)
     winner: int | None = None
     finished: bool = False
+    # The first turn on which the human seat took a bot's hint (`main.take_hint`),
+    # or None. Not needed to replay the game; it is what keeps a hinted game off
+    # the leaderboard across a resume (`Ui.hinted`) and in the verifier
+    # (`tools/verify_scores.py`). Written as soon as the hint is taken, not with
+    # the turn, so quitting before ending the turn does not shed it.
+    hinted_from: int | None = None
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
     version: int = FORMAT_VERSION
@@ -301,6 +307,8 @@ class GameLog:
         self.turns = self.turns[:n]
         self.winner = None
         self.finished = False
+        if self.hinted_from is not None and self.hinted_from > n:
+            self.hinted_from = None   # the hint was for a board this branch never reaches
         # The kept prefix was just replayed under today's rules to *find* this
         # turn, so it demonstrably reproduces under them — which is exactly what
         # the stamp claims. Play continues under them too, so re-stamping keeps
@@ -323,6 +331,8 @@ class GameLog:
             strategies=dict(self.strategies),
             version=self.version,   # the turns come with it, so the format does too
             path=_game_path(self.seed),
+            # a hint taken on board ``n`` or before was seen in this branch too
+            hinted_from=self.hinted_from if self.hinted_from is not None and self.hinted_from <= n else None,
         )   # `match_id` and `rules_version` are deliberately left to their
             # defaults: a fork is a new match, played on from here under today's
             # rules — and its prefix has just replayed under them (see `truncate`).
@@ -381,6 +391,8 @@ class GameLog:
             "finished": self.finished,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            # only when set, so a game nobody hinted writes the file it always did
+            **({"hinted_from": self.hinted_from} if self.hinted_from is not None else {}),
         }
 
     @classmethod
@@ -395,6 +407,7 @@ class GameLog:
         # before the field existed have none, and `save` stamps the new one in on
         # the next turn. Validated, not merely defaulted — see `_MATCH_ID_RE`.
         match_id = str(data.get("match_id", "") or "")
+        hinted = data.get("hinted_from")
         return cls(
             seed=int(data.get("seed", 0)),
             settings=settings,
@@ -406,6 +419,8 @@ class GameLog:
             strategies=_strategies_from_dict(data.get("strategies")),
             winner=int(winner) if isinstance(winner, int) and not isinstance(winner, bool) else None,
             finished=bool(data.get("finished", False)),
+            hinted_from=(max(0, hinted) if isinstance(hinted, int) and not isinstance(hinted, bool)
+                         else None),
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
             version=int(data.get("version", 1)),   # unversioned files predate the field

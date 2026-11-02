@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from . import config, model, stats, turnfilm
+from . import coach, config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
@@ -47,6 +47,8 @@ FOOTER_RECTS = (
     "route_cancel_rect",
     "route_mode_rect",
     "route_auto_rect",
+    "hint_button_rect",
+    "hint_apply_rect",
 )
 
 
@@ -159,7 +161,7 @@ class Ui:
     # standing auto-forward rules: source_id -> ForwardRule (a hold, and a share
     # per lane). Human-only QoL, so it lives here rather than in the pure
     # GameState. Each turn a rule sends each lane its share of (free ships - hold)
-    # (`forward_this_turn`, expanded by main.auto_forward_orders).
+    # (`forward_this_turn`, expanded by `forward_orders`).
     auto_forward: dict[int, ForwardRule] = field(default_factory=dict)
     sel_forward: int | None = None  # source id of the rule being edited, if any
     # source_id -> the turn a lane was last added to its rule from the popup (or
@@ -269,6 +271,17 @@ class Ui:
     history_graph: bool = False
     graph_full: bool = False
     graph_metric: int = 0
+    # The post-game coach (`coach.review`), read off the history boards once
+    # on entering review of a decided game, and dropped on leaving it; None mid-game,
+    # where it would give away what fog hid. `coach_open` puts its notes in the
+    # graph panel in place of a chart (the Coach tab), `coach_sel` is the note
+    # being looked at (-1: none yet), and render rebuilds `coach_rows` as
+    # ``(note index, rect)`` and `coach_tab_rect` every frame.
+    coach_review: coach.Review | None = None
+    coach_open: bool = False
+    coach_sel: int = -1
+    coach_rows: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
+    coach_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     graph_hidden: set[int] = field(default_factory=set)
     dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
@@ -412,6 +425,16 @@ class Ui:
     # somebody else's, so none of the sharing below is offered for it: watching a
     # replay must not be one press away from posting its score as your own.
     watched: bool = False
+    # Training help (`main.take_hint`): a bot's suggested sends for the live turn,
+    # drawn as dashed arrows while `hint_turn` is the board's turn, less what our
+    # own orders already send (`hint_left`). `hinted` is sticky — read back from
+    # the log on resume (`GameLog.hinted_from`) — and takes the result off the
+    # leaderboard (`can_post`).
+    hint_orders: list[Order] = field(default_factory=list)
+    hint_turn: int = -1
+    hinted: bool = False
+    hint_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    hint_apply_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play-by-post: this match is shared, and this seat is ours. `pbp_match` is
     # the match id, `pbp_waiting` the seats still to move for the live turn, and
     # `pbp_submitted` whether we have sent ours — which is what puts the waiting
@@ -482,6 +505,11 @@ class Ui:
     # (`lore_button_rect`) and the I key open it; any press closes it.
     lore_sid: int | None = None
     lore_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The send popup's forecast row (`forecast_rect`) opens a card over the board
+    # setting out how its numbers were reached (`render._draw_odds_card`); any
+    # press closes it, as the star info card.
+    odds_open: bool = False
+    forecast_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
@@ -697,6 +725,21 @@ class Ui:
         """The seats whose lines the graphs draw: offered and not hidden."""
         return tuple(pid for pid in self.graph_seats() if pid not in self.graph_hidden)
 
+    def coach_note(self) -> coach.Note | None:
+        """The coach's note being looked at, if any."""
+        if self.coach_review is None or not 0 <= self.coach_sel < len(self.coach_review.notes):
+            return None
+        return self.coach_review.notes[self.coach_sel]
+
+    def select_note(self, i: int) -> None:
+        """Look at the coach's note ``i``: History jumps to the board it names."""
+        if self.coach_review is None or not self.coach_review.notes:
+            return
+        self.coach_sel = max(0, min(i, len(self.coach_review.notes) - 1))
+        self.history_turn = max(0, min(self.coach_review.notes[self.coach_sel].turn, self.history_max))
+        self.playing = False
+        self.clear_fading_marks()   # a jump, as with the scrubber
+
     def toggle_trace(self, pid: int) -> None:
         """Show or hide ``pid``'s line on the graphs."""
         if pid in self.graph_hidden:
@@ -779,7 +822,77 @@ class Ui:
         from any replay on the board.
         """
         return (state.winner == self.human_id and self.hand_turns > 0
-                and not self.watched and not self.in_pbp)
+                and not self.watched and not self.in_pbp and not self.hinted)
+
+    def can_hint(self, state: GameState) -> bool:
+        """Is the Hint control offered? Only on our own live turn: not in a shared
+        match (a bot's advice against friends), not while reviewing, under
+        autoplay or spectating, and not once the game is decided or we are out."""
+        return (not self.in_pbp and not self.history and not self.autoplay
+                and not self.watched and state.winner is None
+                and self.human_id in state.players and self.human_id != 0
+                and not state.is_defeated(self.human_id))
+
+    def hint_live(self, state: GameState) -> bool:
+        """Whether the hint arrows are for the board on screen."""
+        return self.hint_turn == state.turn and not self.history
+
+    def odds_card_up(self) -> bool:
+        """Is the forecast's breakdown over the board? Only while the send popup
+        it was opened from is still on its Send tab."""
+        return (self.odds_open and self.mode == CHOOSING and not self.forward_armed
+                and self.selected is not None and self.dest is not None and not self.history)
+
+    def hide_hint(self) -> None:
+        self.hint_turn, self.hint_orders = -1, []
+
+    def planned_sends(self, state: GameState) -> dict[tuple[int, int], int]:
+        """Ships each ``(source, dest)`` lane carries out at the end of this turn
+        as things stand: the queued sends plus what the rules forward."""
+        sends: dict[tuple[int, int], int] = {}
+        for o in (*self.pending, *self.forward_orders(state)):
+            sends[(o.source_id, o.dest_id)] = sends.get((o.source_id, o.dest_id), 0) + o.ships
+        return sends
+
+    def hint_left(self, state: GameState) -> list[Order]:
+        """The hint's sends our orders don't already make: each lane's hinted
+        ships less what our queued sends and rules put down it, where that leaves
+        any. What the map draws and `apply_hint` queues."""
+        planned = self.planned_sends(state)
+        hinted: dict[tuple[int, int], int] = {}
+        for o in self.hint_orders:
+            hinted[(o.source_id, o.dest_id)] = hinted.get((o.source_id, o.dest_id), 0) + o.ships
+        return [Order(self.human_id, src, dest, n - planned.get((src, dest), 0))
+                for (src, dest), n in hinted.items() if n > planned.get((src, dest), 0)]
+
+    def apply_hint(self, state: GameState) -> None:
+        """Queue what is left of the hint (`hint_left`) as our own sends, then put
+        the hint away.
+
+        A queued send takes its ships ahead of the source's rule, which forwards
+        what is left, so topping up one lane can thin the rule's send down it:
+        this repeats until every lane carries the hint or its source has nothing
+        free. A send whose ships we have already promised elsewhere is cut to what
+        is free, never taken from our other orders."""
+        if not self.hint_live(state):
+            return
+        if self.mode == CHOOSING:
+            self._close_send()   # the popup's count would no longer be its order's
+        added = True
+        while added:
+            added = False
+            for o in self.hint_left(state):
+                n = min(o.ships, self.available(state, o.source_id))
+                if n <= 0:
+                    continue
+                same = next((p for p in self.pending
+                             if (p.source_id, p.dest_id) == (o.source_id, o.dest_id)), None)
+                if same is not None:
+                    same.ships += n
+                else:
+                    self.pending.append(Order(self.human_id, o.source_id, o.dest_id, n))
+                added = True
+        self.hide_hint()
 
     @property
     def in_stage(self) -> bool:
@@ -813,6 +926,17 @@ class Ui:
         if self.history:
             return 0
         return sum(o.ships for o in self.pending if o.source_id == sid)
+
+    def landing_at(self, state: GameState, dest: int, turns: int) -> int:
+        """Our ships landing on ``dest`` in ``turns`` turns: queued sends whose
+        lane takes exactly that long, and fleets already that far out. They
+        land together, so they fight as one (`combat.resolve_arrival`)."""
+        queued = sum(o.ships for o in self.pending
+                     if o.dest_id == dest and state.travel_turns(o.source_id, dest) == turns)
+        flying = sum(f.ships for f in state.fleets
+                     if f.owner_id == self.human_id and f.dest_id == dest
+                     and f.turns_remaining == turns)
+        return queued + flying
 
     def available(self, state: GameState, sid: int) -> int:
         """Ships still free to deploy from a system this turn."""
@@ -973,10 +1097,29 @@ class Ui:
         self.clear_forward(self.selected)
         self._close_send()
 
+    def forward_orders(self, state: GameState) -> list[Order]:
+        """Standing auto-forward rules as this turn's orders.
+
+        A rule holds back its ``hold`` and sends each lane its share of the rest
+        (`forward_this_turn`, the same figures the popup shows). Ships already
+        promised by manually-queued orders from the same source are not counted as
+        free, so a rule cooperates with (rather than double-counts) manual sends.
+        """
+        orders: list[Order] = []
+        for src in self.auto_forward:
+            # the same test that decides whether the rule is drawn, pickable, editable
+            # and (at the end of this turn, in `prune_forward`) kept at all
+            if not self.rule_is_live(state, src):
+                continue
+            for dest, send in self.forward_this_turn(state, src).items():
+                if send > 0 and state.are_adjacent(src, dest):
+                    orders.append(Order(self.human_id, src, dest, send))
+        return orders
+
     def forward_this_turn(self, state: GameState, sid: int) -> dict[int, int]:
         """Ships each lane of ``sid``'s rule will send at the end of this turn: its
         share of the free ships beyond the hold. The one formula behind both the
-        orders `main.auto_forward_orders` issues and every number the popup and
+        orders `forward_orders` issues and every number the popup and
         panel show, so what you read is what goes."""
         rule = self.auto_forward.get(sid)
         if rule is None or sid not in state.systems:
