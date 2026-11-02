@@ -9,9 +9,9 @@ from starconquest import ai, combat, config, engine
 from starconquest import main as game_main
 from starconquest import settings as settings_mod
 from starconquest.geometry import WorldView
-from starconquest.model import ForwardRule, Order
+from starconquest.model import Fleet, ForwardRule, Order
 from starconquest.replay import GameLog
-from starconquest.viewstate import Ui
+from starconquest.viewstate import CHOOSING, Ui
 from tests.test_engine import make_state
 
 
@@ -90,6 +90,43 @@ def test_landing_counts_everything_arriving_together():
     ui.pending = [Order(1, 0, 1, 6), Order(1, 2, 1, 4)]
     assert ui.landing_at(s, 1, 2) == 10
     assert ui.landing_at(s, 1, 3) == 0
+
+
+def _inbound():
+    """Our 30 at 0, three turns from Crimson's 8 at 1; fleets flying in to 1."""
+    s = make_state([(0, 1, 30, 100), (1, 2, 8, 100), (2, 2, 0, 100), (3, 3, 0, 100)],
+                   [(0, 1, 3), (2, 1, 3), (3, 1, 3)])
+    s.fleets += [Fleet(2, 2, 1, 5, 3, 2),    # lands before us: joins the garrison
+                 Fleet(2, 2, 1, 7, 3, 3),    # lands with us: so does this
+                 Fleet(2, 2, 1, 9, 5, 4),    # lands after: not our fight
+                 Fleet(3, 3, 1, 4, 3, 2)]    # a third seat's: listed, not counted
+    return s
+
+
+def test_the_holders_fleets_in_flight_join_the_garrison():
+    fc = combat.forecast_landing(_inbound(), 1, 1, 3, 30)
+    assert (fc.held, fc.built, fc.inbound, fc.garrison) == (8, 0, 12, 20)
+    assert fc.rivals == ((3, 4),)
+
+
+def test_the_forecast_counts_what_the_engine_pools():
+    """Sized from the forecast, the attack takes the system: the holder's
+    fleets did land in the garrison, as the forecast said."""
+    s = _inbound()
+    s.fleets = [f for f in s.fleets if f.owner_id == 2]
+    fc = combat.forecast_landing(s, 1, 1, 3, 30)
+    s.systems[0].ships = fc.sure_at
+    engine.apply_order(s, Order(1, 0, 1, fc.sure_at))
+    for _ in range(3):
+        engine.end_turn(s)
+    assert s.systems[1].owner_id == 1
+
+
+def test_reinforcing_counts_our_earlier_fleets_not_those_landing_with_us():
+    s = make_state([(0, 1, 10, 100), (1, 1, 4, 100)], [(0, 1, 3)])
+    s.fleets += [Fleet(1, 0, 1, 2, 3, 1), Fleet(1, 0, 1, 6, 3, 3)]
+    fc = combat.forecast_landing(s, 1, 1, 3, 9)
+    assert fc.reinforce and fc.inbound == 2 and fc.garrison == 6
 
 
 def test_reinforcing_is_not_a_fight():
@@ -258,5 +295,59 @@ def test_clear_outlasts_history_in_a_squeeze():
             render.draw(screen, state, ui)
             if not ui.clear_button_rect[2]:
                 assert not ui.history_button_rect[2], w
+    finally:
+        _reset_screen()
+
+
+# -- the forecast's breakdown -------------------------------------------------- #
+def _attack_popup():
+    from starconquest import mapgen
+    s = _inbound()
+    ui = Ui(view=WorldView(mapgen.map_bounds(s), config.play_rect()), human_id=1)
+    ui.visible = ui.seen = set(s.systems)
+    ui.selected = 0
+    ui.begin_send(s, 1)
+    ui.set_send_count(s, 25)
+    return s, ui
+
+
+def test_the_forecast_row_opens_its_breakdown_and_any_press_closes_it():
+    import pygame
+    from starconquest import input as game_input, render
+    screen = _screen()
+    try:
+        s, ui = _attack_popup()
+        render.draw(screen, s, ui)
+        row = pygame.Rect(ui.forecast_rect)
+        assert row.w and pygame.Rect(ui.popup_rect).contains(row)
+        game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=row.center, button=1), s, ui)
+        assert ui.odds_card_up() and ui.chosen == 25
+        render.draw(screen, s, ui)
+        game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x, mod=0, unicode="x"), s, ui)
+        assert not ui.odds_open and ui.mode == CHOOSING and ui.pending   # spent closing it
+
+        ui.visible = {0}                       # a garrison out of view: no breakdown
+        ui.seen = set(s.systems)
+        render.draw(screen, s, ui)
+        assert not ui.forecast_rect[2]
+    finally:
+        _reset_screen()
+
+
+def test_the_breakdown_adds_up_to_the_fight_it_forecasts():
+    from starconquest import render
+    _screen()
+    try:
+        s, ui = _attack_popup()
+        made = render._odds_card(s, ui)
+        assert made is not None
+        rows = {item[1]: item[2] for item in made[3] if item[0] == "row"}
+        held = int(rows["At 1 now"])
+        built = int(rows["Built in the 3 turns before you land"])
+        inbound = int(next(v for k, v in rows.items() if "fleets landing by then" in k))
+        assert held + built + inbound == int(rows["It will hold"]) == 20
+        assert int(rows["Your send"]) == int(rows["You land with"]) == 25
+        notes = " ".join(item[1] for item in made[3] if item[0] == "note")
+        assert "4 ships also land" in notes and "Jitter" in notes
     finally:
         _reset_screen()

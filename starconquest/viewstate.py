@@ -505,6 +505,11 @@ class Ui:
     # (`lore_button_rect`) and the I key open it; any press closes it.
     lore_sid: int | None = None
     lore_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The send popup's forecast row (`forecast_rect`) opens a card over the board
+    # setting out how its numbers were reached (`render._draw_odds_card`); any
+    # press closes it, as the star info card.
+    odds_open: bool = False
+    forecast_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Sits beside the share button: the same token, but opening the public
     # leaderboard's entry form instead of going to the clipboard. Zero-width when
@@ -831,6 +836,12 @@ class Ui:
     def hint_live(self, state: GameState) -> bool:
         """Whether the hint arrows are for the board on screen."""
         return self.hint_turn == state.turn and not self.history
+
+    def odds_card_up(self) -> bool:
+        """Is the forecast's breakdown over the board? Only while the send popup
+        it was opened from is still on its Send tab."""
+        return (self.odds_open and self.mode == CHOOSING and not self.forward_armed
+                and self.selected is not None and self.dest is not None and not self.history)
 
     def hide_hint(self) -> None:
         self.hint_turn, self.hint_orders = -1, []

@@ -22,8 +22,13 @@ A row in the send popup's Send tab, under "send N · M home":
 - **What it meets.** `combat.garrison_after`: the garrison now plus every hull it
   builds on the way, the landing turn's included, because production runs before
   arrivals (`engine._production`). A neutral grows only under
-  `config.NEUTRAL_PRODUCES`. Rival moves are not guessed: the forecast is what
-  happens if nobody else acts.
+  `config.NEUTRAL_PRODUCES`. Plus the holder's fleets already flying in that
+  land on or before our turn: `resolve_arrival` pools an owner's arrivals with
+  its garrison, and they are on the map (the forecast only reads a system in full
+  view, where every fleet to it is drawn). A third seat's fleets flying in are
+  listed in the breakdown, not counted: they fight whoever holds it when they
+  land. Orders given this turn are not guessed: the forecast is what happens if
+  nobody else acts.
 - **The odds.** `combat.fight_odds` is the share of the jitter square the attacker
   wins, measured on a 40x40 grid of the same `_preview_roll` that the Combat page
   draws. It is cached per (ships, garrison, jitter, advantage), so a redraw costs
@@ -36,6 +41,17 @@ A row in the send popup's Send tab, under "send N · M home":
   hides.
 - **Reinforcing** one of our own systems is not a fight: the row shows what will
   be there.
+- **The breakdown** (`render._draw_odds_card`, `Ui.odds_open`). The row is a
+  button, marked with an i like the star info card's, wherever it reads the
+  target. It opens a card over the board: your send, anything landing with it,
+  what you land with; the garrison now, what it builds before you land, the
+  holder's fleets landing by then, what it will hold; the verdict in words; who
+  else is flying in; then how a fight is rolled, from the Combat tab, with this
+  game's jitter and defender advantage ("6 holding it fight like 9"). Any press
+  closes it, as the info card. A phone held sideways puts the dice in a second
+  column. The row was asked for as "your send: a, currently at target: b +
+  produced over the next n turns: c + enemy reinforcements already en route: d
+  = a vs e"; counting d is what moved the forecast to read fleets in flight.
 - The row takes the Send tab to the same height as the one-lane Forward tab
   (which has its hold row there), so flipping tabs does not move the panel.
 

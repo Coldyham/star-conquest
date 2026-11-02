@@ -367,7 +367,7 @@ def _track_score_hover(event, ui: Ui) -> None:
 # selection and the popup, and the orders and rules a tap can create.
 _PRESS_FIELDS = ("mode", "selected", "dest", "chosen", "sel_order", "sel_forward",
                  "forward_armed", "forward_replaced", "editing_existing", "popup_pos",
-                 "route_sel", "route_dest", "lore_sid")
+                 "route_sel", "route_dest", "lore_sid", "odds_open")
 
 
 def _press_snapshot(ui: Ui) -> tuple:
@@ -441,6 +441,14 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
     if ui.lore_sid is not None and not ui.history and state.winner is None:
         if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
             ui.lore_sid = None
+        if event.type != pygame.MOUSEMOTION:
+            return None
+    # ...and so is the forecast's breakdown.
+    if not ui.odds_card_up():
+        ui.odds_open = False
+    if ui.odds_open:
+        if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            ui.odds_open = False
         if event.type != pygame.MOUSEMOTION:
             return None
 
@@ -921,6 +929,9 @@ def _popup_press(state: GameState, ui: Ui, pos) -> bool:
     # Send popup (CHOOSING): Send/Forward tabs pick the mode, the presets retune
     # the count, and Cancel discards the active send or forwarding lane.
     if ui.mode == CHOOSING and ui.selected is not None and ui.dest is not None:
+        if ui.forecast_rect[2] and _point_in_rect(pos, ui.forecast_rect):
+            ui.odds_open = True
+            return True
         if ui.send_tab_rect[2] and _point_in_rect(pos, ui.send_tab_rect):
             ui.set_forward_mode(state, False)
             return True

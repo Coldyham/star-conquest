@@ -374,17 +374,23 @@ def sure_count(defender: int, jitter: float, advantage: float) -> int:
 class Forecast:
     """What ships landing on a system some turns from now will meet there.
 
-    A teaching aid, not an oracle: it counts the garrison the target holds now
-    and what it will build on the way, and our own ships landing the same turn —
-    never a rival's moves, which nobody can know.
+    A teaching aid, not an oracle: it counts the garrison the target holds now,
+    what it will build on the way, its owner's fleets already flying in, and our
+    own ships landing the same turn — never anyone's orders this turn, which
+    nobody can know. Anyone else's fleets flying in are listed, not counted:
+    they fight whoever holds the system when they land.
     """
 
     turns: int  # turns until the ships land
     landing: int  # our ships landing that turn, all lanes together
-    garrison: int  # what the system will hold when they land, if nobody moves
+    garrison: int  # what the system will hold when they land: held + built + inbound
     reinforce: bool  # it is ours already: the ships add to the garrison
     odds: Odds | None  # None when reinforcing
     sure_at: int  # the fewest landing ships that take it on every roll (0 when reinforcing)
+    held: int = 0  # the garrison now
+    built: int = 0  # hulls it finishes before we land, the landing turn's included
+    inbound: int = 0  # its owner's fleets landing by then (ours landing earlier, reinforcing)
+    rivals: tuple[tuple[int, int], ...] = ()  # (owner, ships) of anyone else's landing by then
 
 
 def garrison_after(state: GameState, sid: int, turns: int) -> int:
@@ -402,14 +408,34 @@ def garrison_after(state: GameState, sid: int, turns: int) -> int:
 
 def forecast_landing(state: GameState, owner: int, dest_id: int, turns: int, landing: int) -> Forecast:
     """``landing`` of ``owner``'s ships reaching ``dest_id`` in ``turns`` turns,
-    priced against the garrison they will find, under the rules in force."""
-    garrison = garrison_after(state, dest_id, turns)
-    if state.systems[dest_id].owner_id == owner:
-        return Forecast(turns, landing, garrison, True, None, 0)
-    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
-    return Forecast(turns, landing, garrison, False,
-                    fight_odds(landing, garrison, jitter, advantage),
-                    sure_count(garrison, jitter, advantage))
+    priced against the garrison they will find, under the rules in force.
+
+    Every fleet flying to ``dest_id`` is read, so a caller showing this to a
+    player asks only about a system in full view, where all of them are drawn.
+    A fleet of the holder's that lands on or before our turn joins the garrison
+    (`resolve_arrival` pools an owner's arrivals with what it holds)."""
+    node = state.systems[dest_id]
+    reinforce = node.owner_id == owner
+    held = node.ships
+    built = garrison_after(state, dest_id, turns) - held
+    inbound = 0
+    rivals: dict[int, int] = {}
+    for f in state.fleets:
+        if f.dest_id != dest_id or f.turns_remaining > turns:
+            continue
+        if f.owner_id == node.owner_id:
+            if not (reinforce and f.turns_remaining == turns):  # those are in `landing`
+                inbound += f.ships
+        elif f.owner_id != owner:
+            rivals[f.owner_id] = rivals.get(f.owner_id, 0) + f.ships
+    garrison = held + built + inbound
+    odds, sure_at = None, 0
+    if not reinforce:
+        jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+        odds = fight_odds(landing, garrison, jitter, advantage)
+        sure_at = sure_count(garrison, jitter, advantage)
+    return Forecast(turns, landing, garrison, reinforce, odds, sure_at,
+                    held=held, built=built, inbound=inbound, rivals=tuple(sorted(rivals.items())))
 
 
 def _record_losses(state: GameState, forces: dict[int, int], owner_id: int, ships: int) -> None:

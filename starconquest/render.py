@@ -78,6 +78,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.stage_hint_rect = ui.next_stage_rect = (0, 0, 0, 0)
     # the star info card's button; the panel re-records it beside a selected system
     ui.lore_button_rect = (0, 0, 0, 0)
+    ui.forecast_rect = (0, 0, 0, 0)
     # the history graph's; _draw_history_graph re-records them while it is open
     ui.graph_plot_rect = ui.graph_full_rect = ui.graph_all_rect = (0, 0, 0, 0)
     ui.graph_tab_rects = []
@@ -146,6 +147,8 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
         _draw_briefing(surface, ui)
     elif ui.lore_sid in state.systems:
         _draw_lore(surface, state, ui)
+    elif ui.odds_card_up():
+        _draw_odds_card(surface, state, ui)
     elif ui.pbp_invite:
         _draw_invite_overlay(surface, ui)
     elif ui.awaiting_others(state):
@@ -927,10 +930,20 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
         cy += bh + gap
         if not ui.forward_armed:
-            # the forecast: the odds of the fight these ships land in
-            line = _forecast_line(state, ui, font, iw)
+            # the forecast: the odds of the fight these ships land in. Where it
+            # reads the target, the row is a button for how it was reached
+            # (`_draw_odds_card`), marked with an i at its right end.
+            seen = ui.dest is not None and ui.sees(ui.dest)
+            d = _fonts()["small"].get_height()
+            room = iw - (d + config.s(3) if seen else 0)
+            line = _forecast_line(state, ui, font, room)
             if line is not None:
-                _text(surface, font, line[0], line[1], center=(inner + iw // 2, cy + bh // 2))
+                _text(surface, font, line[0], line[1], center=(inner + room // 2, cy + bh // 2))
+                if seen:
+                    mark = pygame.Rect(inner + iw - d, cy + (bh - d) // 2, d, d)
+                    pygame.draw.circle(surface, config.COLOR_TEXT_DIM, mark.center, d // 2, config.s(1))
+                    _text(surface, _fonts()["small"], "i", config.COLOR_TEXT_DIM, center=mark.center)
+                    ui.forecast_rect = (inner, cy, iw, bh)
             cy += bh + gap
 
         # stepper row: [−]  value  [+]  — the send count, or (Forward) the lane's share
@@ -1029,11 +1042,193 @@ def _forecast_line(state: GameState, ui: Ui, font, width: int) -> tuple[str, tup
             forms = [f"{landing} vs {g} in {turns} turns: {long}",
                      f"{landing} vs {g} in {turns}: {long}",
                      f"{landing} vs {g}: {long}", f"{landing} vs {g}: {short}",
-                     f"{landing}v{g} {short}", short]
+                     f"{landing}v{g} {short}", f"{landing}v{g} {short.replace(' · ', '·')}", short]
     for text in forms:
         if font.size(text)[0] <= width:
             return text, colour
     return forms[-1], colour
+
+
+def _odds_card(state: GameState, ui: Ui) -> tuple[str, str, tuple, list[tuple]] | None:
+    """The forecast's breakdown (`combat.forecast_landing`): ``(title, label,
+    accent, items)`` for `_draw_odds_card`. An item is ``("row", label, value,
+    total)``, ``("text", text, colour)``, ``("head", text)``, ``("note", text)``
+    or ``("gap",)``. None unless the forecast row reads the target."""
+    src, dest = ui.selected, ui.dest
+    if src is None or dest is None or not ui.sees(dest):
+        return None
+    turns = state.travel_turns(src, dest)
+    if turns is None:
+        return None
+    node = state.systems[dest]
+    landing = ui.landing_at(state, dest, turns)
+    fc = combat.forecast_landing(state, ui.human_id, dest, turns, landing)
+    label, accent = _forecast_line(state, ui, _fonts()["small"], 10 ** 6) or ("", config.COLOR_TEXT_DIM)
+    send = min(ui.chosen, landing)
+    plural = "s" if turns != 1 else ""
+    items: list[tuple] = [("row", "Your send", str(send), False)]
+    if landing > send:
+        items.append(("row", "Your other ships landing that turn", f"+{landing - send}", False))
+    items += [("row", "You land with", str(landing), True), ("gap",),
+              ("row", f"At {node.short} now", str(fc.held), False),
+              ("row", f"Built in the {turns} turn{plural} before you land", f"+{fc.built}", False)]
+    if fc.inbound:
+        whose = "Your" if fc.reinforce else f"{config.player_name(node.owner_id)}'s"
+        items.append(("row", f"{whose} fleets landing by then", f"+{fc.inbound}", False))
+    items.append(("row", "It will hold", str(fc.garrison), True))
+    if fc.reinforce:
+        items.append(("row", "There once you land", str(fc.garrison + landing), True))
+    items.append(("gap",))
+    if fc.odds is not None:
+        g, odds = fc.garrison, fc.odds
+        kept = round(odds.survivors)
+        if odds.sure:
+            verdict = f"{landing} against {g}: every roll takes it, and you keep about {kept}."
+        elif odds.capture > 0:
+            pct = min(99, max(1, round(odds.capture * 100)))
+            verdict = (f"{landing} against {g}: you take it on {pct}% of rolls, keeping about "
+                       f"{kept} when you do. {fc.sure_at} would take it on every roll.")
+        else:
+            verdict = f"{landing} against {g}: no roll takes it. {fc.sure_at} would take it on every roll."
+        items.append(("text", verdict, accent))
+    for owner, ships in fc.rivals:
+        items.append(("note", f"Not counted: {config.player_name(owner)}'s {ships} ships also land "
+                              f"there by then, and fight whoever holds it."))
+    items.append(("note", "Not known: what anyone else sends this turn."))
+    if fc.odds is not None:
+        jitter, adv = config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE
+        pct = round(jitter * 100)
+        items += [("gap",), ("head", "How a fight is rolled"),
+                  ("note", "Battles use Lanchester's square law: the stronger side wins and keeps "
+                           "√(W² − L²) ships, so 12 attacking 10 leaves 7.")]
+        if jitter > 0:
+            items.append(("note", f"Jitter ±{pct}%: each side's strength is its ship count rolled up "
+                                  f"to {pct}% up or down, so a close fight can go either way. The odds "
+                                  f"are the share of those rolls you win."))
+        else:
+            items.append(("note", "Jitter is off: every fight goes exactly by the numbers."))
+        if adv != 1:
+            items.append(("note", f"Defender advantage ×{adv:g}: the holder's rolled strength is "
+                                  f"multiplied by {adv:g}, so {fc.garrison} holding it fight like "
+                                  f"{round(fc.garrison * adv)}."))
+        else:
+            items.append(("note", "No defender advantage: the holder fights at its ship count."))
+        items.append(("note", "The setup menu's Combat tab plays out any fight."))
+    title = f"{'Reinforcing' if fc.reinforce else 'Attacking'} {node.short}"
+    return title, label, accent, items
+
+
+def _odds_card_layout(items, inner: int, kind: str) -> tuple[list[tuple], int]:
+    """Each of `_odds_card`'s items with its wrapped lines, and their height, the
+    rows and text in font ``kind`` and the notes small."""
+    gap = config.s(10)
+    out, h = [], 0
+    for item in items:
+        if item[0] == "gap":
+            out.append((item, []))
+            h += gap
+        elif item[0] == "row":
+            font = _fonts()[kind]
+            lines = _wrap(font, item[1], inner - font.size(item[2])[0] - gap)
+            out.append((item, lines))
+            h += len(lines) * _row_h(kind) + (config.s(4) if item[3] else 0)
+        else:
+            k = "small" if item[0] == "note" else kind
+            lines = _wrap(_fonts()[k], item[1], inner)
+            out.append((item, lines))
+            h += len(lines) * _row_h(k)
+    return out, h
+
+
+def _draw_odds_column(surface, laid, kind: str, x: int, y: int, right: int, floor: int) -> None:
+    """One column of the odds card, cut at ``floor``; a heading is drawn only
+    with room for what follows it."""
+    for i, (item, lines) in enumerate(laid):
+        if item[0] == "gap":
+            y += config.s(10)
+            continue
+        k = "small" if item[0] == "note" else kind
+        need = len(lines) * _row_h(k)
+        if item[0] == "head" and i + 1 < len(laid):
+            need += len(laid[i + 1][1]) * _row_h("small" if laid[i + 1][0][0] == "note" else kind)
+        if y + need > floor:
+            break
+        if item[0] == "row":
+            if item[3]:
+                y += config.s(4)
+                pygame.draw.line(surface, config.COLOR_TEXT_DIM, (x, y - config.s(3)),
+                                 (right, y - config.s(3)), 1)
+            colour = config.COLOR_TEXT if item[3] else config.COLOR_TEXT_DIM
+            _text(surface, _fonts()[k], item[2], config.COLOR_TEXT,
+                  midright=(right, y + _fonts()[k].get_height() // 2))
+        elif item[0] == "text":
+            colour = item[2]
+        else:
+            colour = config.COLOR_TEXT if item[0] == "head" else config.COLOR_TEXT_DIM
+        for line in lines:
+            _text(surface, _fonts()[k], line, colour, topleft=(x, y))
+            y += _row_h(k)
+
+
+def _draw_odds_card(surface, state: GameState, ui: Ui) -> None:
+    """The send popup's forecast, set out: what lands, what it meets and how
+    each number was reached, the verdict, and how the dice decide a fight (the
+    Combat tab's rules, with this game's jitter and defender advantage). Over
+    the board like the star info card, until any press.
+
+    One column where it fits; where it doesn't and the screen is wide (a phone
+    held sideways), the dice go in a second column; then the small font."""
+    made = _odds_card(state, ui)
+    if made is None:
+        return
+    title, label, accent, items = made
+    px, py, pw, ph = _card_area()
+    big, small = _fonts()["big"], _fonts()["small"]
+    pad, gap = config.s(20), config.s(10)
+    room = pw - 2 * config.s(16)
+    one = min(room, config.s(580))
+    two = min(room, 2 * one)
+    head = next((i for i, item in enumerate(items) if item[0] == "head"), None)
+    plans: list[tuple[str, int, list]] = []
+    for kind in ("normal", "small"):
+        plans.append((kind, one, [items]))
+        if head and two >= one * 3 // 2:
+            left = items[:head]
+            while left and left[-1][0] == "gap":
+                left = left[:-1]
+            plans.append((kind, two, [left, items[head:]]))
+
+    def measure(plan):
+        kind, width, cols = plan
+        col_w = (width - 2 * pad - pad * (len(cols) - 1)) // len(cols)
+        done = [_odds_card_layout(col, col_w, kind) for col in cols]
+        return col_w, [lines for lines, _h in done], max(h for _lines, h in done)
+
+    frame = pad * 2 + _row_h("big") + _row_h() + gap + _row_h()
+    most = ph - 2 * config.s(8)
+    measured = [(plan, measure(plan)) for plan in plans]
+    (kind, width, _cols), (col_w, laid, body) = next(
+        (m for m in measured if frame + m[1][2] <= most), measured[-1])
+    height = min(most, frame + body)
+    card = pygame.Rect(px + (pw - width) // 2, py + (ph - height) // 2, width, height)
+
+    veil = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    veil.fill((5, 6, 12, 150))
+    surface.blit(veil, (0, 0))
+    pygame.draw.rect(surface, (16, 18, 28), card, border_radius=config.s(10))
+    pygame.draw.rect(surface, accent, card, config.s(2), border_radius=config.s(10))
+    x, y = card.x + pad, card.y + pad
+    _text(surface, big, title, config.COLOR_TEXT, topleft=(x, y))
+    y += _row_h("big")
+    _text(surface, small, label, accent, topleft=(x, y))
+    y += _row_h() + gap
+    floor = card.bottom - pad - _row_h()
+    for i, col in enumerate(laid):
+        cx = x + i * (col_w + pad)
+        _draw_odds_column(surface, col, kind, cx, y, cx + col_w, floor)
+    close = "Tap anywhere to close" if config.touch_ui else "Press any key to close"
+    _text(surface, small, close, config.COLOR_TEXT_DIM,
+          center=(card.centerx, card.bottom - pad - _row_h() // 2))
 
 
 def _draw_mini_stepper(surface, font, row: pygame.Rect, s: int, label: str, value: str,
