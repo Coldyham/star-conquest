@@ -324,6 +324,70 @@ board shows.
 
 Reopened on 2026-10-28 as a frozen star target and set aside again ([`other-games.md`](other-games.md), "Star tiers on every map").
 
+## evolved as a candidate (2026-11-02)
+
+**What prompted it.** On the puzzle daily of 2026-11-01 (`e60a6d946d4a010b`: 6
+systems against actuary, floor 6) the default search found 15/10 on honest
+dice, while a person had posted 11/10. Adding evolved to the candidates found
+11/9 in 12 s, and nothing lower at width 256 with four rollout bots (lucky dice
+reach 10/3). Knower as a candidate did nothing (16/10), and neither did wider
+beams (15/10 at widths 6 and 64). The one candidate that helped was evolved,
+whose orders no other candidate bot was offering on that map.
+
+**The rerun.** Every map named on this page and the 12-cell grid, on honest
+dice at width 6 with a 1200 s budget, with and without evolved, both under the
+roster of 2026-11-02 so only the candidate list differs. The recorded games
+(`games/`) were not on hand. All 60 best lines replay. Four runs at a time on 4
+cores, so the knower maps hit the wall-clock budget sooner than in 2026-10-14's
+runs. Output in the gitignored `results/par-2026-11-02/runs.jsonl`.
+
+| Map | Systems, rivals | Floor | Board best | Without | With evolved |
+| --- | --- | --- | --- | --- | --- |
+| `06a74fc834bdf656` | 5, heuristic | 16 | 17/4 | 17/6 | 17/6 |
+| `23c791a5c2780eef` | 5, marshal | 8 | 16/11 | 13/4 | 13/4 |
+| `4222d9e81bd86a17` | 5, marshal | 7 | 22/23 | 29/21 | 29/21 |
+| `732decc8f9619f60` | 5, marshal | 4 | 11/4 | 10/6 | 10/6 |
+| `83653810811196b0` | 5, heuristic | 12 | 18/7 | 26/16 | 26/16 |
+| `71f7fab85ca23341` | 7, marshal | 6 | 13/7 | 10/5 | 10/5 |
+| `7a81e11e6a977b74` | 7, marshal | 5 | 14/8 | 10/2 | 10/2 |
+| `b9119a724511200d` | 7, heuristic | 10 | 11/2 | 10/9 | 10/9 |
+| `c3c0f862c6f497f7` | 7, marshal | 4 | 10/8 | 15/5 | 15/5 |
+| `e33cf0993ff6b95c` | 7, heuristic | 15 | 15/9 | 17/9 | 17/9 |
+| `979382e8f69c0f0d` | 9, claudebot | 10 | 91/60 | 79/40 | **81/35** |
+| `50f1e509421c1cd3` | 13, marshal knower | 14 | 34/12 | 33/9 | **31/17** |
+| `7f7fabfca0969ba4` | 13, marshal knower | 18 | 38/25 | 28/11 | **27/12** |
+| `a0e7c9f268079977` | 14, marshal knower thinker | 19 | 64/37 | 70/39 (budget) | **76/50** (budget) |
+| `e11525f88c9f825d` | 14, marshal knower thinker | 19 | 34/15 | 45/20 (budget) | **45/22** (budget) |
+| `e8fb9306833d62be` | 14, marshal knower thinker | 15 | 85/100 | 92/60 (budget) | **118/113** (budget) |
+| `665714b9291851c6` | 18, thinker ×2 | 20 | 51/33 | 44/13 | 44/13 |
+| `f0eec8559752bb90` | 18, marshal actuary | 14 | 45/32 | 43/14 | **46/24** |
+
+Grid (random, 3 players; without → with evolved):
+
+| Nodes | vs marshal + actuary, seeds 1, 2 | vs thinker + heuristic, seeds 1, 2 |
+| --- | --- | --- |
+| 8 | 65/18 → 63/16, 73/19 → 73/16 | 75/40 → 75/40, 39/19 → 40/18 |
+| 13 | 50/14 → 59/30, 65/29 → 65/29 | 48/24 → 51/23, 55/23 → 55/23 |
+| 18 | 52/23 → 57/35, 60/24 → 57/25 | 45/28 → 45/28, 67/36 → 64/44 |
+
+What it says:
+
+- **It is a wash: better on 6 of 30, worse on 9, the same on 15**, median 0
+  turns. Every one of the ten maps of 7 systems or fewer is unchanged, including
+  the four where the board still beats the search (`4222d9e81bd86a17`,
+  `83653810811196b0`, `c3c0f862c6f497f7`, `e33cf0993ff6b95c`). The daily's gain
+  is real but rare.
+- **The losses are the beam being crowded, not evolved's orders being bad.**
+  A width-6 beam keeps the best six children; evolved's children score well
+  early in a rollout and push out the ones that led to the old line. The worst
+  losses are the three budget-bound knower maps, where an extra candidate also
+  means fewer turns searched within the budget (e8fb9306833d62be: 92 → 118).
+- **Against the board's bests** (18 maps) the search beats 10 without evolved
+  and 9 with it.
+
+So evolved is a useful candidate to try by hand (`--candidates ... evolved`)
+when a person beats the search on a small map, not a default.
+
 ## Next, if it goes further
 
 - **Search quality.** Rolling out with more than one bot is built ("The
