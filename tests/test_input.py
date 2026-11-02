@@ -17,7 +17,7 @@ import pygame
 import pytest
 
 from starconquest import main
-from starconquest import config, engine, mapgen, replay, turnfilm
+from starconquest import config, engine, mapgen, paths, pbp, replay, turnfilm
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.model import Fleet, ForwardRule, Order
@@ -1686,6 +1686,82 @@ def test_posting_a_score_uploads_the_replay_behind_it(monkeypatch):
         assert sent == [(log.match_id, shared.challenge.key)]
     finally:
         pygame.quit()
+
+
+def test_quick_post_uploads_the_replay_and_waits_on_the_post(monkeypatch):
+    """Quick post is the same press as the entry form's, so it sends the same
+    log under the same key, and the button reads "Posting…" until it lands."""
+    sent: list[tuple] = []
+    posted: list[tuple] = []
+    monkeypatch.setattr(main.share, "post_log",
+                        lambda log, key: sent.append((log.match_id, key)) or True)
+    monkeypatch.setattr(main.share, "quick_post",
+                        lambda token, name: posted.append((token, name)) or "request")
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        ui.post_as = "Ada"
+        assert main.quick_post(settings, state, ui, 77, log) == "request"
+        shared = main.challenge_settings(settings, state, ui, 77, log)
+        assert sent == [(log.match_id, shared.challenge.key)]
+        assert posted == [(shared.to_token(), "Ada")]
+        assert ui.board_action() == "posting"
+    finally:
+        pygame.quit()
+
+
+def test_quick_post_that_cannot_start_opens_the_entry_form(monkeypatch):
+    opened: list[str] = []
+    monkeypatch.setattr(main.share, "post_log", lambda log, key: True)
+    monkeypatch.setattr(main.share, "quick_post", lambda token, name: None)
+    monkeypatch.setattr(main.webstore, "open_url", lambda url: opened.append(url) or True)
+    state, ui = _setup()
+    try:
+        settings = Settings(nodes=18, players=3)
+        log = replay.new_log(settings, 77)
+        log.path = None
+        ui.hand_turns = 1
+        state.turn = 50
+        ui.post_as = "Ada"
+        assert main.quick_post(settings, state, ui, 77, log) is None
+        assert len(opened) == 1 and paths.LEADERBOARD_SUBMIT_PATH in opened[0]
+        assert ui.board_action() == "enter"
+    finally:
+        pygame.quit()
+
+
+def test_a_landed_quick_post_turns_the_button_into_the_maps_page():
+    ui = Ui(view=None, human_id=1)  # type: ignore[arg-type]
+    ui.post_as, ui.post_state = "Ada", "posting"
+    body = json.dumps({"game_key": "k/1", "score_count": 3, "best_turns": 20,
+                       "best_lost": 1, "best_user_name": "Ada", "best_holders": 1})
+    main.land_quick_post(ui, (20, 1), pbp.OK, body)
+    assert ui.board_action() == "view"
+    assert ui.posted_key == "k/1"
+    assert ui.share_msg == "Posted  ·  you lead  ·  3 scores on this map"
+
+
+def test_a_failed_quick_post_leaves_the_entry_form(monkeypatch):
+    ui = Ui(view=None, human_id=1)  # type: ignore[arg-type]
+    ui.post_as, ui.post_state = "Ada", "posting"
+    main.land_quick_post(ui, (20, 1), pbp.ERROR, "insert refused")
+    assert ui.board_action() == "enter"
+    assert ui.share_msg == main.QUICK_POST_FAILED_MSG
+    ui.post_state = "posting"
+    main.land_quick_post(ui, (20, 1), pbp.OK, "not json")
+    assert ui.board_action() == "enter"
+
+
+def test_the_maps_page_opens_on_its_key(monkeypatch):
+    opened: list[str] = []
+    monkeypatch.setattr(main.webstore, "leaderboard_origin", lambda: "https://example.test")
+    monkeypatch.setattr(main.webstore, "open_url", lambda url: opened.append(url) or True)
+    assert main.open_map_page("j:a/b") == ""
+    assert opened == [f"https://example.test{paths.LEADERBOARD_GAME_PATH}?key=j%3Aa%2Fb"]
 
 
 def test_sharing_a_challenge_link_uploads_nothing(monkeypatch):

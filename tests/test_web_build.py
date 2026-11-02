@@ -123,10 +123,17 @@ def test_the_functions_answer_where_the_game_calls_them():
 
 def test_the_games_board_links_point_under_board():
     for path in (paths.LEADERBOARD_SUBMIT_PATH, paths.LEADERBOARD_RECENT_PATH,
-                 paths.LEADERBOARD_LOBBY_PATH):
+                 paths.LEADERBOARD_LOBBY_PATH, paths.LEADERBOARD_GAME_PATH,
+                 paths.LEADERBOARD_POST_MODULE_PATH):
         page = path.split("?")[0]
         assert page.startswith("/board/")
         assert (ROOT / "leaderboard" / page.removeprefix("/board/")).exists()
+
+
+def test_quick_post_calls_what_the_board_module_exports():
+    """`share.quick_post` imports the module and calls this by name."""
+    module = ROOT / "leaderboard" / paths.LEADERBOARD_POST_MODULE_PATH.removeprefix("/board/")
+    assert "export async function quickPost(token, name)" in module.read_text()
 
 
 def test_the_old_host_proxies_the_api_rather_than_redirecting_it():

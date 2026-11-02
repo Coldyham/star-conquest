@@ -189,6 +189,45 @@ def test_win_overlay_pairs_the_leaderboard_button_with_sharing(monkeypatch):
         pygame.quit()
 
 
+def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
+    """Quick post names who it posts as, waits while posting, then opens the
+    map's page; without a name, or after a failure, it is the entry form."""
+    monkeypatch.setattr(config, "touch_ui", False)
+    ui = _make_ui(mapgen.generate_random(1, num_nodes=18, num_players=3))
+    assert render._board_label(ui).startswith("Enter on leaderboard")
+    ui.post_as = "Ada"
+    assert render._board_label(ui).startswith("Post as Ada")
+    ui.post_as = "A" * 40
+    assert ("A" * 15 + "…") in render._board_label(ui)
+    ui.post_state = "posting"
+    assert render._board_label(ui) == "Posting…"
+    ui.post_state = "posted"
+    assert render._board_label(ui).startswith("View on board")
+    ui.post_state = "failed"
+    assert render._board_label(ui).startswith("Enter on leaderboard")
+
+
+def test_a_long_quick_post_summary_wraps_above_quit():
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((360, 740))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.winner = 1
+        ui.hand_turns = 100
+        ui.post_state = "posted"
+        ui.share_msg = "Posted  ·  best is 30 turns, 2 lost by Somebody Long  ·  12 scores on this map"
+        render.draw(screen, state, ui)
+        board, quit_ = ui.leaderboard_button_rect, ui.quit_button_rect
+        notes = render._wrap(render._fonts()["small"], ui.share_msg, 360 - 2 * config.HUD_PAD)
+        assert len(notes) > 1
+        assert quit_[1] >= board[1] + board[3] + len(notes) * render._row_h()
+        assert quit_[1] + quit_[3] <= 740
+    finally:
+        pygame.quit()
+
+
 def test_win_overlay_draws_every_challenge_verdict():
     """Beaten / missed / failed all render, including the losing branch that shows
     a verdict but no score."""

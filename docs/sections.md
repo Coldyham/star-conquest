@@ -77,7 +77,7 @@ line gives only the verdict. Ideas that lost are in
 - leaderboard.md · **Checked scores.** The id rides on `Challenge`; two consented senders; `game_logs` private; `is_current`, `rules_version`; the verifier re-rolls keyed turns' dice (`mismatch`), unkeyed pass unchecked.
 - leaderboard.md · *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - leaderboard.md · **Playstyle readings.** From `public_replays` only, one row per match, never per name; fields sum; `playstyle-baseline.mjs` generated; `rev` and `shape`. *Decided against: warming actuary's learner from a profile.*
-- leaderboard.md · **The game and the board are one site.** Why merge (deploy quota, one localStorage, the PWA); `/board/`. *The pages are templates*: Jinja2 via `tools/render_board.py`, one base.
+- leaderboard.md · **The game and the board are one site.** Why merge (deploy quota, one localStorage, the PWA); `/board/`. *Quick post*: *Post as <name>* runs the board's `post.mjs` in the page, reports what an embargoed page shows, falls back to the form, web only; an `/api/score` function decided against. *The pages are templates*: Jinja2 via `tools/render_board.py`, one base.
 - leaderboard.md · **Rules in full:** the bot column; a replay is never shown as if it still reproduced the game.
 
 ## campaign.md (split from leaderboard.md)

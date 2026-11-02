@@ -113,8 +113,10 @@ you press a sharing button, or tick **Share replays**.
 - **Challenge links.** Win a game, press **Challenge a friend**, and the link
   carries the map plus your score to beat: turns to win, with ties going to
   fewest ships lost. **Enter on leaderboard** posts it to the board, where every
-  map gets its own high-score table. A plain **Get Link** shares a setup with no
-  score attached.
+  map gets its own high-score table. In the browser, once you've posted under a
+  name, the button becomes **Post as <name>**: it posts in one press, without
+  opening the board, and tells you how many scores the map has and who holds
+  the best. A plain **Get Link** shares a setup with no score attached.
 - **Checked scores.** A posted score uploads its replay. An offline job
   (`tools/verify_scores.py`) replays the log and marks each score as verified
   or not, and the board's **Watch** link plays it back.

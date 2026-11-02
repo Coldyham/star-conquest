@@ -91,3 +91,11 @@
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "no-referrer"
+
+# The board's modules, importable from another origin: a game served locally or
+# on a custom domain quick-posts with /board/js/post.mjs from here
+# (share.quick_post). They are public files and send nothing on their own.
+[[headers]]
+  for = "/board/js/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
