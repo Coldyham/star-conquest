@@ -126,7 +126,8 @@ on) and the systems to ring there:
 - **Emptied** (red): a system lost within `EMPTIED_WINDOW` turns of our sending at
   least `EMPTIED_SHARE` of its garrison out. The note names one launch, its
   ships against its own board's garrison (a sum over the window once read "27
-  of 24"), and says what staying would have met.
+  of 24"), any system that launch took when it landed (the trade, which is all
+  the coach can see of a deliberate one), and what staying would have met.
 - **Evacuated** (teal): the same loss, but everything sent in the window, kept
   home, would still have fallen on most rolls to the strongest rival force that
   landed. Pulling out was right, so it is noted as such, at no cost (the first

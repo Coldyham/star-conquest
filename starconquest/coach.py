@@ -206,11 +206,33 @@ def _emptied(states: list[GameState], orders: list[list[Order]], mine: list[list
                         f"them. {by[0].upper()}{by[1:]} on turn {i + 1}.")
                 notes.append(Note(first, EVACUATED, text, (sid,), 0.0))
                 continue
-            text = f"You sent {sent} of {held} ships out of {name}; {by} on turn {i + 1}."
+            took = _captured_by(states, mine[first], first, sid, seat)
+            gain = f" and took {_names(before, took)} with them" if took else ""
+            by = f"{_who(after, taker)} took {name}" if took and taker != 0 else by
+            text = f"You sent {sent} of {held} ships out of {name}{gain}; {by} on turn {i + 1}."
             if force > 0:
-                text += f" Kept home, {stayed} would likely have held it against {rival}'s {force}."
+                text += f" Kept home, {stayed} would likely have held {name} against {rival}'s {force}."
             notes.append(Note(first, EMPTIED, text, (sid,), float(held)))
     return notes, lost
+
+
+def _captured_by(states: list[GameState], launches: list[Order], turn: int, sid: int,
+                 seat: int) -> list[int]:
+    """Systems the launches out of ``sid`` on ``turn`` took when they landed:
+    what the emptying bought, the coach's one view of a trade."""
+    took: list[int] = []
+    for dest in sorted({o.dest_id for o in launches if o.source_id == sid}):
+        t = states[turn].travel_turns(sid, dest)
+        landed = turn + t if t is not None else len(states)
+        if (landed < len(states) and states[landed - 1].systems[dest].owner_id != seat
+                and states[landed].systems[dest].owner_id == seat):
+            took.append(dest)
+    return took
+
+
+def _names(state: GameState, sids: list[int]) -> str:
+    names = [_name(state, sid) for sid in sids]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def _landing(state: GameState, turn_orders: list[Order], sid: int, seat: int) -> dict[int, int]:

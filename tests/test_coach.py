@@ -65,7 +65,7 @@ def test_a_system_sent_out_and_then_lost_is_noted():
     emptied = next(n for n in review.notes if n.kind == coach.EMPTIED)
     assert emptied.turn == 0 and emptied.systems == (0,)
     assert "sent 9 of 10" in emptied.text and "P2 took it on turn 2" in emptied.text
-    assert "10 would likely have held it against P2's 8" in emptied.text
+    assert "10 would likely have held" in emptied.text and "against P2's 8" in emptied.text
     assert review.lost == 1
 
 
@@ -80,6 +80,19 @@ def test_an_emptying_over_several_turns_names_one_launch():
         review = coach.review(boards, orders, 1)
     emptied = next(n for n in review.notes if n.kind == coach.EMPTIED)
     assert emptied.turn == 0 and "sent 6 of 10" in emptied.text
+
+
+def test_an_emptying_that_took_a_system_names_the_trade():
+    state = make_state([(0, 1, 10, 100), (3, 0, 2, 100), (1, 2, 20, 100)],
+                       [(0, 1, 1), (0, 3, 1)], human=1)
+    with no_jitter():
+        boards, orders = _play(state, 3, mine={0: [Order(1, 0, 3, 9)]},
+                               theirs={1: [Order(2, 1, 0, 8)]})
+        review = coach.review(boards, orders, 1)
+    emptied = next(n for n in review.notes if n.kind == coach.EMPTIED)
+    took, name = boards[0].systems[3].short, boards[0].systems[0].short
+    assert f"and took {took} with them" in emptied.text
+    assert f"P2 took {name} on turn 2" in emptied.text
 
 
 def test_pulling_out_of_a_system_that_would_fall_anyway_is_an_evacuation():
