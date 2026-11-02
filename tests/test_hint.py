@@ -1,5 +1,5 @@
 """Training help: the send popup's forecast (`combat.forecast_landing`) and the
-Hint control (`main.take_hint`), which takes a game off the leaderboard."""
+Hint control (`main.press_hint`), which takes a game off the leaderboard."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from starconquest import ai, combat, config, engine
 from starconquest import main as game_main
 from starconquest import settings as settings_mod
 from starconquest.geometry import WorldView
-from starconquest.model import Order
+from starconquest.model import ForwardRule, Order
 from starconquest.replay import GameLog
 from starconquest.viewstate import Ui
 from tests.test_engine import make_state
@@ -110,16 +110,62 @@ def test_a_hint_leaves_the_game_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(GameLog, "save", lambda self: None)
     before = (state.rng.getstate(), {sid: (n.owner_id, n.ships) for sid, n in state.systems.items()},
               state.players[1].ai_strategy)
-    game_main.take_hint(state, ui, log)      # the first press only asks
-    assert ui.hint_armed and not ui.hinted and not ui.hint_live(state)
-    game_main.take_hint(state, ui, log)
+    assert game_main.press_hint(state, ui, log)    # the first press only asks
+    assert not ui.hinted and not ui.hint_live(state)
+    game_main.take_hint(state, ui, log)           # ...and the modal's Show takes it
     assert ui.hinted and ui.hint_live(state) and log.hinted_from == state.turn
     assert all(o.owner_id == 1 and o.ships > 0 for o in ui.hint_orders)
     after = (state.rng.getstate(), {sid: (n.owner_id, n.ships) for sid, n in state.systems.items()},
              state.players[1].ai_strategy)
     assert before == after
-    game_main.take_hint(state, ui, log)      # pressed again: hidden, no second ask
-    assert not ui.hint_live(state) and ui.hinted and not ui.hint_armed
+    assert not game_main.press_hint(state, ui, log)   # pressed again: hidden
+    assert not ui.hint_live(state) and ui.hinted
+    assert not game_main.press_hint(state, ui, log)   # and again: shown, no second ask
+    assert ui.hint_live(state)
+
+
+def _hinted(*hint):
+    """Our system 0 (20 ships) between neighbours 1 and 2, hinted ``hint``."""
+    s = make_state([(0, 1, 20, 3), (1, 0, 5, 3), (2, 0, 5, 3)], [(0, 1, 2), (0, 2, 2)])
+    ui = _ui(s)
+    ui.hint_turn, ui.hint_orders = s.turn, [Order(1, 0, d, n) for d, n in hint]
+    return s, ui
+
+
+def test_the_hint_leaves_out_what_our_orders_already_send():
+    s, ui = _hinted((1, 8), (2, 6))
+    ui.pending.append(Order(1, 0, 1, 8))
+    assert [(o.dest_id, o.ships) for o in ui.hint_left(s)] == [(2, 6)]
+    ui.pending[0].ships = 5                        # short of it: the rest is left
+    assert [(o.dest_id, o.ships) for o in ui.hint_left(s)] == [(1, 3), (2, 6)]
+    ui.pending.clear()
+    ui.auto_forward[0] = ForwardRule({2: 100}, 0)  # a rule's sends count too
+    assert [(o.dest_id, o.ships) for o in ui.hint_left(s)] == [(1, 8)]
+
+
+def test_applying_queues_what_is_left_and_puts_the_hint_away():
+    s, ui = _hinted((1, 8), (2, 6))
+    ui.pending.append(Order(1, 0, 1, 5))
+    ui.apply_hint(s)
+    assert [(o.dest_id, o.ships) for o in ui.pending] == [(1, 8), (2, 6)]
+    assert not ui.hint_live(s)
+
+
+def test_applying_tops_up_a_lane_a_rule_thins():
+    """A queued send comes out ahead of the rule, so the rule sends less down the
+    lane it was topping up: the apply keeps going until the hint is met."""
+    s, ui = _hinted((1, 14))
+    ui.auto_forward[0] = ForwardRule({1: 50, 2: 50}, 0)
+    ui.apply_hint(s)
+    assert ui.planned_sends(s)[(0, 1)] >= 14
+    assert sum(ui.planned_sends(s).values()) <= 20
+
+
+def test_applying_never_takes_ships_promised_elsewhere():
+    s, ui = _hinted((1, 15))
+    ui.pending.append(Order(1, 0, 2, 12))
+    ui.apply_hint(s)
+    assert [(o.dest_id, o.ships) for o in ui.pending] == [(2, 12), (1, 8)]
 
 
 def test_a_hinted_win_is_never_posted():
@@ -148,3 +194,69 @@ def test_the_log_keeps_a_hint_only_on_the_branch_that_saw_it():
     assert log.fork(3).hinted_from is None
     log.truncate(2)
     assert log.hinted_from is None
+
+
+# -- the footer ---------------------------------------------------------------- #
+def _screen(w: int = config.SCREEN_W, h: int = config.SCREEN_H):
+    import pygame
+    from starconquest import render
+    pygame.init()
+    config.SCREEN_W, config.SCREEN_H = w, h
+    config.apply_ui_scale(1.0)
+    render._FONTS.clear()
+    return pygame.display.set_mode((w, h))
+
+
+def _footer_ui(state):
+    from starconquest import mapgen
+    ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
+    ui.visible = ui.seen = set(state.systems)
+    return ui
+
+
+def _reset_screen():
+    import pygame
+    from starconquest import render
+    config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H
+    config.apply_ui_scale(1.0)
+    render._FONTS.clear()
+    pygame.quit()
+
+
+def test_a_shown_hint_splits_into_hide_and_apply():
+    import pygame
+    from starconquest import input as game_input, render
+    screen = _screen()
+    try:
+        state, ui, _ = _game()
+        ui.view = _footer_ui(state).view
+        ui.hint_orders = game_main.hint_orders(state, 1)
+        ui.hint_turn = state.turn
+        assert ui.hint_left(state)
+        render.draw(screen, state, ui)
+        hide, apply = pygame.Rect(ui.hint_button_rect), pygame.Rect(ui.hint_apply_rect)
+        assert hide.w and apply.w and hide.right < apply.x
+        game_input.handle_event(pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, pos=apply.center, button=1), state, ui)
+        assert not ui.hint_live(state) and ui.pending
+        render.draw(screen, state, ui)
+        assert ui.hint_button_rect[2] and not ui.hint_apply_rect[2]
+    finally:
+        _reset_screen()
+
+
+def test_clear_outlasts_history_in_a_squeeze():
+    """Clear is something to do, History something to look at: a narrowing strip
+    folds History away first."""
+    from starconquest import mapgen, render
+    try:
+        for w in range(480, config.BASE_SCREEN_W + 1, 40):
+            screen = _screen(w, 700)
+            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+            state.turn = 3
+            ui = _footer_ui(state)
+            render.draw(screen, state, ui)
+            if not ui.clear_button_rect[2]:
+                assert not ui.history_button_rect[2], w
+    finally:
+        _reset_screen()

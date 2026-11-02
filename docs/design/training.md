@@ -39,13 +39,28 @@ A row in the send popup's Send tab, under "send N · M home":
 - The row takes the Send tab to the same height as the one-lane Forward tab
   (which has its hold row there), so flipping tabs does not move the panel.
 
-## The hint (`main.take_hint`, `Ui.can_hint`, `GameLog.hinted_from`)
+## The hint (`main.press_hint`, `Ui.can_hint`, `GameLog.hinted_from`)
 
 The footer's Hint button (K) shows what `main.HINT_STRATEGY` (marshal) would
 send for the human seat this turn: dashed near-white arrows
 (`config.COLOR_HINT`, no seat's hue), with the count 60% along the lane (a queued
-order's label sits at 40%), and a caption at the top of the map. Press again to
-hide.
+order's label sits at 40%), and a caption at the top of the map. While it is up
+the button splits into ✗ (K, hide) and ✓ (Shift+K, apply); glyphs only, so the
+pair is no wider than the button, and the caption names the keys.
+
+- **It shows only what our orders don't already do** (`Ui.hint_left`). Each
+  lane's hinted ships less what our queued sends and live rules put down it
+  this turn (`Ui.planned_sends`, the same `Ui.forward_orders` that end of turn
+  issues), so a backline the rules already forward drops out. A lane we send
+  some of shows the rest as "+N". The caption counts what is left and what is
+  "already yours". It is recomputed every frame, so editing an order moves it.
+  It does not flag our sends the advisor would not make.
+- **Apply** (`Ui.apply_hint`) queues what is left as our own sends (merged into
+  a queued send on the same lane), then hides the hint. A queued send comes out
+  ahead of the source's rule, so topping up one lane can thin the rule's send
+  down it; the apply repeats until the hint is met or the source has nothing
+  free. Ships already promised elsewhere are never taken back: a send is cut
+  to what is free. ✓ is drawn only while something is left.
 
 - **It never touches the game.** The advisor runs on a deep copy with the seat
   re-dealt to marshal at default `AiParams`, through `engine.decide_seat`, so it
@@ -56,9 +71,11 @@ hide.
   That is acceptable for training help, and is part of why a hinted game is not
   posted.
 - **A hinted game is never posted** (`Ui.can_post` adds `not hinted`). The first
-  press in a game not yet hinted only asks ("Hint: no posting?", amber); any
-  other key or click disarms it (`main`'s event loop). The second press takes
-  the hint.
+  press in a game not yet hinted opens a modal (`render.draw_confirm_hint`)
+  saying what the hint shows and that the game can then not be posted (or
+  clear its stage, in a gauntlet); Show takes it (`main.take_hint`). The ask
+  first lived on the button itself ("Hint: no posting?", pressed twice),
+  which said the cost but not what a hint is.
 - **The log remembers.** `GameLog.hinted_from` is the board the first hint was
   taken on, written and saved immediately (not with the turn), so quitting
   before End Turn does not shed it. A resume reads it back into `Ui.hinted`. It

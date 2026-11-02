@@ -691,6 +691,9 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
     if event.key == pygame.K_g:
         return "toggle_route"
     if event.key == pygame.K_k:
+        if event.mod & pygame.KMOD_SHIFT:
+            ui.apply_hint(state)   # a no-op unless the hint is up, as its button is
+            return None
         # main gates this on `Ui.can_hint`, the same call that draws the button
         return "hint"
     if event.key == pygame.K_ESCAPE:
@@ -873,6 +876,9 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, "toggle_route"
     if ui.hint_button_rect[2] and _point_in_rect(pos, ui.hint_button_rect):
         return True, "hint"
+    if ui.hint_apply_rect[2] and _point_in_rect(pos, ui.hint_apply_rect):
+        ui.apply_hint(state)
+        return True, None
     return False, None
 
 

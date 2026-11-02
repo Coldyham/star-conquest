@@ -42,7 +42,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## training.md
 - training.md · **The send forecast (`combat.forecast_landing`).** What lands that turn (`Ui.landing_at`), the garrison it meets with production on the way (`garrison_after`), the odds over the jitter square (`fight_odds`, cached), `sure_count`; fog hides it; reinforcing is not a fight.
-- training.md · **The hint (`main.take_hint`).** Marshal's sends for the human seat on a deep copy through `decide_seat`; dashed arrows; first press asks; `Ui.hinted` blocks `can_post`; `GameLog.hinted_from` saved at once, kept by fork/truncate by board; the verifier rejects it; not in play-by-post or autoplay.
+- training.md · **The hint (`main.press_hint`).** Marshal's sends for the human seat on a deep copy through `decide_seat`; dashed arrows, less what our orders and rules already send (`Ui.hint_left`); ✗/✓ hide or apply (`Ui.apply_hint`); first press asks in a modal; `Ui.hinted` blocks `can_post`; `GameLog.hinted_from` saved at once, kept by fork/truncate by board; the verifier rejects it; not in play-by-post or autoplay.
 - training.md · **The post-game coach (`coach.review`).** Decided games only; gamble, surprise, emptied, idle and the turning point; the costliest 24 kept; the Coach tab, `Ui.select_note`, rings on the board.
 - training.md · **Proposed, not built.** Drill and per-bot stages; choosing the advisor.
 ## turnfilm.md

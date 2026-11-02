@@ -813,22 +813,28 @@ def test_fast_forward_button_only_exists_while_spectating():
 def test_ironman_hides_history_until_the_game_is_decided():
     """The footer offers History exactly when ``Ui.can_review`` does: under ironman
     not while the game is undecided (even once knocked out — rewinding is the
-    point of hiding it), and again once there is a winner."""
+    point of hiding it), and again once there is a winner. On the strip or in
+    its overflow list: the list is held open so a folded History still counts."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+
+    def draw():
+        ui.more_open = True
+        render.draw(screen, state, ui)
+
     try:
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         state.turn = 3
         ui = _make_ui(state)
-        render.draw(screen, state, ui)
+        draw()
         assert ui.history_button_rect[2] > 0
 
         ui.ironman = True
-        render.draw(screen, state, ui)
+        draw()
         assert ui.history_button_rect[2] == 0
         state.players[1].alive = False
-        render.draw(screen, state, ui)
+        draw()
         assert ui.history_button_rect[2] == 0, "a spectator could still rewind"
 
         state.winner = 2

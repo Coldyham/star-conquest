@@ -254,21 +254,23 @@ def modal_buttons(surface, labels: tuple[str, str]) -> tuple[pygame.Rect, pygame
 
 
 def draw_modal(surface, title: str, detail: str, buttons) -> None:
-    """A confirm modal: veil, title, an optional detail line, and two buttons.
+    """A confirm modal: veil, title, an optional detail (wrapped, `wrap`'s
+    paragraphs), and two buttons.
     ``buttons`` is ((label, fill, edge), (label, fill, edge)) — confirm then cancel.
     """
     w, h = surface.get_size()
-    big, normal = fonts()["big"], fonts()["normal"]
+    big, normal, small = fonts()["big"], fonts()["normal"], fonts()["small"]
     veil = pygame.Surface((w, h), pygame.SRCALPHA)
     veil.fill((5, 6, 12, 200))
     surface.blit(veil, (0, 0))
+    lines = wrap(small, detail, min(w - 2 * config.s(24), config.s(760))) if detail else []
     # Stacked upward from the button row so the title and detail always clear it.
-    detail_h = row_h() if detail else 0
-    y = h // 2 - config.s(12) - detail_h - big.get_height()
+    y = h // 2 - config.s(12) - row_h() * len(lines) - big.get_height()
     text(surface, big, title, config.COLOR_TEXT, center=(w // 2, y + big.get_height() // 2))
-    if detail:
-        y += row_h("big")
-        text(surface, fonts()["small"], detail, config.COLOR_TEXT_DIM, center=(w // 2, y + fonts()["small"].get_height() // 2))
+    y += row_h("big")
+    for line in lines:
+        text(surface, small, line, config.COLOR_TEXT_DIM, center=(w // 2, y + small.get_height() // 2))
+        y += row_h()
     for rect, (label, fill, edge) in zip(modal_buttons(surface, (buttons[0][0], buttons[1][0])), buttons):
         btn(surface, rect, label, fill, edge, normal)
 

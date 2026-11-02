@@ -449,21 +449,32 @@ def _draw_dashed(surface, pa, pb, color, width: int) -> None:
 
 
 def _draw_hint(surface, state: GameState, ui: Ui) -> None:
-    """The advisor's sends for this turn (`main.take_hint`): dashed arrows in
-    the hint colour, the count 60% of the way along — the far side of the lane
-    from a queued order's label (`_draw_pending`), so the two can be compared."""
+    """The advisor's sends for this turn (`main.take_hint`) that our own orders
+    don't already make (`Ui.hint_left`): dashed arrows in the hint colour, the
+    count 60% of the way along — the far side of the lane from a queued order's
+    label (`_draw_pending`), so the two can be compared. A lane we already send
+    some of shows the rest as "+N"."""
     if not ui.hint_live(state):
         return
-    n = len(ui.hint_orders)
-    caption = (f"Hint: {n} send{'s' if n != 1 else ''} (K hides)" if n
-               else "Hint: hold this turn (K hides)")
-    if config.touch_ui:
-        caption = caption.replace(" (K hides)", "")
+    left = ui.hint_left(state)
+    planned = ui.planned_sends(state)
+    lanes = len({(o.source_id, o.dest_id) for o in ui.hint_orders})
+    covered = lanes - len(left)
+    if not lanes:
+        caption = "Hint: hold this turn"
+    elif not left:
+        caption = "Hint: your orders already make its sends"
+    else:
+        caption = f"Hint: {len(left)} send{'s' if len(left) != 1 else ''}"
+        if covered:
+            caption += f" · {covered} already yours"
+    if not config.touch_ui:
+        caption += " · K hides, Shift+K applies" if left else " · K hides"
     vx, vy, vw, _vh = config.play_rect()
     _label_pill(surface, _fonts()["small"], caption, config.COLOR_HINT,
                 (vx + vw // 2, vy + config.s(18)))
     width = config.s(2)
-    for o in ui.hint_orders:
+    for o in left:
         if o.source_id not in state.systems or o.dest_id not in state.systems:
             continue
         pa = ui.view.to_screen(state.systems[o.source_id].pos)
@@ -475,7 +486,8 @@ def _draw_hint(surface, state: GameState, ui: Ui) -> None:
         _draw_arrowhead(surface, tip, (ux, uy), config.COLOR_HINT, width)
         lx = int(pa[0] + (pb[0] - pa[0]) * 0.6)
         ly = int(pa[1] + (pb[1] - pa[1]) * 0.6)
-        _label_pill(surface, _fonts()["small"], str(o.ships), config.COLOR_HINT, (lx, ly - config.s(10)))
+        count = f"+{o.ships}" if planned.get((o.source_id, o.dest_id)) else str(o.ships)
+        _label_pill(surface, _fonts()["small"], count, config.COLOR_HINT, (lx, ly - config.s(10)))
 
 
 def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
@@ -1784,26 +1796,29 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if not ui.in_stage:
         specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
     if ui.can_review(state):
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 3, "right"))
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 1, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
     if not ui.spectating:   # a spectator has nothing to clear
-        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 1, "right"))
+        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 4, "right"))
     # Route mode: multi-select a group of systems and forward them all to one
     # destination. Gated on the same predicate as the G key, so the button is
     # drawn exactly when the mode means something.
     if ui.can_route(state):
         specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
     # Hint: a bot's suggested sends, as training help. Its first press in a game
-    # not yet hinted asks, since a hinted game is never posted (`Ui.can_post`).
+    # not yet hinted asks (`main.press_hint`), since a hinted game is never
+    # posted (`Ui.can_post`). While it is up it splits in two: put it away, or
+    # queue what it suggests — the latter only while there is something left.
+    # Glyphs only, so the pair is no wider than the button it replaces; the map
+    # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
-        if ui.hint_armed:
-            label, colours = "Hint: no posting?", _BTN_AMBER
-        elif ui.hint_live(state):
-            label, colours = "Hide hint", _BTN_ACTIVE
+        if ui.hint_live(state):
+            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 3, "right"))
+            if ui.hint_left(state):
+                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 2, "right"))
         else:
-            label, colours = "Hint", _BTN_GOLD
-        specs.append(("hint_button_rect", _key_hint(label, "K"), *colours, 3, "right"))
+            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 3, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -1846,7 +1861,7 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
     goes to the controls that are.
     """
     fx, _fy, fw, _fh = config.footer_rect()
-    widths = {spec[0]: _btn_w(font, spec[1]) for spec in specs}
+    widths = {spec[0]: _btn_w(font, spec[1], fbh) for spec in specs}
     avail = fw - config.HUD_PAD * 2
     more_w = fbh
 
@@ -1901,7 +1916,9 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 
 # The strip's Menu means the setup screen; in a list under a menu button of its
 # own, it needs saying which menu.
-_MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu")}
+_MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu"),
+                "hint_button_rect": ("✗", "✗ Hide hint"),
+                "hint_apply_rect": ("✓", "✓ Apply hint")}
 
 
 def _draw_more_button(surface, rect: pygame.Rect, lit: bool) -> None:
@@ -3861,6 +3878,29 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
         if turn < len(series) and not math.isnan(series[turn]):
             pygame.draw.circle(surface, color_of(pid), at(turn, series[turn]), config.s(4))
     return box
+
+
+def confirm_hint_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
+    """(show, cancel) button rects — shared by the drawer and the hit-tester."""
+    return _modal_buttons(surface, confirm_labels("Show hint"))
+
+
+def draw_confirm_hint(surface, ui: Ui, advisor: str) -> None:
+    """Modal ask before a game's first hint (`main.press_hint`): what it shows,
+    and that a hinted game is never posted (`Ui.can_post`) or clears its stage."""
+    show, cancel = confirm_labels("Show hint")
+    stake = "posting to the leaderboard" + (" or clearing this stage" if ui.in_stage else "")
+    _draw_modal(
+        surface,
+        "Show a hint?",
+        (f"Shows on the board the moves the {advisor} bot would make in your "
+         f"position this turn, leaving out any your orders already make."
+         f"\n\nUsing a hint makes this game ineligible for {stake}."),
+        (
+            (show, *_BTN_AMBER),
+            (cancel, *_BTN_GREEN),
+        ),
+    )
 
 
 def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:

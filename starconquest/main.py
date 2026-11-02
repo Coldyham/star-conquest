@@ -1278,24 +1278,29 @@ def hint_orders(state: GameState, seat: int, strategy: str = HINT_STRATEGY) -> l
     return [o for o in orders if o.owner_id == seat and o.ships > 0]
 
 
-def take_hint(state: GameState, ui: Ui, log: GameLog | None) -> None:
-    """The Hint control (K): show the advisor's sends for this turn as arrows.
+def press_hint(state: GameState, ui: Ui, log: GameLog | None) -> bool:
+    """The Hint control (K): show the advisor's sends, or hide them when up.
 
-    In a game that has had no hint yet the first press only asks
-    (`Ui.hint_armed`): a hinted result is never posted (`Ui.can_post`), and
-    that is said before it happens, not after. Pressing again with the arrows
-    up hides them. The hint is stamped into the log at once (`hinted_from`), so
-    resuming the game keeps it hinted.
+    True when the press must ask first (`main`'s hint modal, then `take_hint`):
+    in a game not yet hinted, since a hinted result is never posted
+    (`Ui.can_post`), and that is said before it happens, not after.
     """
     if not ui.can_hint(state):
-        return
+        return False
     if ui.hint_live(state):
-        ui.hint_turn, ui.hint_orders = -1, []
+        ui.hide_hint()
+        return False
+    if not ui.hinted:
+        return True
+    take_hint(state, ui, log)
+    return False
+
+
+def take_hint(state: GameState, ui: Ui, log: GameLog | None) -> None:
+    """Show the advisor's sends for this turn as arrows. The hint is stamped into
+    the log at once (`hinted_from`), so resuming the game keeps it hinted."""
+    if not ui.can_hint(state):
         return
-    if not ui.hinted and not ui.hint_armed:
-        ui.hint_armed = True
-        return
-    ui.hint_armed = False
     ui.hint_orders = hint_orders(state, ui.human_id)
     ui.hint_turn = state.turn
     ui.hinted = True
@@ -1308,23 +1313,9 @@ def take_hint(state: GameState, ui: Ui, log: GameLog | None) -> None:
 
 
 def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
-    """Turn standing auto-forward rules into this turn's orders for the human.
-
-    A rule holds back its ``hold`` and sends each lane its share of the rest
-    (`Ui.forward_this_turn`, the same figures the popup shows). Ships already
-    promised by manually-queued orders from the same source are not counted as
-    free, so a rule cooperates with (rather than double-counts) manual sends.
-    """
-    orders: list[Order] = []
-    for src in ui.auto_forward:
-        # the same test that decides whether the rule is drawn, pickable, editable
-        # and (at the end of this turn, in `Ui.prune_forward`) kept at all
-        if not ui.rule_is_live(state, src):
-            continue
-        for dest, send in ui.forward_this_turn(state, src).items():
-            if send > 0 and state.are_adjacent(src, dest):
-                orders.append(Order(ui.human_id, src, dest, send))
-    return orders
+    """Turn standing auto-forward rules into this turn's orders for the human
+    (`Ui.forward_orders`, which the hint also reads to see what we already send)."""
+    return ui.forward_orders(state)
 
 
 def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
@@ -1962,6 +1953,7 @@ async def main() -> None:
     running = True
     confirm_quit = False   # showing the "are you sure?" modal; gates every quit path
     confirm_rewind = False  # showing the destructive mid-game rewind confirm modal
+    confirm_hint = False    # asking before the first hint, which takes the game off the board
     # History-review snapshots, built on entering history mode and dropped on exit;
     # `live_fog` stashes the live fog triple so it survives a history visit intact.
     reel: turnfilm.Reel | None = None   # the turn being played back, if any
@@ -2354,6 +2346,28 @@ async def main() -> None:
                     auto_accum = 0
                 continue
 
+            if confirm_hint:
+                # Modal: what a hint is, and that the game can't be posted after one.
+                do_hint = False
+                if event.type == pygame.QUIT:
+                    confirm_hint, confirm_quit = False, True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                        do_hint = True
+                    elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                        confirm_hint = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    show_r, cancel_r = render.confirm_hint_buttons(screen)
+                    if show_r.collidepoint(event.pos):
+                        do_hint = True
+                    elif cancel_r.collidepoint(event.pos):
+                        confirm_hint = False
+                if do_hint:
+                    assert state is not None and ui is not None   # confirm_hint ⇒ in-game
+                    take_hint(state, ui, log)
+                    confirm_hint = False
+                continue
+
             if resume_prompt is not None:
                 # Boot modal: resume the last unfinished game, or dismiss to the menu.
                 accept = False
@@ -2453,10 +2467,8 @@ async def main() -> None:
             # Past the menu and modal handlers, so scene == "game": state/ui/log are live.
             assert state is not None and ui is not None and log is not None
             action = game_input.handle_event(event, state, ui)
-            if action != "hint" and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-                ui.hint_armed = False   # the ask is answered by the next press only
             if action == "hint":
-                take_hint(state, ui, log)
+                confirm_hint = press_hint(state, ui, log)
             elif action == "quit":
                 confirm_quit = True
             elif action == "menu":
@@ -2617,7 +2629,7 @@ async def main() -> None:
             elif reel is None and ui.film is not None:
                 land_film(state, ui)        # unreachable, but a stranded film would
                                             # hide the End Turn button for good
-            elif reel is not None and not confirm_quit and not confirm_rewind:
+            elif reel is not None and not confirm_quit and not confirm_rewind and not confirm_hint:
                 # Frozen rather than advanced while paused (see `Ui.film_paused`),
                 # so pausing keeps showing what the turn did instead of losing it.
                 if not ui.film_paused:
@@ -2662,7 +2674,7 @@ async def main() -> None:
                         _carry_into(ui, reel, carry)
 
             if (reel is None and ui.history and ui.playing
-                    and not confirm_quit and not confirm_rewind):
+                    and not confirm_quit and not confirm_rewind and not confirm_hint):
                 # Replay playback: one turn per PLAY_MS, stopping when it reaches
                 # the final recorded turn (like a video reaching the end). With
                 # turn animation on, the step becomes a film and the scrubber
@@ -2679,7 +2691,7 @@ async def main() -> None:
                         if ui.history_turn >= ui.history_max:
                             ui.playing = False
             elif (reel is None and state.winner is None
-                    and not confirm_quit and not confirm_rewind and not ui.history
+                    and not confirm_quit and not confirm_rewind and not confirm_hint and not ui.history
                     and ui.mode != viewstate.ROUTING):
                 if ui.autoplay:
                     # Same shape as play mode just below: with turn animation on,
@@ -2748,6 +2760,8 @@ async def main() -> None:
                 render.draw(screen, reel.board if reel is not None else state, ui)
             if confirm_rewind:   # only ever set in-game, so ui is live here
                 render.draw_confirm_rewind(screen, ui.history_turn)
+            if confirm_hint:
+                render.draw_confirm_hint(screen, ui, HINT_STRATEGY.title())
         if confirm_quit:
             render.draw_confirm_quit(screen)
         pygame.display.flip()
