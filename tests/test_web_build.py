@@ -33,7 +33,9 @@ def test_the_service_worker_caches_the_runtime_pygbag_loads():
     as CORS responses (an opaque one can't be checked and pads the quota)."""
     import importlib.util
 
-    runtime = re.search(r'const RUNTIME = "([^"]+)";', SW).group(1)
+    found = re.search(r'const RUNTIME = "([^"]+)";', SW)
+    assert found is not None
+    runtime = found.group(1)
     spec = importlib.util.find_spec("pygbag")
     assert spec is not None and spec.origin is not None
     app = (Path(spec.origin).parent / "app.py").read_text()
@@ -62,7 +64,7 @@ def test_the_board_copy_is_an_allow_list_of_servable_files():
 
 def test_every_board_page_renders_with_the_shared_chrome(tmp_path):
     render_board.build(tmp_path)
-    header = re.compile(r'<header class="bar">.*?</header>', re.S)
+    header = re.compile(r'<header class="bar">.*?</header>', re.DOTALL)
     headers = set()
     for page in render_board.PAGES:
         html = (tmp_path / page).read_text()

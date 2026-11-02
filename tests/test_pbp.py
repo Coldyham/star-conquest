@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from starconquest import engine, pbp, replay, webstore
-from starconquest.model import Order
+from starconquest.model import GameState, Order
 from starconquest.settings import Challenge, Settings
 
 
@@ -46,6 +46,24 @@ def _state_payload(turn=0, submitted=(), turns=(), seats=(1, 2), **over):
     return payload
 
 
+def _parsed(payload) -> pbp.Match:
+    match = pbp.match_from_dict(payload)
+    assert match is not None
+    return match
+
+
+def _resolve(match: pbp.Match, decide=None) -> tuple[GameState, replay.GameLog, str]:
+    resolved = pbp.resolve(match, decide)
+    assert resolved is not None
+    return resolved
+
+
+def _rebuild(match: pbp.Match) -> tuple[GameState, replay.GameLog]:
+    rebuilt = pbp.rebuild(match)
+    assert rebuilt is not None
+    return rebuilt
+
+
 # --------------------------------------------------------------------------- #
 # The link
 # --------------------------------------------------------------------------- #
@@ -78,6 +96,7 @@ def test_the_seat_is_not_in_the_link():
 def test_a_seat_is_remembered_and_returned():
     assert pbp.remember(pbp.Seat(MATCH, 2, TOKEN))
     seat = pbp.seat_for(MATCH)
+    assert seat is not None
     assert (seat.match_id, seat.seat, seat.token) == (MATCH, 2, TOKEN)
 
 
@@ -85,8 +104,9 @@ def test_a_seat_in_another_match_is_not_confused_with_ours():
     other = "ffeeddccbbaa9988"
     pbp.remember(pbp.Seat(MATCH, 1, TOKEN))
     pbp.remember(pbp.Seat(other, 2, "b" * 32))
-    assert pbp.seat_for(MATCH).seat == 1
-    assert pbp.seat_for(other).seat == 2
+    ours, theirs = pbp.seat_for(MATCH), pbp.seat_for(other)
+    assert ours is not None and ours.seat == 1
+    assert theirs is not None and theirs.seat == 2
 
 
 def test_forgetting_a_match_drops_only_that_one():
@@ -116,7 +136,7 @@ def test_a_corrupt_store_reads_as_no_seats():
 # Parsing what the endpoint says
 # --------------------------------------------------------------------------- #
 def test_a_match_parses_with_its_roster_and_live_turn():
-    match = pbp.match_from_dict(_state_payload(turn=3, submitted=[1]))
+    match = _parsed(_state_payload(turn=3, submitted=[1]))
     assert match.match_id == MATCH
     assert match.seats == [1, 2]
     assert match.turn == 3
@@ -134,26 +154,26 @@ def test_something_that_cannot_describe_a_match_is_refused(payload):
 
 
 def test_waiting_is_whoever_has_not_sent_orders():
-    match = pbp.match_from_dict(_state_payload(seats=[1, 2, 3], submitted=[2]))
+    match = _parsed(_state_payload(seats=[1, 2, 3], submitted=[2]))
     assert match.waiting == [1, 3]
     assert not match.ready
     assert match.has_submitted(2) and not match.has_submitted(1)
 
 
 def test_a_turn_is_ready_only_when_every_seat_is_in():
-    assert pbp.match_from_dict(_state_payload(submitted=[1, 2])).ready
-    assert not pbp.match_from_dict(_state_payload(submitted=[1])).ready
+    assert _parsed(_state_payload(submitted=[1, 2])).ready
+    assert not _parsed(_state_payload(submitted=[1])).ready
 
 
 def test_a_finished_match_is_never_ready():
-    match = pbp.match_from_dict(_state_payload(submitted=[1, 2], finished=True))
+    match = _parsed(_state_payload(submitted=[1, 2], finished=True))
     assert not match.ready
 
 
 def test_orders_are_stamped_with_the_seat_they_were_filed_under():
     """There is no owner on the wire — the seat is the row's own, which is what
     makes a foreign order inexpressible rather than merely filtered."""
-    match = pbp.match_from_dict(_state_payload(turn=1, turns=[
+    match = _parsed(_state_payload(turn=1, turns=[
         {"turn": 0, "seat": 2, "orders_json": [{"src": 5, "dst": 6, "ships": 4}]},
     ]))
     orders = match.orders_for_turn(0)
@@ -162,7 +182,7 @@ def test_orders_are_stamped_with_the_seat_they_were_filed_under():
 
 
 def test_a_malformed_order_row_is_dropped_not_coerced():
-    match = pbp.match_from_dict(_state_payload(turn=1, turns=[
+    match = _parsed(_state_payload(turn=1, turns=[
         {"turn": 0, "seat": 1, "orders_json": [
             {"src": 1, "dst": 2, "ships": 3},
             {"src": "x", "dst": 2, "ships": 3},
@@ -179,49 +199,49 @@ def test_two_clients_resolve_a_turn_to_the_same_board():
     """The whole thin-server design in one assertion. The server stores no board
     and computes no dice; every client rebuilds from the same inputs, so they
     must land on the same position or the match has silently forked."""
-    match = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
-    _, _, one = pbp.resolve(match)
-    _, _, two = pbp.resolve(match)
+    match = _parsed(_state_payload(submitted=[1, 2]))
+    _, _, one = _resolve(match)
+    _, _, two = _resolve(match)
     assert one == two
 
 
 def test_the_digest_notices_a_board_that_differs():
     """...and the tripwire is worth having only if it actually trips."""
-    a = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
-    b = pbp.match_from_dict(_state_payload(submitted=[1, 2], seed=8))
-    _, _, one = pbp.resolve(a)
-    _, _, two = pbp.resolve(b)
+    a = _parsed(_state_payload(submitted=[1, 2]))
+    b = _parsed(_state_payload(submitted=[1, 2], seed=8))
+    _, _, one = _resolve(a)
+    _, _, two = _resolve(b)
     assert one != two
 
 
 def test_a_rebuilt_board_replays_every_resolved_turn():
-    match = pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2]))
-    state, _, _ = pbp.resolve(match)
+    match = _parsed(_state_payload(turn=0, submitted=[1, 2]))
+    state, _, _ = _resolve(match)
     assert state.turn == 1
 
 
 def test_resolving_produces_a_log_that_reconstructs_to_the_same_board():
     """A play-by-post match is an ordinary GameLog — which is what lets it
     resume, review and verify with nothing taught about it."""
-    match = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
-    _state, log, digest = pbp.resolve(match)
+    match = _parsed(_state_payload(submitted=[1, 2]))
+    _state, log, digest = _resolve(match)
     rebuilt, _ = replay.reconstruct(log)
     assert replay.digest_hex(rebuilt) == digest
 
 
 def test_a_seats_orders_reach_the_board_it_resolves_to():
     """End to end: a real order, submitted by a real seat, moves real ships."""
-    base = pbp.match_from_dict(_state_payload())
-    state, _ = pbp.rebuild(base)
+    base = _parsed(_state_payload())
+    state, _ = _rebuild(base)
     mine = [sid for sid, s in state.systems.items() if s.owner_id == 1]
     src = mine[0]
     dest = next(iter(state.systems[src].neighbors))
-    match = pbp.match_from_dict(_state_payload(submitted=[1, 2], turns=[
+    match = _parsed(_state_payload(submitted=[1, 2], turns=[
         {"turn": 0, "seat": 1,
          "orders_json": [{"src": src, "dst": dest, "ships": 2}]},
     ]))
     # The live turn's own orders come from `turns` rows filed at `match.turn`.
-    resolved, _, _ = pbp.resolve(match)
+    resolved, _, _ = _resolve(match)
     assert any(f.owner_id == 1 and f.source_id == src for f in resolved.fleets)
 
 
@@ -252,15 +272,15 @@ def test_resolving_applies_the_live_turns_orders():
     moved. Two clients agreed with each other perfectly — both being equally
     wrong — and only comparing a rebuild against the *stored log* showed it.
     """
-    base = pbp.match_from_dict(_state_payload())
-    state, _ = pbp.rebuild(base)
+    base = _parsed(_state_payload())
+    state, _ = _rebuild(base)
     src = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
     dest = next(iter(state.systems[src].neighbors))
 
-    match = pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=[
+    match = _parsed(_state_payload(turn=0, submitted=[1, 2], turns=[
         {"turn": 0, "seat": 1, "orders_json": [{"src": src, "dst": dest, "ships": 3}]},
     ]))
-    resolved, log, _ = pbp.resolve(match)
+    resolved, log, _ = _resolve(match)
     assert any(f.owner_id == 1 and f.source_id == src for f in resolved.fleets), \
         "the live turn's order must actually launch"
     assert len(log.orders_for(0)) == 1, "...and be recorded in the log it uploads"
@@ -270,16 +290,16 @@ def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
     """The two paths to a position must agree: replaying the uploaded log, and
     rebuilding from the stored order rows. They diverging is exactly the bug
     above, and is what a real match caught."""
-    base = pbp.match_from_dict(_state_payload())
-    state, _ = pbp.rebuild(base)
+    base = _parsed(_state_payload())
+    state, _ = _rebuild(base)
     src = next(sid for sid, s in state.systems.items() if s.owner_id == 2)
     dest = next(iter(state.systems[src].neighbors))
     rows = [{"turn": 0, "seat": 2, "orders_json": [{"src": src, "dst": dest, "ships": 2}]}]
 
-    _resolved, log, digest = pbp.resolve(
-        pbp.match_from_dict(_state_payload(turn=0, submitted=[1, 2], turns=rows)))
+    _resolved, log, digest = _resolve(
+        _parsed(_state_payload(turn=0, submitted=[1, 2], turns=rows)))
     # ...and the next client, seeing turn 1 with that turn now settled.
-    rebuilt, _ = pbp.rebuild(pbp.match_from_dict(
+    rebuilt, _ = _rebuild(_parsed(
         _state_payload(turn=1, turns=rows, log=pbp.shareable(log).encoded())))
     assert replay.digest_hex(rebuilt) == digest
     assert replay.digest_hex(replay.reconstruct(log)[0]) == digest
@@ -464,12 +484,12 @@ def test_a_score_already_stored_on_a_match_is_dropped_on_the_way_in():
     """Matches opened before the score was stripped still hold one, on the row
     and in any log a client uploaded since."""
     stored = _challenged().to_dict()
-    assert pbp.match_from_dict(_state_payload(settings_json=stored)).settings.challenge is None
+    assert _parsed(_state_payload(settings_json=stored)).settings.challenge is None
 
-    base = pbp.match_from_dict(_state_payload(submitted=[1, 2]))
-    _state, log, _digest = pbp.resolve(base)
+    base = _parsed(_state_payload(submitted=[1, 2]))
+    _state, log, _digest = _resolve(base)
     log.settings = stored
-    match = pbp.match_from_dict(_state_payload(turn=1, log=pbp.shareable(log).encoded()))
+    match = _parsed(_state_payload(turn=1, log=pbp.shareable(log).encoded()))
     opened = pbp.match_log(match)
     assert opened is not None and opened.settings["challenge"] is None
 

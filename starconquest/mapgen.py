@@ -141,7 +141,7 @@ def generate_symmetric(
 
     state = GameState.new(seed, mode="symmetric")
     num_players = max(2, num_players)
-    per_player, shared = _symmetric_counts(num_nodes, num_players, layout)
+    per_player, _shared = _symmetric_counts(num_nodes, num_players, layout)
 
     side = config.world_side(num_nodes)
     cx = cy = side / 2.0

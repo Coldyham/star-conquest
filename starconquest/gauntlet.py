@@ -49,6 +49,7 @@ from pathlib import Path
 
 from . import paths, pbp, webstore
 from .settings import Settings
+import itertools
 
 # Package-relative, like `uifont._ASSETS`, so the web build ships the files with
 # the package (`tools/build_web.sh` copies `starconquest/` whole).
@@ -144,7 +145,7 @@ class Gauntlet:
         """
         try:
             return _from_dict(data)
-        except Exception:
+        except Exception:  # noqa: BLE001 - from_dict never raises
             return None
 
     def stage(self, sid: int) -> Stage | None:
@@ -242,7 +243,7 @@ def _from_dict(data) -> Gauntlet | None:
                 if len(pair) == 3 and isinstance(pair[2], dict) and pair[2].get("two_way") is True:
                     two_way.add((a, b))     # type: ignore[arg-type]
     else:
-        lanes = [(x.id, y.id) for x, y in zip(stages, stages[1:])]
+        lanes = [(x.id, y.id) for x, y in itertools.pairwise(stages)]
 
     raw_start = data.get("start")
     start = [s for s in (raw_start if isinstance(raw_start, list) else []) if _int(s) in ids]

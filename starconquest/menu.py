@@ -906,10 +906,10 @@ def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
     elif hit is not None and hit.startswith("stage_") and g is not None:
         sid = int(hit[len("stage_"):])
         found = ms.stage_bests.get(g.id, {})
-        if sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found)):
-            if _load_stage(ms, settings, g, sid) is not None:
-                ms.tutorial_open = False
-                return _start(ms, settings)
+        if (sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found))
+                and _load_stage(ms, settings, g, sid) is not None):
+            ms.tutorial_open = False
+            return _start(ms, settings)
     return None
 
 

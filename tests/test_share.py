@@ -280,6 +280,7 @@ def test_the_web_fetch_stores_its_own_result_and_handles_every_ending(watchable,
 def test_polling_reports_pending_then_the_body(watchable, monkeypatch, store):
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.PENDING)
     assert download.poll() == (share.PENDING, "")
 
@@ -293,6 +294,7 @@ def test_a_collected_result_is_cleared_so_it_cannot_be_read_twice(watchable, mon
     instant success carrying somebody else's replay."""
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_BODY_KEY, "the-encoded-log")
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.OK)
     assert download.poll()[0] == share.OK
@@ -303,6 +305,7 @@ def test_a_collected_result_is_cleared_so_it_cannot_be_read_twice(watchable, mon
 def test_a_failed_fetch_polls_as_an_error_not_an_exception(watchable, monkeypatch, store):
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.ERROR)
     assert download.poll() == (share.ERROR, "")
 
@@ -312,6 +315,7 @@ def test_no_such_replay_is_its_own_answer(watchable, monkeypatch, store):
     send the player to different places, so they are not the same state."""
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.MISSING)
     assert download.poll() == (share.MISSING, "")
 
@@ -326,7 +330,9 @@ def test_the_web_fetch_tells_a_404_apart_from_a_dead_connection(watchable, monke
 def test_an_empty_slot_reads_as_pending_rather_than_as_a_failure(watchable, monkeypatch, store):
     """The state between starting the fetch and the browser answering."""
     _bridge(monkeypatch, _EvalWindow())
-    assert share.fetch_log(MATCH).poll() == (share.PENDING, "")
+    download = share.fetch_log(MATCH)
+    assert download is not None
+    assert download.poll() == (share.PENDING, "")
 
 
 def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch):
@@ -347,6 +353,7 @@ def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch)
     monkeypatch.setattr(share, "is_web", lambda: False)
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Response())
     download = share.fetch_log(MATCH)
+    assert download is not None
     for _ in range(200):                      # the thread is real; give it a moment
         if download.poll()[0] != share.PENDING:
             break
@@ -355,15 +362,17 @@ def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch)
 
 
 def test_a_desktop_404_is_missing_rather_than_an_error(watchable, monkeypatch):
+    import email.message
     import urllib.error
     import urllib.request
 
     def _absent(*args, **kwargs):
-        raise urllib.error.HTTPError("u", 404, "no replay", {}, None)
+        raise urllib.error.HTTPError("u", 404, "no replay", email.message.Message(), None)
 
     monkeypatch.setattr(share, "is_web", lambda: False)
     monkeypatch.setattr(urllib.request, "urlopen", _absent)
     download = share.fetch_log(MATCH)
+    assert download is not None
     for _ in range(200):
         if download.poll()[0] != share.PENDING:
             break
@@ -380,6 +389,7 @@ def test_a_refused_download_polls_as_an_error(watchable, monkeypatch):
     monkeypatch.setattr(share, "is_web", lambda: False)
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
     download = share.fetch_log(MATCH)
+    assert download is not None
     for _ in range(200):
         if download.poll()[0] != share.PENDING:
             break

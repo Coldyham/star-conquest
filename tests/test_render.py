@@ -712,7 +712,7 @@ def _touch_scale():
     render._FONTS.clear()
 
 
-def _phone_landscape_scale(css=(740, 360), dpr=2.0):
+def _phone_landscape_scale(css: tuple[int, int] = (740, 360), dpr: float = 2.0):
     """The compact geometry: a phone held sideways in a touch browser, whose
     side panel is narrower and shorter than any of the three above. 740x360 CSS
     px is a small phone; `test_compact` covers the layout at a larger one."""
@@ -994,7 +994,7 @@ def test_every_star_card_fits_whole():
     the close line on the map, at all three geometries: the card is cut silently
     when it doesn't, so a cut entry would be lore nobody reads the end of."""
     pygame.init()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
         for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
             scale()
@@ -1047,7 +1047,7 @@ def test_a_stage_hint_fits_the_empty_panel():
     from starconquest import gauntlet
 
     pygame.init()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     worst = ("abcd " * 40)[:gauntlet.HINT_MAX]
     hints = [worst] + [s.hint for g in gauntlet.builtin() for s in g.stages]
     try:
@@ -1583,6 +1583,7 @@ def test_a_fleet_glides_rather_than_jumping():
             if any(b.kind == "move" for b in reel.film.beats):
                 break
             reel.run()
+        assert reel is not None
         move = next(b for b in reel.film.beats if b.kind == "move")
 
         def frame(ms: float) -> bytes:

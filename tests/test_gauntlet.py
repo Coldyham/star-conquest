@@ -193,9 +193,11 @@ def test_a_malformed_target_is_dropped_and_the_stage_kept(raw):
 
 def test_a_target_is_read_with_its_bot_and_beat():
     t = _targeted({"turns": 31, "lost": 12, "bot": "thinker", "beat": True, "x": 1}).stages[0].target
+    assert t is not None
     assert t == gauntlet.Target(turns=31, lost=12, bot="thinker", beat=True)
     assert t.text() == "Beat thinker: 31 turns / 12 lost"
     t = _targeted({"turns": 14, "beat": "yes"}).stages[0].target
+    assert t is not None
     assert t == gauntlet.Target(turns=14) and t.text() == "Win in 14 turns or fewer"
 
 
@@ -298,7 +300,7 @@ def test_a_user_gauntlet_is_read_on_desktop_only(monkeypatch, tmp_path):
     monkeypatch.setattr(gauntlet, "user_dir", lambda: folder)
     monkeypatch.setattr(gauntlet.paths, "is_web", lambda: False)
     assert [g.id for g in gauntlet.user()] == ["mine"]
-    assert [g.id for g in gauntlet.every()][0] == "tutorial"
+    assert next(g.id for g in gauntlet.every()) == "tutorial"
     monkeypatch.setattr(gauntlet.paths, "is_web", lambda: True)
     assert gauntlet.user() == []
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import random
 import sys
+from typing import Any, cast
 
 import pytest
 
@@ -79,7 +80,7 @@ def _bait_state(neighbour=(0, 5, 3), sent=11):
 
 def test_relief_in_flight_lands_from_the_turn_it_could_turn_round(ac):
     ledger = ac._Ledger(_bait_state(), 1)
-    by_t, flying = ledger.relief[20]
+    _by_t, flying = ledger.relief[20]
     assert flying.get(2, 0) == 0
     assert 0 < flying[3] < 11, "the landing fight thins the relief"
     assert flying[ledger.horizon] == flying[3]
@@ -314,7 +315,7 @@ def test_declares_what_a_decide_costs(ac):
     from starconquest.settings import Settings
     small, big = Settings(nodes=18), Settings(nodes=120)
     assert 0 < ai.decide_ms("actuary", small, 2) < ai.decide_ms("actuary", big, 2)
-    small.custom_map = SimpleNamespace(nodes=[None] * 120)       # a hand map's own count
+    small.custom_map = cast(Any, SimpleNamespace(nodes=[None] * 120))       # a hand map's own count
     assert ai.decide_ms("actuary", small, 2) == ai.decide_ms("actuary", big, 2)
 
 

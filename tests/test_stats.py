@@ -12,6 +12,7 @@ import pytest
 from starconquest import config, fog, main, render, replay, stats
 from starconquest import input as game_input
 from starconquest.settings import Settings
+import itertools
 
 
 def _finished_review(tmp_path, monkeypatch, turns=8, **setup):
@@ -48,7 +49,7 @@ def test_a_chart_reads_every_board_it_is_given(tmp_path, monkeypatch):
         # losses are cumulative, so never fall, and per turn they sum back up
         for pid in chart.seats:
             losses = chart.series("losses", pid)
-            assert all(a <= b for a, b in zip(losses, losses[1:]))
+            assert all(a <= b for a, b in itertools.pairwise(losses))
             per_turn = chart.series("lost_turn", pid)
             assert per_turn[0] == 0 and len(per_turn) == len(losses)
             assert sum(per_turn) == losses[-1]
@@ -89,6 +90,7 @@ def test_mid_game_graphs_chart_a_rival_only_while_in_sight(tmp_path, monkeypatch
         ui, known = _mid_game_review(tmp_path, monkeypatch, fog_sight=config.FOG_ON_SIGHT,
                                      fog_scout=config.FOG_ON_SCOUT)
         chart = ui.history_chart
+        assert chart is not None
         assert all(known[ui.human_id])
         assert any(not all(k) for k in known.values()), "fog should hide someone, some turn"
         for pid, seen in known.items():
@@ -106,6 +108,7 @@ def test_with_fog_off_mid_game_graphs_chart_every_seat(tmp_path, monkeypatch):
     try:
         ui, known = _mid_game_review(tmp_path, monkeypatch)   # fog is off by default
         assert all(all(k) for k in known.values())
+        assert ui.history_chart is not None
         assert ui.graph_seats() == ui.history_chart.seats
     finally:
         pygame.quit()
@@ -169,7 +172,7 @@ def test_clicking_the_plot_jumps_to_that_turn(tmp_path, monkeypatch):
         assert ui.history_turn == 0
         game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(x, y), button=1), state, ui)
         assert not ui.dragging_graph
-        tx, ty, tw, th = ui.graph_tab_rects[2]
+        tx, ty, _tw, _th = ui.graph_tab_rects[2]
         game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(tx + 1, ty + 1), button=1), state, ui)
         assert ui.graph_metric == 2
     finally:
@@ -229,11 +232,11 @@ def test_the_legend_shows_and_hides_each_trace(tmp_path, monkeypatch):
         render.draw(screen, board, ui)
         assert [pid for pid, _r in ui.graph_trace_rects] == list(ui.graph_seats())
         assert ui.graph_all_rect == (0, 0, 0, 0)
-        pid, (x, y, w, h) = ui.graph_trace_rects[0]
+        pid, (x, y, _w, h) = ui.graph_trace_rects[0]
         _press(board, ui, (x + 2, y + h // 2))
         assert pid not in ui.graph_traces() and pid in ui.graph_seats()
         render.draw(screen, board, ui)
-        ax, ay, aw, ah = ui.graph_all_rect
+        ax, ay, aw, _ah = ui.graph_all_rect
         assert aw > 0
         _press(board, ui, (ax + 2, ay + 2))
         assert ui.graph_traces() == ui.graph_seats()
@@ -249,6 +252,7 @@ def test_a_rival_cannot_be_toggled_mid_game(tmp_path, monkeypatch):
         _screen, _board, ui = _open_graphs(tmp_path, monkeypatch)
         ui.history_reveal = False
         chart = ui.history_chart
+        assert chart is not None
         rival = next(pid for pid in chart.seats if pid != ui.human_id)
         ui.history_chart = stats.masked(chart, {pid: (pid != rival,) * (chart.turns + 1) for pid in chart.seats})
         assert rival not in ui.graph_seats()
@@ -342,7 +346,7 @@ def test_a_portrait_legend_runs_under_a_full_width_plot(tmp_path, monkeypatch):
             ui.graph_full = full
             drawn.clear()
             render.draw(screen, board, ui)
-            px, py, pw, ph = ui.graph_plot_rect
+            _px, py, pw, ph = ui.graph_plot_rect
             box_w = config.SCREEN_W if full else config.play_rect()[2]
             assert pw > box_w * 0.75
             assert all(r[1] > py + ph for _pid, r in ui.graph_trace_rects)
@@ -360,6 +364,7 @@ def test_every_tab_draws_a_chart_with_gaps(tmp_path, monkeypatch):
         screen, board, ui = _open_graphs(tmp_path, monkeypatch)
         ui.history_reveal = False
         chart = ui.history_chart
+        assert chart is not None
         rival = next(pid for pid in chart.seats if pid != ui.human_id)
         flicker = tuple(t % 3 != 1 for t in range(chart.turns + 1))
         ui.history_chart = stats.masked(chart, {rival: flicker})

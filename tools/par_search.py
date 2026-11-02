@@ -45,9 +45,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, combat, config, engine, replay  # noqa: E402
-from starconquest.model import GameState, Order  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, combat, config, engine, replay
+from starconquest.model import GameState, Order
+from starconquest.settings import Settings, build_state
 
 CANDIDATES = ("marshal", "actuary", "thinker", "heuristic", "rusherplus", "claudebot")
 ROLLOUT_POLICIES = ("marshal", "actuary")
@@ -512,7 +512,7 @@ def _setup(args: argparse.Namespace) -> tuple[Settings, int, tuple[int, int] | N
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--log", help="search the setup of this saved match")
     ap.add_argument("--game-key", help="search this live leaderboard map")
     ap.add_argument("--seed", type=int, default=1)

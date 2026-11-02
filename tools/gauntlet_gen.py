@@ -40,10 +40,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, dealer, gauntlet  # noqa: E402
-from starconquest import gauntletgen as gg  # noqa: E402
-from starconquest.gauntletgen import candidates, measure, pick, settled, target  # noqa: E402,F401
-from starconquest.settings import Settings, random_seed  # noqa: E402
+from starconquest import ai, dealer, gauntlet
+from starconquest import gauntletgen as gg
+from starconquest.gauntletgen import candidates, measure, pick, settled, target  # noqa: F401
+from starconquest.settings import Settings, random_seed
 
 RESULTS = ROOT / "results" / "gauntlet_gen"
 PROBES = gg.PROBES

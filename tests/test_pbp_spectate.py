@@ -59,9 +59,27 @@ def _payload(settings=None, **over):
     return payload
 
 
+def _parsed(payload) -> pbp.Match:
+    match = pbp.match_from_dict(payload)
+    assert match is not None
+    return match
+
+
+def _resolve(match: pbp.Match, decide=None) -> tuple[model.GameState, replay.GameLog, str]:
+    resolved = pbp.resolve(match, decide)
+    assert resolved is not None
+    return resolved
+
+
+def _open(match: pbp.Match, seat: pbp.Seat) -> tuple[model.GameState, viewstate.Ui, replay.GameLog]:
+    opened = app.open_match(match, seat, Settings())
+    assert opened is not None
+    return opened
+
+
 def _watching(**over):
-    match = pbp.match_from_dict(_payload(**over))
-    state, ui, log = app.open_match(match, pbp.spectator(MATCH), Settings())
+    match = _parsed(_payload(**over))
+    state, ui, log = _open(match, pbp.spectator(MATCH))
     return match, state, ui, log
 
 
@@ -82,17 +100,17 @@ def test_a_spectate_link_carries_the_match_and_nothing_else():
 
 
 def test_a_match_is_watchable_only_with_fog_off():
-    assert pbp.match_from_dict(_payload()).watchable
+    assert _parsed(_payload()).watchable
     fogged = _settings(fog_sight=config.FOG_ON_SIGHT, fog_scout=config.FOG_ON_SCOUT)
-    assert not pbp.match_from_dict(_payload(settings=fogged)).watchable
+    assert not _parsed(_payload(settings=fogged)).watchable
     scouted = _settings(fog_scout=config.FOG_ON_SCOUT)
-    assert not pbp.match_from_dict(_payload(settings=scouted)).watchable
+    assert not _parsed(_payload(settings=scouted)).watchable
 
 
 def test_a_match_that_may_not_be_watched_says_why():
-    assert app.pbp_unwatchable(pbp.match_from_dict(_payload())) == ""
+    assert app.pbp_unwatchable(_parsed(_payload())) == ""
     fogged = _settings(fog_sight=config.FOG_ON_SIGHT, fog_scout=config.FOG_ON_SCOUT)
-    assert (app.pbp_unwatchable(pbp.match_from_dict(_payload(settings=fogged)))
+    assert (app.pbp_unwatchable(_parsed(_payload(settings=fogged)))
             == app.PBP_FOGGED_MSG)
 
 
@@ -115,8 +133,8 @@ def test_a_spectator_sits_at_no_seat_and_sees_the_whole_board():
 
 
 def test_a_seat_is_never_spectating():
-    match = pbp.match_from_dict(_payload())
-    _, ui, _ = app.open_match(match, pbp.Seat(MATCH, 1, TOKEN), Settings())
+    match = _parsed(_payload())
+    _, ui, _ = _open(match, pbp.Seat(MATCH, 1, TOKEN))
     assert not ui.spectating
 
 
@@ -124,7 +142,7 @@ def test_a_spectator_can_write_nothing():
     """No token, so every write refuses it before it is sent."""
     seat = pbp.spectator(MATCH)
     assert seat.spectating and not seat.valid()
-    _, state, _, log = _watching()
+    _, _state, _, log = _watching()
     assert pbp.submit(seat, 0, []) is None
     assert pbp.send_lapse(seat, 0, {2: []}) is None
     assert pbp.send_resolved(seat, 0, log, "", False) is None
@@ -153,10 +171,10 @@ def test_a_spectator_has_no_turn_to_end_and_nothing_to_send():
 def test_a_spectator_steps_to_the_board_the_players_resolved():
     """Stepping applies the resolver's record, exactly as a seat's client does."""
     ai.load_models()
-    complete = pbp.match_from_dict(_payload(submitted=[1, 2]))
-    _elsewhere, log, digest = pbp.resolve(complete, ai.decide)
+    complete = _parsed(_payload(submitted=[1, 2]))
+    _elsewhere, log, digest = _resolve(complete, ai.decide)
     _, state, ui, local = _watching()
-    moved = pbp.match_from_dict(_payload(turn=1, log=pbp.shareable(log).encoded()))
+    moved = _parsed(_payload(turn=1, log=pbp.shareable(log).encoded()))
     assert app.pbp_verdict(moved, state) == app.PBP_STEP
     app.resolve_turn(state, ui, local, Settings(), script=pbp.settled_turn(moved, 0))
     assert replay.digest_hex(state) == digest
@@ -169,11 +187,11 @@ def test_a_spectator_never_touches_a_seats_saved_rules():
     ai.load_models()
     rules = {3: model.ForwardRule(shares={4: 100})}
     pbp.remember_rules(MATCH, rules)
-    complete = pbp.match_from_dict(_payload(submitted=[1, 2]))
-    _elsewhere, log, _digest = pbp.resolve(complete, ai.decide)
+    complete = _parsed(_payload(submitted=[1, 2]))
+    _elsewhere, log, _digest = _resolve(complete, ai.decide)
     _, state, ui, local = _watching()
     assert ui.auto_forward == {}
-    moved = pbp.match_from_dict(_payload(turn=1, log=pbp.shareable(log).encoded()))
+    moved = _parsed(_payload(turn=1, log=pbp.shareable(log).encoded()))
     app.resolve_turn(state, ui, local, Settings(), script=pbp.settled_turn(moved, 0))
     assert pbp.remembered_rules(MATCH) == rules
 
@@ -222,8 +240,7 @@ def test_a_spectator_reads_a_neutral_system_as_nobodys(monkeypatch):
 
 
 def test_the_invite_overlay_offers_the_spectate_link(monkeypatch):
-    state, ui, _ = app.open_match(pbp.match_from_dict(_payload()),
-                                  pbp.Seat(MATCH, 1, TOKEN), Settings())
+    state, ui, _ = _open(_parsed(_payload()), pbp.Seat(MATCH, 1, TOKEN))
     ui.pbp_invite = ((1, "seat-1-link"), (viewstate.SPECTATE_ROW, "watch-link"))
     drawn = _drawn(monkeypatch, state, ui)
     assert "Spectators" in drawn

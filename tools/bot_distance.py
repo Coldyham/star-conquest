@@ -328,7 +328,7 @@ def report(tally: Tally, roster: list[str], phase: str, null: bool) -> None:
 
 # --------------------------------------------------------------------------- #
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--bots", nargs="+", default=None,
                         help="strategies to compare (default: every registered one)")
     parser.add_argument("--play-with", nargs="+", default=None,

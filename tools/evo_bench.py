@@ -32,7 +32,6 @@ and a rerun skips games already there.
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
 import math
 import multiprocessing
@@ -46,8 +45,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, engine, replay
+from starconquest.settings import Settings, build_state
 
 RESULTS = ROOT / "results" / "evolved" / "bench"
 SEED_BASE = 2_800_000
@@ -186,7 +185,7 @@ def score(rows: list[dict], bot: str, opp: str, cell: Cell) -> tuple[float, floa
         else:
             result = 1.0 if r["seats"][r["winner"] - 1] == bot else 0.0
         by_seed.setdefault(r["seed"], []).append(result)
-    full = cell.players if cell.players > 2 else 2
+    full = max(2, cell.players)
     per = [sum(v) / len(v) for v in by_seed.values() if len(v) == full]
     if not per:
         return float("nan"), float("nan"), 0, unfinished
@@ -200,10 +199,10 @@ def score(rows: list[dict], bot: str, opp: str, cell: Cell) -> tuple[float, floa
 
 def report(rows: list[dict], bot: Seat, opps: list[Seat], cells: list[Cell]) -> None:
     print(f"\n{bot} — seed-paired win share (fair = 1/players), z over seeds")
-    head = f"{'cell':<18}" + "".join(f"{str(o):>22}" for o in opps)
+    head = f"{'cell':<18}" + "".join(f"{o!s:>22}" for o in opps)
     print(head)
     for cell in cells:
-        line = f"{str(cell):<18}"
+        line = f"{cell!s:<18}"
         for opp in opps:
             rate, z, n, unf = score(rows, str(bot), str(opp), cell)
             cellval = "—" if n == 0 else f"{rate:5.1%} z{z:+5.1f} n{n}" + (f" u{unf}" if unf else "")
@@ -212,7 +211,7 @@ def report(rows: list[dict], bot: Seat, opps: list[Seat], cells: list[Cell]) -> 
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--bot", default="evolved", help="name[:aux] of the bot under test")
     ap.add_argument("--vs", nargs="*", default=list(OPPONENTS), help="opponents, name[:aux]")
     ap.add_argument("--cell", action="append", default=[], help="mode:nodes:ly:players")
@@ -279,7 +278,7 @@ def main() -> None:
         for cell in cells:
             sub = [r for r in rows if r["cell"] == str(cell)]
             wins = sum(1 for r in sub if r["winner"] == 1)
-            print(f"{str(cell):<18} seat 1 won {wins}/{len(sub)}")
+            print(f"{cell!s:<18} seat 1 won {wins}/{len(sub)}")
         return
     report(rows, bot, opps, cells)
 

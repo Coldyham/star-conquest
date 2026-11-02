@@ -295,7 +295,7 @@ def check(name: str, games: int, opponent: str) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("name", help="a models/ file stem, or a bots/ manifest name")
     ap.add_argument("--games", type=int, default=6, help="games to play (default 6)")
     ap.add_argument("--vs", default="heuristic", help="opponent (default heuristic)")

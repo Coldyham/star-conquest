@@ -23,9 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, engine, replay
+from starconquest import settings as settings_mod
+from starconquest.settings import Settings, build_state
 
 SETUPS = ((7, 6.0, 2), (11, 6.0, 3), (18, 6.0, 2), (18, 18.0, 2), (24, 3.0, 2))
 
@@ -83,9 +83,9 @@ def main() -> None:
         bad_l = sum(x != y for x, y in zip(look, rec["look"]))
         print(f"{len(plain)} positions: plain differs on {bad_p}, look-ahead on {bad_l}; "
               f"plain {tp:.2f}s, look-ahead {tl:.2f}s CPU")
-        hu.LOOKAHEAD = look0
+        hu.LOOKAHEAD = look0  # pyright: ignore[reportAttributeAccessIssue]
         sys.exit(1 if bad_p or bad_l else 0)
-    hu.LOOKAHEAD = look0
+    hu.LOOKAHEAD = look0  # pyright: ignore[reportAttributeAccessIssue]
 
 
 if __name__ == "__main__":

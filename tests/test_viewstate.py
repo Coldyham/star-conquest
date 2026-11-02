@@ -8,6 +8,8 @@ hands it.
 
 from __future__ import annotations
 
+from typing import cast
+
 from starconquest import config, turnfilm
 from starconquest.geometry import WorldView
 from starconquest.model import GameState, Player, System
@@ -213,7 +215,7 @@ def test_a_mark_elsewhere_leaves_a_fading_one_alone():
 
     ui.archive_marks(state, [landed])
 
-    assert sorted(f.node_id for f in ui.fading_fights) == [0, 1]
+    assert sorted(cast(int, f.node_id) for f in ui.fading_fights) == [0, 1]
 
 
 def test_age_fading_marks_ages_and_prunes_at_the_end_of_its_life():

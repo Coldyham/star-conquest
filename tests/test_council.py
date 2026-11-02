@@ -12,6 +12,7 @@ Internals are reached through `sys.modules["sc_model_knower"]`.
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import pytest
 
@@ -126,7 +127,7 @@ def test_council_is_the_fourth_named_stop_and_past_it_is_search(kn):
     assert ai.aux_names("council") == ai.aux_names("knower")
 
     class _P:
-        pass
+        aux: Any
 
     p = _P()
     for raw, want in ((0.0, 0), (1.0, 1), (2.0, 2), (2.7, 2), (3.0, 3), (3.5, 2), (12.0, 2),

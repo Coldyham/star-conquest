@@ -71,7 +71,7 @@ FIELD_EXTRA_EDGE_FRACTION = 0.6
 
 def week_start(now: dt.datetime) -> dt.date:
     """The Monday (UTC) of the week ``now`` falls in."""
-    day = now.astimezone(dt.timezone.utc).date()
+    day = now.astimezone(dt.UTC).date()
     return day - dt.timedelta(days=day.weekday())
 
 
@@ -105,7 +105,7 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
     config below a ``settings.ROLL_FLOORS`` entry is left out too: the dice never
     deal it, so neither does the week, and so is one that fails
     ``starts_in_time``."""
-    cutoff = dt.datetime.combine(before, dt.time(), dt.timezone.utc)
+    cutoff = dt.datetime.combine(before, dt.time(), dt.UTC)
     out: dict[str, Family] = {}
     for row in games:
         setup = row.get("settings_json") or {}
@@ -118,7 +118,7 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
             continue
         if not starts_in_time(parsed):
             continue
-        seen = dt.datetime.fromisoformat(str(row["first_seen_at"]).replace("Z", "+00:00"))
+        seen = dt.datetime.fromisoformat(str(row["first_seen_at"]))
         if seen >= cutoff:
             continue
         key = family_key(setup)
@@ -321,7 +321,7 @@ def active_players(api: Supabase, start: dt.date) -> int:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--week", help="the week's Monday (YYYY-MM-DD); default this week")
     parser.add_argument("--dry-run", action="store_true", help="print the graph, store nothing")
     return parser.parse_args(argv)
@@ -333,8 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     if not url or not key:
         print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
-    start = (week_start(dt.datetime.fromisoformat(args.week).replace(tzinfo=dt.timezone.utc))
-             if args.week else week_start(dt.datetime.now(dt.timezone.utc)))
+    start = (week_start(dt.datetime.fromisoformat(args.week).replace(tzinfo=dt.UTC))
+             if args.week else week_start(dt.datetime.now(dt.UTC)))
     api = Supabase(url, key)
     if api.select("campaigns", f"select=week_start&week_start=eq.{start.isoformat()}"):
         print(f"campaign for {start} already exists — nothing to do")

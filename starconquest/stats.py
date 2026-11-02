@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from . import fog
 from .model import GameState
+import itertools
 
 # (key, tab label, legend unit). Order is the tab order.
 METRICS: tuple[tuple[str, str, str], ...] = (
@@ -100,7 +101,7 @@ def chart(states: list[GameState]) -> Chart:
             cols["losses"][pid].append(float(player.ships_lost if player else 0))
     for pid in seats:
         losses = cols["losses"][pid]
-        cols["lost_turn"][pid] = [0.0] + [b - a for a, b in zip(losses, losses[1:])]
+        cols["lost_turn"][pid] = [0.0] + [b - a for a, b in itertools.pairwise(losses)]
     values = {key: {pid: tuple(v) for pid, v in by_seat.items()} for key, by_seat in cols.items()}
     return Chart(len(states) - 1, seats, values)
 
@@ -146,7 +147,7 @@ def masked(c: Chart, known: dict[int, tuple[bool, ...]]) -> Chart:
                 values[key][pid] = series
                 continue
             if key in STACKED:
-                ok = [False] + [a and b for a, b in zip(seen, seen[1:])]
+                ok = [False] + [a and b for a, b in itertools.pairwise(seen)]
                 ok[0] = seen[0]
             else:
                 ok = list(seen)

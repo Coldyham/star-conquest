@@ -16,7 +16,7 @@ MATCH = "f7697d6f02fbc2e9"
 STAMP = "2026-09-24T10:14:14.123456+00:00"
 
 
-class FakeApi:
+class FakeApi(admin.Supabase):
     """Answers each select with the first canned rows whose table matches and
     whose marker appears in the query; records every write."""
 
@@ -80,7 +80,9 @@ def test_a_new_link_replaces_the_seats_token_and_prints_one_that_opens_it(capsys
     assert table == "pbp_matches"
     assert "updated_at=eq.2026-09-24T10%3A14%3A14.123456%2B00%3A00" in query
     link = next(line for line in capsys.readouterr().out.splitlines() if "#pbp=" in line)
-    match_id, token = pbp.parse_link(link.split("#", 1)[1])
+    parsed = pbp.parse_link(link.split("#", 1)[1])
+    assert parsed is not None
+    match_id, token = parsed
     assert match_id == MATCH
     assert patch["seats"]["tokens"] == {"1": "h1", "2": admin.hash_token(token)}
     assert token not in str(audit), "the plaintext token must never be stored"

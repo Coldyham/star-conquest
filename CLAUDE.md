@@ -54,8 +54,12 @@ Measurement, tuning and generator tools (benches, censuses, CMA-ES, par
 search, gauntlet dealing) are listed in `docs/README.md`, "Tools", with the
 design file each one reports into.
 
-No lint step; match the surrounding style. Pylance basic type-checking
-(`.vscode/settings.json`) warnings are real signal.
+Match the surrounding style, and keep `uvx ruff check .` clean (rules in
+`pyproject.toml`; don't `ruff format` a file you aren't otherwise changing).
+Pylance basic type-checking is real signal: code you touch adds no
+`uvx pyright <files>` errors (`[tool.pyright]`). Narrow with
+`assert x is not None`; where pyright can't follow, a line-level
+`# pyright: ignore[rule]`, never a bare or file-wide ignore.
 
 Run the tests a change can reach, not the whole suite each time. A docs-only
 change needs none unless a test reads the file (`tests/test_bot_brief.py` reads

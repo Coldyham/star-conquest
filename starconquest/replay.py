@@ -487,7 +487,7 @@ class GameLog:
 
 def _game_path(seed: int) -> Path:
     """A fresh, sortable filename for a new match (timestamp keeps them ordered)."""
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return GAMES_DIR / f"game_{stamp}_{seed}.json"
 
 

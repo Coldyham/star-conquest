@@ -218,7 +218,7 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--url", default="", help="override the board's Supabase URL")
     parser.add_argument("--key", default="", help="override the publishable key")
     parser.add_argument("--no-maps", action="store_true",

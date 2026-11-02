@@ -11,7 +11,7 @@ from collections import Counter
 
 import pytest
 
-from starconquest import ai, config, mapgen
+from starconquest import ai, config
 from starconquest.model import GameState, Order, Player, System
 from tools import bot_distance as bd
 

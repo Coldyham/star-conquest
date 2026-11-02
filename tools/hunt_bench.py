@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -33,8 +32,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, engine, replay
+from starconquest.settings import Settings, build_state
 
 RESULTS = ROOT / "results" / "hunter"
 SEED_BASE = 9_100_000
@@ -118,7 +117,7 @@ def report(rows: list[dict], bot: str, cells, base: list[dict] | None = None) ->
         if base is not None:
             bs = per_seed(base, bot, cell)
             d = [ps[s] - bs[s] for s in ps if s in bs]
-            dm, dz, dn = stats(d, 0.0)
+            dm, dz, _dn = stats(d, 0.0)
             diffs += d
             line += f"   vs base {100 * dm:+5.1f}  z {dz:+5.2f}"
         pooled += ps.values()

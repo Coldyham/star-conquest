@@ -71,15 +71,16 @@ from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
-from tools.bot_distance import PHASES, phase_of  # noqa: E402
-from tools.evo_bench import CELLS, Cell, Seat, load  # noqa: E402
-from tools.win_turns import foreign_revs, git_hint, play_rev  # noqa: E402
+from starconquest import ai, engine, replay
+from starconquest.settings import Settings, build_state
+from tools.bot_distance import PHASES, phase_of
+from tools.evo_bench import CELLS, Cell, Seat, load
+from tools.win_turns import foreign_revs, git_hint, play_rev
 
 RESULTS = ROOT / "results" / "candidates"
 SEED_BASE = 7_200_000
@@ -163,9 +164,9 @@ def _patch():
             return out
         return step
 
-    k._externals, k._search, k._candidates = _externals, _search, _candidates
-    k._external_plan = _external_plan
-    k._advance, k._policy_advance = _stepped(advance), _stepped(policy_advance)
+    k._externals, k._search, k._candidates = _externals, _search, _candidates  # pyright: ignore[reportAttributeAccessIssue]
+    k._external_plan = _external_plan  # pyright: ignore[reportAttributeAccessIssue]
+    k._advance, k._policy_advance = _stepped(advance), _stepped(policy_advance)  # pyright: ignore[reportAttributeAccessIssue]
     _patched = k
 
 
@@ -234,7 +235,7 @@ def _record(state, pid, root, rec) -> None:
     # neither): the first best of the rest.
     without = max((i for i in range(len(plans)) if i != b), key=lambda i: (values[i], -i))
     c["changed"] += chosen == b and sigs[b] != sigs[without]
-    c["tied"] += novel and chosen != b and values[b] >= values[chosen]
+    c["tied"] += novel and chosen != b and values[b] >= values[cast(int, chosen)]
 
 
 # --------------------------------------------------------------------------- #
@@ -255,7 +256,11 @@ def play_one(cell: Cell, seed: int, seats: tuple[str, ...], stop: int,
                    ship_ly_per_turn=cell.ly, autoplay=True)
     state = build_state(cfg, seed)
     for pid, seat in enumerate(seats, start=1):
-        name, aux = ("knower", float(stop)) if seat in (VARIANT, BASE) else (opp.name, opp.aux)
+        if seat in (VARIANT, BASE):
+            name, aux = "knower", float(stop)
+        else:
+            assert opp is not None
+            name, aux = opp.name, opp.aux
         player = state.players[pid]
         player.ai_strategy = name
         player.ai_params = replace(player.ai_params, aux=1.0 if aux is None else aux)
@@ -357,8 +362,8 @@ def report(rows: list[dict], cells: list[Cell], opps: list[str], title: str) -> 
     print(f"\n{title}")
     for opp in opps:
         if opp == "knower":
-            print(f"\nhead to head against knower at the same stop "
-                  f"(win share, fair = 1/players; points above fair, z over seeds)")
+            print("\nhead to head against knower at the same stop "
+                  "(win share, fair = 1/players; points above fair, z over seeds)")
             pooled = []
             for cell in cells:
                 ps = per_seed(rows, cell, VARIANT, BASE)
@@ -369,7 +374,7 @@ def report(rows: list[dict], cells: list[Cell], opps: list[str], title: str) -> 
                        and set(r["seats"]) == {VARIANT, BASE}]
                 unf = sum(r["winner"] is None for r in sub)
                 cost = _ms_per_decide(sub, VARIANT) / _ms_per_decide(sub, BASE)
-                print(f"  {str(cell):<16} {m:6.1%}  {100 * (m - fair):+5.1f} pts  z {z:+5.2f}"
+                print(f"  {cell!s:<16} {m:6.1%}  {100 * (m - fair):+5.1f} pts  z {z:+5.2f}"
                       f"  n {n:3d}" + (f"  unfinished {unf}" if unf else "")
                       + f"   ms/decide x{cost:.2f}")
             m, z, n = _mean_z(pooled, 0.0)
@@ -388,7 +393,7 @@ def report(rows: list[dict], cells: list[Cell], opps: list[str], title: str) -> 
             diffs += d
             sub = [r for r in rows if r["cell"] == str(cell) and opp in r["seats"]]
             cost = _ms_per_decide(sub, VARIANT) / _ms_per_decide(sub, BASE)
-            print(f"  {str(cell):<16} {bm:6.1%} -> {vm:6.1%}  {100 * dm:+5.1f} pts  z {dz:+5.2f}"
+            print(f"  {cell!s:<16} {bm:6.1%} -> {vm:6.1%}  {100 * dm:+5.1f} pts  z {dz:+5.2f}"
                   f"  n {n:3d}   ms/decide x{cost:.2f}")
         dm, dz, n = _mean_z(diffs, 0.0)
         print(f"  {'pooled':<16} {'':16}  {100 * dm:+5.1f} pts  z {dz:+5.2f}  n {n:3d}")
@@ -485,16 +490,16 @@ def time_cost(cells: list[Cell], seeds: range, stop: int, borrow, instead=None,
                     more.append(b if k % 2 == 0 else a)
         if not base:
             continue
-        p75 = lambda xs: sorted(xs)[int(0.75 * (len(xs) - 1))]  # noqa: E731
+        p75 = lambda xs: sorted(xs)[int(0.75 * (len(xs) - 1))]
         extra = [m - b for b, m in zip(base, more)]
-        print(f"  {str(cell):<16} n {len(base):4d}   median {statistics.median(base):6.1f} -> "
+        print(f"  {cell!s:<16} n {len(base):4d}   median {statistics.median(base):6.1f} -> "
               f"{statistics.median(more):6.1f}   p75 {p75(base):6.1f} -> {p75(more):6.1f}   "
               f"x{sum(more) / sum(base):.2f} in total, +{statistics.median(extra):.1f} ms median")
     print(f"  load average {os.getloadavg()[0]:.2f}")
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--borrow", required=True, help="name[:aux] of the bot to borrow")
     ap.add_argument("--stop", type=int, default=2, choices=(2, 3),
                     help="knower's Oracle stop: 2 Search (default), 3 Council")

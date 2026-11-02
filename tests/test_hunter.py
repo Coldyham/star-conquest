@@ -275,7 +275,8 @@ def test_on_slow_lanes_a_strike_need_only_win_the_nominal_roll(hu):
 # --------------------------------------------------------------------------- #
 def test_hunt_is_the_fourth_stop(hu):
     assert hu.AUX_NAMES == ("Greedy", "Field", "Learning", "Hunt")
-    assert ai.aux_spec("actuary")[1:3] == (0.0, 3.0)
+    spec = ai.aux_spec("actuary")
+    assert spec is not None and spec[1:3] == (0.0, 3.0)
 
 
 @pytest.mark.parametrize("aux, stop", [(0.0, 0), (1.0, 1), (2.0, 2), (2.9, 2), (3.0, 3),

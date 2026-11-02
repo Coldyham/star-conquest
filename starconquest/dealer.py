@@ -262,7 +262,7 @@ def problems(spec: Spec) -> list[str]:
             out.append(f"{name} has no value left to deal")
         if allowed is None and rule.kind == "not":
             lo, hi, step, _ = _bounds(name)       # type: ignore[misc]
-            if int(round((hi - lo) / step)) + 1 <= len(rule.value):       # type: ignore[arg-type]
+            if round((hi - lo) / step) + 1 <= len(rule.value):       # type: ignore[arg-type]
                 out.append(f"{name} has no value left to deal")
     if not spec.opponents:
         out.append("no opponents are allowed")
@@ -284,7 +284,7 @@ def _draw_number(name: str, rule: Rule | None, rng: random.Random, lo: float | N
                  hi: float | None = None) -> float | int:
     """A value for numeric field ``name`` under ``rule``, within any extra
     ``lo``/``hi`` the caller narrows it to. Raises ValueError when nothing fits."""
-    blo, bhi, step, is_int = _bounds(name)      # type: ignore[misc]
+    blo, bhi, _step, is_int = _bounds(name)      # type: ignore[misc]
     lo = blo if lo is None else max(blo, lo)
     hi = bhi if hi is None else min(bhi, hi)
     if rule is not None and rule.kind in ("fix", "in"):
@@ -422,7 +422,7 @@ def _speeds(rule: Rule | None) -> list[float]:
     if rule is not None and rule.kind == "range":
         lo, hi = rule.value       # type: ignore[misc]
     banned = rule.value if rule is not None and rule.kind == "not" else ()
-    values = (round(lo + i * step, 4) for i in range(int(round((hi - lo) / step)) + 1))
+    values = (round(lo + i * step, 4) for i in range(round((hi - lo) / step) + 1))
     return [v for v in values if v not in banned]       # type: ignore[operator]
 
 

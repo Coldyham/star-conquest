@@ -27,12 +27,13 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, gauntlet  # noqa: E402
-from tests import sim  # noqa: E402
+from starconquest import ai, gauntlet
+from tests import sim
 
 RESULTS = ROOT / "results" / "gauntlet_check.jsonl"
 EXPENSIVE = ("knower", "actuary")
@@ -49,7 +50,7 @@ def play_one(gid: str, sid: int, bot: str) -> dict:
     assert stage is not None
     cfg = gauntlet.stage_settings(stage)
     t0 = time.perf_counter()
-    res = sim.play_settings(cfg, cfg.seed, bot, max_turns=MAX_TURNS)
+    res = sim.play_settings(cfg, cast(int, cfg.seed), bot, max_turns=MAX_TURNS)
     return {"gauntlet": gid, "stage": sid, "key": cfg.challenge_key(), "bot": bot,
             "won": res.won, "turns": res.turns, "lost": res.lost,
             "timed_out": res.timed_out, "secs": round(time.perf_counter() - t0, 1)}

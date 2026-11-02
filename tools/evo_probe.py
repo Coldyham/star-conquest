@@ -40,15 +40,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
-from tools import evo_train  # noqa: E402
+from starconquest import ai, engine, replay
+from starconquest.settings import Settings, build_state
+from tools import evo_train
 
 UNTRAINED = ("stage", "converge", "evacuate", "recapture")
 
 
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -182,7 +183,7 @@ def identity(args) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("moves")
     m.add_argument("--weights")
