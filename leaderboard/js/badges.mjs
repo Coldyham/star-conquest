@@ -248,14 +248,6 @@ export const BADGES = [
   { id: "warlord", group: "Campaign", title: "Warlord",
     how: "Hold the most campaign nodes when a week closes.", has: (f) => f.campaignWins > 0 },
 
-  { id: "daily", group: "Daily", title: "Daily done",
-    how: "Win a daily challenge, any day's, and post the score.", has: (f) => atLeastOne(f.dailyDays) },
-  { id: "daily-winner", group: "Daily", title: "Winner of the day",
-    how: "Post the best score on a daily challenge before its day ends.", has: (f) => atLeastOne(f.dailyWon) },
-  { id: "full-week", group: "Daily", title: "Full week",
-    how: "Win all seven dailies of one Monday-to-Sunday week (days won later from the archive count).",
-    has: (f) => atLeastOne(f.dailyWeeks) },
-
   { id: "puzzle", group: "Daily puzzle", title: "Puzzle done",
     how: "Win a daily puzzle, any day's, and post the score.", has: (f) => atLeastOne(f.puzzleDays) },
   { id: "puzzle-winner", group: "Daily puzzle", title: "Puzzle winner of the day",
@@ -263,6 +255,14 @@ export const BADGES = [
   { id: "full-puzzle-week", group: "Daily puzzle", title: "Full puzzle week",
     how: "Win all seven puzzles of one Monday-to-Sunday week (days won later from the archive count).",
     has: (f) => atLeastOne(f.puzzleWeeks) },
+
+  { id: "daily", group: "Daily board", title: "Board done",
+    how: "Win a daily board, any day's, and post the score.", has: (f) => atLeastOne(f.dailyDays) },
+  { id: "daily-winner", group: "Daily board", title: "Board winner of the day",
+    how: "Post the best score on a daily board before its day ends.", has: (f) => atLeastOne(f.dailyWon) },
+  { id: "full-week", group: "Daily board", title: "Full board week",
+    how: "Win all seven boards of one Monday-to-Sunday week (days won later from the archive count).",
+    has: (f) => atLeastOne(f.dailyWeeks) },
 
   { id: "graduate", group: "Gauntlets", title: "Graduate",
     how: "Win the tutorial's last stage and post the score.", has: (f) => f.tutorial },

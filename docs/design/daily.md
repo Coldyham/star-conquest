@@ -456,10 +456,10 @@ UTC, as a live campaign node's are until its week ends (`campaign.md`,
 Three badges on the player card (`leaderboard/README.md`, "Badges"; the
 author, 2026-10-28), derived like the rest (`badges.mjs`'s `dailyRecord`):
 
-- **Daily done**: a counted win on any day's daily, whenever posted.
-- **Winner of the day**: the best score posted on a day (`bestOnTheDay`), once
+- **Board done**: a counted win on any day's daily, whenever posted.
+- **Board winner of the day**: the best score posted on a day (`bestOnTheDay`), once
   that day has ended. Later scores never take it.
-- **Full week**: every day of one Monday-to-Sunday week won. A day won later
+- **Full board week**: every day of one Monday-to-Sunday week won. A day won later
   from the archive counts, as it mends a streak.
 
 A win autoplayed through (`hand` 0) counts for none, as on the standings. A
@@ -580,8 +580,9 @@ weakest first as the worker plays them:
   "The bot column: the rules in full").
 - **Streaks and badges are per kind** (the author, 2026-10-28): a puzzle
   streak and true streak of its own, and Puzzle done, Puzzle winner of the day
-  and Full puzzle week beside the board's three (`badges.mjs`, group "Daily
-  puzzle"; `dailyRecord` is run once per kind).
+  and Full puzzle week beside the board's three (`badges.mjs`, groups "Daily
+  puzzle" then "Daily board", the puzzle first since it became the default;
+  `dailyRecord` is run once per kind).
 - **The board starts bigger** (the author, 2026-10-28): 11 systems and 3
   players on Monday, never a duel, so the two never overlap (see "The board
   grows through the week").
