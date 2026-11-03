@@ -40,14 +40,17 @@ def test_turns_land_in_a_log_that_replays_to_the_same_board(game):
     assert log.hand_turns == log.turn_count          # every turn is the seat's own
     assert log.turns[0]["orders"][0]["ships"] == home.ships
     first, _ = replay.reconstruct(log)
+    assert log.path is not None
     second, _ = replay.reconstruct(replay.load(log.path))
     assert replay.board_digest(first) == replay.board_digest(second)
 
 
 def test_each_decision_is_noted_beside_the_log(game):
     game("turn", "--why", "hold")
+    path = _log().path
+    assert path is not None
     notes = [json.loads(line) for line in
-             seat_play.notes_path(_log().path).read_text().splitlines()]
+             seat_play.notes_path(path).read_text().splitlines()]
     assert notes == [{"turn": 0, "orders": [], "why": "hold"}]
 
 

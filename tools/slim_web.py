@@ -105,7 +105,7 @@ def subset_font(path: Path, codepoints: set[int]) -> None:
 
     options = subset.Options()
     options.hinting = True  # FreeType renders hinted outlines; keep them identical
-    options.name_IDs = ["*"]  # the licence and copyright strings stay in the file
+    options.name_IDs = ["*"]  # pyright: ignore[reportAttributeAccessIssue]  # the licence and copyright strings stay in the file
     options.notdef_outline = True
     options.glyph_names = False
     font = TTFont(str(path))

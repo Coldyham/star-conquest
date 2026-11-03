@@ -25,6 +25,12 @@ from starconquest.settings import Challenge, Settings, build_state
 from starconquest.viewstate import CHOOSING, IDLE, SELECTED, Ui
 
 
+def _screen() -> pygame.Surface:
+    screen = pygame.display.get_surface()
+    assert screen is not None
+    return screen
+
+
 def _setup():
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -383,7 +389,7 @@ def test_slider_follows_a_dragged_popup():
         from starconquest import render
 
         render._FONTS.clear()      # rebuild fonts under this session
-        screen = pygame.display.get_surface()
+        screen = _screen()
         home = next(s.id for s in state.systems.values() if s.owner_id == 1)
         state.systems[home].ships = 20
         nbr = state.systems[home].neighbors[0]
@@ -1185,6 +1191,7 @@ def test_challenge_settings_pins_the_seed_and_stamps_the_key():
         shared = main.challenge_settings(settings, state, ui, 4821, log)
         assert shared.seed == 4821
         assert settings.seed is None                 # the live config is untouched
+        assert shared.challenge is not None
         assert (shared.challenge.turns, shared.challenge.lost) == (137, 412)
         assert shared.challenge.matches(shared)
     finally:
@@ -1206,6 +1213,7 @@ def test_share_challenge_falls_back_to_a_file_off_the_web(tmp_path, monkeypatch)
         saved = tmp_path / "challenge_77.txt"
         assert saved.exists() and "challenge_77.txt" in msg
         restored = Settings.from_token(saved.read_text().strip())
+        assert restored.challenge is not None
         assert restored.seed == 77 and restored.challenge.turns == 50
     finally:
         pygame.quit()
@@ -1230,7 +1238,6 @@ def test_x_key_clears_forward_rule():
 # --------------------------------------------------------------------------- #
 # Editing / undoing queued orders
 # --------------------------------------------------------------------------- #
-from starconquest.model import Order
 
 
 def test_click_queued_lane_reopens_the_popup_on_that_order():
@@ -1660,8 +1667,10 @@ def test_challenge_settings_names_the_replay_the_score_was_made_in():
         ui.hand_turns = 3
         state.turn = 40
         shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert shared.challenge is not None
         assert shared.challenge.log == log.match_id
-        assert Settings.from_token(shared.to_token()).challenge.log == log.match_id
+        restored = Settings.from_token(shared.to_token()).challenge
+        assert restored is not None and restored.log == log.match_id
     finally:
         pygame.quit()
 
@@ -1683,6 +1692,7 @@ def test_posting_a_score_uploads_the_replay_behind_it(monkeypatch):
         state.turn = 50
         main.post_to_leaderboard(settings, state, ui, 77, log)
         shared = main.challenge_settings(settings, state, ui, 77, log)
+        assert shared.challenge is not None
         assert sent == [(log.match_id, shared.challenge.key)]
     finally:
         pygame.quit()
@@ -1707,6 +1717,7 @@ def test_quick_post_uploads_the_replay_and_waits_on_the_post(monkeypatch):
         ui.post_as = "Ada"
         assert main.quick_post(settings, state, ui, 77, log) == "request"
         shared = main.challenge_settings(settings, state, ui, 77, log)
+        assert shared.challenge is not None
         assert sent == [(log.match_id, shared.challenge.key)]
         assert posted == [(shared.to_token(), "Ada")]
         assert ui.board_action() == "posting"
@@ -1795,6 +1806,7 @@ def test_a_checkpoint_and_a_posted_score_agree_on_the_setup_key():
         ui.hand_turns = 2
         state.turn = 30
         shared = main.challenge_settings(settings, state, ui, 4821, log)
+        assert shared.challenge is not None
         assert log.setup_key() == shared.challenge.key
     finally:
         pygame.quit()
@@ -2063,7 +2075,9 @@ def test_a_watched_replay_is_not_ours_to_post(tmp_path, monkeypatch):
     """
     try:
         log = _watchable_log(tmp_path, monkeypatch)
-        state, ui, _ = main.open_replay(log.encoded(), Settings())
+        opened = main.open_replay(log.encoded(), Settings())
+        assert opened is not None
+        state, ui, _ = opened
         state.winner = ui.human_id           # their win, replayed back in full
         assert ui.hand_turns > 0             # ...by hand, so only `watched` stops it
         assert ui.watched is True
@@ -2081,7 +2095,9 @@ def test_opening_a_replay_enters_review_at_its_opening_position(tmp_path, monkey
     the way back as the only way to actually watch it."""
     try:
         log = _watchable_log(tmp_path, monkeypatch)
-        state, ui, _ = main.open_replay(log.encoded(), Settings())
+        opened = main.open_replay(log.encoded(), Settings())
+        assert opened is not None
+        state, ui, _ = opened
         states, fog, _events, live = main.open_history(state, ui, log)
         assert ui.history and not ui.playing
         assert len(states) == len(fog) == log.turn_count + 1   # ...including turn 0
@@ -2433,6 +2449,7 @@ def test_resolve_turn_lets_its_combat_linger(monkeypatch):
     `linger=True`) — unlike history playback, which must glide straight through
     (see `main._next_history_film`'s own test)."""
     _state, ui, _reel = _won_with_animation(monkeypatch)
+    assert ui.film is not None
     combat = next(b for b in ui.film.beats if b.kind == "combat")
     assert combat.ms == config.FILM_LINGER_COMBAT_MS
     assert ui.film.total_ms > combat.end   # a trailing hold, not an instant end
@@ -2445,6 +2462,7 @@ def test_play_mode_asks_for_a_film_that_glides_instead_of_lingering(monkeypatch)
     board after it (`FILM_LINGER_HOLD_MS`), on top of the `PLAY_MS` gap the loop
     now chains past."""
     _state, ui, _reel = _won_with_animation(monkeypatch, playing=True)
+    assert ui.film is not None
     combat = next(b for b in ui.film.beats if b.kind == "combat")
     assert combat.ms == config.FILM_COMBAT_MS == 0
     assert ui.film.total_ms == combat.end      # nothing left to wait out
@@ -2626,7 +2644,7 @@ def test_next_history_film_does_not_snap_a_continuing_fleet_back_a_turn(monkeypa
         history_events = [[], [turnfilm.Advanced(((0, 1),))]]   # 2 -> 1 this turn
 
         reel = main._next_history_film(ui, history_states, history_fog, history_events)
-        assert reel is not None
+        assert reel is not None and ui.film is not None
         travel = ui.film.travel(0.0)   # what `render._travel` reads on this exact frame
         assert reel.board.fleets[0].progress_at(travel) == end_of_last_turn_progress
     finally:
@@ -2654,6 +2672,7 @@ def test_next_history_film_never_lingers_on_combat(monkeypatch):
         history_events = [[], [turnfilm.Advanced(((0, 0),)), landed]]
 
         assert main._next_history_film(ui, history_states, history_fog, history_events)
+        assert ui.film is not None
         combat = next(b for b in ui.film.beats if b.kind == "combat")
         assert combat.ms == 0.0
         assert ui.film.total_ms == combat.end   # no trailing hold either
@@ -2842,7 +2861,7 @@ def _split_setup():
     ui.auto_forward[home] = ForwardRule({a: 50, b: 50})
     ui.edit_forward(state, home, a)
     render._FONTS.clear()
-    render.draw(pygame.display.get_surface(), state, ui)
+    render.draw(_screen(), state, ui)
     return state, ui, home, a, b
 
 
@@ -2882,7 +2901,7 @@ def test_even_split_and_delete_all_buttons():
 
 
 def test_clicking_a_splits_other_lane_on_the_map_opens_that_lane():
-    state, ui, home, a, b = _split_setup()
+    state, ui, home, _a, b = _split_setup()
     try:
         ui.close_send()
         _click_pos(state, ui, _lane_mid(state, ui, home, b))
@@ -2917,20 +2936,20 @@ def test_a_browser_resize_reshapes_the_surface(monkeypatch):
     pygame.init()
     try:
         pygame.display.set_mode((config.WEB_FB_W, config.WEB_FB_H))
-        view = [(1600, 1200, 1.0)]
+        view: list[tuple[int, int, float] | None] = [(1600, 1200, 1.0)]
         monkeypatch.setattr(main.webstore, "viewport", lambda: view[0])
 
         assert main.fit_web_canvas()
-        assert pygame.display.get_surface().get_size() == (1600, 1200)
+        assert _screen().get_size() == (1600, 1200)
         assert not main.fit_web_canvas(), "an unchanged viewport must not set_mode again"
 
         view[0] = (900, 1600, 1.0)                    # rotated to portrait
         assert main.fit_web_canvas()
-        assert pygame.display.get_surface().get_size() == (900, 1600)
+        assert _screen().get_size() == (900, 1600)
 
         view[0] = None                                # DOM unreadable: keep what we have
         assert not main.fit_web_canvas()
-        assert pygame.display.get_surface().get_size() == (900, 1600)
+        assert _screen().get_size() == (900, 1600)
     finally:
         pygame.quit()
 
@@ -3074,6 +3093,7 @@ def test_start_game_copies_a_stage_onto_the_ui_as_plain_values(tmp_path, monkeyp
     g = gauntlet.builtin()[0]
     first, last = g.stages[0], g.stages[-1]
     cfg = gauntlet.stage_settings(first)
+    assert cfg.seed is not None
     _state, ui, _log = main.start_game(cfg, cfg.seed, False, (g, first))
     assert ui.stage_label == f"{g.name} 1/{len(g.stages)} · {first.title}"
     assert ui.briefing == first.briefing and ui.briefing_open
@@ -3151,6 +3171,7 @@ def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeyp
     main.land_daily(ms, settings, main.pbp.OK, reply, "puzzle")
     assert ms.status_ok and ms.status == f"Puzzle · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
     assert main.daily.daily_of(settings) == ("2026-10-28", "puzzle")
+    assert settings.seed is not None
 
     state = build_state(settings, settings.seed)
     ui = main.new_ui(state, False, settings)

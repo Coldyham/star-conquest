@@ -59,7 +59,7 @@ import sys
 import time
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import NoReturn, Self
+from typing import Any, NoReturn, Self, cast
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -255,7 +255,7 @@ class Cell:
 
     mode: str
     nodes: int
-    knobs: tuple[tuple[str, object], ...] = ()
+    knobs: tuple[tuple[str, Any], ...] = ()
 
     def key(self) -> str:
         bits = "".join(f",{k}={v}" for k, v in self.knobs)
@@ -373,7 +373,7 @@ def _resolve(arm: Arm) -> str:
     fn = getattr(module, "decide", None)
     if not callable(fn):
         _fatal(f"arm {arm.name!r}: {arm.strategy}.py has no callable decide")
-    ai.register(alias, fn)
+    ai.register(alias, cast(ai.DecideFn, fn))
     return alias
 
 
@@ -419,7 +419,7 @@ class Ledger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fd: int | None = None
 
-    def open(self) -> Ledger:
+    def open(self) -> Self:
         self._fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         return self
 

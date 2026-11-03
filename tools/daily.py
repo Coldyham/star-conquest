@@ -49,9 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, dealer, engine, gauntletgen    # noqa: E402
-from starconquest.settings import Settings    # noqa: E402
-from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credentials    # noqa: E402
+from starconquest import ai, dealer, engine, gauntletgen
+from starconquest.settings import Settings
+from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credentials
 
 KINDS = ("board", "puzzle")
 SPEC_FILE = ROOT / "tools" / "daily_spec.json"
@@ -220,7 +220,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     days = ([dt.date.fromisoformat(args.day)] if args.day
-            else days_to_make(dt.datetime.now(dt.timezone.utc).date()))
+            else days_to_make(dt.datetime.now(dt.UTC).date()))
     kinds = [args.kind] if args.kind else list(KINDS)
     api = None
     if not args.dry_run:

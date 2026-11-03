@@ -64,7 +64,7 @@ def build(out: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
                         help=f"where to write the board (default: {DEFAULT_OUT.relative_to(ROOT)})")
     args = parser.parse_args(argv)

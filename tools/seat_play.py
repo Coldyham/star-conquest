@@ -38,13 +38,14 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, combat, config, engine, fog, replay  # noqa: E402
-from starconquest.model import GameState, Order  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, combat, config, engine, fog, replay
+from starconquest.model import GameState, Order
+from starconquest.settings import Settings, build_state
 
 NOTES_SUFFIX = ".notes.jsonl"
 
@@ -254,7 +255,7 @@ def _alarm(state: GameState, me: int, visible: set[int]) -> tuple:
 
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--log", help="the game's log file (default: newest seat_play game)")
     sub = parser.add_subparsers(dest="cmd", required=True)
     new = sub.add_parser("new", help="start a game")
@@ -281,10 +282,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.key and cfg.challenge is None:
             from starconquest.settings import Challenge
             cfg.challenge = Challenge(key=args.key)
-        state = build_state(cfg, cfg.seed)
+        seed = cast(int, cfg.seed)
+        state = build_state(cfg, seed)
         _seat(state)
-        log = replay.new_log(cfg, cfg.seed, state)
+        log = replay.new_log(cfg, seed, state)
         log.save()
+        assert log.path is not None
         notes_path(log.path).write_text("", encoding="utf-8")
         print(f"log: {log.path}")
         print(render(state, cfg, set(), {}))

@@ -14,6 +14,7 @@ from . import coach, combat, config, fog, matchnames, model, paths, starlore, st
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
+import itertools
 
 # The measured-layout kit lives in `widgets` now that the map creator draws with
 # it too. Bound to module-level names here rather than called qualified, because
@@ -3621,7 +3622,7 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     label, and a Rewind button (only when viewing a turn before the latest).
     Records hit-rects on ``ui`` for input, mirroring the store-rect-then-test
     handoff used across the HUD."""
-    w, h = surface.get_size()
+    w, _h = surface.get_size()
     _fx, by, _fw, fh = config.footer_rect(history=True)
     font = _fonts()["small"]
     bh = config.FOOTER_BTN_H
@@ -3730,7 +3731,7 @@ def _graph_value(metric: str, v: float) -> str:
         return f"{v:.1f}"
     if metric in stats.AREA:
         return f"{v:.0f}%"
-    return str(int(round(v)))
+    return str(round(v))
 
 
 def _turn_ticks(turns: int, width: int, label_w: int) -> list[int]:
@@ -3831,7 +3832,7 @@ def _draw_known_line(surface, color, series, at, width: int) -> None:
             pygame.draw.lines(surface, color, False, run, width)
         else:
             pygame.draw.circle(surface, color, run[0], width)
-    for before, after in zip(runs, runs[1:]):
+    for before, after in itertools.pairwise(runs):
         _draw_dotted(surface, color, before[-1], after[0], max(1, width // 2))
 
 

@@ -47,7 +47,7 @@ def is_touch_web() -> bool:
     import platform as _platform
 
     try:
-        return int(_platform.window.navigator.maxTouchPoints) > 0
+        return int(_platform.window.navigator.maxTouchPoints) > 0  # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
         return False
 
@@ -62,7 +62,7 @@ def _element():
     import platform as _platform
 
     try:
-        doc = _platform.window.document
+        doc = _platform.window.document  # pyright: ignore[reportAttributeAccessIssue]
         el = doc.createElement("input")
         el.setAttribute("id", _ELEMENT_ID)
         el.setAttribute("type", "text")
@@ -146,7 +146,7 @@ def dismissed() -> bool:
     import platform as _platform
 
     try:
-        focused = str(_platform.window.document.activeElement.id) == _ELEMENT_ID
+        focused = str(_platform.window.document.activeElement.id) == _ELEMENT_ID  # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
         return False
     _took_focus = _took_focus or focused

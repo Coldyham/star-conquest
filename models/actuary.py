@@ -671,7 +671,7 @@ class _Ledger:
             theirs = [x for x in near if rival in x[2]]     # systems it ever holds
             if not theirs:
                 continue
-            for k in range(0, last_k + 1):
+            for k in range(last_k + 1):
                 by_d: dict[int, int] = {}
                 for nbr, d, n_owners, n_ships in theirs:
                     if k + d > H:
@@ -1235,7 +1235,7 @@ class Model:
         self.turns = turns
 
     def plus(self, other: Model) -> Model:
-        return Model(*(tuple(x + y for x, y in zip(getattr(self, name), getattr(other, name)))
+        return Model(*(tuple(x + y for x, y in zip(getattr(self, name), getattr(other, name)))  # pyright: ignore[reportCallIssue]
                        for name in self.COUNTS), self.turns + other.turns)
 
 
@@ -1492,7 +1492,7 @@ def observe(prev: _Snap, cur: _Snap, state) -> dict[int, Model]:
         for option in _options(prev, state, sid):
             cell = (option.kind * 2 + pressed) * RATIO_BINS + _ratio_bin(option.ratio)
             c["strikes" if to.get(option.target, 0) > 0 else "passes"][cell] += 1
-    return {q: Model(*(tuple(c[name]) for name in Model.COUNTS), 1)
+    return {q: Model(*(tuple(c[name]) for name in Model.COUNTS), 1)  # pyright: ignore[reportCallIssue]
             for q, c in counts.items()}
 
 

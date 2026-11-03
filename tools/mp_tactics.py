@@ -42,9 +42,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, mapgen  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from tools import sweep  # noqa: E402
+from starconquest import ai, engine, mapgen
+from starconquest import settings as settings_mod
+from tools import sweep
 
 OUT = ROOT / "results" / "mp_tactics"
 SEED_BASE = 8_300_000
@@ -98,6 +98,7 @@ def standing(state, pid):
 def make_arm(alias: str, knobs: dict):
     """A private import of marshal with ``knobs`` wrapped in."""
     spec = importlib.util.spec_from_file_location(alias, ROOT / "models" / "marshal.py")
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[alias] = mod
     spec.loader.exec_module(mod)
@@ -139,8 +140,8 @@ def make_arm(alias: str, knobs: dict):
                 threat *= knobs["CEDE"]
         return threat
 
-    mod._richness = richness
-    mod._max_adjacent_enemy = adjacent
+    mod._richness = richness  # pyright: ignore[reportAttributeAccessIssue]
+    mod._max_adjacent_enemy = adjacent  # pyright: ignore[reportAttributeAccessIssue]
     return mod
 
 
@@ -254,7 +255,7 @@ def report(rows) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--seeds", type=int, default=400)
     ap.add_argument("--jobs", type=int, default=22)
     ap.add_argument("--groups", nargs="*", default=list(GROUPS))

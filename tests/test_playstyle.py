@@ -6,10 +6,11 @@ import copy
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from starconquest import engine, replay
+from starconquest import engine
 from tests.test_replay import _preserve_config
 from tests.test_verify_scores import _won_match
 from tools import playstyle, playstyle_worker
@@ -91,7 +92,9 @@ def test_the_rev_moves_with_either_source(tmp_path, monkeypatch):
 
 def test_the_baseline_file_is_a_pooled_record_of_this_shape():
     text = playstyle.BASELINE.read_text()
-    record = json.loads(re.search(r"export const BASELINE = (\{.*\});", text).group(1))
+    found = re.search(r"export const BASELINE = (\{.*\});", text)
+    assert found is not None
+    record = json.loads(found.group(1))
     assert record["shape"] == playstyle.SHAPE
     assert record["games"] == len(record["turns"]) > 0
     assert record["hand_turns"] == 0
@@ -117,7 +120,7 @@ def test_only_current_hand_played_logs_are_read(match):
 
 
 def test_pending_reads_missing_and_stale_rows_and_prune_finds_orphans():
-    logs = {"a" * 16: None, "b" * 16: None, "c" * 16: None}
+    logs: dict[str, Any] = {"a" * 16: None, "b" * 16: None, "c" * 16: None}
     stored = {"a" * 16: "rev1", "b" * 16: "old", "d" * 16: "rev1"}
     assert playstyle_worker.pending(logs, stored, "rev1") == ["b" * 16, "c" * 16]
     public = {"a" * 16, "b" * 16, "c" * 16}

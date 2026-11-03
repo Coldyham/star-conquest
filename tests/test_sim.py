@@ -350,6 +350,7 @@ def test_the_log_reconstructs_to_exactly_what_play_settings_reported():
 
     state, _ = replay.reconstruct(log)
     seat = state.human()
+    assert seat is not None
     assert (state.winner == seat.id) == result.won
     assert state.turn == result.turns
     assert seat.ships_lost == result.lost
@@ -385,6 +386,7 @@ def test_reconstructing_a_replay_never_asks_a_seat_to_decide_anything():
 
         state, _ = replay.reconstruct(log)
         seat = state.human()
+        assert seat is not None
         assert (state.winner == seat.id) == result.won
         assert state.turn == result.turns
         assert seat.ships_lost == result.lost

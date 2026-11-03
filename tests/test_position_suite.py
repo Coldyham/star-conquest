@@ -32,7 +32,9 @@ def _game(seed: int = 3, players: int = 3, nodes: int = 12, max_turns: int = 300
     with _preserve_config():
         state = build_state(cfg, seed)
         log = replay.GameLog(seed=seed, settings=cfg.to_dict())
-        hid = state.human().id
+        human = state.human()
+        assert human is not None
+        hid = human.id
         turns = 0
         while state.winner is None and turns < max_turns:
             record = engine.end_turn(state, human_orders=ai.decide(state, hid),
@@ -104,6 +106,7 @@ def test_a_win_gives_the_bot_something_to_be_measured_against(played):
         result = sim.play_from(log, 20, "marshal", max_turns=300)
     assert result.human_won is True
     assert result.human_turns_from == log.turn_count - 20
+    assert result.human_turns_from is not None
     if result.turns_from is not None:
         assert result.gain == result.turns_from - result.human_turns_from
 

@@ -49,6 +49,7 @@ def test_a_win_stores_the_exact_replay_a_watch_link_would_play():
     decoded = replay.GameLog.decode(row["log"])
     state, _ = replay.reconstruct(decoded)
     seat = state.human()
+    assert seat is not None
     assert (state.winner == seat.id) == row["won"] == result.won
     assert state.turn == row["turns"] == result.turns
     assert seat.ships_lost == row["lost"] == result.lost

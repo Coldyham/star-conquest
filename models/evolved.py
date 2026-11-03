@@ -160,6 +160,7 @@ def _weights_module():
     if module is None:
         path = Path(__file__).resolve().parent / "_evolved_weights.py"
         spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         spec.loader.exec_module(module)
@@ -832,7 +833,7 @@ def _danger(me: int):
     advantage = combat._advantage()
 
     def play(state, p):
-        if state.turn != play.root:
+        if state.turn != play.root:  # pyright: ignore[reportFunctionMemberAccess]
             return []
         out = []
         for s in state.systems.values():
@@ -851,7 +852,7 @@ def _danger(me: int):
                 out.append(Order(p, s.id, best[1], s.ships))
         return out
 
-    play.root = -1
+    play.root = -1  # pyright: ignore[reportFunctionMemberAccess]
     return play
 
 
@@ -886,7 +887,7 @@ def decide_ms(settings, seat) -> float:
     """Typical CPU ms of one decide on this setup (`ai.decide_ms`): knower's
     Search runs a rival's decide on every turn it looks ahead. With the
     look-ahead off the policy answers in well under a millisecond."""
-    if int(round(settings.seat_params(seat).aux)) == 0:
+    if round(settings.seat_params(seat).aux) == 0:
         return 0.0
     drawn = getattr(settings, "custom_map", None)
     nodes = len(drawn.nodes) if drawn is not None else settings.nodes
@@ -921,7 +922,7 @@ def make_decide(vec):
         root = state.turn
         rival = _danger(pid) if danger else None
         if rival:
-            rival.root = root
+            rival.root = root  # pyright: ignore[reportFunctionMemberAccess]
 
         def play(st, p):
             if p == pid:
@@ -939,7 +940,7 @@ def make_decide(vec):
 
     def decide(state, pid):
         p = state.players.get(pid)
-        if p is not None and int(round(p.ai_params.aux)) == 0:
+        if p is not None and round(p.ai_params.aux) == 0:
             return plain(state, pid)
         deadline = time.perf_counter() + LOOK_BUDGET_S * BUDGET_SCALE
         near: list = []
@@ -965,7 +966,7 @@ def make_decide(vec):
             return base
         # The best likely outcome, unless the dangerous case punishes it more
         # than it punishes the policy's own move.
-        best, best_v, floor = base, -1.0, None
+        best, best_v, floor = base, -1.0, -math.inf
         for i, orders in enumerate(plans):
             if time.perf_counter() > deadline:
                 break

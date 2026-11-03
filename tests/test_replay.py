@@ -398,10 +398,12 @@ def test_list_and_latest_log_newest_first(games_dir):
     import os
     import time
     t = time.time()
+    assert old.path is not None and new.path is not None
     os.utime(old.path, (t - 100, t - 100))
     os.utime(new.path, (t, t))
     assert replay.list_logs()[0] == new.path
-    assert replay.latest_log().seed == 2
+    latest = replay.latest_log()
+    assert latest is not None and latest.seed == 2
 
 
 def test_latest_log_skips_older_format(games_dir):
@@ -414,9 +416,11 @@ def test_latest_log_skips_older_format(games_dir):
     import os
     import time
     t = time.time()
+    assert current.path is not None and stale.path is not None
     os.utime(current.path, (t - 100, t - 100))
     os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
-    assert replay.latest_log().seed == 8
+    latest = replay.latest_log()
+    assert latest is not None and latest.seed == 8
 
 
 def test_latest_log_skips_outdated_rules(games_dir):
@@ -432,9 +436,11 @@ def test_latest_log_skips_outdated_rules(games_dir):
     import os
     import time
     t = time.time()
+    assert current.path is not None and stale.path is not None
     os.utime(current.path, (t - 100, t - 100))
     os.utime(stale.path, (t, t))       # the stale file is "newest" but must be skipped
-    assert replay.latest_log().seed == 8
+    latest = replay.latest_log()
+    assert latest is not None and latest.seed == 8
 
 
 def test_is_current_tracks_the_running_engines_rules_version():
@@ -455,9 +461,11 @@ def test_latest_log_skips_corrupt_file(games_dir):
     import os
     import time
     t = time.time()
+    assert good.path is not None
     os.utime(good.path, (t - 100, t - 100))
     os.utime(bad, (t, t))          # corrupt file is "newest" but must be skipped
-    assert replay.latest_log().seed == 8
+    latest = replay.latest_log()
+    assert latest is not None and latest.seed == 8
 
 
 def test_save_is_atomic_replace_on_rewrite(games_dir):
@@ -465,6 +473,7 @@ def test_save_is_atomic_replace_on_rewrite(games_dir):
     log = replay.new_log(Settings(seed=4), 4)
     log.record_turn(_record([])); log.save()
     first_path = log.path
+    assert first_path is not None
     log.record_turn(_record([Order(1, 0, 1, 1)]), human_ai=True); log.save()
     assert log.path == first_path
     assert replay.load(first_path).turn_count == 2
@@ -487,6 +496,7 @@ def test_match_id_survives_save_and_load(games_dir):
     log = replay.new_log(Settings(seed=3), 3)
     log.record_turn(_record([]))
     log.save()
+    assert log.path is not None
     assert replay.load(log.path).match_id == log.match_id
 
 
@@ -635,7 +645,8 @@ def test_a_match_begun_in_autoplay_has_no_human_seat():
 
 def test_a_match_begun_by_hand_still_has_one():
     state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=False), 5)
-    assert state.human() is not None and state.human().id == replay.HUMAN_SEAT
+    human = state.human()
+    assert human is not None and human.id == replay.HUMAN_SEAT
 
 
 def test_the_first_hand_played_turn_claims_the_seat():
@@ -648,14 +659,16 @@ def test_the_first_hand_played_turn_claims_the_seat():
     assert state.human() is None
     engine.end_turn(state, human_orders=[], decide=ai.decide,
                     claim_seat=replay.HUMAN_SEAT)          # ...ended by hand
-    assert state.human() is not None and state.human().id == replay.HUMAN_SEAT
+    human = state.human()
+    assert human is not None and human.id == replay.HUMAN_SEAT
 
 
 def test_claiming_a_seat_is_idempotent_and_skips_neutral():
     state = build_state(Settings(players=3, nodes=14, seed=5, autoplay=True), 5)
     engine._claim_seat(state, replay.HUMAN_SEAT)
     engine._claim_seat(state, replay.HUMAN_SEAT)
-    assert state.human().id == replay.HUMAN_SEAT
+    human = state.human()
+    assert human is not None and human.id == replay.HUMAN_SEAT
     engine._claim_seat(state, 0)                # neutral is a real player (id 0)
     assert not state.players[0].is_human
 
@@ -669,7 +682,8 @@ def test_reconstruct_reclaims_the_seat_at_the_turn_it_was_claimed():
     assert log.turn_is_ai(0)                                           # opened as a demo
     assert any(not log.turn_is_ai(i) for i in range(log.turn_count))   # ...then taken over
     rebuilt, _ = replay.reconstruct(log)
-    assert rebuilt.human() is not None and rebuilt.human().id == replay.HUMAN_SEAT
+    human = rebuilt.human()
+    assert human is not None and human.id == replay.HUMAN_SEAT
     # ...and on the very board the live run reached, claim included.
     assert rebuilt.turn == state.turn and rebuilt.winner == state.winner
     assert all(rebuilt.systems[i].owner_id == state.systems[i].owner_id

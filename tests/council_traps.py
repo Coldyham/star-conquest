@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 from starconquest import ai, engine, replay
 
@@ -53,7 +54,7 @@ def play(seed: str, index: int, target: int, decide=None) -> tuple[str, int]:
     if not strike:
         return "held", 0
     sent = sum(o.ships for o in strike)
-    land = index + max(state.travel_turns(o.source_id, o.dest_id) for o in strike)
+    land = index + max(cast(int, state.travel_turns(o.source_id, o.dest_id)) for o in strike)
     start = state.turn
     for k in range(index, land):
         if state.winner is not None:

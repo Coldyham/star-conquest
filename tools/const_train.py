@@ -51,9 +51,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, mapgen  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from tools import sweep  # noqa: E402
+from starconquest import ai, engine, mapgen
+from starconquest import settings as settings_mod
+from tools import sweep
 
 RESULTS = ROOT / "results" / "const"
 BOT = "marshal"
@@ -87,18 +87,19 @@ NAMES = tuple(g[0] for g in GENOME)
 PRE_1017 = {"FEED": 1.0, "FEED_MAX_TURNS": 2, "RELIEF_AWARE": 0.5, "POUR_GUARD": 0.55}
 
 _cand = None
-_stock: dict[str, object] = {}
+_stock: dict[str, float] = {}
 
 
 def _load(alias: str):
     spec = importlib.util.spec_from_file_location(alias, ROOT / "models" / f"{BOT}.py")
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[alias] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-def stock_values() -> dict[str, object]:
+def stock_values() -> dict[str, float]:
     mod = _load("sc_const_stock")
     return {n: getattr(mod, n) for n in NAMES + tuple(PRE_1017)}
 
@@ -432,7 +433,7 @@ def ablate(args) -> None:
 
 
 def train(args) -> None:
-    import cma
+    import cma  # pyright: ignore[reportMissingImports]
 
     folder = RESULTS / args.run
     folder.mkdir(parents=True, exist_ok=True)
@@ -487,7 +488,7 @@ def train(args) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--run")
     ap.add_argument("--pilot", action="store_true", help="fixed arms, timing and noise only")
     ap.add_argument("--pilot-steps", type=int, default=3,

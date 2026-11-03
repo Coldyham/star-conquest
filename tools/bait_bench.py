@@ -51,11 +51,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay  # noqa: E402
-from starconquest.model import Order  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
-from tools.pileup_bench import SETUPS, load_rows, paired  # noqa: E402
-from tools.win_turns import git_hint, play_rev  # noqa: E402
+from starconquest import ai, engine, replay
+from starconquest.model import Order
+from starconquest.settings import Settings, build_state
+from tools.pileup_bench import SETUPS, load_rows, paired
+from tools.win_turns import git_hint, play_rev
 
 RESULTS = ROOT / "results" / "bait"
 SEED_BASE = 8_400_000
@@ -145,7 +145,7 @@ def _patch():
         _fires["picked"] += id(root) in _ids
         return root
 
-    k._candidates, k._search = _candidates, _search
+    k._candidates, k._search = _candidates, _search  # pyright: ignore[reportAttributeAccessIssue]
     _patched = k
 
 
@@ -237,7 +237,7 @@ def report(rows: list[dict]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--setup", nargs="+", default=list(SETUPS), choices=list(SETUPS))
     ap.add_argument("--lineup", nargs="+", default=list(LINEUPS), choices=list(LINEUPS))
     ap.add_argument("--arm", nargs="+", default=list(ARMS), choices=list(ARMS))

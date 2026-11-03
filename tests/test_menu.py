@@ -637,7 +637,7 @@ def test_the_node_stepper_moves_a_symmetric_map_between_sizes_it_can_build():
 
 
 def test_the_lane_readout_describes_the_setup_being_shown():
-    screen, ms, settings = _setup()
+    _screen, ms, settings = _setup()
     try:
         assert menu._lane_readout_lines(ms, settings) == []   # nothing surveyed yet
         menu.pump(ms, settings)
@@ -654,7 +654,7 @@ def test_the_lane_readout_describes_the_setup_being_shown():
 def test_the_lane_readout_fits_its_column_at_its_longest():
     """Slowest ships on the sparsest map give the widest figures; the line must
     still stop short of the Advanced tab's right-hand column."""
-    screen, ms, settings = _setup()
+    _screen, ms, settings = _setup()
     try:
         settings.players, settings.nodes = config.MIN_PLAYERS, settings.min_nodes()
         settings.ship_ly_per_turn = 1.0
@@ -667,7 +667,7 @@ def test_the_lane_readout_fits_its_column_at_its_longest():
 
 
 def test_the_lane_readout_waits_for_a_slider_drag_to_end():
-    screen, ms, settings = _setup()
+    _screen, ms, settings = _setup()
     try:
         menu.pump(ms, settings)
         key = ms.lane_key
@@ -1200,6 +1200,7 @@ def test_slider_drag_is_not_interrupted_mid_gesture():
         menu.handle_event(up, ms, settings)
         assert ms.confirm_unchallenge, "never asked after the drag ended"
         # and the revert restores the pre-drag value
+        assert ms.challenge_snapshot is not None
         before = ms.challenge_snapshot["node_jitter"]
         _click_key(screen, ms, settings, "unchallenge_keep")
         assert settings.node_jitter == before
@@ -1431,6 +1432,7 @@ def test_clearing_a_drawn_map_asks_first():
 
 def test_declining_keeps_the_drawn_map():
     screen, ms, settings = _with_map()
+    assert settings.custom_map is not None
     drawn = settings.custom_map.to_dict()
     try:
         _click_key(screen, ms, settings, "clear_map")
@@ -1613,6 +1615,7 @@ def test_tutorial_lists_its_stages_and_opens_only_the_first(monkeypatch, tmp_pat
         assert ms.tutorial_open
         menu.draw(screen, ms, settings)
         g = menu.gauntlet.find(ms.gauntlets, "tutorial")
+        assert g is not None
         assert _tutorial_rows(ms) == [f"stage_{g.stages[0].id}"], "the rest are locked"
         canvas = screen.get_rect().inflate(10_000, 10_000)
         assert all(canvas.contains(r) for r in ms.rects.values())
@@ -1631,6 +1634,7 @@ def test_picking_a_stage_stashes_your_setup_and_leaving_restores_it(monkeypatch,
         _click_key(screen, ms, settings, "tutorial")
         menu.draw(screen, ms, settings)
         g = menu.gauntlet.find(ms.gauntlets, "tutorial")
+        assert g is not None
         first = g.stages[0]
         action = _click_key(screen, ms, settings, f"stage_{first.id}")
         assert action == "start"

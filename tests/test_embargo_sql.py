@@ -38,7 +38,7 @@ def board():
           " if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;"
           " end $$", DB)
     out = subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-q",
-                          "-f", str(SCHEMA)], capture_output=True, text=True)
+                          "-f", str(SCHEMA)], capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stderr
     # Seeds 1-3 are this week's nodes, 4 last week's; 9 is on no campaign. The
     # game rows are browser-written (`6`, not the worker's `6.0`).
@@ -119,10 +119,10 @@ def test_a_day_holds_one_daily_of_each_kind(board):
     out = subprocess.run(["psql", f"{DSN} dbname={board}", "-q", "-c",
                           f"insert into dailies (day, kind, settings, spec, probes, rules_version)"
                           f" values ({_TODAY}, 'puzzle', '{{}}', '{{}}', '[]', 2)"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     assert "dailies_pkey" in out.stderr
     out = subprocess.run(["psql", f"{DSN} dbname={board}", "-q", "-c",
                           f"insert into dailies (day, kind, settings, spec, probes, rules_version)"
                           f" values ({_TODAY} + 5, 'chess', '{{}}', '{{}}', '[]', 2)"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     assert "dailies_kind_shape" in out.stderr

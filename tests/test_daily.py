@@ -41,7 +41,8 @@ def test_a_days_candidates_keep_its_weekday_and_lanes(w):
     for s in cands:
         assert lo <= s.system_count() <= hi and plo <= s.players <= phi
         assert 6 <= s.ship_ly_per_turn <= 12 and s.ship_speed_growth_pct == 0
-        assert 2 <= settings.lane_turns(settings.lane_lengths(s), s.ship_ly_per_turn)[1] <= 5
+        turns = settings.lane_turns(settings.lane_lengths(s), s.ship_ly_per_turn)
+        assert turns is not None and 2 <= turns[1] <= 5
         assert isinstance(s.seed, int)
 
 
@@ -145,7 +146,7 @@ def test_a_puzzle_deals_from_its_own_stream():
 
 
 def test_a_puzzle_row_names_its_kind_and_opponent(tmp_path, monkeypatch):
-    play, calls = _fake_play({(0, "thinker"): 30})
+    play, _calls = _fake_play({(0, "thinker"): 30})
     monkeypatch.setattr(daily.gauntletgen, "play_one", play)
     sunday = MONDAY + dt.timedelta(days=6)
     row = daily.make(sunday, results=tmp_path, limit=2, out=lambda _: None, kind="puzzle")
@@ -162,8 +163,8 @@ def test_a_puzzle_row_names_its_kind_and_opponent(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # The game's side (`starconquest/daily.py`)
 # --------------------------------------------------------------------------- #
-from starconquest import daily as game_daily, webstore    # noqa: E402
-from starconquest.settings import Settings    # noqa: E402
+from starconquest import daily as game_daily, webstore
+from starconquest.settings import Settings
 
 
 @pytest.fixture

@@ -62,10 +62,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, config, engine, replay  # noqa: E402
-from starconquest.model import AiParams  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
-from tools.playstyle import shares  # noqa: E402
+from starconquest import ai, config, engine, replay
+from starconquest.model import AiParams
+from starconquest.settings import Settings, build_state
+from tools.playstyle import shares
 
 RESULTS = ROOT / "results" / "win_turns"
 SEED_BASE = 7_000_000
@@ -237,7 +237,7 @@ def play_rev() -> str:
     """A digest of the code that decides a game here, `_PLAY_MODULES` and every
     `models/` file (a rival, or a bot knower borrows), and of `SHAPE`."""
     digest = hashlib.blake2s(digest_size=4)
-    digest.update(f"shape {SHAPE}\0".encode("utf-8"))
+    digest.update(f"shape {SHAPE}\0".encode())
     for path in ([ROOT / "starconquest" / f"{name}.py" for name in _PLAY_MODULES]
                  + sorted((ROOT / "models").glob("*.py"))):
         digest.update(path.name.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
@@ -494,7 +494,7 @@ def print_pairs(a: Arm, b: Arm, groups: list[tuple[str, str]]) -> None:
 # The run
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--bot", nargs="+", default=list(BOTS), help="bots under test, name[:aux]")
     ap.add_argument("--vs", nargs="+", default=list(OPPONENTS),
                     help="opponent line-ups: name[:aux] for every other seat, or one per seat joined by +")

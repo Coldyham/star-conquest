@@ -997,7 +997,7 @@ class _Line:
 
     root: list                  # the plan at ply 0, i.e. what winning this search means
     board: object               # the position the line has reached
-    score: float                # `_evaluate` of that position
+    score: float | _Lazy        # `_score` of that position
 
 
 def _search(state, pid, orc, turns: int, deadline):
@@ -1186,6 +1186,7 @@ def _council_eval():
         if _EVAL is None:
             spec = importlib.util.spec_from_file_location(
                 name, Path(__file__).resolve().parent / "_council_eval.py")
+            assert spec is not None and spec.loader is not None
             _EVAL = importlib.util.module_from_spec(spec)
             sys.modules[name] = _EVAL
             spec.loader.exec_module(_EVAL)

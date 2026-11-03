@@ -49,8 +49,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, combat, engine, replay, turnfilm  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, combat, engine, replay, turnfilm
+from starconquest.settings import Settings, build_state
 
 CELLS = ("random:7:6:2", "random:11:6:2", "random:13:3:2")
 SEED_BASE = 3_200_000
@@ -143,9 +143,9 @@ def play(job) -> dict:
                 if t["stripped"]:
                     events.append((turn, "stripped", 1))
                 events.append((turn, "garrison_lost", ev.was_ships))
-            if ev.was_owner == 0 and ev.owner_id in them:
-                if any(owner_before[n] == me for n in state.systems[ev.node_id].neighbors):
-                    events.append((turn, "race_lost", 1))
+            if (ev.was_owner == 0 and ev.owner_id in them
+                    and any(owner_before[n] == me for n in state.systems[ev.node_id].neighbors)):
+                events.append((turn, "race_lost", 1))
 
         a, b = _income(state, me), sum(_income(state, q) for q in them)
         share.append(a / (a + b) if a + b else 1.0 / (len(them) + 1))
@@ -170,7 +170,7 @@ def _stats(rows, window: int) -> dict:
     """One subject's facts and per-game category counts, for its wins and losses."""
     losses = [r for r in rows if not r["won"] and r["winner"] is not None]
     wins = [r for r in rows if r["won"]]
-    out = {"n": len(rows), "won": len(wins), "lost": len(losses)}
+    out: dict[str, object] = {"n": len(rows), "won": len(wins), "lost": len(losses)}
     if losses:
         out["never ahead"] = sum(1 for r in losses if not r["ahead"]) / len(losses)
         out["decided by t15"] = sum(1 for r in losses if 0 < r["decide_at"] <= 15) / len(losses)
@@ -218,7 +218,7 @@ def summarise(rows, window: int) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--vs", nargs="*", default=["marshal", "actuary"])
     ap.add_argument("--cell", action="append", default=[])
     ap.add_argument("--seeds", type=int, default=100)

@@ -198,7 +198,7 @@ def candidates(score: dict, uploads: list[dict]) -> list[dict]:
 
 def _when(row: dict) -> dt.datetime:
     """A row's ``submitted_at``. PostgREST writes ``+00:00``; ``Z`` is read too."""
-    return dt.datetime.fromisoformat(str(row["submitted_at"]).replace("Z", "+00:00"))
+    return dt.datetime.fromisoformat(str(row["submitted_at"]))
 
 
 def judge(score: dict, uploads: list[dict], settings_json: dict | None) -> Check:
@@ -430,7 +430,7 @@ def _disagreement(log: replay.GameLog, detail: str) -> tuple[str, str, bool]:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--recheck", action="store_true",
                         help="re-decide every score, not only the undecided ones")
     parser.add_argument("--stale", action="store_true",

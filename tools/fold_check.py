@@ -151,7 +151,7 @@ def cmd_check(args) -> int:
             print("an orders run failed", file=sys.stderr)
             return 2
     finally:
-        subprocess.run(["git", "-C", str(HERE), "worktree", "remove", "--force", str(tree)])
+        subprocess.run(["git", "-C", str(HERE), "worktree", "remove", "--force", str(tree)], check=False)
     a = json.loads((work / "old.json").read_text())
     b = json.loads((work / "new.json").read_text())
     n = len(pickle.loads(positions.read_bytes()))
@@ -167,7 +167,7 @@ def cmd_check(args) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd")
     p = sub.add_parser("positions")
     p.add_argument("--out", required=True)

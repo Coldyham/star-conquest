@@ -12,6 +12,8 @@ keeps the decision logic testable at all.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from starconquest import ai, engine, replay
@@ -335,7 +337,7 @@ def test_a_setup_the_worker_cannot_read_is_never_taken_as_a_match(posted):
     score, blob, _ = posted
     for junk in (None, "nonsense", []):
         with _preserve_config():
-            assert verify_scores.verify(score, blob, junk).verdict == "mismatch"
+            assert verify_scores.verify(score, blob, cast(Any, junk)).verdict == "mismatch"
 
 
 # --------------------------------------------------------------------------- #

@@ -160,7 +160,7 @@ class Plan:
     target: str
     summary: list[str]
     detail: dict = field(default_factory=dict)
-    steps: list[Callable[[], str | None]] = field(default_factory=list)
+    steps: list[Callable[[], object]] = field(default_factory=list)
 
 
 def apply(api: Supabase, plan: Plan, *, yes: bool, reason: str) -> int:
@@ -348,7 +348,7 @@ def plan_delete_tag(api: Supabase, tag: str, config_key: str | None) -> Plan:
     # The tags a config was given when it was first named, before tags had a table.
     legacy = api.select("configs", f"select=config_key,tags&tags=cs.{q('{' + json.dumps(key) + '}')}"
                                    f"{where}&order=config_key.asc")
-    steps: list[Callable[[], str | None]] = []
+    steps: list[Callable[[], object]] = []
     if rows:
         steps.append(lambda: api.delete("config_tags", f"tag_key=eq.{q(key)}{where}"))
     for config in legacy:
@@ -477,7 +477,7 @@ def show_gauntlets(api: Supabase) -> None:
 # Command line
 # --------------------------------------------------------------------------- #
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
     def writes(name: str, help_: str) -> argparse.ArgumentParser:

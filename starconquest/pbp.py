@@ -834,7 +834,7 @@ def _call_web(url: str, body: str | None) -> Request | None:
     init = ("{method:'POST',headers:{'Content-Type':'application/json'},body:"
             f"{json.dumps(body)}}}") if body is not None else "{}"
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
             f"fetch({json.dumps(url)},{init}).then(function(r)"
             "{return r.text().then(function(t){"
@@ -872,7 +872,7 @@ def settle(promise: str) -> Request | None:
     mailbox = _next_mailbox()
     state, slot = (json.dumps(key) for key in _web_keys(mailbox))
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
             f"Promise.resolve().then(function(){{return {promise}}}).then(function(t)"
             f"{{localStorage.setItem({slot},t);localStorage.setItem({state},'{OK}')}})"

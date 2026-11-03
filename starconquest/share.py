@@ -224,7 +224,7 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     import platform as _platform
 
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"fetch({json.dumps(log_url())},{{method:'POST',headers:{json.dumps(headers)},body:{json.dumps(body)}}}).catch(function(){{}})"
         )
         return True
@@ -438,7 +438,7 @@ def _fetch_web(url: str) -> Download | None:
 
     state, body = json.dumps(WEB_REPLAY_STATE_KEY), json.dumps(WEB_REPLAY_BODY_KEY)
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({body});"
             f"fetch({json.dumps(url)}).then(function(r)"
             "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"

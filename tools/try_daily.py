@@ -37,9 +37,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import dealer, replay, settings as settings_mod    # noqa: E402
-from starconquest.settings import Settings    # noqa: E402
-from tools import daily    # noqa: E402
+from starconquest import dealer, replay, settings as settings_mod
+from starconquest.settings import Settings
+from tools import daily
 
 TRY_DIR = daily.RESULTS / "try"
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -58,7 +58,7 @@ def weekday(text: str) -> int:
 
 def next_weekday(w: int, today: dt.date | None = None) -> dt.date:
     """The first day on or after ``today`` that falls on weekday ``w``."""
-    today = today or dt.datetime.now(dt.timezone.utc).date()
+    today = today or dt.datetime.now(dt.UTC).date()
     return today + dt.timedelta(days=(w - today.weekday()) % 7)
 
 

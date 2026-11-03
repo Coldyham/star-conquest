@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import random
 import sys
+from typing import Any, cast
 
 import pytest
 
@@ -19,6 +20,7 @@ from starconquest import ai, config, engine, mapgen
 from starconquest.model import AiParams, GameState, Order, Player, System
 from tests import sim
 from tools import learner_check
+import itertools
 
 
 @pytest.fixture(scope="module")
@@ -229,7 +231,7 @@ def test_the_strike_curve_never_falls(ac):
         for kind in (ac.NEUTRAL, ac.PLAYER):
             for pressed in (0, 1):
                 curve = ac.strike_curve(model, kind, pressed)
-                assert all(a <= b + 1e-12 for a, b in zip(curve, curve[1:]))
+                assert all(a <= b + 1e-12 for a, b in itertools.pairwise(curve))
                 assert all(0.0 <= p <= 1.0 for p in curve)
 
 
@@ -300,7 +302,7 @@ def test_the_style_knob_has_four_stops(ac):
     assert ai.aux_spec("actuary") == ("Style", 0.0, 3.0, 1.0, True)
     assert ai.aux_names("actuary") == ("Greedy", "Field", "Learning", "Hunt")
     for aux, stop in ((0.0, ac.GREEDY), (0.5, ac.GREEDY), (1.0, ac.FIELD), (1.9, ac.FIELD),
-                      (2.0, ac.LEARNING), (9.0, ac.LEARNING), ("junk", ac.FIELD)):
+                      (2.0, ac.LEARNING), (9.0, ac.LEARNING), (cast(Any, "junk"), ac.FIELD)):
         seat = Player(1, "P1", (0, 0, 0), ai_params=AiParams(aux=aux))
         assert ac._stop_of(seat) == stop, aux
         assert ac.is_oracle_seat(seat) == (stop == ac.LEARNING)
