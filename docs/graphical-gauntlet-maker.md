@@ -96,6 +96,20 @@ all stay.
     it, and leave a re-export in render.
   - A gated lane is drawn dashed, with its `Target.short()` label ("≤12").
   - A hidden lane, and any stage only it reaches, is not drawn until met.
+- **One graph drawer, shared with the maker.** All the drawing above goes in a
+  new shell module, `stagegraph.py`, which Phase 3's editor uses too. It knows
+  nothing of the menu or the maker. It takes the surface, a `WorldView` onto
+  `GRAPH_BOX`, and a list of stage nodes and lanes. Each node carries a
+  position, a label and a state (cleared, won, open, locked, selected,
+  invalid). Each lane carries its ends, whether it is gated, its label, whether
+  it is hidden and whether it is invalid. The module draws them and returns a
+  rect per node, for hit-testing.
+  - The menu builds those nodes and lanes from `open_stages` / `cleared`, and
+    the maker from its draft and its `problems()`.
+  - It imports neither `engine` nor `ai`, and never mutates what it is given.
+    Add it to CLAUDE.md's shell module list.
+  - Building it here, read-only, means Phase 3 starts with its canvas already
+    drawn. The maker adds only the rubber band and the drag on top.
 - **The detail strip.** Tapping a node selects it, and a strip under the graph
   shows its title, best, target and each way on with what it needs ("Shortcut:
   win in 12"). It has **Play** (the existing `_load_stage` + `_start`) and, in a
@@ -107,9 +121,12 @@ all stay.
 - **Win overlay.** Next stage (N) is unchanged: it uses `gauntlet.next_stage`,
   and a fork sends the player to the graph.
 
-Tests: `tests/test_menu*.py`. Every node's rect is inside the panel at 1, 25 and
-64 stages and at scale 1, 1.5 and 2. Hidden stages are absent, and a locked node
-is not clickable.
+Tests:
+- `tests/test_menu*.py`: every node's rect is inside the panel at 1, 25 and 64
+  stages and at scale 1, 1.5 and 2. Hidden stages are absent, and a locked node
+  is not clickable.
+- `tests/test_stagegraph.py` (headless): every state draws, the returned rects
+  match the view, and a hidden lane draws nothing.
 
 ## Phase 3: the gauntlet maker (new shell `gauntletmaker.py`, core `GauntletDraft`)
 
@@ -127,13 +144,42 @@ list in `test_no_core_module_imports_pygame` and in CLAUDE.md).** It follows the
 - `to_gauntlet()` goes through `Gauntlet.from_dict`, and the result must pass
   `checkBody` unchanged.
 
-**Editor (shell).** It is mapmaker-shaped and reuses `geometry.WorldView` for
-pan and zoom. It copies mapmaker's small pieces rather than refactoring mapmaker
-(114 tests depend on its private functions): the rect registry with `_hit`,
-`_pick_node`/`_pick_lane`, press/drag/release, the whole-draft undo/redo
-snapshots, the confirm modal, status ageing, `_pinch` and sidebar scroll. If the
-copy turns out large, extract only the pure geometry pickers into a shared helper
-in a follow-up.
+**First, extract the shared editing machinery from mapmaker (its own PR, and
+it changes no behaviour).** About 600 of mapmaker's 2,331 lines would serve any
+node-and-lane editor. The other ~1,700 are about maps: seats, owners, the
+palette, the economy sliders, auto-lanes, box select and the spacing rules. A
+copy would leave about 500 lines of gesture code to fix in two places, so the
+generic part moves into a new shell module, `editkit.py`. It holds:
+- **Layout:** the top strip, sidebar and footer rects measured with `config.s()`,
+  the footer wrap, portrait and compact (`mapmaker.py:303-392`, `:665-703`).
+- **Hit-testing:** the rect registry and `_hit` (`:1380`).
+- **Pickers:** `pick_node` and `pick_lane`, the latter cycling through
+  overlapping lanes (`:2146-2200`). They take positions and pairs, never a
+  `CustomMap`.
+- **Gestures:**
+  - `_pinch` (`:705`) and sidebar scroll (`:749`);
+  - the zoom cluster (`:469`);
+  - the press, drag and release state for a node drag, a rubber-band lane and a
+    pan. This includes the move threshold and the rule that a drag pushes its
+    undo entry only on its first move (`:1534-1610`).
+- **Undo:** a stack of whole-model snapshots capped at `config.EDIT_UNDO_DEPTH`
+  (`:1687-1725`). The kit doesn't know what a snapshot holds; each editor
+  supplies its own "adopt" step.
+- **Text and dialogs:** the text field with `softkeyboard` (`:1194`), the
+  confirm modal (`:1211`, `:1224`, `:1635`), and status ageing.
+
+Mapmaker keeps its private names (`_undo`, `_redo`, `_push_undo`, `_adopt`,
+`_hit`, `_view_rect`, `_side_rect`, `_footer_rect`, `_build_view`) as thin
+wrappers over the kit, because `tests/test_mapmaker.py` calls them. **Its 114
+tests pass with no edit**, and that is the proof the extraction moved nothing.
+`editkit.py` joins CLAUDE.md's shell module list. The kit holds no editor's
+model, so each editor's `Editor` dataclass carries the kit's state as fields.
+
+**Editor (shell).** Built on `editkit` and `stagegraph` (Phase 2), so it does
+not redraw the canvas. It holds a `GauntletDraft` and a `geometry.WorldView`
+onto `GRAPH_BOX`, never a `Gauntlet` or a `Settings`. What is left to write is
+what is particular to gauntlets: the tools, the two sidebars, setup and target
+editing, save, and the wiring.
 
 - **Tools:**
   - **Stages:** tap empty space to add a stage, drag to move, tap to select.
@@ -173,8 +219,12 @@ in a follow-up.
   Portrait moves the sidebar to the bottom, and compact scrolls the sidebar.
   Nothing has a fixed pixel size.
 
-Tests: `tests/test_gauntletdraft.py` (pure) and `tests/test_gauntletmaker.py`,
-headless in the same way as `test_mapmaker.py`:
+Tests:
+- **For the extraction:** `tests/test_mapmaker.py`, unchanged, plus
+  `tests/test_editkit.py` for the pickers, the undo cap and the drag threshold.
+- **For the maker:** `tests/test_gauntletdraft.py` (pure) and
+  `tests/test_gauntletmaker.py`, headless in the same way as
+  `test_mapmaker.py`:
 - placing, dragging, a lane, gating a lane, undo;
 - the save round trip through `from_dict` and the shared `checkBody` fixture;
 - the Play gate on blockers;
@@ -317,20 +367,49 @@ Main wiring tests:
   - the Gauntlets paragraph: lane targets, the maker, runs, and "a boon game is
     unpostable; boons live in `GameLog.boons`, never `Settings`";
   - the core module list: `boons`, `run`, `gauntletdraft`;
-  - the shell list: `gauntletmaker`;
+  - the shell list: `gauntletmaker`, `stagegraph`, `editkit`. Also note under
+    *Hand-authored maps* that mapmaker's gesture and undo machinery lives in
+    `editkit`;
   - the derived-stream list: run offers.
 
 ## Order and PR shape
 
-There are five PRs, each usable on its own:
+There are six PRs, each usable on its own:
 1. the format;
-2. the graph view, which is useful at once for existing gauntlets;
-3. the maker;
+2. the graph view and `stagegraph`, which are useful at once for existing
+   gauntlets;
+3. the maker:
+   - 3a: `editkit` extracted from mapmaker, with no behaviour change;
+   - 3b: `GauntletDraft` and the editor;
 4. boons in the log;
 5. runs.
 
-Phases 1 and 2 unblock the board's hidden-lane idea as well. Phase 4 has no UI
-entry point until phase 5, but it is tested headless.
+Phases 1 and 2 alone already give branching gauntlets with shortcuts and hidden
+bonus stages, written by hand, and they unblock the board's hidden-lane idea.
+Phase 4 has no UI entry point until phase 5, but it is tested headless.
+
+### Size estimate
+
+These are estimates scaled from code already in the repo, not counts from a
+design. For scale, the map maker and `custommap` come to about 4,550 lines with
+their tests.
+
+| Phase | New or changed code | Tests | Size | Main reuse |
+|---|---|---|---|---|
+| 1. Format | ~250 (`gauntlet.py` ~180, `checkBody` ~70) | ~250 | Small | `Target`, `_target`, the existing `from_dict` and `checkBody` |
+| 2. Graph view + `stagegraph` | ~450 (replaces ~150 in menu) | ~200 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
+| 3a. `editkit` extraction | ~650 moved, ~100 net new | ~100 | Medium, mechanical | mapmaker's own code, guarded by its 114 tests |
+| 3b. Gauntlet maker | ~1,100 (`GauntletDraft` ~300, editor ~700, wiring ~100) | ~800 | Large | `editkit`, `stagegraph`, the `custommap` pattern, `softkeyboard`, `gauntlet.remember`/`ask_listing`/`link_fragment` |
+| 4. Boons in the log | ~250 | ~200 | Small, but it touches replay (run the full suite) | the Hint's unpostable path, the `strategies` stamp in `reconstruct` |
+| 5. Runs | ~900 (`run.py` ~300, run view and boon pick ~400, wiring ~200) | ~450 | Medium-large | the Phase 2 graph view, `webstore`, the `stage_ui` pattern |
+| Docs | ~400 lines of prose | n/a | Small | mostly moving *proposed* sections to *built* |
+
+The total is about 3,000-3,500 lines of game code and 2,000 lines of tests.
+Sharing through `editkit` and `stagegraph` cuts the maker from about 1,500
+lines to about 1,100, and keeps the gesture handling in one place. The parts
+most likely to grow are the maker's stage sidebar (editing several briefing
+paragraphs in pygame, and getting a setup in from the menu) and the main wiring
+for runs.
 
 ## Verification
 
