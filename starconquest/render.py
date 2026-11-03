@@ -3456,6 +3456,7 @@ _COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is
     coach.GAMBLE: _BTN_DANGER[1],
     coach.SURPRISE: _BTN_AMBER[1],
     coach.EMPTIED: _BTN_DANGER[1],
+    coach.EVACUATED: _BTN_TEAL[1],
     coach.IDLE: _BTN_AMBER[1],
     coach.TURN: _BTN_VIOLET[1],
 }

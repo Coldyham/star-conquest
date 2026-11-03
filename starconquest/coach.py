@@ -9,7 +9,8 @@ when nothing is hidden any more, and flags the turns worth a second look:
   expect, it was a gamble; at or above it, the owner reinforced or a rival
   landed too.
 - **Emptied, then lost.** A system we sent at least half its garrison out of
-  and lost within the next three turns.
+  and lost within the next three turns. When the ships sent out could not
+  have held it against what landed, it was an **evacuation**, noted as such.
 - **Idle ships.** A system holding enough to take a neutral next door on every
   roll, with no rival next door, sending nothing for `IDLE_TURNS` turns or more.
 - **The turning point.** The turn our income (`fog.player_totals`, as the
@@ -37,6 +38,7 @@ EMPTIED_SHARE = 0.5  # a launch of at least this share of the garrison empties i
 GAMBLE = "gamble"      # an attack below the sure count that failed
 SURPRISE = "surprise"  # a sure-looking attack that failed anyway
 EMPTIED = "emptied"    # a system sent out and then lost
+EVACUATED = "evacuated"  # the same, but staying would have lost it anyway
 IDLE = "idle"          # ships sitting beside a sure capture
 TURN = "turn"          # the turn the game turned, for or against us
 
@@ -83,7 +85,7 @@ def review(states: list[GameState], orders: list[list[Order]], seat: int,
     mine = [[o for o in turn if o.owner_id == seat and o.ships > 0] for turn in orders]
     mine += [[] for _ in range(len(states) - len(mine))]
     attacks, captures, failed = _attacks(states, mine, seat)
-    emptied, lost = _emptied(states, mine, seat)
+    emptied, lost = _emptied(states, orders, mine, seat)
     notes = attacks + emptied + _idle(states, mine, seat)
     turning = _turning_point(states, seat)
     notes.sort(key=lambda n: -n.cost)
@@ -161,11 +163,18 @@ def _attacks(states: list[GameState], mine: list[list[Order]], seat: int
     return notes, captures, failed
 
 
-def _emptied(states: list[GameState], mine: list[list[Order]], seat: int
-             ) -> tuple[list[Note], int]:
-    """Systems we lost soon after sending most of their garrison away."""
+def _emptied(states: list[GameState], orders: list[list[Order]], mine: list[list[Order]],
+             seat: int) -> tuple[list[Note], int]:
+    """Systems we lost soon after sending most of their garrison away.
+
+    The note names the one launch that emptied the system, its own ships against
+    its own board's garrison (a sum over several turns could outnumber any one
+    board's). A loss that staying could not have stopped (everything sent in the
+    window back home, against the rival force that landed, still falls on most
+    rolls) was an evacuation, and is noted as one rather than as a lesson."""
     notes: list[Note] = []
     lost = 0
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
     for i in range(len(states) - 1):
         before, after = states[i], states[i + 1]
         for sid, node in before.systems.items():
@@ -174,19 +183,70 @@ def _emptied(states: list[GameState], mine: list[list[Order]], seat: int
             lost += 1
             window = range(max(0, i - EMPTIED_WINDOW), i + 1)
             launched = {j: sum(o.ships for o in mine[j] if o.source_id == sid) for j in window}
-            first = next((j for j in window if launched[j]), None)
-            if first is None:
+            emptying = [j for j in window if launched[j] > 0
+                        and launched[j] >= EMPTIED_SHARE * states[j].systems[sid].ships]
+            if not emptying:
                 continue
+            first = max(emptying, key=lambda j: (launched[j], -j))
             held = states[first].systems[sid].ships
-            sent = sum(launched.values())
-            if held <= 0 or sent < EMPTIED_SHARE * held:
-                continue
+            sent = launched[first]
             taker = after.systems[sid].owner_id
+            name = _name(before, sid)
             by = f"{_who(after, taker)} took it" if taker != 0 else "it was lost"
-            text = (f"You sent {sent} of {held} ships out of {_name(before, sid)}; "
-                    f"{by} on turn {i + 1}.")
+            # What staying would have met: the strongest rival landing that turn,
+            # against the garrison plus every ship sent out in the window.
+            stayed = node.ships + sum(launched[j] for j in window if j < i)
+            landing = _landing(before, orders[i] if i < len(orders) else [], sid, seat)
+            pid, force = max(landing.items(), key=lambda kv: (kv[1], kv[0] == taker),
+                             default=(taker, 0))
+            rival = _who(after, pid)
+            if force > 0 and combat.fight_odds(force, stayed, jitter, advantage).capture >= 0.5:
+                text = (f"You pulled {sent} of {held} ships out of {name} before {rival}'s "
+                        f"{force} landed; {stayed} could not have held it, so that saved "
+                        f"them. {by[0].upper()}{by[1:]} on turn {i + 1}.")
+                notes.append(Note(first, EVACUATED, text, (sid,), 0.0))
+                continue
+            took = _captured_by(states, mine[first], first, sid, seat)
+            gain = f" and took {_names(before, took)} with them" if took else ""
+            by = f"{_who(after, taker)} took {name}" if took and taker != 0 else by
+            text = f"You sent {sent} of {held} ships out of {name}{gain}; {by} on turn {i + 1}."
+            if force > 0:
+                text += f" Kept home, {stayed} would likely have held {name} against {rival}'s {force}."
             notes.append(Note(first, EMPTIED, text, (sid,), float(held)))
     return notes, lost
+
+
+def _captured_by(states: list[GameState], launches: list[Order], turn: int, sid: int,
+                 seat: int) -> list[int]:
+    """Systems the launches out of ``sid`` on ``turn`` took when they landed:
+    what the emptying bought, the coach's one view of a trade."""
+    took: list[int] = []
+    for dest in sorted({o.dest_id for o in launches if o.source_id == sid}):
+        t = states[turn].travel_turns(sid, dest)
+        landed = turn + t if t is not None else len(states)
+        if (landed < len(states) and states[landed - 1].systems[dest].owner_id != seat
+                and states[landed].systems[dest].owner_id == seat):
+            took.append(dest)
+    return took
+
+
+def _names(state: GameState, sids: list[int]) -> str:
+    names = [_name(state, sid) for sid in sids]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _landing(state: GameState, turn_orders: list[Order], sid: int, seat: int) -> dict[int, int]:
+    """Rival ships landing on ``sid`` during the turn played from ``state``, by
+    owner: fleets a step out, and this turn's launches one turn away."""
+    force: dict[int, int] = defaultdict(int)
+    for f in state.fleets:
+        if f.dest_id == sid and f.owner_id != seat and f.turns_remaining <= 1:
+            force[f.owner_id] += f.ships
+    for o in turn_orders:
+        if (o.dest_id == sid and o.owner_id != seat and o.ships > 0
+                and state.travel_turns(o.source_id, sid) == 1):
+            force[o.owner_id] += o.ships
+    return dict(force)
 
 
 def _idle(states: list[GameState], mine: list[list[Order]], seat: int) -> list[Note]:
