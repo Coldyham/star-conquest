@@ -6,6 +6,7 @@
     uv run python tools/par_search.py --game-key 06a74fc834bdf656  # a live board map
     uv run python tools/par_search.py --seed 42 --dice honest --width 4 --budget 300
     uv run python tools/par_search.py ... --out best.json       # keep the winning line
+    uv run python tools/par_search.py ... --every-count         # every launch size, for small maps
 
 Plays the human seat as a person would, knowing exactly what every bot will do,
 and reports three numbers for the setup:
@@ -221,9 +222,22 @@ def _all_in(state: GameState, orders: list[Order]) -> list[Order]:
             for o in orders]
 
 
-def candidates(state: GameState, me: int, names: tuple[str, ...] = CANDIDATES) -> list[list[Order]]:
+def _lane_sends(state: GameState, me: int, every_count: bool) -> Iterator[Order]:
+    """One launch down each of ``me``'s lanes, all-in, or with ``every_count`` every
+    size from one ship up."""
+    for s in state.systems.values():
+        if s.owner_id == me:
+            counts = range(1, s.ships + 1) if every_count else range(s.ships, s.ships + 1)
+            for nbr in s.neighbors:
+                for n in counts:
+                    yield Order(me, s.id, nbr, n)
+
+
+def candidates(state: GameState, me: int, names: tuple[str, ...] = CANDIDATES,
+               every_count: bool = False) -> list[list[Order]]:
     """Distinct order sets worth trying for ``me`` this turn: each borrowed bot's,
-    each sent all-in, holding, and the first bot's with one strike dropped."""
+    each sent all-in, holding, one launch down each lane (`_lane_sends`), and the
+    first bot's with one strike dropped."""
     found: list[list[Order]] = []
     seen: set[tuple] = set()
 
@@ -242,6 +256,8 @@ def candidates(state: GameState, me: int, names: tuple[str, ...] = CANDIDATES) -
         add(orders)
         add(_all_in(state, orders))
     add([])
+    for order in _lane_sends(state, me, every_count):
+        add([order])
     if first:
         strikes = [o for o in first if state.systems[o.dest_id].owner_id != me]
         for o in strikes[:DROP_ONE_CAP]:
@@ -305,7 +321,8 @@ class Search:
                  policies: tuple[str, ...] = ROLLOUT_POLICIES,
                  budget: float = 600.0, max_turns: int = MAX_TURNS,
                  verbose: bool = False,
-                 strategies: dict[int, str] | None = None) -> None:
+                 strategies: dict[int, str] | None = None,
+                 every_count: bool = False) -> None:
         self.cfg, self.seed = cfg, seed
         self.root = build_state(cfg, seed)
         for pid, name in (strategies or {}).items():
@@ -318,6 +335,7 @@ class Search:
         self.me = human.id
         self.dice, self.width, self.names, self.policies = dice, width, names, policies
         self.budget, self.max_turns, self.verbose = budget, max_turns, verbose
+        self.every_count = every_count
         self.best = Best()
         self.stats = Stats()
         self.started = 0.0
@@ -354,7 +372,7 @@ class Search:
 
     def expand(self, node: Node) -> Iterator[Node]:
         self.stats.expanded += 1
-        for orders in candidates(node.board, self.me, self.names):
+        for orders in candidates(node.board, self.me, self.names, self.every_count):
             board = clone(node.board)
             record = step(board, orders)
             yield Node(board, node, record)
@@ -527,6 +545,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help="rollout bots for the human seat; a child keeps its best")
     ap.add_argument("--budget", type=float, default=600.0, help="seconds")
     ap.add_argument("--max-turns", type=int, default=MAX_TURNS)
+    ap.add_argument("--every-count", action="store_true",
+                    help="try every size of launch down each lane, not only all-in")
     ap.add_argument("--out", help="save the best line as a game log here")
     ap.add_argument("--verbose", action="store_true")
     return ap.parse_args(argv)
@@ -540,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
     search = Search(cfg, seed, dice=args.dice, width=args.width,
                     names=tuple(args.candidates), policies=tuple(args.policy), budget=args.budget,
                     max_turns=args.max_turns, verbose=args.verbose,
-                    strategies=strategies)
+                    strategies=strategies, every_count=args.every_count)
     rivals = [search.root.players[p].ai_strategy for p in sorted(rivals_of(search.root, search.me))]
     root_floor = floor(search.root, search.me)
     print(f"setup: {cfg.mode}, {len(search.root.systems)} systems, {cfg.players} players, "
