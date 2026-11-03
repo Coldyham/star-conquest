@@ -508,6 +508,15 @@ def land_quick_post(ui: Ui, figures: tuple[int, int], status: str, body: str) ->
     ui.posted_key, ui.share_msg = summary
 
 
+def land_post_name(ui: Ui, status: str, body: str) -> None:
+    """Put the signed-in player's claimed name on the quick post button, if the
+    board answered one. Too late once a post has started: the answer it lands on
+    names who it was posted as."""
+    name = body.strip() if status == pbp.OK else ""
+    if name and not ui.post_state:
+        ui.post_as = name
+
+
 def open_map_page(key: str) -> str:
     """Open the board's page for the map ``key``. Returns a line for the overlay
     when it could not, else ``""``."""
@@ -1482,6 +1491,7 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         record_best(settings, state, ui)
         # Read here, once the result is ours, never in `render`.
         ui.post_as = share.quick_post_name()
+        ui.post_name_due = True
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
     if ui.in_pbp and not ui.spectating:
@@ -1994,6 +2004,8 @@ async def main() -> None:
     # A quick post in flight: the Ui it reports to, the request, and the posted
     # (turns, lost). Landed on that Ui even if the player has moved on.
     pending_post: tuple[Ui, pbp.Request, tuple[int, int]] | None = None
+    # The signed-in name a decided game's quick post asked for, and its Ui.
+    pending_name: tuple[Ui, pbp.Request] | None = None
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         asked = daily.link(webstore.url_token())
         if asked is not None:
@@ -2055,6 +2067,15 @@ async def main() -> None:
             if dstate != pbp.PENDING:
                 pending_daily = None
                 land_daily(menu_state, settings, dstate, dbody, pending_daily_kind)
+        if ui is not None and ui.post_name_due:
+            ui.post_name_due = False
+            asked = share.signed_in_name()
+            pending_name = None if asked is None else (ui, asked)
+        if pending_name is not None:
+            nstate, nbody = pending_name[1].poll()
+            if nstate != pbp.PENDING:
+                land_post_name(pending_name[0], nstate, nbody)
+                pending_name = None
         if pending_post is not None:
             pstate, pbody = pending_post[1].poll()
             if pstate != pbp.PENDING:

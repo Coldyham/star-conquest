@@ -519,8 +519,11 @@ class Ui:
     # Quick post (`share.quick_post`): the name the leaderboard button posts under
     # without the entry form ("" for the form), and how far the post has got:
     # "", "posting", "posted" (the button then opens the map's page, `posted_key`)
-    # or "failed" (the button falls back to the form).
+    # or "failed" (the button falls back to the form). `post_as` starts as the
+    # remembered name; `post_name_due` asks main to replace it with the signed-in
+    # player's claimed name, if they own one (`share.signed_in_name`).
     post_as: str = ""
+    post_name_due: bool = False
     post_state: str = ""
     posted_key: str = ""
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only

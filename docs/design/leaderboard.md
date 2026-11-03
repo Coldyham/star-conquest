@@ -604,9 +604,15 @@ and the fork-preview risk is held by the "Require approval" policy.
 ### Quick post
 
 **One press posts a win, without the entry form.** Built 2026-11-02. Once
-this browser has a posting name (`sc_pbp_name`, set by posting once through
-the form or by claiming a play-by-post seat), the win overlay's leaderboard
-button reads *Post as <name>*. Pressing it uploads the log as the form's
+this browser has a posting name, the win overlay's leaderboard button reads
+*Post as <name>*. The name is the claimed name of the player signed in on the
+board, if they own one (`post.mjs`'s `ownName`, asked through `pbp.settle` as
+the game is decided: `share.signed_in_name`). Failing that, it is the name the
+browser remembers (`sc_pbp_name`, set by posting once through the form or by
+claiming a play-by-post seat). With neither, the button is *Post on
+leaderboard*, which opens the form. A claimed name that answers after a post
+has started is ignored, so the summary names who the score went in as.
+Pressing it uploads the log as the form's
 button does, then imports the board's own `leaderboard/js/post.mjs` into the
 page and calls `quickPost(token, name)` (`share.quick_post`, through
 `pbp.settle`'s mailbox). That module is also what the submit page posts with
@@ -618,14 +624,15 @@ lookup, user lookup and grant-checked insert are written once.
   (`share.post_summary`). After that the button becomes *View on board*.
 - **Failure falls back to the form.** If the post can't start (desktop, no
   bridge), the press opens the form. If it is refused, the button becomes
-  *Enter on leaderboard*. Once the score is in, the summary read is quiet
+  *Post on leaderboard*. Posting under a name someone else has claimed is
+  refused this way, before the score is sent (`ensureUser`). Once the score is in, the summary read is quiet
   (`.catch(() => [])`), so a later failure can never send the player to the
   form to post a second time.
 - **No embargo, no tags, no other name.** The form still covers those. If
   the setter of a brand-new map wants an embargo, they use *Challenge a
   friend* and paste the link into the form. The button only becomes quick
-  post once a name is remembered, so a browser that has never posted still
-  goes through the form.
+  post once there is a name, so a browser that has never posted and isn't
+  signed in still goes through the form.
 - **Web only.** Desktop has no page to run the module in, and keeps opening
   the form. `/board/js/*` is served with `Access-Control-Allow-Origin: *`, so
   a game on a local server or a custom domain can import the module from the
