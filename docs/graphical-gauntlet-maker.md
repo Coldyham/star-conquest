@@ -1,4 +1,4 @@
-# Branching gauntlets, an in-game gauntlet maker, and roguelite runs with boons
+# Branching gauntlets, a gauntlet maker on the board, and roguelite runs with boons
 
 *Working plan, kept here so the work can move between machines. Planned
 2026-11-03 at `cf92eb9`. Not part of the design docs: as each phase lands, its
@@ -21,10 +21,10 @@ canvas past about 25 stages.
   so it scores as a different map (*Carry-over*).
 
 This plan builds all three:
-1. an in-game gauntlet maker in the style of the map maker, where stages are
-   nodes you drag around in 2D and lanes are one-way arrows that can carry
-   targets;
-2. a graph view in place of the stage list;
+1. lane editing on the board's existing gauntlet page: each stage card gets a
+   row of "Leads to" chips, and a lit chip carries the lane's options (two-way,
+   a target, hidden). A diagram drawn by the page shows the shape;
+2. a graph view in place of the game's stage list;
 3. roguelite runs with simple boons.
 
 The boons answer the old objection the way the Hint does. A boon never touches
@@ -32,12 +32,32 @@ The boons answer the old objection the way the Hint does. A boon never touches
 unpostable, the same as a hinted one. Its result counts only towards the run.
 
 Decisions taken with the user (2026-11-03):
-- the maker lives in the game, beside the map maker;
+- **the maker is the board's `gauntlet.html`, grown, not a new editor in the
+  game.** The first draft put it in the game beside the map maker, only so as to
+  reuse the map maker. But a gauntlet's lanes have no length and the game shows
+  no geometry, so what the map maker would lend (placing, dragging, pan and zoom)
+  is the part a gauntlet doesn't need. Everything a stage does need is already
+  on the board page: pasted links, briefings, hints, the link's score and "Beat
+  the best bot" as targets (only the board reads `bot_scores`), `checkBody`,
+  Save and listing. HTML forms also edit text far better on a phone than a
+  pygame sidebar with `softkeyboard`;
+- **a stage's place on the graph is computed, never stored.** There is no `at`
+  field. `layout` places stages by depth and order ("Layout", Phase 2), and the
+  author's only say in the picture is the stages' order within a column;
 - a run is a stored local record alongside bests, so any gauntlet can be played
   freely or as a run;
 - the boons are extra home ships, home production −1 and scouting;
 - boons are optional per stage, so a stage played without them still posts and
   still clears a best.
+
+What is given up by not building in the game, judged acceptable:
+- **Trying a stage from inside the maker.** On the board the author plays the
+  stage in the game and pastes its challenge link back, which is today's flow and
+  already sets the target. Each card gets a Play link to make that one click.
+- **Making a gauntlet with no board** (`LEADERBOARD_ORIGIN` blank, or offline).
+  Hand-written files still work on desktop, and the page's `.json` download
+  covers getting a board-made one onto disk.
+- **"Use menu setup" in place of Get Link.** A convenience, not a capability.
 
 ## Phase 1: the format grows (core `gauntlet.py`, board `gauntlet-build.mjs`)
 
@@ -45,14 +65,11 @@ This follows *Later: targets on lanes* in `gauntlet.md` as written. Every
 addition is optional, so no existing file changes meaning.
 
 - **A target on a lane:** `[a, b, {"turns": 12, "lost": 30, "hidden": true, "two_way": true}]`.
-  - Parse with the existing `_target`.
+  - Parse with the existing `_target`, so the bot shape
+    (`{"turns", "lost", "bot", "beat": true}`) works on a lane as on a stage.
   - `Gauntlet` gains `lane_targets: dict[(a, b), Target]` and `hidden: frozenset`.
-  - A bad target means the lane has none.
-- **A stage's place on the graph:** `"at": [x, y]`, ints in a 0..1000 box
-  (`GRAPH_BOX`), clamped on read.
-  - When it is missing, `layout(g)` places stages by depth (column) and rank
-    within the depth (row). Existing linear gauntlets therefore draw as a row
-    with no file change.
+  - A bad target means the lane has none. `hidden` on an ungated lane is
+    dropped: there is nothing to reveal it.
 - **Run end stages:** `"goal": [ids]`.
   - Default: the sinks reached by ungated lanes, so a bonus dead end is never a
     goal.
@@ -69,14 +86,16 @@ addition is optional, so no existing file changes meaning.
     opens.
 - **Derived labels, never stored.** A gated lane is a "Shortcut" when it skips
   depth, or "Bonus" when its far end leads back to no goal.
-- **New `to_dict(g)`.** It writes the canonical file. The maker needs it, and
+- **New `to_dict(g)`.** It writes the canonical file, and
   `from_dict(to_dict(g)) == g` gets a test.
-- **`checkBody` / `_from_dict` parity.** `checkBody` learns `at`, the lane keys
-  `turns`/`lost`/`hidden`, `goal` and `run`. Add a shared fixture read by both
-  the Python and JS suites, the way `gauntlet-spec.json` works.
-- **Board remix.** `gauntlet.html`, opened on a gauntlet that has lanes, `at` or
-  targets, says "open it in the game's gauntlet maker" instead of silently
-  flattening it to a linear one.
+- **`checkBody` / `_from_dict` parity.** `checkBody` learns the lane keys
+  `turns`/`lost`/`bot`/`beat`/`hidden`, `goal` and `run` (today it refuses any
+  lane key but `two_way`, and drops unknown top-level keys). Add a shared
+  fixture read by both the Python and JS suites, the way `gauntlet-spec.json`
+  works.
+- **Until Phase 3 lands**, `gauntlet.html` opened on a gauntlet with lanes says
+  "this gauntlet branches; saving here would make it linear" instead of
+  silently flattening it. Phase 3 replaces the warning with real editing.
 
 Tests: extend `tests/test_gauntlet.py` (lane gates, hidden, depth over ungated,
 goal default, round trip) and `leaderboard/tests/gauntlet-build.test.mjs`.
@@ -87,8 +106,40 @@ goal default, round trip) and `leaderboard/tests/gauntlet-build.test.mjs`.
 the same modal. The heading, gauntlet picker, notes, Leave, Copy link and Close
 all stay.
 
-- **Nodes.** Stages are drawn at `layout(g)` positions, scaled to fit the panel
-  whatever the stage count, which fixes the overflow.
+### Layout (core `gauntlet.layout`, mirrored by the board)
+
+Positions are computed from the graph, never stored, so the game and the board
+must agree on them. `gauntlet.layout(g, shown=None)` returns a
+`{stage id: (column, row)}` grid, pure and deterministic:
+
+- **Column is depth over ungated lanes** (`depths()`), so the main path reads
+  left to right and a shortcut is a long arrow, not a stage moved forward.
+- **A stage reached only by gated lanes** has no ungated depth. It goes one
+  column past the shallowest stage a lane into it comes from.
+- **A stage no start reaches** (a `problems()` blocker) goes in a last column of
+  its own, so the board can draw it red rather than drop it.
+- **Row is the stages' list order within the column**, then one pass of
+  crossing reduction: each column after the first is sorted by the average row
+  of its parents (ties keep list order). One pass, not iterated, so the author's
+  order still decides most of the picture and a small edit never reshuffles it.
+- **Hidden stages are laid out, then left undrawn.** The grid is computed over
+  the whole graph, so revealing a bonus stage moves nothing else. The cost is a
+  gap where it will appear; the board's diagram nudges the author to put such a
+  stage last in its column, so the gap is at the edge.
+- **Two-way lanes** don't change depth beyond what their forward direction
+  gives, and are drawn as a double-headed arrow.
+
+`leaderboard/js/gauntlet-graph.mjs` implements the same function for the board.
+A shared fixture, `tests/fixtures/gauntlet-layout.json` (graphs and their
+expected grids: linear, a fork that rejoins, a shortcut, a gated bonus, a
+hidden bonus, an unreachable stage, a two-way lane), is read by
+`tests/test_gauntlet.py` and `leaderboard/tests/gauntlet-graph.test.mjs`, so the
+two cannot drift.
+
+### The view
+
+- **Nodes.** Stages are drawn at their `layout` cell, the grid scaled to fit the
+  panel whatever the stage count, which fixes the overflow.
 - **Node states:** cleared ✓, won short of target, open (pulsing), locked
   (dim). Starts and goals get a small mark.
 - **Lanes** are arrows.
@@ -96,24 +147,17 @@ all stay.
     it, and leave a re-export in render.
   - A gated lane is drawn dashed, with its `Target.short()` label ("≤12").
   - A hidden lane, and any stage only it reaches, is not drawn until met.
-- **One graph drawer, shared with the maker.** All the drawing above goes in a
-  new shell module, `stagegraph.py`, which Phase 3's editor uses too. It knows
-  nothing of the menu or the maker. It takes the surface, a `WorldView` onto
-  `GRAPH_BOX`, and a list of stage nodes and lanes. Each node carries a
-  position, a label and a state (cleared, won, open, locked, selected,
-  invalid). Each lane carries its ends, whether it is gated, its label, whether
-  it is hidden and whether it is invalid. The module draws them and returns a
-  rect per node, for hit-testing.
-  - The menu builds those nodes and lanes from `open_stages` / `cleared`, and
-    the maker from its draft and its `problems()`.
-  - It imports neither `engine` nor `ai`, and never mutates what it is given.
-    Add it to CLAUDE.md's shell module list.
-  - Building it here, read-only, means Phase 3 starts with its canvas already
-    drawn. The maker adds only the rubber band and the drag on top.
+- **The drawer is its own shell module**, `stagegraph.py`, so the run view
+  (Phase 5) draws with it too. It knows nothing of the menu. It takes the
+  surface, a rect, and a list of stage nodes (cell, label, state) and lanes
+  (ends, gated, label, hidden), draws them and returns a rect per node for
+  hit-testing. It imports neither `engine` nor `ai`, and never mutates what it
+  is given. Add it to CLAUDE.md's shell module list.
 - **The detail strip.** Tapping a node selects it, and a strip under the graph
   shows its title, best, target and each way on with what it needs ("Shortcut:
   win in 12"). It has **Play** (the existing `_load_stage` + `_start`) and, in a
-  run, the run controls (Phase 5).
+  run, the run controls (Phase 5). A gauntlet stored on the board (`#g=`) also
+  gets **Edit on the board**, which opens `gauntlet.html#<id>` as a draft.
 - **Keyboard.** Arrow keys move between nodes and Enter plays, so it stays
   usable without a mouse.
 - **Compact.** It keeps working through `_fit_modal`, and the touch targets are
@@ -122,113 +166,117 @@ all stay.
   and a fork sends the player to the graph.
 
 Tests:
+- `tests/test_gauntlet.py`: the layout fixture.
 - `tests/test_menu*.py`: every node's rect is inside the panel at 1, 25 and 64
   stages and at scale 1, 1.5 and 2. Hidden stages are absent, and a locked node
   is not clickable.
 - `tests/test_stagegraph.py` (headless): every state draws, the returned rects
-  match the view, and a hidden lane draws nothing.
+  match the cells, and a hidden lane draws nothing.
 
-## Phase 3: the gauntlet maker (new shell `gauntletmaker.py`, core `GauntletDraft`)
+## Phase 3: lanes on the board's gauntlet page (`gauntlet.html`, `gauntlet-page.mjs`, `gauntlet-build.mjs`, new `gauntlet-graph.mjs`)
 
-**Model (core, in `gauntlet.py` or a new `gauntletdraft.py`, added to the core
-list in `test_no_core_module_imports_pygame` and in CLAUDE.md).** It follows the
-`custommap` pattern:
-- `GauntletDraft` holds the stages (id, at, title, briefing, hint, settings,
-  target), the lanes with their attributes, start, goal, name and run.
-- `without_stage()` is the only way a stage is deleted.
-- `normalised()` is idempotent.
-- `problems()` is the one validator. It returns `Problem`s that block (no stage,
-  an unreachable stage, a stage with no setup or no int seed, text over the
-  limits, more than `MAX_STAGES`) and ones that warn (a goal-less run, a gated
-  lane to a stage with no other way in).
-- `to_gauntlet()` goes through `Gauntlet.from_dict`, and the result must pass
-  `checkBody` unchanged.
+The page keeps its stage cards: one pasted link per stage, title, briefing,
+hint, target, ↑/↓, Remove. Phase 3 adds the graph to them. Nothing in the game
+changes. A working mockup of the cards, chips, lane options and diagram, with
+the body Save would store: https://claude.ai/artifact/QbeXvScWNfVzj5XK5rubGB
+(private to the author).
 
-**First, extract the shared editing machinery from mapmaker (its own PR, and
-it changes no behaviour).** About 600 of mapmaker's 2,331 lines would serve any
-node-and-lane editor. The other ~1,700 are about maps: seats, owners, the
-palette, the economy sliders, auto-lanes, box select and the spacing rules. A
-copy would leave about 500 lines of gesture code to fix in two places, so the
-generic part moves into a new shell module, `editkit.py`. It holds:
-- **Layout:** the top strip, sidebar and footer rects measured with `config.s()`,
-  the footer wrap, portrait and compact (`mapmaker.py:303-392`, `:665-703`).
-- **Hit-testing:** the rect registry and `_hit` (`:1380`).
-- **Pickers:** `pick_node` and `pick_lane`, the latter cycling through
-  overlapping lanes (`:2146-2200`). They take positions and pairs, never a
-  `CustomMap`.
-- **Gestures:**
-  - `_pinch` (`:705`) and sidebar scroll (`:749`);
-  - the zoom cluster (`:469`);
-  - the press, drag and release state for a node drag, a rubber-band lane and a
-    pan. This includes the move threshold and the rule that a drag pushes its
-    undo entry only on its first move (`:1534-1610`).
-- **Undo:** a stack of whole-model snapshots capped at `config.EDIT_UNDO_DEPTH`
-  (`:1687-1725`). The kit doesn't know what a snapshot holds; each editor
-  supplies its own "adopt" step.
-- **Text and dialogs:** the text field with `softkeyboard` (`:1194`), the
-  confirm modal (`:1211`, `:1224`, `:1635`), and status ageing.
+### The draft
 
-Mapmaker keeps its private names (`_undo`, `_redo`, `_push_undo`, `_adopt`,
-`_hit`, `_view_rect`, `_side_rect`, `_footer_rect`, `_build_view`) as thin
-wrappers over the kit, because `tests/test_mapmaker.py` calls them. **Its 114
-tests pass with no edit**, and that is the proof the extraction moved nothing.
-`editkit.py` joins CLAUDE.md's shell module list. The kit holds no editor's
-model, so each editor's `Editor` dataclass carries the kit's state as fields.
+- **Lanes join stages by a draft key, not by index.** A draft stage gets a
+  `key` (a counter, kept in the stored draft) when it is made, so reordering
+  and removing never rewire a lane. `draft.lanes` is a list of
+  `{from, to, two_way?, gate?, hidden?}` by key, and `draft.start` a list of
+  keys.
+- **`buildBody` numbers stages 0.. in list order, as now, and maps keys to
+  ids.** It writes `lanes` and `start` only when they differ from what
+  `from_dict` assumes (the list-order chain, the first stage open), so a linear
+  gauntlet saves exactly the body it saves today and keeps its id.
+- **Defaults keep the linear case free.** A new draft and **+ Stage** (at the
+  bottom, as now) join the new stage from the last one. An author who never
+  touches a chip gets today's linear gauntlet.
+- **Remove** drops the stage's lanes and its start mark. A stage left with no
+  way in is then flagged by the diagram, not repaired behind the author's back.
+- **`readDraft` keeps the graph.** Opening `gauntlet.html#<id>` on a branching
+  gauntlet loads its lanes, start, lane targets and hidden marks; Phase 1's
+  "would make it linear" warning goes. **Open a file** (a file input, read with
+  `FileReader`) loads a `.json` gauntlet the same way, for desktop files and
+  generated gauntlets the board never saw.
 
-**Editor (shell).** Built on `editkit` and `stagegraph` (Phase 2), so it does
-not redraw the canvas. It holds a `GauntletDraft` and a `geometry.WorldView`
-onto `GRAPH_BOX`, never a `Gauntlet` or a `Settings`. What is left to write is
-what is particular to gauntlets: the tools, the two sidebars, setup and target
-editing, save, and the wiring.
+### Each stage card gains
 
-- **Tools:**
-  - **Stages:** tap empty space to add a stage, drag to move, tap to select.
-  - **Lanes:** drag from one stage to another to make a one-way lane; tap a lane
-    to select it.
-  - **Ends:** tap to toggle a start or a goal.
-- **Sidebar for a selected stage:**
-  - title, hint and briefing paragraphs (add or remove), through the mapmaker
-    filename field and `softkeyboard`;
-  - **Setup:**
-    - *Use menu setup*: the editor stays alive in `main` while the author steps
-      back to the menu and returns, like `editor` today.
-    - *Paste link*: `Settings.from_token`, dropping the challenge.
-    - Either way an int seed is pinned, rolled with `settings.roll_seed` when
-      the setup has none.
-  - **Target:** none; a number of turns (and ships lost) on steppers; or *from
-    my best on this stage*, read from `gauntlet.best`, which is the in-game
-    version of the board's `linkTarget`;
-  - **Try stage:** plays it and returns to the maker afterwards.
-- **Sidebar for a selected lane:** two-way, gated (turns/lost steppers), hidden,
-  delete.
-- **Save:**
-  - Desktop writes `user_dir()/<id>.json`. The web build uses
-    `gauntlet.remember`.
-  - The id is `made-<12 hex of to_dict>`, like `gen-<hash>`.
-  - **Copy link** gives `#gauntlet=`.
-  - **Ask to list on the board** goes through `gauntlet.ask_listing`. It is a
-    separate button press, which is the consent, as the generate form's tickbox
-    is.
-  - Edit (from the graph view) opens a copy. Saving gives a new id, because
-    stored rows never change.
-- **Entry and exit.** `main` gets a scene `"gmaker"` beside `"maker"`
-  (main.py:2512-2527, frame pump around 2798, `reflow` on resize). The graph
-  modal gets **Make new** and **Edit copy** buttons, and the editor returns
-  `"menu"` / `"try"`.
-- **Layout.** The top strip, sidebar and footer are measured with `config.s()`.
-  Portrait moves the sidebar to the bottom, and compact scrolls the sidebar.
-  Nothing has a fixed pixel size.
+- **Leads to:** a row of chips, one per other stage, labelled by its title (or
+  "Stage N"). Lit means a lane from this stage to that one. Tapping an unlit
+  chip adds the lane; tapping a lit chip opens its options. The far stage's own
+  card shows the lane too, as a small "from Stage 2" note, so either end
+  explains it.
+  - **A pair joined the other way.** When B→A already exists, A's chip for B
+    reads "↔ make two-way" rather than adding a second lane, since the format
+    keeps a pair's first lane and drops the second.
+  - **Many stages.** Up to 16 stages every chip shows. Past that, the lit chips
+    show and the rest sit behind "+ Lane to…", a select, so a 64-stage card is
+    not 63 chips.
+- **Open from the start:** a tick per card, writing `start`. The first stage's
+  is ticked by default.
+- **+ After** adds a stage directly below this card with a lane from this one.
+  **+ Branch** adds a stage with a lane from each of this stage's parents (from
+  nothing, and ticked as a start, if this stage is a start), so it lands beside
+  this stage in the same column. These are how most forks get made; the chips
+  are for joining and fixing.
+- **↑/↓** move the stage in list order as now. Since a column's rows are the
+  list order (Phase 2, "Layout"), this is how the author untangles a crossing.
+- **Play** opens the stage's pasted link in the game, so trying a stage and
+  pasting back its challenge link is one round trip.
 
-Tests:
-- **For the extraction:** `tests/test_mapmaker.py`, unchanged, plus
-  `tests/test_editkit.py` for the pickers, the undo cap and the drag threshold.
-- **For the maker:** `tests/test_gauntletdraft.py` (pure) and
-  `tests/test_gauntletmaker.py`, headless in the same way as
-  `test_mapmaker.py`:
-- placing, dragging, a lane, gating a lane, undo;
-- the save round trip through `from_dict` and the shared `checkBody` fixture;
-- the Play gate on blockers;
-- every rect on screen at each tool and scale.
+### The lane's options (shown under the card when a lit chip is tapped)
+
+- **Two-way** (rare, kept for completeness).
+- **Gate:** *None: any clear of this stage opens it*; *Win in N turns* (and
+  optionally *N ships lost*) on number inputs; *Your score from this stage's
+  link* (`linkTarget` on the near stage's pasted challenge link); *Beat the best
+  bot on the board* (`botRows`/`botTarget` for the near stage's setup). These
+  are the stage target's choices, so `applyAim` and its notes are reused, aimed
+  at a lane.
+- **Hidden until met:** enabled only when gated.
+- **The derived label** shows as you set it, from the same rule as the game
+  (Phase 1): "Shortcut" when the lane skips a column, "Bonus" when its far end
+  reaches no goal.
+- **Remove lane.**
+
+### The diagram
+
+A read-only SVG above the cards, drawn from `gauntlet-graph.mjs`'s `layout`
+(Phase 2), so it is the picture the game will show.
+
+- Columns by depth, rows by order; one-way arrows; gated lanes dashed with their
+  short label ("≤12"); hidden lanes dotted with an eye mark; starts and goals
+  marked.
+- **Problems in place:** a stage no start reaches is drawn red in the last
+  column, a gated lane that is a stage's only way in is amber (the warning from
+  Phase 1's rules), and Save says what blocks it, as `draftProblem` does today.
+- Clicking a node scrolls to its card and flashes it; hovering a chip lights its
+  lane in the diagram.
+- It scrolls sideways in its own container past the page width, so 64 stages
+  never widen the page.
+- No dragging, and the diagram never edits. A later step could let a click on A
+  then B toggle a lane, as a shortcut over the chips; it needs no new model.
+
+### Checks
+
+`checkBody` (Phase 1) already refuses what the game would drop. The page adds
+nothing the store doesn't check, and runs `checkBody` before offering Save as
+now. The id hashes the body, so adding a lane is a new row and the old link keeps
+opening the old gauntlet.
+
+Tests (`node --test leaderboard/tests/*.test.mjs`):
+- `gauntlet-graph.test.mjs`: the shared layout fixture, and the derived labels.
+- `gauntlet-build.test.mjs`:
+  - a draft whose chips were never touched builds the same body, byte for byte,
+    as today's linear builder, so its id doesn't move;
+  - keys survive reorder and remove; a removed stage's lanes go;
+  - the reverse-pair chip sets `two_way` and never adds a second lane;
+  - `readDraft` of a branching body round-trips through `buildBody`;
+  - a lane gate from a link, and from bot rows, has the stage target's shape.
 
 ## Phase 4: boons in the game log (core, no `Settings` field)
 
@@ -354,78 +402,87 @@ Main wiring tests:
 - **`gauntlet.md`** (811 lines). Move *Generated gauntlets* out to a new
   `gauntlet-gen.md` to stay under about 1000 lines. Then:
   - turn *Later: targets on lanes* into a built section;
-  - add *The graph view* and *The gauntlet maker*.
+  - add *The graph view* (with *Layout*, and why positions are computed) and
+    *Lanes on the board* (and why the maker is the board page, not an editor
+    in the game).
 - **New `docs/design/runs.md`:**
   - runs, and the record and why it is stored;
   - boons, and why they are unpostable rather than a setup edit;
   - lives, and no Retry in a run.
 - **`decided-against.md`.** Amend the Carry-over line: "boons as a setup edit".
-  The unpostable boons replace that idea, and `runs.md` carries the reason.
+  The unpostable boons replace that idea, and `runs.md` carries the reason. Add
+  two lines: an in-game gauntlet maker built on the map maker (geometry a
+  gauntlet doesn't use; the board already edits the rest), and a stored `at`
+  position per stage (the author would place what `layout` already places).
 - **`open.md`.** Remove the two gauntlet entries that are now built.
 - **`sections.md`** and **`docs/README.md`**: add the new files and sections.
 - **`rules.md`** *Gauntlets*, and **CLAUDE.md**:
   - the Gauntlets paragraph: lane targets, the maker, runs, and "a boon game is
     unpostable; boons live in `GameLog.boons`, never `Settings`";
-  - the core module list: `boons`, `run`, `gauntletdraft`;
-  - the shell list: `gauntletmaker`, `stagegraph`, `editkit`. Also note under
-    *Hand-authored maps* that mapmaker's gesture and undo machinery lives in
-    `editkit`;
+  - the core module list: `boons`, `run`;
+  - the shell list: `stagegraph`;
+  - the Gauntlets paragraph also gets "a stage's place is computed
+    (`gauntlet.layout`, mirrored by `gauntlet-graph.mjs`), never stored";
   - the derived-stream list: run offers.
 
 ## Order and PR shape
 
-There are six PRs, each usable on its own:
+There are five PRs, each usable on its own:
 1. the format;
-2. the graph view and `stagegraph`, which are useful at once for existing
-   gauntlets;
-3. the maker:
-   - 3a: `editkit` extracted from mapmaker, with no behaviour change;
-   - 3b: `GauntletDraft` and the editor;
+2. the graph view, `stagegraph` and the shared layout, which are useful at once
+   for existing gauntlets;
+3. lanes on the board's gauntlet page;
 4. boons in the log;
 5. runs.
 
 Phases 1 and 2 alone already give branching gauntlets with shortcuts and hidden
 bonus stages, written by hand, and they unblock the board's hidden-lane idea.
-Phase 4 has no UI entry point until phase 5, but it is tested headless.
+Phase 3 needs only Phase 1 to save and Phase 2's layout fixture to draw, so it
+can be built alongside Phase 2. Phase 4 has no UI entry point until phase 5,
+but it is tested headless.
 
 ### Size estimate
 
 These are estimates scaled from code already in the repo, not counts from a
-design. For scale, the map maker and `custommap` come to about 4,550 lines with
-their tests.
+design.
 
 | Phase | New or changed code | Tests | Size | Main reuse |
 |---|---|---|---|---|
-| 1. Format | ~250 (`gauntlet.py` ~180, `checkBody` ~70) | ~250 | Small | `Target`, `_target`, the existing `from_dict` and `checkBody` |
-| 2. Graph view + `stagegraph` | ~450 (replaces ~150 in menu) | ~200 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
-| 3a. `editkit` extraction | ~650 moved, ~100 net new | ~100 | Medium, mechanical | mapmaker's own code, guarded by its 114 tests |
-| 3b. Gauntlet maker | ~1,100 (`GauntletDraft` ~300, editor ~700, wiring ~100) | ~800 | Large | `editkit`, `stagegraph`, the `custommap` pattern, `softkeyboard`, `gauntlet.remember`/`ask_listing`/`link_fragment` |
+| 1. Format | ~230 (`gauntlet.py` ~170, `checkBody` ~60) | ~250 | Small | `Target`, `_target`, the existing `from_dict` and `checkBody` |
+| 2. Graph view, `stagegraph`, `layout` | ~520 (replaces ~150 in menu; `layout` ~70) | ~250 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
+| 3. Lanes on the board | ~550 (`gauntlet-graph.mjs` ~150, page ~300, build ~50, CSS ~50) | ~250 | Medium | the stage cards, `applyAim`, `linkTarget`/`botTarget`, `checkBody`, `readDraft` |
 | 4. Boons in the log | ~250 | ~200 | Small, but it touches replay (run the full suite) | the Hint's unpostable path, the `strategies` stamp in `reconstruct` |
 | 5. Runs | ~900 (`run.py` ~300, run view and boon pick ~400, wiring ~200) | ~450 | Medium-large | the Phase 2 graph view, `webstore`, the `stage_ui` pattern |
 | Docs | ~400 lines of prose | n/a | Small | mostly moving *proposed* sections to *built* |
 
-The total is about 3,000-3,500 lines of game code and 2,000 lines of tests.
-Sharing through `editkit` and `stagegraph` cuts the maker from about 1,500
-lines to about 1,100, and keeps the gesture handling in one place. The parts
-most likely to grow are the maker's stage sidebar (editing several briefing
-paragraphs in pygame, and getting a setup in from the menu) and the main wiring
-for runs.
+The total is about 2,450 lines of code and 1,400 of tests. Against the in-game
+maker this replaces (Phase 3a, the `editkit` extraction, ~750; Phase 3b, the
+editor and `GauntletDraft`, ~1,100 plus ~900 of tests), the maker is about a
+third of the size, and mapmaker is not touched at all. The parts most likely to
+grow are the lane options (the gate choices reuse the stage target's, but each
+needs its notes and its async bot lookup) and the main wiring for runs.
 
 ## Verification
 
 - **Per phase:** the tests named above, `uvx ruff check .`, and `uvx pyright`
   on touched files. Run `node --test leaderboard/tests/*.test.mjs` in phase 1.
+  Run it again in phases 2 and 3 (the layout fixture).
   Run the full `uv run pytest` after phases 4 and 5 (they touch `replay`,
   `main` and `viewstate`).
-- **End to end** (`uv run python main.py`):
-  1. In the gauntlet maker, build a seven-stage graph:
-     - a main path 1→2→3→4;
+- **End to end** (a deploy preview of the board, and `uv run python main.py`):
+  1. On `gauntlet.html`, build a seven-stage graph:
+     - a main path 1→2→3→4, by + After;
+     - a fork 1→2b by + Branch, rejoining at 3 by a chip;
      - a shortcut 2→4 gated "win in 12";
      - a hidden bonus 3→B gated "win in 10";
-     - set setups from the menu;
-     - Try a stage, and set its target from that best.
-  2. Save, reopen it from the Gauntlets graph, and check the layout, the dashed
-     gated lanes and that B is absent.
+     - Play a stage from its card, paste the challenge link back, and set a
+       lane's gate from that link's score.
+     The diagram shows the shape at each step; removing 2 turns 2b's lane into
+     3's only way in and nothing goes red, removing 1 turns the rest red.
+  2. Save, open `#g=` in the game, and check the graph matches the page's
+     diagram cell for cell, the dashed gated lanes, and that B is absent.
+     Reopen the board page on the id (Edit on the board) and see the same
+     draft, lanes included.
   3. Free play: clear 1 and 2 fast. The shortcut opens and the graph shows it.
   4. Start a run:
      - win 1 and take +ships;
@@ -444,6 +501,10 @@ for runs.
 
 ## Defaults taken without asking (confirm before building)
 
+- **The board page's details** (Phase 3): every chip shows up to 16 stages, past
+  that a "+ Lane to…" select; + Branch copies the stage's parents; one pass of
+  crossing reduction, not iterated; a lane's gate offers the same four choices
+  as a stage target.
 - **One life by default, and no Retry or rewind in a run game.** Without that a
   run cannot be lost. A file can raise `run.lives`.
 - **Boons are permanent for the run and stack**: ships add up, production steps
@@ -455,8 +516,9 @@ for runs.
 - **A run's maps are the gauntlet's pinned seeds**, so its variety comes from
   path and boon choices. A dealt run graph (`gauntlet.md`, *The gauntlet:
   proposed, not built*: `tools/campaign.py` `_layout`, `cut_nodes`,
-  `_from_family`, `_mystery`) is a later step. In the maker it could become
-  "deal this stage from a spec" through `dealer.deal`.
+  `_from_family`, `_mystery`) is a later step. On the board it could become
+  a stage card that holds a spec instead of a link, dealt by the game as the
+  generate form's gauntlets are (the board has no engine).
 - **The sight boon does nothing on a no-fog stage.** It is still offered there.
   Whether to filter offers by the stages ahead is open.
 - **A boosted replay still uploading under Share replays**: the hint's log
@@ -553,60 +615,6 @@ for runs.
   - `_stage_verdict` is at `render.py:3600`;
   - input handles N at `input.py:499-500` and the rect at `:521`.
 
-### Map maker (the model for Phase 3)
-- **Model and tools:**
-  - `Editor` is at `mapmaker.py:73-177`, and its tools are at `:48-50`.
-  - `draw` is at `:392`; it clears `ed.rects` every frame.
-  - `handle_event` is at `:1238` and returns `"play"`/`"menu"`/`None`.
-- **Pressing and dragging:**
-  - `_press_lane` (`:1347`) draws lanes, by tap-tap or drag with a rubber band.
-  - `_arm_move` (`:1406`) arms a node drag; the drag pushes its undo entry only
-    once it moves (`:1562`), and an illegal drop snaps back (`:1599`).
-  - `_place` (`:1725`) adds a node.
-  - `_hit` (`:1380`) hit-tests chrome rects, and `_handle_chrome`/`_handle_action`
-    (`:1418`/`:1459`) dispatch on string keys.
-- **Undo:** `_push_undo` (`:1687`), `_undo` (`:1693`), `_redo` (`:1701`) and
-  `_adopt` (`:1709`). Each entry is a whole-recipe snapshot, capped at
-  `config.EDIT_UNDO_DEPTH`.
-- **Pickers:** `_pick_node` is at `:2146` (with a minimum tap size) and
-  `_pick_lane` at `:2175` (repeat presses cycle through overlapping lanes).
-- **Gestures:** `_pinch` is at `:705` and `_side_scroll_event` at `:749`.
-- **Confirm modal:** `_CONFIRMS` is at `:1211` and `_handle_confirm` at `:1635`.
-- **Layout:**
-  - the layout code is at `:303-386`; the footer wraps (`:317`);
-  - portrait moves the sidebar to the bottom (`:358`);
-  - compact scrolls the sidebar (`:665-703`);
-  - the zoom cluster is at `:469`.
-- **Saving and playing:** save and open are at `:2290-2314`, `commit` at `:234`,
-  and `_play` at `:1523`.
-- **Scene wiring in `main.py`:**
-  - the editor variable is at `:1872`;
-  - the `create_map` action leads to `open_editor` and the `"maker"` scene
-    (`:2512-2514`);
-  - events go through `:2519-2527`;
-  - each frame calls pump, age_status and draw (`:2798-2802`);
-  - `reflow` runs on resize (`:2337`).
-- **Reusable as is:** `geometry.WorldView` (`to_screen`, `to_world`, `zoom_at`,
-  `pan`, `fit_to`), `geometry.point_segment_dist` and `segments_intersect`, and
-  `render._draw_arrowhead` (`render.py:355`).
-- **Specific to maps, not reused:** `CUSTOM_WORLD_W`/`WORLD_SIZE`, the seats and
-  palette (`:547-662`), and the spacing and planarity rules (`:2098-2136`).
-- **Tests:** `tests/test_mapmaker.py` has 114 tests. Its `scene` fixture (`:28`)
-  runs headless on the dummy SDL driver at `apply_ui_scale(1.0)`. The helpers
-  draw first so the rects exist, then post synthetic mouse events at a rect's
-  centre. The layout test (`:665`) checks every rect is on screen at scales 1,
-  1.5 and 2.
-
-### `custommap.py` (the pattern for `GauntletDraft`)
-- `Problem(severity, code, text, nodes, lanes)` with `.blocks` is at `:54-72`.
-- `without_node` (`:159`) is the only way to delete.
-- `normalised` (`:176`) is idempotent, and `to_dict` always writes the
-  normalised form.
-- `problems` (`:195`) is built from small rule functions at `:344-467`.
-- `from_dict` (`:238`) never raises.
-- `from_state` is at `:470`.
-- For one-way lanes, keep `(a, b)` ordered: don't canonicalise to `a<b`.
-
 ### The board's builder
 - `leaderboard/js/gauntlet-build.mjs`:
   - `LIMITS` is at `:23`, `buildBody` at `:152` (always linear), and `checkBody`
@@ -614,5 +622,13 @@ for runs.
   - Only `name`, `stages`, `lanes` and `start` are kept; other top-level keys
     are dropped silently. A lane's third element may only say `two_way`.
   - `unreachable` is at `:242`.
-- `gauntlet.html` loads a branching gauntlet as a linear one, which is why
-  Phase 1 has the remix guard.
+- `leaderboard/js/gauntlet-build.mjs` also holds the draft: `emptyStage`
+  (`:331`), `emptyDraft` (`:345`), `readDraft` (`:384`, flattens a branching
+  gauntlet today), `draftProblem` (`:419`) and `moveStage` (`:433`).
+- `leaderboard/js/gauntlet-page.mjs`: `renderStage` (`:219`) builds a card (the
+  ↑/↓/Remove tools at `:225-247`, the target select and `applyAim` after it);
+  `keep()` (`:55`) stores the draft in `localStorage`; `#<id>` loads a stored
+  gauntlet (`:394`, `:477`).
+- `leaderboard/gauntlet.html` is a Jinja template on `templates/base.html`
+  (`tools/render_board.py`), styled by `leaderboard/css/style.css` (the dark
+  arcade cabinet; pixel face for chrome, monospace for prose).
