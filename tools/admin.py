@@ -431,7 +431,7 @@ def plan_assign_name(api: AdminApi, name: str, email: str,
                           "--fold it into this one (one name per account)")
 
     summary: list[str] = []
-    steps: list[Callable[[], str | None]] = []
+    steps: list[Callable[[], object]] = []
     moved: dict[str, dict] = {}
     for row in folded:
         rid = int(row["id"])

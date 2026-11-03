@@ -22,7 +22,7 @@ BOB = "22222222-2222-2222-2222-222222222222"
 def _load() -> None:
     out = subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-q",
                           "-f", str(AUTH_STUB), "-f", str(SCHEMA)],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stderr
 
 
@@ -51,7 +51,7 @@ def _as(sql: str, role: str = "authenticated", uid: str = "") -> subprocess.Comp
     """Run ``sql`` as ``role``, signed in as ``uid`` (or signed out)."""
     script = (f"set role {role}; set request.jwt.claim.sub = '{uid}'; {sql}")
     return subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-qAt",
-                           "-c", script], capture_output=True, text=True)
+                           "-c", script], capture_output=True, text=True, check=False)
 
 
 def _ok(sql: str, role: str = "authenticated", uid: str = "") -> str:
