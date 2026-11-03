@@ -1844,11 +1844,10 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
             setattr(ui, attr, (0, 0, 0, 0))
         return
 
-    br = pygame.Rect(config.end_turn_rect())
-    if config.portrait:
-        # a full-width bar at the screen's foot: off the very edges, where a
-        # phone's rounded corners and gesture bar sit
-        br = br.inflate(-2 * config.HUD_PAD, -config.HUD_PAD).move(0, -config.HUD_PAD // 4)
+    # `hit` answers presses; `br` is the bar drawn inside it (in portrait, clear
+    # of the phone's rounded corners and gesture bar, `config.end_turn_face_rect`)
+    hit = pygame.Rect(config.end_turn_rect())
+    br = pygame.Rect(config.end_turn_face_rect())
     fill, edge = _BTN_GREEN
 
     # Route mode borrows this slot for its confirm. Taking the button away (rather
@@ -1861,7 +1860,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         if ui.route_plan:
             pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
             pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
-            ui.route_confirm_rect = (br.x, br.y, br.w, br.h)
+            ui.route_confirm_rect = (hit.x, hit.y, hit.w, hit.h)
             label = f"Confirm {len(ui.route_plan)}"
         else:
             pygame.draw.rect(surface, (24, 28, 40), br, border_radius=config.s(8))
@@ -1889,7 +1888,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # brings that forward.
     # A spectator has no turn to end at all, so the block only says so.
     _gone = ui.film is not None or ui.awaiting_others(state) or ui.spectating
-    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (br.x, br.y, br.w, br.h)
+    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (hit.x, hit.y, hit.w, hit.h)
     if _gone and (ui.awaiting_others(state) or ui.spectating):
         _text(surface, _fonts()["normal"],
               "Spectating" if ui.spectating else "Orders sent", config.COLOR_TEXT_DIM,
