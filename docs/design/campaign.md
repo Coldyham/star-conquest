@@ -302,7 +302,8 @@ The game and the board are one site, so the game can ask before it plays.
 A proposal for giving the campaign meta-map real-time lanes and fleets, written
 up so it can be argued over and playtested before any of it is built. Nothing
 here is in the code. The rules in force are in "Crowns, the weekly campaign and
-embargoes" in this file.
+embargoes" in this file. Noted for another look if claimed names are taken
+up widely: "Revisit if claimed names take hold", below.
 
 Since this was written, "The grace period" in this file has dealt more
 cheaply with the stolen neighbour. A cooldown for the Monday sweep was tried
@@ -434,3 +435,31 @@ its winner. Set aside, for three reasons:
   week-long clock is already running.
 
 The best-score rule settles a collision with what already exists.
+
+### Revisit if claimed names take hold
+
+**Noted 2026-11-03, not reopened.** The credential that weighed against fleets
+now exists, so the cost has narrowed to the stored table and the design work.
+Worth another look if claimed names are deployed and widely taken up. Three
+things to work out first:
+
+- **Opt-in identity.** Claiming a name is optional, and a launch needs it. So
+  either the campaign field needs sign-in, or players who haven't signed in
+  have no fleet and play a weaker campaign than those who have. Both are only
+  acceptable if nearly everyone has a claimed name anyway.
+- **Does arrival need a notification?** An arrival opens a window, so a player
+  needs to know when it opens and when it closes: "your fleet has reached node
+  6; you may post a score on it for the next N hours". The page can show ETAs,
+  but anything more is new machinery (web push through the service worker, or
+  email, which needs stored addresses). The model above also lets a player play
+  the node's map at any time and *post* inside the window. Whether arrival
+  should gate the attempt instead, so a notification means "you may now try
+  it", is itself open.
+- **It may simply be annoying.** Wait timers are the mechanic that mobile games
+  sell gem shops against, and their incentives are the bad ones: checking in on
+  a clock, and getting up in the night because a window closes before morning.
+  If fleets come back, the guard is a window long enough to always span a
+  waking day (`WINDOW_HOURS` ≥ 24, or arrivals snapped to a fixed daily time),
+  no cost for a missed window beyond launching again, and nothing ever to buy
+  or speed up. Playtest it this way: if a player feels they *have* to look at
+  their phone, the design has failed, however well it paces the week.
