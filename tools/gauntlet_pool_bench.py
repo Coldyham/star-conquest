@@ -46,10 +46,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, dealer, engine, replay  # noqa: E402
-from starconquest import gauntletgen as gg  # noqa: E402
-from starconquest.model import AiParams  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, dealer, engine, replay
+from starconquest import gauntletgen as gg
+from starconquest.model import AiParams
+from starconquest.settings import Settings, build_state
 
 RESULTS = ROOT / "results" / "gauntlet_pool"
 # The first run's spec (docs/design/gauntlet.md, "The first run").
@@ -144,6 +144,7 @@ def play_one(key: str, stage: dict, probe: str) -> dict:
     cfg = Settings.from_dict(stage)
     state = build_state(cfg, cfg.seed if cfg.seed is not None else 0)
     seat = state.human()
+    assert seat is not None
     seat.is_human, seat.ai_strategy, seat.ai_params = False, bot, params
     while state.winner is None and state.turn < gg.MAX_TURNS:
         replay.reseed(state)

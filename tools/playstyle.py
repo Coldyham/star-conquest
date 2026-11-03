@@ -366,7 +366,7 @@ def write_baseline(record: dict, seeds: list[int]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("logs", nargs="*", help="game log files to read")
     parser.add_argument("--baseline", action="store_true",
                         help=f"regenerate {BASELINE.relative_to(ROOT)} from roster self-play")

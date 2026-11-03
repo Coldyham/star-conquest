@@ -61,7 +61,7 @@ def orphans(public: set[str], stored: dict[str, str]) -> list[str]:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--min-hand", type=int, default=MIN_HAND,
                         help="skip a game with fewer turns played by hand")
     parser.add_argument("--prune", action="store_true",
@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
             break
         try:
             row = {"match_id": match_id, "rev": rev, "readings": readings(logs[match_id])}
-        except Exception as err:            # one bad log must not stop the rest
+        except Exception as err:  # noqa: BLE001 - one bad log must not stop the rest
             print(f"  {match_id}: {type(err).__name__}: {err}")
             continue
         batch.append(row)

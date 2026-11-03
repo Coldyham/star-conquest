@@ -68,7 +68,7 @@ def test_z_is_infinite_only_when_every_seed_agrees_off_the_fair_share():
     assert cb._mean_z([1.0, 1.0], 0.5) == (1.0, math.inf, 2)
     assert cb._mean_z([0.0, 0.0], 0.5) == (0.0, -math.inf, 2)
     assert cb._mean_z([0.5, 0.5], 0.5) == (0.5, 0.0, 2)
-    m, z, n = cb._mean_z([0.0, 1.0, 1.0], 0.5)
+    _m, z, n = cb._mean_z([0.0, 1.0, 1.0], 0.5)
     assert n == 3 and 0 < z < math.inf
 
 
@@ -86,7 +86,7 @@ def knower(monkeypatch):
         monkeypatch.setattr(k, name, getattr(k, name))
     for fn in set(ai.STRATEGIES.values()):
         module = sys.modules.get(fn.__module__)
-        if isinstance(getattr(module, "BUDGET_SCALE", None), float):
+        if module is not None and isinstance(getattr(module, "BUDGET_SCALE", None), float):
             monkeypatch.setattr(module, "BUDGET_SCALE", module.BUDGET_SCALE)
     for name in ("_patched", "_under_test", "_borrow", "_instead", "_with", "_tally",
                  "MAX_TURNS"):

@@ -40,6 +40,12 @@ def status(received=100.0, **kw) -> campaign.Status:
     return parsed
 
 
+def confirmed(st: campaign.Status, now: float) -> tuple[str, list[str]]:
+    shown = campaign.confirm(st, now)
+    assert shown is not None
+    return shown
+
+
 def test_parse_reads_the_answer_and_refuses_anything_else():
     s = status(why="grace", graceUntil=NOW + 12 * MIN,
                beat={"turns": 30, "lost": 2, "name": "bo"})
@@ -96,19 +102,19 @@ def test_start_is_confirmed_only_when_a_win_wouldnt_count_or_is_on_the_clock():
                   status(why="no-name", can=False), status(why="home-open", kind="home")):
         assert campaign.confirm(quiet, t) is None, quiet.why
 
-    title, lines = campaign.confirm(status(why="not-adjacent", can=False), t)
+    title, lines = confirmed(status(why="not-adjacent", can=False), t)
     assert title == "Campaign node 3"
     assert lines[0] == "A win here won't be a campaign move."
     assert "ordinary score" in lines[-1]
-    title, lines = campaign.confirm(status(why="home-taken", can=False, kind="home", node=11), t)
+    title, lines = confirmed(status(why="home-taken", can=False, kind="home", node=11), t)
     assert title == "Campaign home 11" and "can't be taken" in lines[1]
 
-    _, lines = campaign.confirm(status(why="grace", graceUntil=NOW + 12 * MIN,
-                                       beat={"turns": 30, "lost": 2, "name": "bo"}), t)
+    _, lines = confirmed(status(why="grace", graceUntil=NOW + 12 * MIN,
+                                beat={"turns": 30, "lost": 2, "name": "bo"}), t)
     assert lines[0] == "Post a win within 12 min or it won't be a move."
     assert lines[-1] == "Held by bo: beat 30 turns, 2 lost."
     # A grace that has already run out locally is "not a move".
-    _, lines = campaign.confirm(status(why="grace", graceUntil=NOW + MIN), t + 120)
+    _, lines = confirmed(status(why="grace", graceUntil=NOW + MIN), t + 120)
     assert lines[0] == "A win here won't be a campaign move."
 
 
@@ -120,7 +126,7 @@ def test_only_a_seeded_generated_setup_is_looked_up():
 class FakeRequest:
     def __init__(self, url):
         self.url = url
-        self.answer = (pbp.PENDING, "")
+        self.answer: tuple[str, str] = (pbp.PENDING, "")
 
     def poll(self):
         return self.answer
@@ -323,7 +329,7 @@ def test_main_writes_the_label_each_frame_but_never_for_a_watched_replay(monkeyp
 def test_a_game_started_after_losing_access_is_told_its_win_wont_count():
     late = status(why="late-start", can=False, graceUntil=NOW + 12 * MIN)
     assert campaign.label(late, 100.0) == "Node 3: not a move"
-    _, lines = campaign.confirm(late, 100.0)
+    _, lines = confirmed(late, 100.0)
     assert lines[0] == "A win here won't be a campaign move."
     assert "only covers a game started before that" in lines[1]
 
@@ -343,4 +349,5 @@ def test_the_stamp_taken_at_start_rides_on_the_posted_score(monkeypatch):
     # Nothing looked up, nothing claimed.
     watch.status = None
     main.stamp_campaign(ui, watch)
-    assert main.challenge_settings(settings, state, ui, 42, log).challenge.campaign == ""
+    again = main.challenge_settings(settings, state, ui, 42, log).challenge
+    assert again is not None and again.campaign == ""

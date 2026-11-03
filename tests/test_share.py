@@ -280,6 +280,7 @@ def test_the_web_fetch_stores_its_own_result_and_handles_every_ending(watchable,
 def test_polling_reports_pending_then_the_body(watchable, monkeypatch, store):
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.PENDING)
     assert download.poll() == (share.PENDING, "")
 
@@ -293,6 +294,7 @@ def test_a_collected_result_is_cleared_so_it_cannot_be_read_twice(watchable, mon
     instant success carrying somebody else's replay."""
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_BODY_KEY, "the-encoded-log")
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.OK)
     assert download.poll()[0] == share.OK
@@ -303,6 +305,7 @@ def test_a_collected_result_is_cleared_so_it_cannot_be_read_twice(watchable, mon
 def test_a_failed_fetch_polls_as_an_error_not_an_exception(watchable, monkeypatch, store):
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.ERROR)
     assert download.poll() == (share.ERROR, "")
 
@@ -312,6 +315,7 @@ def test_no_such_replay_is_its_own_answer(watchable, monkeypatch, store):
     send the player to different places, so they are not the same state."""
     _bridge(monkeypatch, _EvalWindow())
     download = share.fetch_log(MATCH)
+    assert download is not None
     share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.MISSING)
     assert download.poll() == (share.MISSING, "")
 
@@ -326,7 +330,9 @@ def test_the_web_fetch_tells_a_404_apart_from_a_dead_connection(watchable, monke
 def test_an_empty_slot_reads_as_pending_rather_than_as_a_failure(watchable, monkeypatch, store):
     """The state between starting the fetch and the browser answering."""
     _bridge(monkeypatch, _EvalWindow())
-    assert share.fetch_log(MATCH).poll() == (share.PENDING, "")
+    download = share.fetch_log(MATCH)
+    assert download is not None
+    assert download.poll() == (share.PENDING, "")
 
 
 def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch):
@@ -347,6 +353,7 @@ def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch)
     monkeypatch.setattr(share, "is_web", lambda: False)
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Response())
     download = share.fetch_log(MATCH)
+    assert download is not None
     for _ in range(200):                      # the thread is real; give it a moment
         if download.poll()[0] != share.PENDING:
             break
@@ -355,15 +362,17 @@ def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch)
 
 
 def test_a_desktop_404_is_missing_rather_than_an_error(watchable, monkeypatch):
+    import email.message
     import urllib.error
     import urllib.request
 
     def _absent(*args, **kwargs):
-        raise urllib.error.HTTPError("u", 404, "no replay", {}, None)
+        raise urllib.error.HTTPError("u", 404, "no replay", email.message.Message(), None)
 
     monkeypatch.setattr(share, "is_web", lambda: False)
     monkeypatch.setattr(urllib.request, "urlopen", _absent)
     download = share.fetch_log(MATCH)
+    assert download is not None
     for _ in range(200):
         if download.poll()[0] != share.PENDING:
             break
@@ -380,8 +389,114 @@ def test_a_refused_download_polls_as_an_error(watchable, monkeypatch):
     monkeypatch.setattr(share, "is_web", lambda: False)
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
     download = share.fetch_log(MATCH)
+    assert download is not None
     for _ in range(200):
         if download.poll()[0] != share.PENDING:
             break
         time.sleep(0.01)
     assert download.poll() == (share.ERROR, "")
+
+
+# --------------------------------------------------------------------------- #
+# Quick post
+# --------------------------------------------------------------------------- #
+def _web_bridge(monkeypatch, window):
+    """Quick post's mailbox is `pbp.settle`'s, which asks `pbp.is_web` itself."""
+    _bridge(monkeypatch, window)
+    monkeypatch.setattr(share.pbp, "is_web", lambda: True)
+
+
+def test_quick_post_is_offered_only_on_the_web_with_a_name(configured, monkeypatch):
+    monkeypatch.setattr(share.webstore, "pbp_name", lambda: "Ada")
+    monkeypatch.setattr(share, "is_web", lambda: False)
+    assert share.quick_post_name() == ""          # desktop: the entry form
+    monkeypatch.setattr(share, "is_web", lambda: True)
+    assert share.quick_post_name() == "Ada"
+    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
+    assert share.quick_post_name() == ""          # no board at all
+
+
+def test_quick_post_runs_the_boards_own_module_into_a_mailbox(configured, monkeypatch, store):
+    """The game files no score itself: it imports the entry form's posting module
+    and parks how it settles where a poll collects it."""
+    window = _EvalWindow()
+    _web_bridge(monkeypatch, window)
+    request = share.quick_post("eNoTOKEN", 'Ada "the" Bold')
+    assert request is not None
+    script = window.scripts[0]
+    assert f'import("https://example.test{paths.LEADERBOARD_POST_MODULE_PATH}")' in script
+    assert 'm.quickPost("eNoTOKEN","Ada \\"the\\" Bold")' in script
+    assert ".catch(" in script and "localStorage.setItem" in script
+
+    state_key = f"{paths.WEB_PBP_STATE_KEY}:{request._slot}"
+    body_key = f"{paths.WEB_PBP_BODY_KEY}:{request._slot}"
+    assert request.poll() == (share.pbp.PENDING, "")
+    share.webstore.set(body_key, '{"game_key":"k"}')
+    share.webstore.set(state_key, share.pbp.OK)
+    assert request.poll() == (share.pbp.OK, '{"game_key":"k"}')
+
+
+def test_quick_post_needs_the_web_a_board_and_a_name(configured, monkeypatch):
+    monkeypatch.setattr(share.pbp, "is_web", lambda: False)
+    assert share.quick_post("eNoTOKEN", "Ada") is None
+    _web_bridge(monkeypatch, _EvalWindow())
+    assert share.quick_post("eNoTOKEN", "") is None
+    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
+    assert share.quick_post("eNoTOKEN", "Ada") is None
+
+
+def _answer(**fields) -> str:
+    return json.dumps({"game_key": "abc", **fields})
+
+
+def test_a_lone_score_is_the_first_on_its_map():
+    got = share.post_summary(_answer(score_count=1, best_turns=30, best_lost=4,
+                                     best_user_name="Ada", best_holders=1), 30, 4, "ada")
+    assert got == ("abc", "Posted  ·  the first score on this map")
+
+
+def test_the_best_on_our_figures_and_name_is_ours():
+    got = share.post_summary(_answer(score_count=7, best_turns=30, best_lost=4,
+                                     best_user_name="Ada", best_holders=1), 30, 4, "Ada")
+    assert got == ("abc", "Posted  ·  you lead  ·  7 scores on this map")
+
+
+def test_a_shared_best_says_how_many_share_it():
+    got = share.post_summary(_answer(score_count=7, best_turns=30, best_lost=4,
+                                     best_user_name="Bob", best_holders=3), 30, 4, "Ada")
+    assert got == ("abc", "Posted  ·  joint best with 2 others  ·  7 scores on this map")
+
+
+def test_behind_names_the_best_and_its_losses_only_on_level_turns():
+    behind = share.post_summary(_answer(score_count=7, best_turns=21, best_lost=4,
+                                        best_user_name="Bob"), 30, 4, "Ada")
+    assert behind == ("abc", "Posted  ·  best is 21 turns by Bob  ·  7 scores on this map")
+    level = share.post_summary(_answer(score_count=7, best_turns=30, best_lost=2,
+                                       best_user_name="Bob"), 30, 4, "Ada")
+    assert level == ("abc", "Posted  ·  best is 30 turns, 2 lost by Bob  ·  7 scores on this map")
+
+
+def test_a_best_on_our_figures_under_another_name_is_theirs():
+    """Our score did not count (a match posted twice), so the best is Bob's."""
+    got = share.post_summary(_answer(score_count=7, best_turns=30, best_lost=4,
+                                     best_user_name="Bob", best_holders=1), 30, 4, "Ada")
+    assert got == ("abc", "Posted  ·  best is 30 turns, 4 lost by Bob  ·  7 scores on this map")
+
+
+def test_a_posted_score_without_a_summary_still_says_posted():
+    """The module answers the key alone when the summary could not be read."""
+    assert share.post_summary(_answer(), 30, 4, "Ada") == ("abc", "Posted")
+    assert share.post_summary(_answer(score_count=5), 30, 4, "Ada") == (
+        "abc", "Posted  ·  5 scores on this map")
+
+
+def test_a_long_leader_name_is_cut():
+    got = share.post_summary(_answer(score_count=2, best_turns=21, best_lost=0,
+                                     best_user_name="A" * 40), 30, 4, "Ada")
+    assert got is not None and ("A" * 15 + "…") in got[1] and "A" * 16 not in got[1]
+
+
+def test_an_answer_that_is_not_one_is_none():
+    for body in ("", "nope", "[]", "{}", '{"game_key": ""}', '{"game_key": 5}',
+                 _answer(score_count="many")):
+        assert share.post_summary(body, 30, 4, "Ada") is None

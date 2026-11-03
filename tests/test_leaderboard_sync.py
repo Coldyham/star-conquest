@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import cast
 
 from starconquest import ai, config, engine, matchnames, paths, pbp
 
@@ -59,7 +60,7 @@ def test_the_board_ranks_bots_in_the_games_ladder_order():
 def test_seat_names_and_colours_match_the_game():
     """The lobby names and colours each seat as the game draws it."""
     assert _js_string_list(CONFIG_MJS, "PLAYER_NAMES") == config.PLAYER_NAMES
-    colours = ["#%02x%02x%02x" % rgb for rgb in config.PLAYER_COLORS]
+    colours = ["#{:02x}{:02x}{:02x}".format(*rgb) for rgb in config.PLAYER_COLORS]
     assert _js_string_list(CONFIG_MJS, "PLAYER_COLORS") == colours
 
 
@@ -137,7 +138,7 @@ def test_the_boards_pace_estimate_tracks_real_maps():
         for speed in (3.0, 6.0, 8.5, 19.5):
             for seed in (1, 2, 3):
                 state = build_state(Settings(nodes=nodes, players=3, ship_ly_per_turn=speed), seed)
-                turns = [state.travel_turns(lane.a, lane.b) for lane in state.lanes.values()]
+                turns = [cast(int, state.travel_turns(lane.a, lane.b)) for lane in state.lanes.values()]
                 low, high = statistics.median_low(turns), statistics.median_high(turns)
                 estimate = max(1, math.ceil(pace_ly / math.sqrt(min(len(state.systems), 40)) / speed))
                 assert low - 1 <= estimate <= high + 1, (nodes, speed, seed, estimate, turns)
@@ -154,6 +155,7 @@ def test_the_board_names_each_bots_stops_as_the_game_does():
     folded into a family, must regenerate it."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("gen_bot_stops", ROOT / "tools" / "gen_bot_stops.py")
+    assert spec is not None and spec.loader is not None
     gen = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gen)
     assert (ROOT / "leaderboard" / "js" / "bot-stops.mjs").read_text() == gen.render(), \
@@ -163,9 +165,9 @@ def test_the_board_names_each_bots_stops_as_the_game_does():
 def _sql_rows(table: str) -> list[tuple[str, ...]]:
     """The VALUES rows of one of `sc_bot_profile`'s inline tables, as text."""
     sql = (ROOT / "leaderboard" / "schema.sql").read_text()
-    body = re.search(r"create or replace function public\.sc_bot_profile\(.*?\$\$;", sql, re.S)
+    body = re.search(r"create or replace function public\.sc_bot_profile\(.*?\$\$;", sql, re.DOTALL)
     assert body is not None, "sc_bot_profile not found in schema.sql"
-    block = re.search(rf"{table}\([^)]*\) as \(values(.*?)\n  \)", body.group(0), re.S)
+    block = re.search(rf"{table}\([^)]*\) as \(values(.*?)\n  \)", body.group(0), re.DOTALL)
     assert block is not None, f"{table} not found in sc_bot_profile"
     return [tuple(x.strip().strip("'").replace("::integer", "") for x in row.split(","))
             for row in re.findall(r"\(([^()]*)\)", block.group(1))]
@@ -180,7 +182,9 @@ def test_the_database_reads_each_seats_stop_as_the_game_does():
     for name in ai.STRATEGIES:
         if ai.aux_names(name) is None:
             continue
-        _label, lo, hi, _step, _int = ai.aux_spec(name)
+        spec = ai.aux_spec(name)
+        assert spec is not None
+        _label, lo, hi, _step, _int = spec
         over = ai.aux_over(name)
         knobs[name] = (str(int(lo)), str(int(hi)), "null" if over is None else str(int(over)))
     assert {row[0]: row[1:] for row in _sql_rows("knobs")} == knobs

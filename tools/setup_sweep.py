@@ -212,7 +212,7 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--seeds", type=int, default=150, help="games per bot per arm")
     parser.add_argument("--start", type=int, default=1000, help="first seed")
     parser.add_argument("--max-turns", type=int, default=600)

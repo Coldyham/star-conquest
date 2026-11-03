@@ -58,7 +58,7 @@ def get(key: str) -> str:
     import platform as _platform
 
     try:
-        value = _platform.window.localStorage.getItem(key)
+        value = _platform.window.localStorage.getItem(key)  # pyright: ignore[reportAttributeAccessIssue]
         return str(value) if value else ""
     except Exception:
         return ""
@@ -81,7 +81,7 @@ def set(key: str, value: str) -> bool:
     import platform as _platform
 
     try:
-        _platform.window.localStorage.setItem(key, value)
+        _platform.window.localStorage.setItem(key, value)  # pyright: ignore[reportAttributeAccessIssue]
         return True
     except Exception:
         return False
@@ -240,7 +240,7 @@ def leaderboard_origin() -> str:
         import platform as _platform
 
         try:
-            host = str(_platform.window.location.hostname)
+            host = str(_platform.window.location.hostname)  # pyright: ignore[reportAttributeAccessIssue]
         except Exception:  # no DOM, nothing to read
             host = ""
         if host.endswith(paths.NETLIFY_SUFFIX):
@@ -262,7 +262,7 @@ def link_url(token: str) -> str:
     import platform as _platform
 
     try:
-        loc = _platform.window.location
+        loc = _platform.window.location  # pyright: ignore[reportAttributeAccessIssue]
         return f"{loc.origin}{loc.pathname}#{token}"
     except Exception:
         return ""
@@ -276,7 +276,7 @@ def set_url_fragment(token: str) -> bool:
     import platform as _platform
 
     try:
-        _platform.window.history.replaceState(None, "", "#" + token)
+        _platform.window.history.replaceState(None, "", "#" + token)  # pyright: ignore[reportAttributeAccessIssue]
         return True
     except Exception:
         return False
@@ -294,7 +294,7 @@ def copy_to_clipboard(text: str) -> bool:
     import platform as _platform
 
     try:
-        _platform.window.eval(f"navigator.clipboard.writeText({json.dumps(text)}).catch(function(){{}})")
+        _platform.window.eval(f"navigator.clipboard.writeText({json.dumps(text)}).catch(function(){{}})")  # pyright: ignore[reportAttributeAccessIssue]
         return True
     except Exception:
         return False
@@ -316,7 +316,7 @@ def open_url(url: str) -> bool:
         import platform as _platform
 
         try:
-            _platform.window.location = url
+            _platform.window.location = url  # pyright: ignore[reportAttributeAccessIssue]
             return True
         except Exception:
             return False
@@ -382,7 +382,7 @@ def close_window() -> bool:
     import platform as _platform
 
     try:
-        _platform.window.close()
+        _platform.window.close()  # pyright: ignore[reportAttributeAccessIssue]
         return True
     except Exception:
         return False
@@ -403,7 +403,7 @@ def trigger_resize() -> bool:
     import platform as _platform
 
     try:
-        _platform.window.dispatchEvent(_platform.window.Event.new("resize"))
+        _platform.window.dispatchEvent(_platform.window.Event.new("resize"))  # pyright: ignore[reportAttributeAccessIssue]
         return True
     except Exception:
         return False
@@ -436,7 +436,7 @@ def viewport() -> tuple[int, int, float] | None:
     import platform as _platform
 
     try:
-        win = _platform.window
+        win = _platform.window  # pyright: ignore[reportAttributeAccessIssue]
         canvas = win.canvas
     except Exception:
         return None
@@ -465,6 +465,6 @@ def url_token() -> str:
     import platform as _platform
 
     try:
-        return str(_platform.window.location.hash).lstrip("#")
+        return str(_platform.window.location.hash).lstrip("#")  # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
         return ""

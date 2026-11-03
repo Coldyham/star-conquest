@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from dataclasses import replace
 
 import pytest
 
@@ -35,7 +34,7 @@ def knower(monkeypatch):
         monkeypatch.setattr(k, name, getattr(k, name))
     for fn in set(ai.STRATEGIES.values()):
         module = sys.modules.get(fn.__module__)
-        if isinstance(getattr(module, "BUDGET_SCALE", None), float):
+        if module is not None and isinstance(getattr(module, "BUDGET_SCALE", None), float):
             monkeypatch.setattr(module, "BUDGET_SCALE", module.BUDGET_SCALE)
     for name in ("_patched", "_defend", "_attack", "_fires", "MAX_TURNS"):
         monkeypatch.setattr(pb, name, getattr(pb, name))
@@ -144,6 +143,7 @@ def test_attack_pays_for_a_third_seat_landing_with_us_and_never_less(knower):
     state, ours, theirs = _board(knower)
     pos = knower._posture()
     dist = state.travel_turns(ours.id, theirs.id)
+    assert dist is not None
     stock = knower._required(state, None, 1, theirs, dist, pos)
     pb._attack = frozenset({1})
     assert knower._required(state, None, 1, theirs, dist, pos) == stock

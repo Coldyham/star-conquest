@@ -189,6 +189,45 @@ def test_win_overlay_pairs_the_leaderboard_button_with_sharing(monkeypatch):
         pygame.quit()
 
 
+def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
+    """Quick post names who it posts as, waits while posting, then opens the
+    map's page; without a name, or after a failure, it is the entry form."""
+    monkeypatch.setattr(config, "touch_ui", False)
+    ui = _make_ui(mapgen.generate_random(1, num_nodes=18, num_players=3))
+    assert render._board_label(ui).startswith("Enter on leaderboard")
+    ui.post_as = "Ada"
+    assert render._board_label(ui).startswith("Post as Ada")
+    ui.post_as = "A" * 40
+    assert ("A" * 15 + "…") in render._board_label(ui)
+    ui.post_state = "posting"
+    assert render._board_label(ui) == "Posting…"
+    ui.post_state = "posted"
+    assert render._board_label(ui).startswith("View on board")
+    ui.post_state = "failed"
+    assert render._board_label(ui).startswith("Enter on leaderboard")
+
+
+def test_a_long_quick_post_summary_wraps_above_quit():
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((360, 740))
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        state.winner = 1
+        ui.hand_turns = 100
+        ui.post_state = "posted"
+        ui.share_msg = "Posted  ·  best is 30 turns, 2 lost by Somebody Long  ·  12 scores on this map"
+        render.draw(screen, state, ui)
+        board, quit_ = ui.leaderboard_button_rect, ui.quit_button_rect
+        notes = render._wrap(render._fonts()["small"], ui.share_msg, 360 - 2 * config.HUD_PAD)
+        assert len(notes) > 1
+        assert quit_[1] >= board[1] + board[3] + len(notes) * render._row_h()
+        assert quit_[1] + quit_[3] <= 740
+    finally:
+        pygame.quit()
+
+
 def test_win_overlay_draws_every_challenge_verdict():
     """Beaten / missed / failed all render, including the losing branch that shows
     a verdict but no score."""
@@ -673,7 +712,7 @@ def _touch_scale():
     render._FONTS.clear()
 
 
-def _phone_landscape_scale(css=(740, 360), dpr=2.0):
+def _phone_landscape_scale(css: tuple[int, int] = (740, 360), dpr: float = 2.0):
     """The compact geometry: a phone held sideways in a touch browser, whose
     side panel is narrower and shorter than any of the three above. 740x360 CSS
     px is a small phone; `test_compact` covers the layout at a larger one."""
@@ -955,7 +994,7 @@ def test_every_star_card_fits_whole():
     the close line on the map, at all three geometries: the card is cut silently
     when it doesn't, so a cut entry would be lore nobody reads the end of."""
     pygame.init()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     try:
         for scale in (_desktop_scale, _web_desktop_scale, _touch_scale):
             scale()
@@ -1008,7 +1047,7 @@ def test_a_stage_hint_fits_the_empty_panel():
     from starconquest import gauntlet
 
     pygame.init()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
     worst = ("abcd " * 40)[:gauntlet.HINT_MAX]
     hints = [worst] + [s.hint for g in gauntlet.builtin() for s in g.stages]
     try:
@@ -1544,6 +1583,7 @@ def test_a_fleet_glides_rather_than_jumping():
             if any(b.kind == "move" for b in reel.film.beats):
                 break
             reel.run()
+        assert reel is not None
         move = next(b for b in reel.film.beats if b.kind == "move")
 
         def frame(ms: float) -> bytes:

@@ -45,8 +45,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, replay, turnfilm  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, engine, replay, turnfilm
+from starconquest.settings import Settings, build_state
 
 RESULTS = ROOT / "results" / "evolved"
 WEIGHTS_FILE = ROOT / "models" / "_evolved_weights.py"
@@ -65,6 +65,7 @@ def _module():
     if _evolved is None:
         spec = importlib.util.spec_from_file_location(
             "sc_evolved_train", ROOT / "models" / "evolved.py")
+        assert spec is not None and spec.loader is not None
         _evolved = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_evolved)
     return _evolved
@@ -74,6 +75,7 @@ def _layout():
     """evolved's LAYOUT, readable even while the weights file is in an older layout."""
     spec = importlib.util.spec_from_file_location(
         "sc_evolved_layout", ROOT / "models" / "evolved.py")
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
@@ -92,7 +94,7 @@ def _share(state, pid: int) -> float:
     return _income(state, pid) / total if total else 1.0 / max(1, len(state.players) - 1)
 
 
-_league: dict[str, object] = {}
+_league: dict[str, ai.DecideFn] = {}
 
 
 def _register_opponent(opp: str) -> None:
@@ -189,7 +191,7 @@ def play(vec, cell: str, seed: int, opp: str, cand_seat: int, cap: int,
     return score
 
 
-def play_batch(vec, games, cap: int, mid: int = 0, trade: float = 0.0,
+def play_batch(vec, games: list[tuple[str, int, str, int]], cap: int, mid: int = 0, trade: float = 0.0,
                adjudicate: bool = True) -> list[float]:
     return [play(vec, *g, cap, mid, trade, adjudicate) for g in games]
 
@@ -242,14 +244,16 @@ def write_weights(vec, note: str, path: Path = WEIGHTS_FILE) -> None:
     body = f"# {note}\nWEIGHTS = [\n" + "\n".join(lines) + "\n]\n"
     text = (path if path.exists() else WEIGHTS_FILE).read_text()
     new = re.sub(r"(# BEGIN WEIGHTS\n).*?(# END WEIGHTS)", lambda m: m[1] + body + m[2],
-                 text, flags=re.S)
+                 text, flags=re.DOTALL)
     path.write_text(new)
 
 
 def read_named(path: Path) -> dict[tuple[str, str], float]:
     """A weights file's values keyed by (group, feature), from its comment lines."""
     text = path.read_text()
-    body = re.search(r"# BEGIN WEIGHTS\n(.*?)# END WEIGHTS", text, flags=re.S)[1]
+    found = re.search(r"# BEGIN WEIGHTS\n(.*?)# END WEIGHTS", text, flags=re.DOTALL)
+    assert found is not None
+    body = found[1]
     body = body.split("WEIGHTS = [", 1)[1].split("]", 1)[0]
     out, names, group, k = {}, [], "", 0
     for line in body.splitlines():
@@ -276,7 +280,7 @@ def migrate(src: Path) -> list[float]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--run", required=True)
     ap.add_argument("--gens", type=int, default=150, help="train up to this generation")
     ap.add_argument("--pop", type=int, default=20)
@@ -341,7 +345,7 @@ def main() -> None:
               f"{tail[0]['gen']}..{tail[-1]['gen']} to {out}")
         return
 
-    import cma
+    import cma  # pyright: ignore[reportMissingImports]
 
     if es_path.exists():
         saved = pickle.loads(es_path.read_bytes())
@@ -354,6 +358,7 @@ def main() -> None:
             print(f"starting from {args.start}")
         else:
             spec = importlib.util.spec_from_file_location("sc_w", WEIGHTS_FILE)
+            assert spec is not None and spec.loader is not None
             wmod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(wmod)
             base = list(wmod.WEIGHTS)
@@ -379,6 +384,7 @@ def main() -> None:
     def full(x):
         if not idx:
             return list(x)
+        assert base is not None
         out = list(base)
         for i, v in zip(idx, x):
             out[i] = float(v)

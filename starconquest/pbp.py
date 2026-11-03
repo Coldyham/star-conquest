@@ -842,15 +842,13 @@ def _call_web(url: str, body: str | None, signed: bool = False) -> Request | Non
     """
     import platform as _platform
 
-    global _web_calls
-    mailbox = _web_calls % _WEB_SLOTS
-    _web_calls += 1
+    mailbox = _next_mailbox()
     state, slot = (json.dumps(key) for key in _web_keys(mailbox))
     init = ("{method:'POST',headers:h,body:"
             f"{json.dumps(body)}}}") if body is not None else "{}"
     headers = "var h={'Content-Type':'application/json'};" + (_auth_js() if signed else "")
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
             f"{headers}fetch({json.dumps(url)},{init}).then(function(r)"
             "{return r.text().then(function(t){"
@@ -858,6 +856,42 @@ def _call_web(url: str, body: str | None, signed: bool = False) -> Request | Non
             f"localStorage.setItem({state},r.ok?'{OK}':r.status===404?'{MISSING}'"
             f":r.status===403?'{REFUSED}':'{ERROR}')}})}})"
             f".catch(function(e){{console.warn('pbp call failed',e);"
+            f"localStorage.setItem({state},'{ERROR}')}})"
+        )
+        return Request(web=True, slot=mailbox)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _next_mailbox() -> int:
+    """The web mailbox the next call parks its answer in (``_WEB_SLOTS``)."""
+    global _web_calls
+    mailbox = _web_calls % _WEB_SLOTS
+    _web_calls += 1
+    return mailbox
+
+
+def settle(promise: str) -> Request | None:
+    """Web only: run ``promise``, a JS expression for a promise of a string, and
+    park how it settles in a mailbox. None off the web or without the bridge.
+
+    For work the board's own modules do in the page rather than an endpoint
+    answers (``share.quick_post``). A rejection is ``ERROR`` with its message as
+    the body, for the console.
+    """
+    if not is_web():
+        return None
+    import platform as _platform
+
+    mailbox = _next_mailbox()
+    state, slot = (json.dumps(key) for key in _web_keys(mailbox))
+    try:
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
+            f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
+            f"Promise.resolve().then(function(){{return {promise}}}).then(function(t)"
+            f"{{localStorage.setItem({slot},t);localStorage.setItem({state},'{OK}')}})"
+            f".catch(function(e){{console.warn('call failed',e);"
+            f"localStorage.setItem({slot},String(e&&e.message||e));"
             f"localStorage.setItem({state},'{ERROR}')}})"
         )
         return Request(web=True, slot=mailbox)

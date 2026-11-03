@@ -23,9 +23,9 @@ def test_floor_never_exceeds_the_real_win():
                 p.is_human = False
             floors: dict[int, list[float]] = {pid: [] for pid in state.players if pid}
             while state.winner is None and state.turn < 300:
-                for pid in floors:
+                for pid, floor in floors.items():
                     if state.players[pid].alive:
-                        floors[pid].append(par_search.floor(state, pid))
+                        floor.append(par_search.floor(state, pid))
                 engine.end_turn(state, decide=ai.decide)
             if state.winner:
                 assert max(floors[state.winner]) <= state.turn

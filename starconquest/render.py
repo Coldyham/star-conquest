@@ -14,6 +14,7 @@ from . import coach, combat, config, fog, matchnames, model, paths, starlore, st
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
+import itertools
 
 # The measured-layout kit lives in `widgets` now that the map creator draws with
 # it too. Bound to module-level names here rather than called qualified, because
@@ -1844,11 +1845,10 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
             setattr(ui, attr, (0, 0, 0, 0))
         return
 
-    br = pygame.Rect(config.end_turn_rect())
-    if config.portrait:
-        # a full-width bar at the screen's foot: off the very edges, where a
-        # phone's rounded corners and gesture bar sit
-        br = br.inflate(-2 * config.HUD_PAD, -config.HUD_PAD).move(0, -config.HUD_PAD // 4)
+    # `hit` answers presses; `br` is the bar drawn inside it (in portrait, clear
+    # of the phone's rounded corners and gesture bar, `config.end_turn_face_rect`)
+    hit = pygame.Rect(config.end_turn_rect())
+    br = pygame.Rect(config.end_turn_face_rect())
     fill, edge = _BTN_GREEN
 
     # Route mode borrows this slot for its confirm. Taking the button away (rather
@@ -1861,7 +1861,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
         if ui.route_plan:
             pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
             pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
-            ui.route_confirm_rect = (br.x, br.y, br.w, br.h)
+            ui.route_confirm_rect = (hit.x, hit.y, hit.w, hit.h)
             label = f"Confirm {len(ui.route_plan)}"
         else:
             pygame.draw.rect(surface, (24, 28, 40), br, border_radius=config.s(8))
@@ -1889,7 +1889,7 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # brings that forward.
     # A spectator has no turn to end at all, so the block only says so.
     _gone = ui.film is not None or ui.awaiting_others(state) or ui.spectating
-    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (br.x, br.y, br.w, br.h)
+    ui.end_turn_rect = (0, 0, 0, 0) if _gone else (hit.x, hit.y, hit.w, hit.h)
     if _gone and (ui.awaiting_others(state) or ui.spectating):
         _text(surface, _fonts()["normal"],
               "Spectating" if ui.spectating else "Orders sent", config.COLOR_TEXT_DIM,
@@ -3338,7 +3338,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     quit_label = _key_hint("Quit", "Esc")
     # A daily's result goes out as a line, not a link: everyone has its map.
     share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
-    board_label = _key_hint("Enter on leaderboard", "L")
+    board_label = _board_label(ui)
     share = ui.can_post(state)
     # The constant, not a resolved URL: a blank one disables the feature
     # everywhere (see `paths`), and resolving one costs a DOM read that this must
@@ -3358,6 +3358,8 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # the share pair side by side, or stacked where two won't fit across
     share_w = max(_btn_w(normal, share_label, bw), _btn_w(normal, board_label, bw))
     stack_share = board and 2 * share_w + gap > room
+    # A quick post's summary can outrun a phone's width, so it wraps.
+    notes = _wrap(_fonts()["small"], ui.share_msg, room) if (share and ui.share_msg) else []
     rows = (4 + stack_share) if share else 3
     stack = (
         _row_h(head_kind)
@@ -3365,7 +3367,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         + pad
         + rows * (bh + gap)
         - gap
-        + (_row_h() if (share and ui.share_msg) else 0)
+        + len(notes) * _row_h()
     )
     y = (h - stack) // 2
 
@@ -3418,9 +3420,10 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
             ui.share_button_rect = _btn(surface, pygame.Rect(w // 2 - sw // 2, y, sw, bh), share_label, *_BTN_TEAL)
             ui.leaderboard_button_rect = (0, 0, 0, 0)
         y += bh + gap
-        if ui.share_msg:
-            _text(surface, _fonts()["small"], ui.share_msg, config.COLOR_TEXT_DIM, center=(w // 2, button_y + bh + _row_h() // 2))
-            y += _row_h()
+        for i, note in enumerate(notes):
+            _text(surface, _fonts()["small"], note, config.COLOR_TEXT_DIM,
+                  center=(w // 2, button_y + bh + i * _row_h() + _row_h() // 2))
+        y += len(notes) * _row_h()
     else:
         ui.share_button_rect = (0, 0, 0, 0)
         ui.leaderboard_button_rect = (0, 0, 0, 0)
@@ -3428,10 +3431,31 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
+# How much of a name the leaderboard button shows.
+_POST_NAME_SHOWN = 16
+
+
+def _board_label(ui: Ui) -> str:
+    """The win overlay's leaderboard button, by what it does now
+    (``Ui.board_action``)."""
+    action = ui.board_action()
+    if action == "view":
+        return _key_hint("View on board", "L")
+    if action == "posting":
+        return "Posting…"
+    if action == "post":
+        name = ui.post_as.strip()
+        if len(name) > _POST_NAME_SHOWN:
+            name = name[:_POST_NAME_SHOWN - 1].rstrip() + "…"
+        return _key_hint(f"Post as {name}", "L")
+    return _key_hint("Enter on leaderboard", "L")
+
+
 _COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is
     coach.GAMBLE: _BTN_DANGER[1],
     coach.SURPRISE: _BTN_AMBER[1],
     coach.EMPTIED: _BTN_DANGER[1],
+    coach.EVACUATED: _BTN_TEAL[1],
     coach.IDLE: _BTN_AMBER[1],
     coach.TURN: _BTN_VIOLET[1],
 }
@@ -3598,7 +3622,7 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     label, and a Rewind button (only when viewing a turn before the latest).
     Records hit-rects on ``ui`` for input, mirroring the store-rect-then-test
     handoff used across the HUD."""
-    w, h = surface.get_size()
+    w, _h = surface.get_size()
     _fx, by, _fw, fh = config.footer_rect(history=True)
     font = _fonts()["small"]
     bh = config.FOOTER_BTN_H
@@ -3707,7 +3731,7 @@ def _graph_value(metric: str, v: float) -> str:
         return f"{v:.1f}"
     if metric in stats.AREA:
         return f"{v:.0f}%"
-    return str(int(round(v)))
+    return str(round(v))
 
 
 def _turn_ticks(turns: int, width: int, label_w: int) -> list[int]:
@@ -3808,7 +3832,7 @@ def _draw_known_line(surface, color, series, at, width: int) -> None:
             pygame.draw.lines(surface, color, False, run, width)
         else:
             pygame.draw.circle(surface, color, run[0], width)
-    for before, after in zip(runs, runs[1:]):
+    for before, after in itertools.pairwise(runs):
         _draw_dotted(surface, color, before[-1], after[0], max(1, width // 2))
 
 

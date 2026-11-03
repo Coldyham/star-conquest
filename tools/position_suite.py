@@ -239,7 +239,7 @@ def summarise(results: list[sim.PositionResult]) -> dict:
     """
     compared = [r for r in results if r.gain is not None]
     recoverable = [r for r in results if not r.human_won]
-    gains = [r.gain for r in compared]
+    gains = [r.gain for r in compared if r.gain is not None]
     return {
         "positions": len(results),
         "won": sum(1 for r in results if r.won),
@@ -274,7 +274,7 @@ def report(by_bot: dict[str, list[sim.PositionResult]]) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--bots", nargs="+", default=None,
                         help="strategies to measure (default: every registered one)")
     parser.add_argument("--every", type=int, default=DEFAULT_EVERY,

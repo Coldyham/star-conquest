@@ -27,7 +27,7 @@ def board():
           " end $$", DB)
     out = subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-q",
                           "-f", str(AUTH_STUB), "-f", str(SCHEMA)],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stderr
     # solo: one player twice. pair: two players, but bob's score is a mismatch.
     # duel: two counted players. fog/scout: fog on via either range. Bots: on

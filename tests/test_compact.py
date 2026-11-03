@@ -120,6 +120,26 @@ def test_the_game_screens_regions_tile_without_overlapping(screen_for, landscape
         assert play.w == w and play.h > h // 3   # the map takes the full width
 
 
+def test_portrait_end_turn_stands_clear_of_the_gesture_bar_and_answers_its_whole_row(screen_for):
+    """In portrait End Turn crosses the screen's foot, where a phone's browser
+    takes a tap near the edge for its own: the bar is drawn lifted clear of it,
+    at least a finger tall, and a press anywhere in its row (the inset under it
+    and the side margins too) still ends the turn."""
+    screen = screen_for(False)
+    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    ui = _make_ui(state)
+    render.draw(screen, state, ui)
+    slot, face = pygame.Rect(config.end_turn_rect()), pygame.Rect(config.end_turn_face_rect())
+    css = config.SCREEN_W / _CSS[0]                   # device px per CSS px
+    assert slot.contains(face)
+    assert (slot.bottom - face.bottom) / css >= 16    # off the gesture bar
+    assert face.h / css >= 40                         # a finger tall
+    assert ui.end_turn_rect == tuple(slot)
+    for pos in (slot.midbottom, (slot.left + 1, slot.bottom - 1), face.center):
+        pos = (pos[0], min(pos[1], slot.bottom - 1))
+        assert game_input.handle_event(_press(pos), state, ui) == "end_turn", pos
+
+
 @pytest.mark.parametrize("landscape", [True, False])
 def test_the_exits_fold_into_the_overflow_list_and_still_work(screen_for, landscape):
     """On a phone Quit, Menu and New map live behind the strip's "more" button:
@@ -219,6 +239,7 @@ def test_the_compact_menu_fits_its_canvas_and_still_starts(screen_for, landscape
     menu._FONTS.clear()
     ms, settings = menu.MenuState(), Settings.defaults()
     menu.draw(screen, ms, settings)
+    assert menu._CANVAS is not None
     canvas = pygame.Rect((0, 0), menu._CANVAS.get_size())
     assert canvas.w < config.BASE_SCREEN_W        # its own canvas, not the letterbox
     for key, rect in ms.rects.items():
@@ -239,6 +260,7 @@ def test_the_basic_and_advanced_tabs_need_no_scroll(screen_for, landscape):
     for tab in ("basic", "advanced"):
         ms.tab = tab
         menu.draw(screen, ms, settings)
+        assert ms.panel_view is not None
         assert ms.panel_view.w >= menu._C_PANEL_W
         assert ms.panel_content_h <= ms.panel_view.h, tab
 
@@ -261,6 +283,7 @@ def test_a_drag_up_from_a_slider_scrolls_and_one_across_moves_it(screen_for):
     ms, settings = menu.MenuState(), Settings.defaults()
     ms.tab = "combat"
     menu.draw(screen, ms, settings)
+    assert ms.panel_view is not None
     assert ms.panel_content_h > ms.panel_view.h
     rect = ms.rects["preview_attacker"]
     before = ms.preview_attacker
@@ -282,6 +305,7 @@ def test_the_settings_panel_scrolls_and_shows_only_what_is_in_view(screen_for):
     ms.tab = "combat"
     menu.draw(screen, ms, settings)
     view = ms.panel_view
+    assert view is not None
     assert ms.panel_content_h > view.h
     k = ms.canvas_scale
     # blank space: the panel's far right margin, clear of every widget
@@ -482,6 +506,7 @@ def test_portrait_keeps_one_panel_height_with_the_map_and_taller_buttons_under_i
         ms.tab = tab
         menu.draw(screen, ms, settings)
         views[tab] = ms.panel_view
+        assert ms.panel_view is not None
         assert ms.panel_content_h <= ms.panel_view.h, tab   # no tab scrolls
     assert len(set(map(tuple, views.values()))) == 1
     assert ms.rects["start"].y - views["ai"].bottom > menu._C_SKETCH_MIN

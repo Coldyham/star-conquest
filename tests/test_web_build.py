@@ -33,7 +33,9 @@ def test_the_service_worker_caches_the_runtime_pygbag_loads():
     as CORS responses (an opaque one can't be checked and pads the quota)."""
     import importlib.util
 
-    runtime = re.search(r'const RUNTIME = "([^"]+)";', SW).group(1)
+    found = re.search(r'const RUNTIME = "([^"]+)";', SW)
+    assert found is not None
+    runtime = found.group(1)
     spec = importlib.util.find_spec("pygbag")
     assert spec is not None and spec.origin is not None
     app = (Path(spec.origin).parent / "app.py").read_text()
@@ -62,7 +64,7 @@ def test_the_board_copy_is_an_allow_list_of_servable_files():
 
 def test_every_board_page_renders_with_the_shared_chrome(tmp_path):
     render_board.build(tmp_path)
-    header = re.compile(r'<header class="bar">.*?</header>', re.S)
+    header = re.compile(r'<header class="bar">.*?</header>', re.DOTALL)
     headers = set()
     for page in render_board.PAGES:
         html = (tmp_path / page).read_text()
@@ -124,10 +126,17 @@ def test_the_functions_answer_where_the_game_calls_them():
 
 def test_the_games_board_links_point_under_board():
     for path in (paths.LEADERBOARD_SUBMIT_PATH, paths.LEADERBOARD_RECENT_PATH,
-                 paths.LEADERBOARD_LOBBY_PATH):
+                 paths.LEADERBOARD_LOBBY_PATH, paths.LEADERBOARD_GAME_PATH,
+                 paths.LEADERBOARD_POST_MODULE_PATH):
         page = path.split("?")[0]
         assert page.startswith("/board/")
         assert (ROOT / "leaderboard" / page.removeprefix("/board/")).exists()
+
+
+def test_quick_post_calls_what_the_board_module_exports():
+    """`share.quick_post` imports the module and calls this by name."""
+    module = ROOT / "leaderboard" / paths.LEADERBOARD_POST_MODULE_PATH.removeprefix("/board/")
+    assert "export async function quickPost(token, name)" in module.read_text()
 
 
 def test_the_old_host_proxies_the_api_rather_than_redirecting_it():

@@ -160,6 +160,7 @@ def test_a_dealt_stage_is_an_ordinary_setup_the_gauntlet_reads():
     g = gauntlet.Gauntlet.from_dict({"stages": [{"id": 0, "settings": stage}]})
     assert g is not None
     assert gauntlet.stage_key(g.stages[0]) == s.challenge_key()
+    assert s.seed is not None
     build_state(gauntlet.stage_settings(g.stages[0]), s.seed)
     assert dealer.describe(s).startswith("Symmetric · ")
 
@@ -174,7 +175,9 @@ def test_lane_turns_fits_the_speed_to_the_dealt_map():
     spec = dealer.Spec.from_dict(LANES)
     assert spec.rules["lane_turns"] == dealer.Rule("range", (2, 5))
     for s in _deals(spec, 12):
-        median = settings.lane_turns(settings.lane_lengths(s), s.ship_ly_per_turn)[1]
+        turns = settings.lane_turns(settings.lane_lengths(s), s.ship_ly_per_turn)
+        assert turns is not None
+        median = turns[1]
         assert 2 <= median <= 5 and 6 <= s.ship_ly_per_turn <= 12
         assert s.ship_ly_per_turn * 2 == int(s.ship_ly_per_turn * 2)
 

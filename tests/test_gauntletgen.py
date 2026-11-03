@@ -32,7 +32,7 @@ def test_a_stepped_job_plays_the_same_games_as_playing_them_whole():
     assert steps > len(job.rows) and len(job.rows) % len(gg.PROBES) == 0
     whole = [gg.play_one(r["key"], next(c["stage"] for c in job.cands if c["key"] == r["key"]), r["bot"])
              for r in job.rows]
-    strip = lambda rows: [{k: r[k] for k in ("key", "bot", "won", "turns", "lost")} for r in rows]  # noqa: E731
+    strip = lambda rows: [{k: r[k] for k in ("key", "bot", "won", "turns", "lost")} for r in rows]
     assert strip(job.rows) == strip(whole)
 
 
@@ -134,7 +134,8 @@ def test_a_job_stops_at_the_end_of_a_round_that_settles(monkeypatch):
     _finish(job)
     per_round = len([c for c in job.cands if c["round"] == 0])
     assert calls == [per_round] and len(job.rows) == per_round * len(gg.PROBES)
-    assert job.result() is None or job.result()["stages"]
+    result = job.result()
+    assert result is None or result["stages"]
 
 
 def test_a_spec_that_can_never_deal_is_refused():
@@ -168,7 +169,7 @@ def test_the_boards_spec_link_is_a_run_the_game_reads_unchanged():
     fx = json.loads((Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "fixtures"
                      / "gauntlet-spec.json").read_text(encoding="utf-8"))
     data = gg.spec_from_fragment(fx["fragment"])
-    assert data == fx["spec"]
+    assert data is not None and data == fx["spec"]
     spec = dealer.Spec.from_dict(data)
     assert set(spec.rules) == set(data["rules"]) and dealer.problems(spec) == []
     job = gg.job_from_link(data, seed=0)

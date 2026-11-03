@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import time
@@ -30,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-import hunt_bench  # noqa: E402
+import hunt_bench
 
 # name: (start, scale, low, high, integer)
 SPACE = {
@@ -56,7 +55,7 @@ def decode(x, names) -> dict:
     for v, name in zip(x, names):
         start, scale, lo, hi, integer = SPACE[name]
         val = min(hi, max(lo, start + v * scale))
-        out[name] = int(round(val)) if integer else round(val, 4)
+        out[name] = int(round(val)) if integer else round(val, 4)  # noqa: RUF046 - val may be a numpy float
     if "EDGE_SWING" in out and out["EDGE_SWING"] >= 1.2215:
         out["EDGE_SWING"] = 0.0          # the worst roll, as shipped
     return out
@@ -88,7 +87,7 @@ def fitness(variants, seeds, ex) -> list[float]:
 
 
 def main() -> None:
-    import cma
+    import cma  # pyright: ignore[reportMissingImports]
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", default="t1")
     ap.add_argument("--hours", type=float, default=10.0)

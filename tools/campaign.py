@@ -59,6 +59,7 @@ HOME_OFFSET = 110.0           # world units a home sits outside its edge node
 MYSTERY_MAX_NODES = config.STANDARD_MAX_NODES
 FAMILY_MAX_NODES = config.STANDARD_MAX_NODES   # a config past this is never a node
 SEED_TRIES = 50
+FIRST_MOVE_TURNS = 10         # a node's home must match the average neutral garrison by then
 # Extra lanes past the MST, as a fraction of it: half again a game board's 0.4.
 # At 0.4 a 12-node field averaged 4.5 cut nodes (a node every route through it
 # must cross, so one par-tight score walls off what lies behind it) and a 36-node
@@ -70,7 +71,7 @@ FIELD_EXTRA_EDGE_FRACTION = 0.6
 
 def week_start(now: dt.datetime) -> dt.date:
     """The Monday (UTC) of the week ``now`` falls in."""
-    day = now.astimezone(dt.timezone.utc).date()
+    day = now.astimezone(dt.UTC).date()
     return day - dt.timedelta(days=day.weekday())
 
 
@@ -102,8 +103,9 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
     is any config past ``FAMILY_MAX_NODES`` systems: a big map is a long sitting,
     and one played once as a test would otherwise turn up week after week. A
     config below a ``settings.ROLL_FLOORS`` entry is left out too: the dice never
-    deal it, so neither does the week."""
-    cutoff = dt.datetime.combine(before, dt.time(), dt.timezone.utc)
+    deal it, so neither does the week, and so is one that fails
+    ``starts_in_time``."""
+    cutoff = dt.datetime.combine(before, dt.time(), dt.UTC)
     out: dict[str, Family] = {}
     for row in games:
         setup = row.get("settings_json") or {}
@@ -114,7 +116,9 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
         parsed = Settings.from_dict(dict(setup))
         if any(getattr(parsed, attr) < floor for attr, floor in ROLL_FLOORS.items()):
             continue
-        seen = dt.datetime.fromisoformat(str(row["first_seen_at"]).replace("Z", "+00:00"))
+        if not starts_in_time(parsed):
+            continue
+        seen = dt.datetime.fromisoformat(str(row["first_seen_at"]))
         if seen >= cutoff:
             continue
         key = family_key(setup)
@@ -122,6 +126,17 @@ def families(games: list[dict], before: dt.date) -> list[Family]:
         mode = setup.get("mode", "random")
         family.plays[mode] = family.plays.get(mode, 0) + 1
     return sorted(out.values(), key=lambda f: family_key(f.setup))
+
+
+def starts_in_time(settings: Settings) -> bool:
+    """Whether a home, on its starting ships and its production, matches the
+    average neutral garrison within ``FIRST_MOVE_TURNS`` turns. Read from the
+    settings alone: the average is the one ``config.garrison_for`` deals over
+    ``config.PRODUCTION_WEIGHTS``."""
+    weights = config.PRODUCTION_WEIGHTS
+    scaled = sum(w * round(settings.garrison_k / p) for p, w in weights.items()) / sum(weights.values())
+    neutral = settings.garrison_base + scaled + settings.garrison_jitter / 2
+    return settings.home_start_ships + FIRST_MOVE_TURNS // settings.home_production >= neutral
 
 
 def _fresh_seed(rng: random.Random, taken: set[tuple[str, int]], mode: str) -> int:
@@ -169,9 +184,15 @@ def _symmetric_layout(rng: random.Random) -> str:
 
 def _mystery(rng: random.Random, taken: set[tuple[str, int]]) -> tuple[dict, int]:
     """A "?" node: default settings with every Advanced knob rolled, and random
-    players, systems, map type and opponents."""
+    players, systems, map type and opponents. The knobs are rolled again until
+    they pass ``starts_in_time``."""
     settings = Settings.defaults()
-    randomise_knobs(settings, ADV_MAP + ADV_TRAVEL + ADV_ECON + ADV_FOG, rng)
+    for _ in range(SEED_TRIES):
+        randomise_knobs(settings, ADV_MAP + ADV_TRAVEL + ADV_ECON + ADV_FOG, rng)
+        if starts_in_time(settings):
+            break
+    else:
+        raise RuntimeError('no "?" roll started in time')   # about one in 10^26
     settings.players = rng.randint(config.MIN_PLAYERS, config.MAX_PLAYERS)
     settings.nodes = rng.randint(settings.min_nodes(), MYSTERY_MAX_NODES)
     settings.mode = rng.choice(("random", "symmetric"))
@@ -300,7 +321,7 @@ def active_players(api: Supabase, start: dt.date) -> int:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--week", help="the week's Monday (YYYY-MM-DD); default this week")
     parser.add_argument("--dry-run", action="store_true", help="print the graph, store nothing")
     return parser.parse_args(argv)
@@ -312,8 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     if not url or not key:
         print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
-    start = (week_start(dt.datetime.fromisoformat(args.week).replace(tzinfo=dt.timezone.utc))
-             if args.week else week_start(dt.datetime.now(dt.timezone.utc)))
+    start = (week_start(dt.datetime.fromisoformat(args.week).replace(tzinfo=dt.UTC))
+             if args.week else week_start(dt.datetime.now(dt.UTC)))
     api = Supabase(url, key)
     if api.select("campaigns", f"select=week_start&week_start=eq.{start.isoformat()}"):
         print(f"campaign for {start} already exists — nothing to do")

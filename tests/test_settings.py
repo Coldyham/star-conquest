@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import random
+from typing import Any
 
 import pytest
 
@@ -240,17 +241,20 @@ def test_copy_from_carries_the_challenge():
     target = Settings.defaults()
     target.copy_from(_challenged())
     assert target.challenge == _challenged().challenge
+    assert target.challenge is not None
     target.challenge.turns = 1          # must be a copy, not the same object
-    assert _challenged().challenge.turns == 137
+    original = _challenged().challenge
+    assert original is not None and original.turns == 137
 
 
 def test_challenge_carries_the_id_of_its_replay():
     """`Challenge.log` names the uploaded game log behind the score, and has to
     survive the link — it is what tools/verify_scores.py keys on."""
     s = _challenged()
+    assert s.challenge is not None
     s.challenge.log = "00112233445566ff"
-    assert Settings.from_token(s.to_token()).challenge.log == "00112233445566ff"
-    assert Settings.from_dict(s.to_dict()).challenge.log == "00112233445566ff"
+    for back in (Settings.from_token(s.to_token()), Settings.from_dict(s.to_dict())):
+        assert back.challenge is not None and back.challenge.log == "00112233445566ff"
 
 
 def test_challenge_log_does_not_move_the_setup_digest():
@@ -281,6 +285,7 @@ def test_challenge_key_changes_with_the_setup():
 
 def test_challenge_matches_until_the_config_is_edited():
     s = _challenged()
+    assert s.challenge is not None
     assert s.challenge.matches(s)
     s.nodes += 1
     assert not s.challenge.matches(s)
@@ -302,6 +307,7 @@ def test_challenge_key_ignores_seats_beyond_players():
     s.ai[3] = AiParams(reserve_fraction=0.9)
     s.challenge = Challenge(turns=10, key=s.challenge_key())
     reopened = Settings.from_token(s.to_token())
+    assert reopened.challenge is not None
     assert reopened.challenge.matches(reopened)
 
 
@@ -431,7 +437,7 @@ def test_an_int_aux_at_the_default_value_still_travels_in_the_link():
     assert Settings.from_token(s.to_token()).challenge_key() == s.challenge_key()
 
 
-def _through_a_browser(value):
+def _through_a_browser(value: Any) -> Any:
     """What `JSON.parse` then `JSON.stringify` leaves of a value: JavaScript has
     one number type, so an integral float comes back an int."""
     if isinstance(value, float) and value.is_integer():
@@ -455,7 +461,7 @@ def test_a_browser_round_trip_moves_the_challenge_key_only_through_aux():
         value = getattr(s, f.name)
         if isinstance(value, float):
             setattr(s, f.name, float(int(value)) + 1.0)
-    whole = {f.name: float(int(getattr(AiParams(), f.name))) + 1.0
+    whole: dict[str, Any] = {f.name: float(int(getattr(AiParams(), f.name))) + 1.0
              for f in dataclasses.fields(AiParams)
              if isinstance(getattr(AiParams(), f.name), float) and f.name != "aux"}
     s.ai[1] = AiParams(**whole)
@@ -841,6 +847,7 @@ def test_copy_from_deep_copies_the_recipe():
     s = _with_map()
     other = Settings()
     other.copy_from(s)
+    assert other.custom_map is not None and s.custom_map is not None
     other.custom_map.nodes[0].x = 999
     assert s.custom_map.nodes[0].x == 200
 
@@ -1080,7 +1087,7 @@ def test_a_roll_never_lands_below_its_floor_but_the_slider_still_reaches_it():
     """Sight 0 can be chosen by hand, so the slider keeps it; the dice (the menu's
     and the campaign's "?" nodes alike) never deal it."""
     from starconquest.settings import ADV_FOG, ROLL_FLOORS, randomise_knobs
-    assert dict((attr, lo) for _k, _l, attr, lo, *_ in ADV_FOG)["fog_sight"] < ROLL_FLOORS["fog_sight"]
+    assert {attr: lo for _k, _l, attr, lo, *_ in ADV_FOG}["fog_sight"] < ROLL_FLOORS["fog_sight"]
     rng = random.Random(0)
     rolled = set()
     for _ in range(300):

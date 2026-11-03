@@ -16,6 +16,7 @@ SWITCHABLE = ("evacuate", "recapture")
 
 def _evolved():
     spec = importlib.util.spec_from_file_location("evolved_under_test", MODELS / "evolved.py")
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

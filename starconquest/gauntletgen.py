@@ -192,7 +192,7 @@ def _spread(measured: list[dict], stages: int) -> list[dict]:
 def target(m: dict, slack: int, which: str = "slowest") -> dict:
     """The slowest or the fastest probe win (``which``), plus ``slack`` turns:
     shown possible by a bot."""
-    score = lambda r: (r["turns"], r["lost"])       # noqa: E731
+    score = lambda r: (r["turns"], r["lost"])
     win = max(m["wins"], key=score) if which == "slowest" else min(m["wins"], key=score)
     if slack:
         return {"turns": win["turns"] + slack}

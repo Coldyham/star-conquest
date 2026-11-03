@@ -371,6 +371,12 @@ def test_route_mode_is_not_offered_when_there_is_nothing_to_plan():
 # --------------------------------------------------------------------------- #
 # The drag box (needs a display for the view/screen mapping)
 # --------------------------------------------------------------------------- #
+def _screen() -> pygame.Surface:
+    screen = pygame.display.get_surface()
+    assert screen is not None
+    return screen
+
+
 def _display_setup():
     pygame.init()
     pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -696,7 +702,7 @@ def test_x_clears_the_group_but_stays_in_the_mode():
 def test_render_zeroes_end_turn_so_it_cannot_be_hit_while_routing():
     state, ui = _routed_setup()
     try:
-        screen = pygame.display.get_surface()
+        screen = _screen()
         render.draw(screen, state, ui)
         assert ui.end_turn_rect == (0, 0, 0, 0)
         # and the live-play strip is out of service too
@@ -711,7 +717,7 @@ def test_render_suppresses_clear_forwarding_while_routing():
     """It would mutate auto_forward underneath the preview."""
     state, ui = _display_setup()
     try:
-        screen = pygame.display.get_surface()
+        screen = _screen()
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
         render.draw(screen, state, ui)
@@ -740,11 +746,11 @@ def test_history_mode_retires_the_route_button():
     clicks — history mode draws no footer at all."""
     state, ui = _display_setup()
     try:
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert ui.route_button_rect[2] > 0
         ui.history = True
         ui.history_max = ui.history_turn = 0
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert ui.route_button_rect == (0, 0, 0, 0)
         assert ui.route_cancel_rect == (0, 0, 0, 0)
     finally:
@@ -987,12 +993,12 @@ def test_the_footer_button_switches_sub_mode():
     """One button, naming the sub-mode it is in and switching when pressed."""
     state, ui = _routed_setup()
     try:
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert ui.route_mode_rect[2] > 0
         rx, ry, rw, rh = ui.route_mode_rect
         _press(state, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.route_rally is True
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         rx, ry, rw, rh = ui.route_mode_rect
         _press(state, ui, (rx + rw // 2, ry + rh // 2))
         assert ui.route_rally is False
@@ -1042,7 +1048,7 @@ def test_render_draws_a_rally_plan_without_a_destination():
             state.systems[nbr].owner_id = 1
         ui.route_tap(state, home)
         assert ui.route_plan and ui.route_dest is None
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert ui.route_confirm_rect[2] > 0       # the confirm takes the End Turn slot
         assert ui.end_turn_rect == (0, 0, 0, 0)
     finally:
@@ -1210,10 +1216,10 @@ def test_auto_rally_does_nothing_when_nothing_is_threatened():
 def test_the_auto_route_button_is_drawn_only_in_rally_mode_with_a_front():
     state, ui = _routed_setup()
     try:
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert ui.route_auto_rect == (0, 0, 0, 0)      # chain mode never offers it
         ui.set_route_rally(state, True)
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert bool(ui.route_auto_rect[2]) == bool(ui.threatened_systems(state))
     finally:
         pygame.quit()
@@ -1225,7 +1231,7 @@ def test_the_auto_route_button_picks_the_front():
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         for nbr in state.systems[home].neighbors:      # guarantee a front to find
             state.systems[nbr].owner_id = 2
-        render.draw(pygame.display.get_surface(), state, ui)
+        render.draw(_screen(), state, ui)
         assert ui.route_auto_rect[2] > 0
         ax, ay, aw, ah = ui.route_auto_rect
         _press(state, ui, (ax + aw // 2, ay + ah // 2))

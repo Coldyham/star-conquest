@@ -16,6 +16,7 @@ import asyncio
 import copy
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import pygame
 
@@ -469,6 +470,56 @@ def post_to_leaderboard(settings: Settings, state: GameState, ui: Ui,
     if webstore.copy_to_clipboard(url):
         return "Leaderboard link copied — open it to post"
     print(f"Leaderboard entry link:\n{url}")
+    return "Couldn't open a browser — link printed to the console"
+
+
+QUICK_POST_FAILED_MSG = "Couldn't post — press again for the entry form"
+
+
+def quick_post(settings: Settings, state: GameState, ui: Ui,
+               seed: int, log: GameLog) -> pbp.Request | None:
+    """Post this result under ``ui.post_as`` without the entry form, and answer
+    the post to poll. Falls back to the form (``post_to_leaderboard``) when it
+    cannot be tried, as this is still the button press."""
+    shared = challenge_settings(settings, state, ui, seed, log)
+    request = share.quick_post(shared.to_token(), ui.post_as)
+    if request is None:
+        ui.post_state = "failed"
+        ui.share_msg = post_to_leaderboard(settings, state, ui, seed, log)
+        return None
+    # The same upload, and the same consent, as the form's button: the score
+    # names the log and the two may land in either order.
+    share.post_log(log, shared.challenge.key if shared.challenge else "")
+    ui.post_state = "posting"
+    ui.share_msg = ""
+    return request
+
+
+def land_quick_post(ui: Ui, figures: tuple[int, int], status: str, body: str) -> None:
+    """Show how a quick post went. A failure leaves the button on the entry form.
+    ``figures`` is the posted ``(turns, lost)``."""
+    summary = share.post_summary(body, *figures, ui.post_as) if status == pbp.OK else None
+    if summary is None:
+        print(f"quick post ended in state {status!r}: {body[:200]!r}")
+        ui.post_state = "failed"
+        ui.share_msg = QUICK_POST_FAILED_MSG
+        return
+    ui.post_state = "posted"
+    ui.posted_key, ui.share_msg = summary
+
+
+def open_map_page(key: str) -> str:
+    """Open the board's page for the map ``key``. Returns a line for the overlay
+    when it could not, else ``""``."""
+    page = webstore.leaderboard_url(paths.LEADERBOARD_GAME_PATH)
+    if not page:
+        return "No leaderboard is configured"
+    url = f"{page}?key={quote(key, safe='')}"
+    if webstore.open_url(url):
+        return ""
+    if webstore.copy_to_clipboard(url):
+        return "Map page link copied"
+    print(f"Map page:\n{url}")
     return "Couldn't open a browser — link printed to the console"
 
 
@@ -1429,6 +1480,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
             share.post_log(log, log.setup_key())
     if ui.can_post(state) and settings is not None:
         record_best(settings, state, ui)
+        # Read here, once the result is ours, never in `render`.
+        ui.post_as = share.quick_post_name()
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
     if ui.in_pbp and not ui.spectating:
@@ -1938,6 +1991,9 @@ async def main() -> None:
     # fragment per launch, so it never meets the links above.
     pending_daily: pbp.Request | None = None
     pending_daily_kind = daily.BOARD
+    # A quick post in flight: the Ui it reports to, the request, and the posted
+    # (turns, lost). Landed on that Ui even if the player has moved on.
+    pending_post: tuple[Ui, pbp.Request, tuple[int, int]] | None = None
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         asked = daily.link(webstore.url_token())
         if asked is not None:
@@ -1999,6 +2055,11 @@ async def main() -> None:
             if dstate != pbp.PENDING:
                 pending_daily = None
                 land_daily(menu_state, settings, dstate, dbody, pending_daily_kind)
+        if pending_post is not None:
+            pstate, pbody = pending_post[1].poll()
+            if pstate != pbp.PENDING:
+                land_quick_post(pending_post[0], pending_post[2], pstate, pbody)
+                pending_post = None
         if pending_replay is not None:
             status, body = pending_replay.poll()
             if status != share.PENDING:
@@ -2502,7 +2563,16 @@ async def main() -> None:
                 # Same gate as "share": the two buttons offer one result by two
                 # channels, so neither may fire on a result that isn't yours.
                 if ui.can_post(state):
-                    ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
+                    board = ui.board_action()
+                    if board == "view":
+                        ui.share_msg = open_map_page(ui.posted_key) or ui.share_msg
+                    elif board == "post":
+                        request = quick_post(settings, state, ui, current_seed, log)
+                        if request is not None:
+                            figures = (state.turn, state.players[ui.human_id].ships_lost)
+                            pending_post = (ui, request, figures)
+                    elif board == "enter":
+                        ui.share_msg = post_to_leaderboard(settings, state, ui, current_seed, log)
             elif action == "end_turn" and not ui.autoplay:
                 if ui.in_pbp:
                     # The one thing that makes a shared match different: the turn

@@ -17,6 +17,8 @@ measured against itself can never generate for itself.
 
 * Pressing *Post to leaderboard* uploads the match behind that score. Pressing
   the button is the consent; it works whether or not the preference below is on.
+  Quick post (*Post as <name>*, ``quick_post``) is the same button posting the
+  score itself, so it is the same consent.
 * With *Share replays* ticked on the menu (``webstore.share_games``, off until
   switched on), a game also uploads as it goes — every ``CHECKPOINT_TURNS`` turns
   and again when it ends, so a match that is abandoned rather than finished is
@@ -68,9 +70,10 @@ from __future__ import annotations
 import json
 import threading
 
-from . import webstore
+from . import pbp, webstore
 from .paths import (
     LEADERBOARD_LOG_PATH,
+    LEADERBOARD_POST_MODULE_PATH,
     LEADERBOARD_REPLAY_PATH,
     WEB_REPLAY_BODY_KEY,
     WEB_REPLAY_STATE_KEY,
@@ -221,7 +224,7 @@ def _post_web(body: str, headers: dict[str, str]) -> bool:
     import platform as _platform
 
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"fetch({json.dumps(log_url())},{{method:'POST',headers:{json.dumps(headers)},body:{json.dumps(body)}}}).catch(function(){{}})"
         )
         return True
@@ -255,6 +258,88 @@ def _post_desktop(body: str, headers: dict[str, str]) -> bool:
         return True
     except RuntimeError:  # thread creation refused; not worth doing inline
         return False
+
+
+# --------------------------------------------------------------------------- #
+# Quick post (a score, without the entry form)
+# --------------------------------------------------------------------------- #
+# How much of a name the overlay's button and summary show.
+_NAME_SHOWN = 16
+
+
+def quick_post_name() -> str:
+    """The name a win can be posted under from the overlay, or ``""`` for the
+    entry form instead.
+
+    Web only: the board's posting module runs in the page (``quick_post``). The
+    name is the one the board and the play-by-post prompt remember
+    (``webstore.pbp_name``), so it is set by posting once through the form.
+    """
+    if not is_web() or not webstore.leaderboard_url(LEADERBOARD_POST_MODULE_PATH):
+        return ""
+    return webstore.pbp_name()
+
+
+def quick_post(token: str, name: str) -> pbp.Request | None:
+    """Post ``token``'s score under ``name`` with the board's own posting module,
+    without opening a tab. None if it cannot be tried.
+
+    The module is the one the entry form posts with (``leaderboard/js/post.mjs``),
+    loaded from the board on the game's own origin, so the game reimplements none
+    of how a score is filed. It answers ``game_summary``'s aggregate as JSON
+    (``post_summary`` reads it). The caller uploads the log first, as the entry
+    form's button does.
+    """
+    module = webstore.leaderboard_url(LEADERBOARD_POST_MODULE_PATH)
+    if not module or not name:
+        return None
+    return pbp.settle(
+        f"import({json.dumps(module)}).then(function(m)"
+        f"{{return m.quickPost({json.dumps(token)},{json.dumps(name)})}})"
+        ".then(function(r){return JSON.stringify(r)})"
+    )
+
+
+def short_name(name: str) -> str:
+    """``name`` cut to fit a button."""
+    name = name.strip()
+    return name if len(name) <= _NAME_SHOWN else name[:_NAME_SHOWN - 1].rstrip() + "…"
+
+
+def post_summary(body: str, turns: int, lost: int, name: str) -> tuple[str, str] | None:
+    """``(game key, line)`` for the overlay from ``quick_post``'s answer, or None
+    if it is not one.
+
+    Only what an embargoed map's page shows anyone (the count, and who holds the
+    best), so the line reads the same whether or not the map is embargoed. A
+    best on our figures is ours when the name matches or several players share
+    it; otherwise our score did not count (a match posted twice) and the best is
+    somebody else's.
+    """
+    try:
+        answer = json.loads(body)
+        key = answer["game_key"]
+        count = int(answer.get("score_count") or 0)
+        best = answer.get("best_turns")
+        best = None if best is None else (int(best), int(answer.get("best_lost") or 0))
+        holders = int(answer.get("best_holders") or 1)
+        leader = str(answer.get("best_user_name") or "").strip()
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return None
+    if not isinstance(key, str) or not key:
+        return None
+    scores = f"{count} scores on this map"
+    if best is None:
+        return key, f"Posted  ·  {scores}" if count > 1 else "Posted"
+    if best == (turns, lost) and (holders > 1 or leader.lower() == name.strip().lower()):
+        if count <= 1:
+            return key, "Posted  ·  the first score on this map"
+        if holders > 1:
+            others = holders - 1
+            return key, f"Posted  ·  joint best with {others} other{'s' if others > 1 else ''}  ·  {scores}"
+        return key, f"Posted  ·  you lead  ·  {scores}"
+    figures = f"{best[0]} turns" + (f", {best[1]} lost" if best[0] == turns else "")
+    return key, f"Posted  ·  best is {figures} by {short_name(leader or 'anonymous')}  ·  {scores}"
 
 
 # --------------------------------------------------------------------------- #
@@ -353,7 +438,7 @@ def _fetch_web(url: str) -> Download | None:
 
     state, body = json.dumps(WEB_REPLAY_STATE_KEY), json.dumps(WEB_REPLAY_BODY_KEY)
     try:
-        _platform.window.eval(
+        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
             f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({body});"
             f"fetch({json.dumps(url)}).then(function(r)"
             "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"

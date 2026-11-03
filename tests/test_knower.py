@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import sys
+from typing import Any, cast
 
 import pytest
 
@@ -495,7 +496,8 @@ def test_aux_slider_is_declared_as_four_named_stops(kn):
 def test_seat_depth_is_tolerant(kn):
     """`aux` rides a hand-editable token, so nothing it can hold may raise."""
     class _P:
-        pass
+        ai_params: Any
+        aux: Any
 
     p = _P()
     p.ai_params = _P()
@@ -763,7 +765,7 @@ def test_a_decided_line_is_carried_not_stepped(kn):
 # --------------------------------------------------------------------------- #
 def test_the_horizon_is_the_longest_lane_plus_the_cushion(kn):
     state = _state()
-    longest = max(state.travel_turns(a, b) for a, nbrs in state.adjacency.items() for b in nbrs)
+    longest = max(cast(int, state.travel_turns(a, b)) for a, nbrs in state.adjacency.items() for b in nbrs)
     assert kn._horizon(state) == longest + kn.LANE_CUSHION
 
 
@@ -967,7 +969,7 @@ def test_a_hand_map_is_priced_on_the_systems_it_actually_has(kn, monkeypatch):
     monkeypatch.setattr(kn, "_longest_lane", lambda settings: 4)
     s = _knower_setup(2, nodes=18, players=6, ship_ly_per_turn=1.0)
     assert kn.setup_warning(s, [2, 3, 4, 5, 6]) == []
-    s.custom_map = SimpleNamespace(nodes=[None] * 120)
+    s.custom_map = cast(Any, SimpleNamespace(nodes=[None] * 120))
     lines = kn.setup_warning(s, [2, 3, 4, 5, 6])
     assert "on 120 systems" in lines[0]
     assert "use a smaller map" in lines[-1]

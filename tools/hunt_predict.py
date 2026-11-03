@@ -31,8 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, combat, config, engine, replay  # noqa: E402
-from starconquest.settings import Settings, build_state  # noqa: E402
+from starconquest import ai, combat, config, engine, replay
+from starconquest.settings import Settings, build_state
 
 SWING_FLOOR = 1.1 / 0.9
 REINFORCE = 0.3

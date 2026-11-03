@@ -7,6 +7,7 @@ seat to its named strategy, and per-seat `AiParams` actually change behaviour.
 from __future__ import annotations
 
 import sys
+from typing import Any, cast
 
 from starconquest import ai, engine, mapgen
 from starconquest.model import AiParams, Order
@@ -229,7 +230,7 @@ def test_aux_names_name_each_stop_of_an_integer_knob():
 
 def test_aux_names_are_ignored_unless_they_fit_the_slider():
     """A bad tuple costs the bot its names and nothing else: the number shows."""
-    good = dict(AUX_LABEL="Oracle", AUX_RANGE=(0, 2, 1), AUX_INT=True)
+    good = {"AUX_LABEL": "Oracle", "AUX_RANGE": (0, 2, 1), "AUX_INT": True}
     for extra in ({"AUX_NAMES": ("Off", "On")},                    # one short
                   {"AUX_NAMES": ("Off", "", "Search")},             # a blank stop
                   {"AUX_NAMES": "OffPredictSearch"},                # not a sequence
@@ -365,7 +366,7 @@ def test_a_legacy_name_is_its_family_at_its_stop():
     assert ai.canonical("council", 1.0) == ("knower", 3.0)
     assert ai.canonical("council", 0.0) == ("knower", 2.0)
     assert ai.canonical("council", 12.0) == ("knower", 3.0), "council read any 1+ as On"
-    assert ai.canonical("council", "junk") == ("knower", 3.0), "unreadable was On"
+    assert ai.canonical("council", cast(Any, "junk")) == ("knower", 3.0), "unreadable was On"
     assert ai.canonical("claudebot", 7.0) == ("thinker", 0.0)
     assert ai.canonical("knower", 12.0) == ("knower", 12.0), "a family is itself"
     assert ai.family("council") == "knower" and ai.family("marshal") == "marshal"

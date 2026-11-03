@@ -133,6 +133,8 @@ NETLIFY_SUFFIX = ".netlify.app"
 # touch `game_logs` — posting straight to PostgREST would mean shipping a key
 # with insert rights inside the game.
 LEADERBOARD_SUBMIT_PATH = "/board/submit.html"  # the score-entry form, opened with #<token>
+LEADERBOARD_POST_MODULE_PATH = "/board/js/post.mjs"  # the form's posting, run by quick post
+LEADERBOARD_GAME_PATH = "/board/game.html"  # one map's page, opened with ?key=<game key>
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)
 LEADERBOARD_PBP_PATH = "/api/pbp"      # play-by-post: match state and submissions

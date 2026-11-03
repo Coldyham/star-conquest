@@ -738,6 +738,13 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
 - **The game screen's regions come from `config`**: `play_rect`,
   `side_panel_rect`, `footer_rect`, `end_turn_rect`. Nothing in `render` or
   `input` derives one from `HUD_RIGHT_W` or the bars directly.
+- **Portrait End Turn stands off the gesture bar but answers its whole row.**
+  A mobile browser takes a tap near the screen's foot for its own (Safari
+  raises its toolbar), and the bar there used to reach almost to the edge, so
+  presses on its lower half went missing. The row is taller in portrait
+  (`COMPACT_PORTRAIT_END_TURN_H`), the bar is drawn `PORTRAIT_FOOT_INSET` clear
+  of the foot (`config.end_turn_face_rect`), and `Ui.end_turn_rect` is the whole
+  row, so a low or wide thumb still ends the turn.
 - **A landscape phone's panel gets its own legend** (`render._LEGEND_COMPACT_TOUCH`,
   `_LEGEND_HISTORY_COMPACT_TOUCH`): the column is about 14 rows of 24
   characters against the touch build's 23 rows, and the legend is cut silently

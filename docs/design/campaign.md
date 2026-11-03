@@ -31,7 +31,8 @@ campaign fleets proposal (decided against). Split out of
   a long sitting for one node) (sometimes its symmetric variant, plus one or two "?" nodes rolled with
   `settings.randomise_knobs` — the menu's dice, so never below a
   `settings.ROLL_FLOORS` entry (sight 0 is opt-in only), and a played config
-  below one is never a node either; a symmetric node whose config names no `layout`
+  below one is never a node either; nor is a setup, rolled or played, that
+  fails `starts_in_time` (see "A node you can start on"); a symmetric node whose config names no `layout`
   rolls one of `mapgen.SYMMETRIC_LAYOUTS`), and a ring of homes, one lane each off the edge
   nodes `mapgen.peripheral_starts` picks. A *cut node* (`cut_nodes`: one whose
   loss splits the field, so a single par-tight score there walls off what lies
@@ -105,6 +106,38 @@ campaign fleets proposal (decided against). Split out of
     fetches rather than added to `game_embargoes`, which reads live weeks only
     so `game_summary` never scans every past campaign. Counted by today's
     verdicts, so a score whose replay later fails its check was never ahead.
+
+## A node you can start on
+
+A rolled economy can leave a node with nothing to do for most of a sitting.
+The week of 2026-11-02 dealt a home making a ship every 7 turns from 5 ships
+against neutrals of about 26: some 180 turns before a first capture. It was an
+earlier week's "?", played and posted, so it had joined the pool like any
+config. About 30% of "?" rolls fail the rule below.
+
+**The rule: a home's starting ships plus `FIRST_MOVE_TURNS` (10) turns of its
+production must match the average neutral garrison** (`campaign.starts_in_time`).
+The average is the one `config.garrison_for` deals over
+`config.PRODUCTION_WEIGHTS`, so the rule reads the setup alone and never
+builds a map: like a `ROLL_FLOORS` entry, `families` leaves a failing config
+out, and `_mystery` rolls its knobs again until they pass.
+
+- *Measured on the week of 2026-11-02:* it drops 3 of the pool's 95 families
+  and 3 of the week's 16 nodes (the slow one, a "?" with 11 ships at turn 10
+  against neutrals of 12.7, and an earlier "?" with 21 against 23). Every
+  daily to date passes. Fog sight 1 to 2 with 1-turn lanes, the week's
+  liked maze, passes easily (30 ships against 16).
+- *Decided against: a probe win within a turn cap*, the daily's check
+  (`gauntletgen.play_one`). At 110 turns it rejected the slow node but also
+  the maze and both other rolled nodes tried: no probe won any of them, yet
+  a person can.
+- *Decided against: the turns until a `combat.edge_attacking` capture of the
+  home's cheapest neighbour*, measured on the built map. It agreed with this
+  rule on 95% of "?" rolls, but it needs the map built, and one cheap
+  neighbour passed a board walled off everywhere else.
+- *Decided against: flagging a config first dealt as a "?"* so a later week
+  shows it as one again. It labels the slow node but still deals it, and
+  flags the playable rolled ones too.
 
 ## The week's replay
 

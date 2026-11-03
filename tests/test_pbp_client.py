@@ -25,11 +25,12 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 import pytest
 
-from starconquest import ai, config, engine, pbp, replay, webstore
 from starconquest import main as app
-from starconquest.model import ForwardRule, Order
+from starconquest import ai, config, engine, pbp, replay, webstore
+from starconquest.model import ForwardRule, GameState, Order
 from starconquest.paths import WEB_AUTH_KEY
 from starconquest.settings import Settings
+from starconquest.viewstate import Ui
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,10 +74,34 @@ def _seat(seat: int = 1) -> pbp.Seat:
     return pbp.Seat(MATCH, seat, TOKEN)
 
 
+def _parsed(payload) -> pbp.Match:
+    match = pbp.match_from_dict(payload)
+    assert match is not None
+    return match
+
+
+def _resolve(match: pbp.Match, decide=None) -> tuple[GameState, replay.GameLog, str]:
+    resolved = pbp.resolve(match, decide)
+    assert resolved is not None
+    return resolved
+
+
+def _rebuild(match: pbp.Match) -> tuple[GameState, replay.GameLog]:
+    rebuilt = pbp.rebuild(match)
+    assert rebuilt is not None
+    return rebuilt
+
+
+def _open(match: pbp.Match, seat: pbp.Seat) -> tuple[GameState, Ui, replay.GameLog]:
+    opened = app.open_match(match, seat, Settings())
+    assert opened is not None
+    return opened
+
+
 def _opened(seat: int = 1, **over):
     """A match open on our screen, as `main` would have it after the first read."""
-    match = pbp.match_from_dict(_payload(**over))
-    state, ui, log = app.open_match(match, _seat(seat), Settings())
+    match = _parsed(_payload(**over))
+    state, ui, log = _open(match, _seat(seat))
     return match, state, ui, log
 
 
@@ -131,13 +156,13 @@ def test_a_shared_match_is_never_ours_to_post():
 
 def _resolved_log(rows, **over) -> str:
     """The log a client would have uploaded for turn 0 played with ``rows``."""
-    _, log, _ = pbp.resolve(pbp.match_from_dict(
+    _, log, _ = _resolve(_parsed(
         _payload(turn=0, submitted=[1, 2], turns=rows, **over)))
     return pbp.shareable(log).encoded()
 
 
 def test_a_match_opens_on_the_turn_the_endpoint_says_it_is_on():
-    rows = [_a_move(pbp.rebuild(pbp.match_from_dict(_payload()))[0], 1)]
+    rows = [_a_move(_rebuild(_parsed(_payload()))[0], 1)]
     _, state, _, log = _opened(turn=1, turns=rows, log=_resolved_log(rows))
     assert state.turn == 1
     assert log.turn_count == 1
@@ -146,22 +171,22 @@ def test_a_match_opens_on_the_turn_the_endpoint_says_it_is_on():
 def test_a_match_with_no_record_of_its_turns_does_not_open():
     """Past turn 0 the log is the only record of what the bots decided, so a
     match without one cannot be rebuilt — and must say so, not guess."""
-    rows = [_a_move(pbp.rebuild(pbp.match_from_dict(_payload()))[0], 1)]
-    assert app.open_match(pbp.match_from_dict(_payload(turn=1, turns=rows)),
+    rows = [_a_move(_rebuild(_parsed(_payload()))[0], 1)]
+    assert app.open_match(_parsed(_payload(turn=1, turns=rows)),
                           _seat(1), Settings()) is None
 
 
 def test_a_log_that_files_an_order_a_person_never_sent_is_refused():
     """The resolver writes the bots' orders and the dice; a person's orders are
     stored under their own token, and the log may not add to them."""
-    state = pbp.rebuild(pbp.match_from_dict(_payload()))[0]
+    state = _rebuild(_parsed(_payload()))[0]
     rows = [_a_move(state, 1, 2)]
     log = replay.GameLog.decode(_resolved_log(rows))
     src, dst = _lane(state, 2)
     log.turns[0]["orders"].append(replay._order_to_dict(Order(2, src, dst, 1)))
-    forged = pbp.match_from_dict(_payload(turn=1, turns=rows, log=log.encoded()))
+    forged = _parsed(_payload(turn=1, turns=rows, log=log.encoded()))
     assert pbp.match_log(forged) is None
-    honest = pbp.match_from_dict(_payload(turn=1, turns=rows, log=_resolved_log(rows)))
+    honest = _parsed(_payload(turn=1, turns=rows, log=_resolved_log(rows)))
     assert pbp.match_log(honest) is not None
 
 
@@ -170,7 +195,7 @@ def test_the_uploaded_log_carries_none_of_our_standing_rules():
     _, state, ui, log = _opened()
     src, dst = _lane(state, 1)
     ui.auto_forward = {src: ForwardRule({dst: 100}, 0)}
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
+    match = _parsed(_payload(turn=0, submitted=[1, 2]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
     assert log.rules_for(0), "recorded locally, so our own resume keeps them"
@@ -184,12 +209,12 @@ def test_reopening_a_match_brings_back_our_standing_rules():
     _, state, ui, log = _opened()
     src, dst = _lane(state, 1)
     ui.auto_forward = {src: ForwardRule({dst: 100}, 1)}
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
+    match = _parsed(_payload(turn=0, submitted=[1, 2]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
     assert not pbp.shareable(log).rules_for(0), "still never uploaded"
 
-    reopened = pbp.match_from_dict(_payload(
+    reopened = _parsed(_payload(
         turn=1, log=pbp.shareable(log).encoded(),
         turns=[{"turn": 0, "seat": 1, "orders_json": []},
                {"turn": 0, "seat": 2, "orders_json": []}]))
@@ -199,7 +224,7 @@ def test_reopening_a_match_brings_back_our_standing_rules():
 
 
 def test_a_saved_rule_out_of_a_system_since_lost_does_not_come_back():
-    _, state, ui, _ = _opened()
+    _, state, _ui, _ = _opened()
     src, dst = _lane(state, 1)
     pbp.remember_rules(MATCH, {src: ForwardRule({dst: 100}, 0), dst: ForwardRule({src: 100}, 0)})   # dst was never ours
     _, _, ui2, _ = _opened()
@@ -232,15 +257,15 @@ def test_a_stepped_turn_applies_the_record_and_decides_nothing(monkeypatch):
     """The whole fix for a bot on a wall clock: only the resolver asks it."""
     ai.load_models()
     settings = Settings(mode="random", players=3, nodes=16, seed=7)
-    match = pbp.match_from_dict(_payload(
+    match = _parsed(_payload(
         seats=(1, 2), players=3, settings_json=settings.to_dict(),
         submitted=[1, 2]))
-    _elsewhere, log, digest = pbp.resolve(match, ai.decide)
+    _elsewhere, log, digest = _resolve(match, ai.decide)
 
     _, state, ui, local = _opened(seats=(1, 2), players=3,
                                   settings_json=settings.to_dict())
     monkeypatch.setattr(app.ai, "decide", lambda *a: pytest.fail("decided again"))
-    stepped = pbp.match_from_dict(_payload(
+    stepped = _parsed(_payload(
         seats=(1, 2), players=3, settings_json=settings.to_dict(), turn=1,
         log=pbp.shareable(log).encoded()))
     app.resolve_turn(state, ui, local, Settings(),
@@ -255,13 +280,13 @@ def _fought_turn():
     over = {"seats": (1, 2), "players": 3, "settings_json": settings.to_dict(), "seed": 4}
     log_blob = None
     for turn in range(60):
-        match = pbp.match_from_dict(_payload(turn=turn, submitted=[1, 2], **over))
+        match = _parsed(_payload(turn=turn, submitted=[1, 2], **over))
         if log_blob is not None:
             match.log = log_blob
         rebuilt = pbp.rebuild(match)
         assert rebuilt is not None
         state, log = rebuilt
-        _resolved, log, _ = pbp.resolve(match, ai.decide)
+        _resolved, log, _ = _resolve(match, ai.decide)
         if log.dice_for(turn):
             return state, log.script_for(turn), match
         log_blob = pbp.shareable(log).encoded()
@@ -283,7 +308,7 @@ def test_a_turn_with_dice_its_orders_do_not_roll_is_caught():
 
 def test_a_shared_match_rolls_dice_of_its_own():
     """Playing the match's seed alone must show nothing of the dice it will roll."""
-    state, record, match = _fought_turn()
+    state, record, _match = _fought_turn()
     assert state.dice_salt == pbp.DICE_SALT
     solo = copy.deepcopy(state)
     solo.dice_salt = "dice"
@@ -310,9 +335,9 @@ def test_deciding_the_bots_leaves_the_live_rng_alone():
     turn's seed put it."""
     ai.load_models()
     settings = Settings(mode="random", players=3, nodes=14, seed=7)
-    match = pbp.match_from_dict(_payload(seats=(1,), players=3,
+    match = _parsed(_payload(seats=(1,), players=3,
                                          settings_json=settings.to_dict()))
-    state, _ = pbp.rebuild(match)
+    state, _ = _rebuild(match)
     pbp.reseed(state, match.seed)
     before = state.rng.getstate()
     orders = pbp.turn_orders(state, match, ai.decide)
@@ -324,7 +349,7 @@ def test_a_refused_resolve_rebuilds_from_the_log_that_won():
     """Our board may hold a turn the match never had: somebody else resolved it
     first, and their bots need not have decided as ours did."""
     _, state, _, _ = _opened()
-    match = pbp.match_from_dict(_payload(turn=1))
+    match = _parsed(_payload(turn=1))
     state.turn = 1
     assert app.pbp_verdict(match, state) != app.PBP_REBUILD
     assert app.pbp_verdict(match, state, stale=True) == app.PBP_REBUILD
@@ -340,11 +365,11 @@ def test_the_shell_steps_a_turn_to_the_board_another_client_rebuilds():
     disagreement is a forked match neither screen would mention."""
     _, state, ui, log = _opened()
     rows = [_a_move(state, 1, 3), _a_move(state, 2, 2)]
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2], turns=rows))
+    match = _parsed(_payload(turn=0, submitted=[1, 2], turns=rows))
 
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
-    elsewhere, _, digest = pbp.resolve(match)
+    elsewhere, _, digest = _resolve(match)
 
     assert replay.digest_hex(state) == digest
     assert state.turn == elsewhere.turn == 1
@@ -354,7 +379,7 @@ def test_a_stepped_turn_leaves_a_log_that_reconstructs_to_the_same_board():
     """...and the log it uploads is an ordinary one: a play-by-post match resumes,
     reviews and verifies with nothing taught about it."""
     _, state, ui, log = _opened()
-    match = pbp.match_from_dict(
+    match = _parsed(
         _payload(turn=0, submitted=[1, 2], turns=[_a_move(state, 2)]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
@@ -371,7 +396,7 @@ def test_the_wires_orders_are_the_only_ones_that_reach_the_board():
     src, dst = _lane(state, 1)
     ui.pending.append(Order(1, src, dst, 1))   # queued after submitting, never sent
 
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2], turns=[row]))
+    match = _parsed(_payload(turn=0, submitted=[1, 2], turns=[row]))
     app.resolve_turn(state, ui, log, Settings(),
                      seat_orders=match.orders_for_turn(0))
     ours = [f for f in state.fleets if f.owner_id == 1]
@@ -384,35 +409,35 @@ def test_the_wires_orders_are_the_only_ones_that_reach_the_board():
 # --------------------------------------------------------------------------- #
 def test_a_match_a_turn_ahead_is_stepped_onto_the_board():
     _, state, _, _ = _opened()
-    assert app.pbp_verdict(pbp.match_from_dict(_payload(turn=1)), state) == app.PBP_STEP
+    assert app.pbp_verdict(_parsed(_payload(turn=1)), state) == app.PBP_STEP
 
 
 def test_a_match_further_ahead_is_rebuilt():
     _, state, _, _ = _opened()
-    assert app.pbp_verdict(pbp.match_from_dict(_payload(turn=4)), state) == app.PBP_REBUILD
+    assert app.pbp_verdict(_parsed(_payload(turn=4)), state) == app.PBP_REBUILD
 
 
 def test_a_complete_turn_is_resolved_by_whoever_notices():
     _, state, _, _ = _opened()
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2]))
+    match = _parsed(_payload(turn=0, submitted=[1, 2]))
     assert app.pbp_verdict(match, state) == app.PBP_RESOLVE
 
 
 def test_an_incomplete_turn_is_waited_on():
     _, state, _, _ = _opened()
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1]))
+    match = _parsed(_payload(turn=0, submitted=[1]))
     assert app.pbp_verdict(match, state) == app.PBP_WAIT
 
 
 def test_a_match_behind_us_is_simply_our_own_resolve_not_landing_yet():
     _, state, _, _ = _opened()
     state.turn = 2
-    assert app.pbp_verdict(pbp.match_from_dict(_payload(turn=1)), state) == app.PBP_WAIT
+    assert app.pbp_verdict(_parsed(_payload(turn=1)), state) == app.PBP_WAIT
 
 
 def test_a_finished_match_is_never_resolved_again():
     _, state, _, _ = _opened()
-    match = pbp.match_from_dict(_payload(turn=0, submitted=[1, 2], finished=True))
+    match = _parsed(_payload(turn=0, submitted=[1, 2], finished=True))
     assert app.pbp_verdict(match, state) == app.PBP_WAIT
 
 
@@ -521,7 +546,7 @@ def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_the_overlay_is_built_from_what_the_endpoint_says():
     _, _state, ui, _ = _opened()
-    app.pbp_adopt(pbp.match_from_dict(_payload(submitted=[1], seats=(1, 2, 3),
+    app.pbp_adopt(_parsed(_payload(submitted=[1], seats=(1, 2, 3),
                                                players=3)), _seat(), ui)
     assert ui.pbp_submitted
     assert ui.pbp_waiting == (2, 3)
@@ -532,7 +557,7 @@ def test_whether_we_submitted_is_the_endpoints_answer_and_never_ours():
     a turn nobody is waiting on."""
     _, _state, ui, _ = _opened()
     ui.pbp_submitted = True
-    app.pbp_adopt(pbp.match_from_dict(_payload(submitted=[2])), _seat(), ui)
+    app.pbp_adopt(_parsed(_payload(submitted=[2])), _seat(), ui)
     assert not ui.pbp_submitted
 
 
@@ -549,8 +574,8 @@ def _brief(match: pbp.Match, **over) -> dict:
 def test_a_brief_updates_the_live_turn_and_keeps_everything_settled():
     """The merged match is the whole read the endpoint would have sent: it still
     opens onto the same board, and only the live turn's fields have moved."""
-    rows = [_a_move(pbp.rebuild(pbp.match_from_dict(_payload()))[0], 1)]
-    match = pbp.match_from_dict(_payload(turn=1, turns=rows, log=_resolved_log(rows)))
+    rows = [_a_move(_rebuild(_parsed(_payload()))[0], 1)]
+    match = _parsed(_payload(turn=1, turns=rows, log=_resolved_log(rows)))
     merged = pbp.with_brief(match, _brief(match, submitted=[2], lapsed={"1": "hold"},
                                           title="Rematch", names={"2": "Ada"}))
     assert merged is not None
@@ -566,13 +591,13 @@ def test_a_brief_updates_the_live_turn_and_keeps_everything_settled():
                                   {"brief": False}, {"seats": []}])
 def test_a_brief_for_some_other_read_is_refused_rather_than_merged(over):
     """A log from one turn under another turn's number is a board nobody had."""
-    match = pbp.match_from_dict(_payload())
+    match = _parsed(_payload())
     assert pbp.with_brief(match, _brief(match, **over)) is None
 
 
 def test_a_brief_answers_to_the_board_and_never_opens_one():
     """With no whole read to merge into, a brief is no match at all."""
-    assert pbp.match_from_dict(_brief(pbp.match_from_dict(_payload()))) is None
+    assert pbp.match_from_dict(_brief(_parsed(_payload()))) is None
 
 
 def test_a_resolved_turn_hands_the_board_straight_back():
@@ -831,15 +856,14 @@ def _orders_for(state, seat: int) -> list[dict]:
 
 
 def _client(server: _Endpoint, seat: int):
-    state, ui, log = app.open_match(
-        pbp.match_from_dict(server.state()), _seat(seat), Settings())
+    state, ui, log = _open(_parsed(server.state()), _seat(seat))
     return [state, ui, log, _seat(seat)]
 
 
 def _tick(server: _Endpoint, client) -> None:
     """One client's frame: read the match, then do whatever the read asks for."""
     state, ui, log, seat = client
-    match = pbp.match_from_dict(server.state())
+    match = _parsed(server.state())
     app.pbp_adopt(match, seat, ui)
     verdict = app.pbp_verdict(match, state)
     if verdict == app.PBP_WAIT:
@@ -853,7 +877,7 @@ def _tick(server: _Endpoint, client) -> None:
         elif not ui.pbp_submitted and not match.finished:
             server.submit(seat.seat, state.turn, _orders_for(state, seat.seat))
     elif verdict == app.PBP_REBUILD:
-        client[0], client[1], client[2] = app.open_match(match, seat, Settings())
+        client[0], client[1], client[2] = _open(match, seat)
     elif verdict == app.PBP_STEP:
         script = pbp.settled_turn(match, state.turn)
         assert script is not None and pbp.verify_turn(state, script, match), \
@@ -869,8 +893,7 @@ def _tick(server: _Endpoint, client) -> None:
         if not server.resolve(turn, replay.digest_hex(state), state.winner is not None,
                               pbp.shareable(log).encoded()):
             # Somebody else's resolution won: theirs is the record.
-            client[0], client[1], client[2] = app.open_match(
-                pbp.match_from_dict(server.state()), seat, Settings())
+            client[0], client[1], client[2] = _open(_parsed(server.state()), seat)
 
 
 def test_two_clients_play_a_match_out_and_never_disagree():
@@ -996,7 +1019,7 @@ def test_filing_a_bots_turn_leaves_the_live_dice_exactly_where_they_were():
 def test_an_action_this_build_cannot_carry_out_is_dropped():
     """A client and an endpoint on different deploys disagreeing must leave the
     seat waiting, not file something neither of them means."""
-    match = pbp.match_from_dict(_payload(lapsed={"2": "resign", "3": "hold"}))
+    match = _parsed(_payload(lapsed={"2": "resign", "3": "hold"}))
     assert match.lapsed == {3: "hold"}
 
 

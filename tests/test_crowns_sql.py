@@ -29,7 +29,7 @@ pytestmark = pytest.mark.skipif(not DSN or not shutil.which("psql"),
 def _psql(sql: str, db: str = "postgres") -> str:
     out = subprocess.run(
         ["psql", f"{DSN} dbname={db}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c", sql],
-        capture_output=True, text=True)
+        capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stderr
     return out.stdout.strip()
 
@@ -45,7 +45,7 @@ def board():
           " end $$", DB)
     out = subprocess.run(["psql", f"{DSN} dbname={DB}", "-v", "ON_ERROR_STOP=1", "-q",
                           "-f", str(AUTH_STUB), "-f", str(SCHEMA)],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stderr
     # Users 1-3; each map a separate story, scores posted a minute apart in order.
     _psql("""
@@ -152,7 +152,7 @@ def test_campaign_scores_carry_the_stamp_from_the_start_of_the_game(board):
         ["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
          "insert into scores (game_key, user_id, turns, lost, hand, raw_token, campaign_start)"
          " values ('stamped', 3, 30, 0, 30, '', 'Adjacent; drop')"],
-        capture_output=True, text=True)
+        capture_output=True, text=True, check=False)
     assert refused.returncode != 0 and "campaign_start" in refused.stderr
 
 
@@ -317,7 +317,7 @@ def test_the_public_cannot_choose_when_a_score_was_posted(board):
          "set role anon; insert into scores"
          " (game_key, user_id, turns, lost, hand, raw_token, submitted_at)"
          " values ('stamp', 1, 30, 0, 30, '', '2026-09-01 00:00Z')"],
-        capture_output=True, text=True)
+        capture_output=True, text=True, check=False)
     assert backdated.returncode != 0 and "permission denied" in backdated.stderr
     _psql("set role anon; insert into scores (game_key, user_id, turns, lost, hand, raw_token)"
           " values ('stamp', 1, 30, 0, 30, '')", board)

@@ -43,7 +43,7 @@ line gives only the verdict. Ideas that lost are in
 ## training.md
 - training.md · **The send forecast (`combat.forecast_landing`).** What lands that turn (`Ui.landing_at`), the garrison it meets with production on the way (`garrison_after`) and the holder's fleets in flight, the odds over the jitter square (`fight_odds`, cached), `sure_count`; fog hides it; reinforcing is not a fight; the row opens a breakdown card (`_draw_odds_card`).
 - training.md · **The hint (`main.press_hint`).** Marshal's sends for the human seat on a deep copy through `decide_seat`; dashed arrows, less what our orders and rules already send (`Ui.hint_left`); ✗/✓ hide or apply (`Ui.apply_hint`); first press asks in a modal; `Ui.hinted` blocks `can_post`; `GameLog.hinted_from` saved at once, kept by fork/truncate by board; the verifier rejects it; not in play-by-post or autoplay.
-- training.md · **The post-game coach (`coach.review`).** Decided games only; gamble, surprise, emptied, idle and the turning point; the costliest 24 kept; the Coach tab, `Ui.select_note`, rings on the board.
+- training.md · **The post-game coach (`coach.review`).** Decided games only; gamble, surprise, emptied, evacuated, idle and the turning point; the costliest 24 kept; the Coach tab, `Ui.select_note`, rings on the board.
 - training.md · **Proposed, not built.** Drill and per-bot stages; choosing the advisor.
 ## turnfilm.md
 - turnfilm.md · **Animated end of turn**, organised by bold lead sentences: why it exists; it plays back the past; events carry results; why its own module; the crossing sort key; the launch tick; production as a mark.
@@ -77,13 +77,14 @@ line gives only the verdict. Ideas that lost are in
 - leaderboard.md · **Checked scores.** The id rides on `Challenge`; two consented senders; `game_logs` private; `is_current`, `rules_version`; the verifier re-rolls keyed turns' dice (`mismatch`), unkeyed pass unchecked.
 - leaderboard.md · *Watching one back* (a watched result is not ours to post); *versioning: bots are free to move, the engine is not*.
 - leaderboard.md · **Playstyle readings.** From `public_replays` only, one row per match, never per name; fields sum; `playstyle-baseline.mjs` generated; `rev` and `shape`. *Decided against: warming actuary's learner from a profile.*
-- leaderboard.md · **The game and the board are one site.** Why merge (deploy quota, one localStorage, the PWA); `/board/`. *The pages are templates*: Jinja2 via `tools/render_board.py`, one base.
+- leaderboard.md · **The game and the board are one site.** Why merge (deploy quota, one localStorage, the PWA); `/board/`. *Quick post*: *Post as <name>* runs the board's `post.mjs` in the page, reports what an embargoed page shows, falls back to the form, web only; an `/api/score` function decided against. *The pages are templates*: Jinja2 via `tools/render_board.py`, one base.
 - leaderboard.md · **Rules in full:** the bot column; a replay is never shown as if it still reproduced the game.
 - leaderboard.md · **Claimed names.** Optional Google sign-in, one name per account; only an unused name is claimed by its claimant, a used one via `admin.py assign-name` (`--fold` frees the old names); RLS on `scores`/`config_tags` and `pbp.mjs` enforce it; the owner uuid is never public.
 - leaderboard.md · (same section) *Decided against:* a per-week campaign token; claiming a used name on first sign-in; a pending email for assignment; a JWT check inside `pbp.mjs`; folded names kept as aliases.
 
 ## campaign.md (split from leaderboard.md)
 - campaign.md · **Crowns, the weekly campaign and embargoes** (rules in full). `counted_scores`, `crown_holders`, `crown_steals`; the 24-hour unverified grace; the campaign map, `fold`, `attemptStatus`; embargoes.
+- campaign.md · **A node you can start on.** `starts_in_time`: starting ships plus `FIRST_MOVE_TURNS` (10) turns of home production must match the average neutral garrison, read from the setup alone; `families` drops a failing config, `_mystery` re-rolls; the slow node of 2026-11-02; a probe win, an `edge_attacking` first capture and flagging old "?" configs decided against.
 - campaign.md · **The week's replay.** `weekHistory` (a frame per move via `fold`'s `onMove`), the scrubber, live only at "now", `fieldCounts` and the territory chart (Time / Moves axis); 3D height-for-score not built; `playerHue` collisions.
 - campaign.md · **The grace period.** Half an hour after losing a node or its neighbour, derived in `fold`, for a game started with access (`scores.campaign_start`). *In the game*: confirm before Start, a top-bar countdown.
 - campaign.md · *Decided against:* an "able to capture" flag on its own; a cooldown between moves.

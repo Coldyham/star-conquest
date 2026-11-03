@@ -799,4 +799,5 @@ def test_a_dead_seat_orders_nothing_and_is_not_asked():
 def test_humans_lists_every_seat_a_person_holds():
     s = _two_humans()
     assert [p.id for p in s.humans()] == [1, 3]
-    assert s.human().id == 1, "the single-seat question still answers, unchanged"
+    human = s.human()
+    assert human is not None and human.id == 1, "the single-seat question still answers, unchanged"

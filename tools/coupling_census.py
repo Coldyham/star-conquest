@@ -47,9 +47,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, mapgen  # noqa: E402
-from starconquest import settings as settings_mod  # noqa: E402
-from starconquest.settings import Settings  # noqa: E402
+from starconquest import ai, engine, mapgen
+from starconquest import settings as settings_mod
+from starconquest.settings import Settings
 
 CELLS = ("random:11:11", "random:13:3", "random:18:6",
          "random:24:3", "random:24:12", "random:18:18")
@@ -379,7 +379,7 @@ def _parse_perturb(spec: str) -> tuple[str, object]:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     p.add_argument("--bot", default="marshal")
     p.add_argument("--perturb", action="append", default=[], metavar="CONSTANT=VALUE",
                    help="a perturbation; repeatable. Default: marshal's table.")

@@ -33,7 +33,7 @@ def test_every_shipped_file_strips_to_the_same_program_on_the_same_lines(path):
     assert out.count("\n") == src.count("\n")
     assert slim_web._shape(out) == slim_web._shape(src)
     # Every statement starts on the line it started on.
-    lines = lambda text: [getattr(n, "lineno", None) for n in ast.walk(ast.parse(text))]  # noqa: E731
+    lines = lambda text: [getattr(n, "lineno", None) for n in ast.walk(ast.parse(text))]
     assert lines(out) == lines(src)
 
 
@@ -53,7 +53,7 @@ def test_stripping_removes_comments_and_docstrings_but_not_strings():
     assert "Module doc" not in out and "lines." not in out and "Doc." not in out
     assert '"# not a comment"' in out
     namespace: dict = {}
-    exec(compile(out, "x", "exec"), namespace)
+    exec(compile(out, "x", "exec"), namespace)  # noqa: S102 - runs the stripped source to prove it still works
     assert namespace["f"]() == "# not a comment"
     assert namespace["C"].x == "1#2"
     assert out.count("\n") == src.count("\n")

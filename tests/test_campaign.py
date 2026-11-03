@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import random
 from collections import deque
+from typing import Any
 
 from starconquest import config
 from starconquest.settings import ROLL_FLOORS, Settings, build_state
@@ -38,7 +39,7 @@ def _neighbours(graph: dict) -> dict[int, set[int]]:
 
 
 def test_week_start_is_the_monday_in_utc():
-    sunday_late = dt.datetime(2026, 10, 4, 23, 59, tzinfo=dt.timezone.utc)
+    sunday_late = dt.datetime(2026, 10, 4, 23, 59, tzinfo=dt.UTC)
     assert campaign.week_start(sunday_late) == START
     assert campaign.week_start(sunday_late + dt.timedelta(minutes=1)) == dt.date(2026, 10, 5)
 
@@ -82,6 +83,7 @@ def test_every_node_builds_and_reports_its_real_system_count():
     for node in _graph()["nodes"]:
         settings = Settings.from_dict(node["settings"])
         assert settings.custom_map is None and not settings.autoplay
+        assert settings.seed is not None
         assert len(build_state(settings, settings.seed).systems) == node["systems"]
 
 
@@ -193,3 +195,20 @@ def test_no_node_is_dealt_sight_zero():
         graph = _graph(games=GAMES + blind, seed=seed)
         for node in graph["nodes"]:
             assert Settings.from_dict(dict(node["settings"])).fog_sight >= ROLL_FLOORS["fog_sight"]
+
+
+
+SLOW: dict[str, Any] = {"home_production": 7, "home_start_ships": 5, "garrison_base": 16, "garrison_k": 35, "garrison_jitter": 6}
+
+
+def test_a_config_whose_home_cannot_match_the_neutrals_in_time_is_never_a_node():
+    """A home making a ship every 7 turns from 5 can't match neutrals of 25-30
+    for well over a hundred turns: a "?" never rolls it, and a played config
+    with it is never a node."""
+    slow = _game("s", 9, **SLOW)
+    assert not campaign.starts_in_time(Settings.from_dict(dict(slow["settings_json"])))
+    assert campaign.starts_in_time(Settings.defaults())
+    assert campaign.families([slow], START) == []
+    for seed in range(40):
+        for node in _graph(games=GAMES + [slow], seed=seed)["nodes"]:
+            assert campaign.starts_in_time(Settings.from_dict(dict(node["settings"])))

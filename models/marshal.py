@@ -652,7 +652,7 @@ def _required(state, pid, target, dist: int) -> int:
     if target.owner_id == 0:  # static neutral garrison — no production, no reinforcement
         static = max(ships + 1, math.ceil(ships * _neutral_margin()))
         if REMNANT and _alive_players(state) <= REMNANT_MAX_PLAYERS:
-            return min(static, _remnant_price(state, pid, target, dist))
+            return int(min(static, _remnant_price(state, pid, target, dist)))
         return static
     defence = (ships + _inbound(state, target.id, target.owner_id, dist)
                + _production_by(target, dist))
