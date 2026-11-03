@@ -447,6 +447,13 @@ COMPACT_MAX_H = 720          # ...and so is shorter than this
 # End Turn block shrinks from a quarter of a landscape phone's height.
 COMPACT_NODE_SCALE = 0.8
 COMPACT_END_TURN_H = 64
+# Portrait puts End Turn across the screen's foot, on top of the phone's gesture
+# bar, where a mobile browser takes a tap near the bottom edge for its own (Safari
+# raises its toolbar instead). So the row is taller and the drawn bar stands
+# `PORTRAIT_FOOT_INSET` clear of the edge; the whole row, inset included, answers
+# a press (`end_turn_rect`), so a thumb that lands low or wide still ends the turn.
+COMPACT_PORTRAIT_END_TURN_H = 92
+PORTRAIT_FOOT_INSET = 26
 COMPACT_HUD_RIGHT_W = 236
 COMPACT_TOUCH_MIN_TARGET = 40
 
@@ -465,7 +472,7 @@ _SCALABLE = (
     "FILM_BURST_R", "FILM_BURST_W", "FILM_ARRIVAL_GAP", "FILM_CAPTION_GAP",
     "FILM_LOSS_GAP",
     "SEND_POPUP_W", "SEND_POPUP_BTN_H", "SEND_POPUP_GAP", "SEND_POPUP_PAD",
-    "SPLIT_POPUP_W",
+    "SPLIT_POPUP_W", "PORTRAIT_FOOT_INSET",
     "SLIDER_TRACK_H", "SLIDER_KNOB_R",
     "FONT_SIZE", "FONT_SIZE_SMALL", "FONT_SIZE_BIG",
 )
@@ -498,7 +505,7 @@ def apply_ui_scale(factor: float, touch: bool = False,
     if compact:
         values["NODE_MIN_RADIUS"] *= COMPACT_NODE_SCALE
         values["NODE_MAX_RADIUS"] *= COMPACT_NODE_SCALE
-        values["END_TURN_H"] = COMPACT_END_TURN_H
+        values["END_TURN_H"] = COMPACT_PORTRAIT_END_TURN_H if portrait else COMPACT_END_TURN_H
         values["HUD_RIGHT_W"] = COMPACT_HUD_RIGHT_W
         values["TOUCH_MIN_TARGET"] = COMPACT_TOUCH_MIN_TARGET
     for name, base in values.items():
@@ -630,6 +637,18 @@ def end_turn_rect() -> tuple[int, int, int, int]:
     if portrait:
         return (0, SCREEN_H - END_TURN_H, SCREEN_W, END_TURN_H)
     return (SCREEN_W - HUD_RIGHT_W, SCREEN_H - END_TURN_H, HUD_RIGHT_W, END_TURN_H)
+
+
+def end_turn_face_rect() -> tuple[int, int, int, int]:
+    """Where the End Turn bar is drawn inside `end_turn_rect`: the whole block in
+    landscape; in portrait, off the side edges (rounded corners) and lifted
+    `PORTRAIT_FOOT_INSET` above the foot (the gesture bar). Only the drawing
+    shrinks: a press anywhere in `end_turn_rect` counts."""
+    x, y, w, h = end_turn_rect()
+    if not portrait:
+        return (x, y, w, h)
+    top = HUD_PAD // 2
+    return (x + HUD_PAD, y + top, w - 2 * HUD_PAD, h - top - PORTRAIT_FOOT_INSET)
 
 
 def play_rect() -> tuple[int, int, int, int]:
