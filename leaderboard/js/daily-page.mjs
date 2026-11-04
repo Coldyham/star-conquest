@@ -99,7 +99,7 @@ function drawLeader(summaries) {
   clear(standingsBox).append(ranked.length
     ? el("p", { class: "lede" }, [
       "Currently ahead: ", el("strong", { text: leaderCredit(ranked[0]) }),
-      ` — ${ranked[0].best_turns} turns, of ${posted} ${posted === 1 ? "score" : "scores"} posted`
+      ` — ${ranked[0].best_turns} turns, ${ranked[0].best_lost} lost, of ${posted} ${posted === 1 ? "score" : "scores"} posted`
         + ` by ${players} ${players === 1 ? "player" : "players"}. ${hidden}`,
     ])
     : el("p", { class: "empty", text: posted
