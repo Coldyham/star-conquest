@@ -122,6 +122,9 @@ a { color: var(--cyan); }
   text-transform: uppercase;
   box-shadow: 0 3px 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.28);
   transition: transform 0.06s, box-shadow 0.06s;
+  /* Only a page's default action pulses (a form's plain <button>, the coin);
+   * a <button class="btn"> would otherwise inherit that pulse. */
+  animation: none;
 }
 .btn:hover { background: #10283f; }
 .btn:active { transform: translateY(3px); box-shadow: 0 0 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.4); }
@@ -251,6 +254,15 @@ h1::after {
 }
 
 .card-main { min-width: 0; }
+
+/* A card whose credit names a player: the card is a div, its setup line the
+ * link, stretched over the whole body; the name is a link of its own above it
+ * (an anchor can't nest inside one). */
+div.card-body { position: relative; }
+.card-link { display: block; color: inherit; text-decoration: none; }
+.card-link::after { content: ""; position: absolute; inset: 0; }
+.credit a { position: relative; z-index: 1; color: inherit; text-decoration: none; }
+.credit a:hover { text-decoration: underline; }
 
 .setup {
   font-family: var(--pixel);
@@ -920,6 +932,9 @@ button {
 button:hover:not(:disabled) { background: #3d0f28; }
 button:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 0 0 #58082f, 0 0 18px rgba(255, 62, 165, 0.45); }
 button:disabled { animation: none; opacity: 0.45; cursor: default; }
+/* The score form's Enter stays clickable while incomplete, so it can say what
+ * is missing, but pulses only once a click would post (submit.mjs). */
+#go:not(.ready) { animation: none; }
 
 @keyframes coin {
   50% { box-shadow: 0 4px 0 #58082f, 0 0 26px rgba(255, 62, 165, 0.75); }
@@ -1183,6 +1198,81 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 /* Earned badges in gold; locked ones dimmed but still readable, since the hint
  * on a locked badge is the point: it says what to try next. */
 .streaks-panel { margin: 2rem 0 1rem; }
+
+/* Each kind: this week as seven pips, a tap away from the month calendar. */
+.streak + .streak { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed rgba(42, 35, 80, 0.9); }
+.streak .tally-row + .streak-week { margin-top: 0.4rem; }
+button.streak-week {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  width: 100%;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #05070f;
+  color: var(--dim);
+  font-size: 0.6rem;
+  box-shadow: none;
+  animation: none;
+}
+button.streak-week:hover { border-color: var(--cyan); background: #05070f; }
+button.streak-week:active:not(:disabled) { transform: none; box-shadow: none; }
+.wk-day { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+.wk-letter { line-height: 1; }
+.wk-day .pip { width: 100%; max-width: 3rem; height: 0.9rem; }
+.wk-more { flex: 0 0 auto; align-self: center; font-size: 0.8rem; transition: transform 0.15s; }
+.streak-week[aria-expanded="true"] .wk-more { transform: rotate(180deg); }
+
+/* A day's state, the same in the bar, the calendar and its key. */
+.pip { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; vertical-align: middle; }
+.pip.day { background: var(--green); box-shadow: 0 0 6px rgba(107, 255, 143, 0.5); }
+.pip.later { border: 2px solid var(--green); background: rgba(107, 255, 143, 0.15); }
+.pip.miss { background: #1a1f36; }
+.pip.today { border: 2px dashed var(--cyan); }
+.pip.future, .pip.none { border: 1px solid #1a1f36; }
+.wk-day .pip.is-today { outline: 1px solid var(--cyan); outline-offset: 2px; }
+
+.streak-cal { margin: 0.5rem 0 0.4rem; padding: 0.6rem; border: 1px solid var(--line); background: #05070f; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+.cal-month { font-family: var(--pixel); font-size: 0.75rem; line-height: 1.8; color: var(--cyan); text-transform: uppercase; }
+button.cal-nav {
+  margin: 0;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--cyan);
+  font-size: 0.9rem;
+  box-shadow: none;
+  animation: none;
+}
+button.cal-nav:hover:not(:disabled) { border-color: var(--cyan); background: transparent; }
+button.cal-nav:active:not(:disabled) { transform: none; box-shadow: none; }
+.cal-grid { display: grid; gap: 0.25rem; }
+.cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.25rem; }
+.cal-dow { font-family: var(--pixel); font-size: 0.55rem; line-height: 1.8; color: var(--dim); text-align: center; text-transform: uppercase; }
+.cal-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  max-height: 2.6rem;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--dim);
+  text-decoration: none;
+}
+a.cal-day:hover { outline: 1px solid var(--cyan); }
+.cal-day.day { background: var(--green); color: #05070f; font-weight: bold; }
+.cal-day.later { border: 2px solid var(--green); background: rgba(107, 255, 143, 0.15); color: var(--green); }
+.cal-day.miss { background: #12162a; }
+.cal-day.today { border: 2px dashed var(--cyan); color: var(--cyan); }
+.cal-day.future, .cal-day.none { opacity: 0.45; }
+.cal-day.is-today:not(.today) { outline: 1px solid var(--cyan); outline-offset: 1px; }
+.cal-foot { margin: 0.6rem 0 0; font-family: var(--pixel); font-size: 0.6rem; line-height: 2; color: var(--dim); text-transform: uppercase; }
+.cal-foot .pip { margin-left: 0.4rem; }
 .badges-panel { margin: 2rem 0 1rem; }
 .medals {
   display: grid;
@@ -1366,3 +1456,5 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .gen .dual input[type="range"]:disabled::-webkit-slider-thumb { background: var(--dim); }
 .gen .dual input[type="range"]:disabled::-moz-range-thumb { background: var(--dim); }
 .gen-group > .mini { margin: 0.25rem 0 0.5rem; }
+.playstyle th a { color: inherit; text-decoration: none; }
+.playstyle th a:hover { color: var(--cyan); text-decoration: underline; }

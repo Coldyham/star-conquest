@@ -6,7 +6,7 @@ import { dailyMark, dayParam } from "./daily.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, dailyBadge,
-  difficultyBadge, el, embargoNote, fogBadge, leaderCredit, mapSummary, ordinal, relativeTime, scoreSummary, shortTime,
+  difficultyBadge, el, embargoNote, fogBadge, leaderLink, mapSummary, ordinal, relativeTime, scoreSummary, shortTime,
   showError, userHref,
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
@@ -415,7 +415,7 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
   const lede = ranked
     ? el("p", { class: "lede" }, [
         "Currently ahead: ",
-        el("strong", { text: leaderCredit(game) }),
+        el("strong", {}, leaderLink(game)),
         ` — ${game.best_turns} turns, ${game.best_lost} lost. `,
         "Every other score, and every replay, stays hidden until the embargo lifts.",
       ])
