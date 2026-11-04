@@ -425,7 +425,10 @@ with few launches is found by counting launches, not turns. Position includes
 the launches spent; K = 1, 2, 3, ... run in turn, each exact. On the puzzle K = 3
 reaches 10/3 in 22 s (against 52 minutes for the capped search), and K = 4 (163 s)
 finds nothing sooner or with fewer lost: **no plan of up to 4 launch orders beats
-10 turns, 3 lost.** It is not a general speedup: spent launches multiply the
+10 turns, 3 lost.** K = 5 (722 s; the widest layer 2.9M order sets expanded, 545k boards
+kept, under the cap) finds nothing either: the same holds for plans of up to 5. Each launch
+added has cost about 5 to 6 times as much (20 s, 130 s, 722 s for K up to 3, 4 and 5). It
+is not a general speedup: spent launches multiply the
 states, and on a 3-system map the plain search (20 s) beat K = 4 (over 80 s).
 `--splits` adds sends down two lanes at once; it was not needed here.
 
