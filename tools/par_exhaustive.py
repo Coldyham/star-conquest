@@ -82,11 +82,25 @@ def launch_counts(ships: int, levels: str) -> list[int]:
     return sorted(n for n in picks if 1 <= n <= ships)
 
 
-def order_sets(board: GameState, me: int, levels: str, max_branch: int, splits: bool = False):
+def _limited(per_source: list[list[list[Order]]], limit: int):
+    """The order sets using at most ``limit`` orders: holding, then every choice of
+    up to ``limit`` systems that launch."""
+    yield []
+    for r in range(1, min(limit, len(per_source)) + 1):
+        for chosen in itertools.combinations(range(len(per_source)), r):
+            for combo in itertools.product(*(per_source[i][1:] for i in chosen)):
+                orders = [o for part in combo for o in part]
+                if len(orders) <= limit:
+                    yield orders
+
+
+def order_sets(board: GameState, me: int, levels: str, max_branch: int, splits: bool = False,
+               limit: int | None = None):
     """Every order set for ``me`` this turn under ``levels``, and whether it had
     to fall back because the set was too large. With ``splits`` a system may also
     send down two different lanes in one turn (a ships down one, b down another,
-    a + b <= its garrison)."""
+    a + b <= its garrison). With ``limit`` only sets of at most that many orders
+    (a plan's remaining launch budget), which needs no fallback."""
     def options(levels_: str, splits_: bool) -> list[list[list[Order]]]:
         per_source: list[list[list[Order]]] = []
         for s in board.systems.values():
@@ -109,6 +123,8 @@ def order_sets(board: GameState, me: int, levels: str, max_branch: int, splits: 
 
     exact = True
     per_source = options(levels, splits)
+    if limit is not None:
+        return _limited(per_source, limit), True
     if size_of(per_source) > max_branch and splits:
         per_source, exact = options(levels, False), False
     if size_of(per_source) > max_branch and levels != "coarse":
@@ -277,10 +293,11 @@ def _shared_decide():
 
 def expand_chunk(task):
     """Expand ``boards`` by every order set. Returns the surviving children as
-    ``(key, lost, board, parent position, orders)`` (equal boards already merged),
+    ``(key, lost, board, parent position, orders)`` (equal boards already merged;
+    with a launch limit, equal boards that spent the same number of launches),
     the wins that beat the incumbent, whether every board was fully enumerated,
     and how many order sets were stepped."""
-    boards, inc_turn, inc_lost = task
+    boards, inc_turn, inc_lost, max_launches = task
     me, levels = _W["me"], _W["levels"]
     floors: FloorTable = _W["floors"]
     horizon = int(min(inc_turn, _W["max_turns"]))
@@ -290,7 +307,9 @@ def expand_chunk(task):
     exact = True
     scratch = random.Random()
     for pos, node_board in enumerate(boards):
-        sets, ok = order_sets(node_board, me, levels, _W["max_branch"], _W["splits"])
+        used = getattr(node_board, "launches", 0)
+        budget = None if max_launches is None else max_launches - used
+        sets, ok = order_sets(node_board, me, levels, _W["max_branch"], _W["splits"], budget)
         exact &= ok
         decide = _shared_decide()
         for orders in sets:
@@ -313,6 +332,10 @@ def expand_chunk(task):
                 exact = False
                 continue
             key = ps.board_key(board)
+            if max_launches is not None:
+                spent = used + len(orders)   # a spent launch budget is part of the position
+                setattr(board, "launches", spent)  # noqa: B010 - GameState has no such field
+                key = (key, spent)
             old = kept.get(key)
             if old is None or lost < old[0]:
                 kept[key] = (lost, board, pos, packed)
@@ -392,6 +415,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--assume-lost", type=int,
                     help="with --assume-turn: also assume that many ships lost, so only a strictly "
                          "better line (sooner, or the same turn with fewer lost) counts")
+    ap.add_argument("--max-launches", type=int, default=0,
+                    help="search plans of at most K launch orders, K = 1, 2, ... in turn: waiting is free, "
+                         "so a line with few launches is found in seconds. Exact per K, no cap needed")
     ap.add_argument("--ratio", type=float, default=0.0,
                     help="drop a board whose potential is under RATIO x the strongest rival's "
                          "(0 = off; 0.5 is a cautious start). Not exact.")
@@ -444,15 +470,19 @@ def main(argv: list[str] | None = None) -> int:
 
     exact = True
     incumbent = {"turn": bound[0], "lost": bound[1]}
-    layer: list[tuple[GameState, tuple]] = [(ps.clone(root), ())]   # (board, path)
-    depth = 0
-    try:
+    limits: list[int | None] = list(range(1, args.max_launches + 1)) if args.max_launches else [None]
+
+    def run_layers(limit: int | None) -> bool:
+        """One pass over every board; True when it ran out of boards (not of time)."""
+        nonlocal exact
+        layer: list[tuple[GameState, tuple]] = [(ps.clone(root), ())]   # (board, path)
+        depth = 0
         while layer and time.perf_counter() - started < args.budget:
             depth += 1
             n_chunks = max(1, min(len(layer), args.workers * 4))
             size = min(math.ceil(len(layer) / n_chunks), CHUNK_BOARDS)
             chunks = [layer[i:i + size] for i in range(0, len(layer), size)]
-            tasks = [([b for b, _ in chunk], incumbent["turn"], incumbent["lost"]) for chunk in chunks]
+            tasks = [([b for b, _ in chunk], incumbent["turn"], incumbent["lost"], limit) for chunk in chunks]
             results = waves(pool, tasks, args.workers) if pool else map(expand_chunk, tasks)
             nxt: dict[tuple, tuple[int, GameState, tuple]] = {}
             expanded = 0
@@ -474,7 +504,8 @@ def main(argv: list[str] | None = None) -> int:
                                floors, args.rank)
             if best_win and (best_win[0], best_win[1]) < (incumbent["turn"], incumbent["lost"]):
                 incumbent.update(turn=best_win[0], lost=best_win[1])
-                record({"event": "best", "turn": best_win[0], "lost": best_win[1], "source": "exhaustive"})
+                record({"event": "best", "turn": best_win[0], "lost": best_win[1],
+                        "source": "exhaustive", "launches": limit})
                 log = line_log(root, cfg, seed, search.strategies, me, best_win[2])
                 log.path = best_path
                 log.save()
@@ -485,16 +516,24 @@ def main(argv: list[str] | None = None) -> int:
                 nxt = trim(nxt, args.max_frontier, me, horizon, floors, args.rank)
             layer = [(b, p) for _, b, p in nxt.values()]
             record({"event": "layer", "depth": depth, "expanded": expanded, "frontier": len(layer),
-                    "best": [incumbent["turn"], incumbent["lost"]], "exact": exact})
+                    "best": [incumbent["turn"], incumbent["lost"]], "exact": exact, "launches": limit})
             print(f"layer {depth}: {expanded} expanded, {len(layer)} kept, best "
                   f"{incumbent['turn']}/{incumbent['lost']}, {time.perf_counter() - started:.0f}s", flush=True)
+        return not layer
+
+    finished = True
+    try:
+        for limit in limits:
+            if limit is not None:
+                print(f"plans of at most {limit} launch order(s):", flush=True)
+            finished &= run_layers(limit)
     finally:
         if pool:
             pool.terminate()
 
-    finished = not layer
     exact &= finished
-    verdict = "optimal within the order model" if exact else "best found (search not exact)"
+    model = f"plans of at most {args.max_launches} launch orders" if args.max_launches else "the order model"
+    verdict = f"optimal within {model}" if exact else "best found (search not exact)"
     print(f"result: turn {incumbent['turn']}, lost {incumbent['lost']}; floor {root_floor:.0f}; {verdict}")
     record({"event": "done", "turn": incumbent["turn"], "lost": incumbent["lost"], "exact": exact})
     if best_path.exists():

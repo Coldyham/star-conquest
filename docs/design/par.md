@@ -388,6 +388,50 @@ What it says:
 So evolved is a useful candidate to try by hand (`--candidates ... evolved`)
 when a person beats the search on a small map, not a default.
 
+## Exhaustive search (`tools/par_exhaustive.py`, 2026-11-04)
+
+The beam samples a few orders a turn. `par_exhaustive.py` walks **every** order
+set of a stated model, a turn at a time on the real keyed dice, merging equal
+boards and dropping any whose floor cannot beat the incumbent. A finished run is
+optimal *within that model* and says so; a layer wider than `--max-frontier`, a
+fallback past `--max-branch` or `--ratio` clears `exact`.
+
+**The puzzle `2026-11-04_puzzle` (5 systems, rusherplus).** The floor is 7, the
+beam found 11/3, and a person found 10 turns. Within the model that is a win on
+10 with 3 ships lost, from three launches: 6 of 10 ships from home to Dust-Ball
+on turn 2, the last 5 on turn 6, and Dust-Ball's 3 survivors on to Asterope the
+same turn. It works by waiting: rusherplus sends 9 ships at turn 0, which empties
+Asterope.
+
+**Why the first runs missed it.** The cap kept boards by (floor, losses), which
+prefers boards that have not fought. This line takes its 3 losses at turn 6 and
+ranked #426,307 of 536,731 in layer 6, under a cap of 200,000. Ranked by
+potential over the strongest rival's (`--rank ratio`, now the default) it is #1
+there, and #4,048 and #54,452 in layers 4 and 5, so a cap under about 55,000
+would still lose it. One line on one map tuned that key; it is not shown to
+generalise. Launch sizes matter too: `quarters` offers 10, 9, 7, 5 and 2 of ten
+ships, never 6.
+
+**What did not help.** The rival decides once per board (`_shared_decide`), the
+floor is a table, boards share their lane tables and layers expand in parallel
+(`--workers`). Layer counts match the plain version exactly, and the first three
+save about a third of the time. Four workers were *slower* on every map tried,
+since nearly every child survives and the boards cost more to send than to make.
+The floor stays weak (7 against a true 10), so a turn-9 bound prunes no more
+than a turn-10 one: both expand the same 8.2M order sets in layer 7.
+
+**Plans of up to K launches (`--max-launches K`).** Waiting is free, so a line
+with few launches is found by counting launches, not turns. Position includes
+the launches spent; K = 1, 2, 3, ... run in turn, each exact. On the puzzle K = 3
+reaches 10/3 in 22 s (against 52 minutes for the capped search), and K = 4 (163 s)
+finds nothing sooner or with fewer lost: **no plan of up to 4 launch orders beats
+10 turns, 3 lost.** It is not a general speedup: spent launches multiply the
+states, and on a 3-system map the plain search (20 s) beat K = 4 (over 80 s).
+`--splits` adds sends down two lanes at once; it was not needed here.
+
+Still open: a bound that counts the ships a fight needs (the floor counts only
+travel), and whether K = 5 or more finds anything.
+
 ## Next, if it goes further
 
 - **Search quality.** Rolling out with more than one bot is built ("The
