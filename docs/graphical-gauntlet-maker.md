@@ -70,27 +70,33 @@ addition is optional, so no existing file changes meaning.
   - `Gauntlet` gains `lane_targets: dict[(a, b), Target]` and `hidden: frozenset`.
   - A bad target means the lane has none. `hidden` on an ungated lane is
     dropped: there is nothing to reveal it.
-- **Run end stages:** `"goal": [ids]`.
-  - Default: the sinks reached by ungated lanes, so a bonus dead end is never a
-    goal.
-- **Run settings:** `"run": {"lives": 1, "boons": ["ships", "production", "sight"]}`.
-  - Optional. The defaults are one life and all three boons.
+- **Run end stages are derived, never stored** (`gauntlet.goals`). A goal is a
+  reachable stage with no ungated lane out that is a start or has an ungated lane
+  in. A bonus dead end behind a gate is therefore never a goal. There is no
+  `goal` field: the board page has no control to set one, and the rule gives the
+  right ends for every shape in the mockup. If a shape ever needs a goal the
+  rule can't give, an explicit field can be added then; `checkBody` would learn
+  it at that point.
+- **Run settings are config defaults, not file fields:** `config.RUN_LIVES` (1)
+  and `config.BOON_KINDS` (all three). A per-gauntlet `run` field waits for a
+  page that sets it, and would be a format addition when it comes.
 - **Rules:**
   - `open_stages` covers the starts, every won stage, and each stage a lane
     leads to whose condition the near end's best meets. An ungated lane's
     condition is the stage's own target.
   - `depths()` walks ungated lanes only, so a shortcut doesn't steal Next stage.
-  - `problems()` reachability ignores targets. It also names an unreachable
-    goal.
+  - `problems()` reachability ignores targets.
   - A stage reached only by hidden lanes is not shown until one of those lanes
     opens.
-- **Derived labels, never stored.** A gated lane is a "Shortcut" when it skips
-  depth, or "Bonus" when its far end leads back to no goal.
+- **Derived labels, never stored.** A gated lane is a "Bonus" when its far end
+  reaches no goal, or else a "Shortcut" when it skips a column ("Layout",
+  Phase 2), or otherwise plain "Gated". The game's stage detail strip and the
+  board's lane options use the same three words.
 - **New `to_dict(g)`.** It writes the canonical file, and
   `from_dict(to_dict(g)) == g` gets a test.
 - **`checkBody` / `_from_dict` parity.** `checkBody` learns the lane keys
-  `turns`/`lost`/`bot`/`beat`/`hidden`, `goal` and `run` (today it refuses any
-  lane key but `two_way`, and drops unknown top-level keys). Add a shared
+  `turns`/`lost`/`bot`/`beat`/`hidden` (today it refuses any lane key but
+  `two_way`). The top-level keys are unchanged. Add a shared
   fixture read by both the Python and JS suites, the way `gauntlet-spec.json`
   works.
 - **Until Phase 3 lands**, `gauntlet.html` opened on a gauntlet with lanes says
@@ -98,7 +104,8 @@ addition is optional, so no existing file changes meaning.
   silently flattening it. Phase 3 replaces the warning with real editing.
 
 Tests: extend `tests/test_gauntlet.py` (lane gates, hidden, depth over ungated,
-goal default, round trip) and `leaderboard/tests/gauntlet-build.test.mjs`.
+derived goals and labels, round trip) and
+`leaderboard/tests/gauntlet-build.test.mjs`.
 
 ## Phase 2: the graph view replaces the stage list (`menu.py`)
 
@@ -114,8 +121,13 @@ must agree on them. `gauntlet.layout(g, shown=None)` returns a
 
 - **Column is depth over ungated lanes** (`depths()`), so the main path reads
   left to right and a shortcut is a long arrow, not a stage moved forward.
-- **A stage reached only by gated lanes** has no ungated depth. It goes one
-  column past the shallowest stage a lane into it comes from.
+- **A stage reached only by gated lanes** has no ungated depth. Its column comes
+  from one breadth-first walk over *every* lane, seeded with all the ungated
+  depths at once, each lane adding one column. The stage therefore lands one
+  column past its shallowest placed source, and a chain of them (A gated→X
+  gated→Y) is placed the same way whatever the list order. The mockup's
+  repeated passes in list order are the thing to avoid: they can place such a
+  chain differently depending on which stage comes first in the list.
 - **A stage no start reaches** (a `problems()` blocker) goes in a last column of
   its own, so the board can draw it red rather than drop it.
 - **Row is the stages' list order within the column**, then one pass of
@@ -126,13 +138,16 @@ must agree on them. `gauntlet.layout(g, shown=None)` returns a
   the whole graph, so revealing a bonus stage moves nothing else. The cost is a
   gap where it will appear; the board's diagram nudges the author to put such a
   stage last in its column, so the gap is at the edge.
-- **Two-way lanes** don't change depth beyond what their forward direction
-  gives, and are drawn as a double-headed arrow.
+- **Two-way lanes count in both directions for depth**, as `Gauntlet.onward()`
+  and `depths()` already walk them (and as the mockup does). They are drawn as a
+  double-headed arrow.
 
 `leaderboard/js/gauntlet-graph.mjs` implements the same function for the board.
 A shared fixture, `tests/fixtures/gauntlet-layout.json` (graphs and their
-expected grids: linear, a fork that rejoins, a shortcut, a gated bonus, a
-hidden bonus, an unreachable stage, a two-way lane), is read by
+expected grids and derived goals and labels: linear, a fork that rejoins, a
+shortcut, a gated bonus, a hidden bonus, a chain of gated-only stages listed
+out of order, an unreachable stage, a two-way lane reached only backwards), is
+read by
 `tests/test_gauntlet.py` and `leaderboard/tests/gauntlet-graph.test.mjs`, so the
 two cannot drift.
 
@@ -239,8 +254,8 @@ the body Save would store: https://claude.ai/artifact/QbeXvScWNfVzj5XK5rubGB
   at a lane.
 - **Hidden until met:** enabled only when gated.
 - **The derived label** shows as you set it, from the same rule as the game
-  (Phase 1): "Shortcut" when the lane skips a column, "Bonus" when its far end
-  reaches no goal.
+  (Phase 1): "Bonus" when its far end reaches no goal, "Shortcut" when the lane
+  skips a column, otherwise "Gated".
 - **Remove lane.**
 
 ### The diagram
@@ -254,6 +269,11 @@ A read-only SVG above the cards, drawn from `gauntlet-graph.mjs`'s `layout`
 - **Problems in place:** a stage no start reaches is drawn red in the last
   column, a gated lane that is a stage's only way in is amber (the warning from
   Phase 1's rules), and Save says what blocks it, as `draftProblem` does today.
+- **As the author sees it / As a new player sees it.** A toggle above the
+  diagram. The player view drops hidden lanes and the stages only they reach,
+  leaving the gap the game leaves (the grid is computed over the whole graph,
+  "Layout"). It is how the author checks that a hidden bonus really is hidden,
+  and sees where the gap falls.
 - Clicking a node scrolls to its card and flashes it; hovering a chip lights its
   lane in the diagram.
 - It scrolls sideways in its own container past the page width, so 64 stages
@@ -344,12 +364,13 @@ progress (memory: complete records beat compact ones).
     score, not on bests);
   - a hidden lane shows only once met.
 - **Boon offers** come from a derived stream, `random.Random(f"{seed}:{step}")`.
-  - It offers `config.BOON_OFFER` (3) choices drawn from the gauntlet's `run.boons`.
+  - It offers `config.BOON_OFFER` (3) choices drawn from `config.BOON_KINDS`.
   - The player picks one or skips.
   - Add it to CLAUDE.md's list of sanctioned derived streams.
 - **Losses and endings:**
-  - A loss costs a life. With lives left, the same stage is replayed fresh.
-  - Winning a goal stage wins the run.
+  - A run starts with `config.RUN_LIVES` lives. A loss costs a life. With lives
+    left, the same stage is replayed fresh.
+  - Winning a goal stage (`gauntlet.goals`, derived) wins the run.
   - A run game offers no Retry and no rewind, because otherwise a run can't be
     lost. Resuming a saved run game continues it.
 - **Storage.**
@@ -505,8 +526,12 @@ needs its notes and its async bot lookup) and the main wiring for runs.
   that a "+ Lane to…" select; + Branch copies the stage's parents; one pass of
   crossing reduction, not iterated; a lane's gate offers the same four choices
   as a stage target.
-- **One life by default, and no Retry or rewind in a run game.** Without that a
-  run cannot be lost. A file can raise `run.lives`.
+- **One life (`config.RUN_LIVES`), and no Retry or rewind in a run game.**
+  Without that a run cannot be lost. Lives and the boon pool are the same for
+  every gauntlet until the board page gets a "Played as a run" section and the
+  format a `run` field.
+- **Goals are derived only** (Phase 1), with no `goal` field until a shape needs
+  one.
 - **Boons are permanent for the run and stack**: ships add up, production steps
   down to a floor of 1, and sight adds hops up to `FOG_MAX_HOPS`.
 - **The Use boons switch is all held boons or none.** It is not a per-boon
