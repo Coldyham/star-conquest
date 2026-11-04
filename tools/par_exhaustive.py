@@ -418,6 +418,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-launches", type=int, default=0,
                     help="search plans of at most K launch orders, K = 1, 2, ... in turn: waiting is free, "
                          "so a line with few launches is found in seconds. Exact per K, no cap needed")
+    ap.add_argument("--from-launches", type=int, default=1,
+                    help="with --max-launches: start at this K, not 1 (a pass for K covers every plan of "
+                         "at most K, so the lower passes only warm the bound up)")
     ap.add_argument("--ratio", type=float, default=0.0,
                     help="drop a board whose potential is under RATIO x the strongest rival's "
                          "(0 = off; 0.5 is a cautious start). Not exact.")
@@ -470,7 +473,8 @@ def main(argv: list[str] | None = None) -> int:
 
     exact = True
     incumbent = {"turn": bound[0], "lost": bound[1]}
-    limits: list[int | None] = list(range(1, args.max_launches + 1)) if args.max_launches else [None]
+    limits: list[int | None] = (list(range(max(1, args.from_launches), args.max_launches + 1))
+                                    if args.max_launches else [None])
 
     def run_layers(limit: int | None) -> bool:
         """One pass over every board; True when it ran out of boards (not of time)."""

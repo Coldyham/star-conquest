@@ -448,6 +448,20 @@ puzzle the beam alone stays at 11/3 up to width 1500; with the candidates it fin
 child is scored by how marshal or actuary would finish from it, and the 10-turn
 line scores badly until the turn-6 fight.
 
+**The blend (`tools/par_best.py`).** The three tools do different jobs, so it runs them in
+order and records how far to trust the answer. A beam (strike candidates on) gives a
+starting bound and is never what the answer rests on. Then launch-limited passes,
+K = 1..3 together and K by K after, each starting from the best bound so far, so each
+looks only for something strictly better and each finished pass is exact for its family.
+It stops when two passes in a row improve nothing, at `--max-k`, or when a pass ends
+unfinished (a time budget or the frontier cap). The report says `exact up to K`: no plan of
+at most K launch orders is better, which says nothing about plans with more. On the
+2026-11-04 puzzle: beam 11/2, K = 3 gives 10/3 (20 s), K = 4 confirms it (130 s). Each
+stage is appended to `results/par/best/<name>.jsonl` and a rerun repeats nothing; it takes
+`--daily FILE`, or deals days itself (`--days`, `--last N`) with the worker's `daily.make`,
+which is not guaranteed to be the posted map. Launch sizes default to every count
+(`--levels all`); on a 3-system map that was over 60 s a pass where `coarse` took 5.
+
 Still open: a bound that counts the ships a fight needs (the floor counts only
 travel), and whether K = 5 or more finds anything.
 

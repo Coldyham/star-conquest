@@ -108,6 +108,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `human_habits.py` | How people play vs roster self-play | learner.md |
 | `evo_bench.py`, `evo_train.py` (`--with cma`), `evo_probe.py`, `evo_losses.py` | evolved's gate, training and diagnosis | evolved.md |
 | `par_search.py` | Par search on a map (local only) | par.md |
+| `par_best.py` | The blend: a beam bound, then exact launch-limited passes, K by K; resumable, batch over days (local only) | par.md |
 | `par_exhaustive.py` | Exhaustive search for the best score on a small setup: every order set, or every plan of up to K launches (local only) | par.md |
 | `seat_play.py` | Play a posted map's seat by hand | seat-play.md |
 | `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md |
