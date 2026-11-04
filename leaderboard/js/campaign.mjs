@@ -66,7 +66,7 @@ function inOrder(scores) {
  * Replay a week.
  *
  * @returns {holders: Map<nodeId, {key, name, turns, lost, since}>,
- *           homes: Map<playerKey, nodeId>, captures: [{nodeId, taker, from, turns, at}],
+ *           homes: Map<playerKey, nodeId>, captures: [{nodeId, taker, from, turns, lost, at}],
  *           lostAt: Map<"key|nodeId", ms>, standings: [{key, name, fields, home}]}
  *
  * `onMove(capture, holders)` is called after each capture, with `holders` as
@@ -104,7 +104,7 @@ export function fold(graph, scores, { onMove = null } = {}) {
       if (held || homes.has(key)) continue;
       holders.set(nodeId, entry);
       homes.set(key, nodeId);
-      captures.push({ nodeId, taker: score.user_name, from: null, turns: score.turns, at });
+      captures.push({ nodeId, taker: score.user_name, from: null, turns: score.turns, lost: score.lost, at });
       onMove?.(captures.at(-1), holders);
       continue;
     }
@@ -126,7 +126,7 @@ export function fold(graph, scores, { onMove = null } = {}) {
       bump(held.key, -1, at);
       lostAt.set(`${held.key}|${nodeId}`, at);
     }
-    captures.push({ nodeId, taker: score.user_name, from: held ? held.name : null, turns: score.turns, at });
+    captures.push({ nodeId, taker: score.user_name, from: held ? held.name : null, turns: score.turns, lost: score.lost, at });
     onMove?.(captures.at(-1), holders);
   }
 
