@@ -35,7 +35,7 @@ SPECTATE_ROW = -1
 # Every hit-rect the footer strip can record, so a frame can zero the lot before
 # drawing whichever survive — a stale rect would otherwise still answer clicks.
 FOOTER_RECTS = (
-    "quit_button_rect",
+    "retry_live_button_rect",
     "clear_button_rect",
     "menu_button_rect",
     "restart_live_button_rect",
@@ -532,10 +532,11 @@ class Ui:
     # Drawn (and hit-tested) only while the human is knocked out and the match is
     # still running — the one situation `fast_forward` applies to.
     fast_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Quit (Esc) and Clear/cancel (X) touch equivalents. quit_button_rect is
-    # shared between the live footer and the game-over overlay, like
-    # menu_button_rect above; clear_button_rect is live-play only.
-    quit_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Retry (T) and Clear/cancel (X) touch equivalents, live play only. Retry
+    # restarts this same match from turn 0 (`retry_button_rect`'s fork, mid-game):
+    # the one way back to the start of a game with no history to rewind through,
+    # a daily's. Never in a shared match (`can_retry`).
+    retry_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The footer's overflow: a strip too narrow for every button folds the least
     # essential behind one "more" button (and a compact screen always folds the
@@ -780,6 +781,15 @@ class Ui:
     def in_pbp(self) -> bool:
         """Whether this is a shared match rather than a game of our own."""
         return bool(self.pbp_match)
+
+    @property
+    def can_retry(self) -> bool:
+        """Whether live play offers Retry (T): restarting this match from turn 0.
+
+        Not in a shared match, whose log is the table's record and is decided
+        once (`pbp.settled_turn`), not one seat's to start over.
+        """
+        return not self.in_pbp
 
     @property
     def spectating(self) -> bool:

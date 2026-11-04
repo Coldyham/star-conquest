@@ -847,13 +847,31 @@ def test_forward_rules_all_die_when_the_human_is_knocked_out():
         pygame.quit()
 
 
-def test_quit_button_click_returns_quit():
-    """Touch/web equivalent of Esc: the live footer's Quit button, since there is
-    no keyboard to press Escape on a phone."""
+def test_retry_button_and_key_return_retry():
+    """The live footer's Retry and its T key restart the match: the one way back
+    to turn 0 in a game with no history to rewind (a daily)."""
     state, ui = _setup()
     try:
-        ui.quit_button_rect = (100, 100, 120, 24)
-        assert _click_pos(state, ui, (110, 110)) == "quit"
+        ui.retry_live_button_rect = (100, 100, 120, 24)
+        assert _click_pos(state, ui, (110, 110)) == "retry"
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_t, mod=0, unicode="t")
+        assert game_input.handle_event(ev, state, ui) == "retry"
+        ui.pbp_match = "m1"   # a shared match is the table's, not ours to restart
+        assert not ui.can_retry
+        assert game_input.handle_event(ev, state, ui) is None
+    finally:
+        pygame.quit()
+
+
+def test_escape_goes_to_the_menu():
+    """Esc leaves for the setup menu, in live play (once nothing is left to
+    cancel) and on the win overlay; quitting is the menu's."""
+    state, ui = _setup()
+    try:
+        ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0, unicode="\x1b")
+        assert game_input.handle_event(ev, state, ui) == "menu"
+        state.winner = 1
+        assert game_input.handle_event(ev, state, ui) == "menu"
     finally:
         pygame.quit()
 
@@ -880,19 +898,6 @@ def test_clear_button_click_is_noop_with_nothing_selected():
     try:
         ui.clear_button_rect = (100, 100, 120, 24)
         assert _click_pos(state, ui, (110, 110)) is None
-    finally:
-        pygame.quit()
-
-
-def test_game_over_quit_button_click_returns_quit():
-    """The win overlay's Quit button (touch equivalent of Esc in the game-over
-    state) — a separate code path from live play's, gated on state.winner."""
-    state, ui = _setup()
-    try:
-        state.winner = 1
-        ui.quit_button_rect = (100, 100, 120, 24)
-        ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(110, 110), button=1)
-        assert game_input.handle_event(ev, state, ui) == "quit"
     finally:
         pygame.quit()
 

@@ -207,7 +207,7 @@ def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
     assert render._board_label(ui).startswith("Enter on leaderboard")
 
 
-def test_a_long_quick_post_summary_wraps_above_quit():
+def test_a_long_quick_post_summary_wraps_and_fits():
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((360, 740))
@@ -219,11 +219,10 @@ def test_a_long_quick_post_summary_wraps_above_quit():
         ui.post_state = "posted"
         ui.share_msg = "Posted  ·  best is 30 turns, 2 lost by Somebody Long  ·  12 scores on this map"
         render.draw(screen, state, ui)
-        board, quit_ = ui.leaderboard_button_rect, ui.quit_button_rect
+        board = ui.leaderboard_button_rect
         notes = render._wrap(render._fonts()["small"], ui.share_msg, 360 - 2 * config.HUD_PAD)
         assert len(notes) > 1
-        assert quit_[1] >= board[1] + board[3] + len(notes) * render._row_h()
-        assert quit_[1] + quit_[3] <= 740
+        assert board[1] + board[3] + len(notes) * render._row_h() <= 740
     finally:
         pygame.quit()
 
@@ -745,7 +744,7 @@ def _hud_rects(ui):
     """The bottom bar's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
     names = ("end_turn_rect", "play_pause_rect", "autoplay_button_rect",
              "history_button_rect", "restart_live_button_rect", "menu_button_rect",
-             "clear_button_rect", "quit_button_rect", "exit_history_rect",
+             "clear_button_rect", "retry_live_button_rect", "exit_history_rect",
              "rewind_button_rect", "fast_forward_rect", "route_button_rect",
              "route_cancel_rect", "route_confirm_rect", "route_mode_rect",
              "route_auto_rect", "history_prev_rect", "history_next_rect")

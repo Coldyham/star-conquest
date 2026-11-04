@@ -58,7 +58,7 @@ is what switches it:
 - **The footer folds rather than drops.** A strip too narrow for every button
   used to drop the least essential, which on a phone (no keyboard) lost the
   control outright; it now folds them behind a "more" button whose list offers
-  them again, on a desktop window too. A compact screen folds the exits (Quit,
+  them again, on a desktop window too. A compact screen folds the exits (Retry,
   Setup menu, New map) from the start, giving the room to the controls in use.
 - **The send popup docks.** Floating over a map a third the size of a
   desktop's, it covered the lane it was about and outgrew the band it was
@@ -817,6 +817,12 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   (`webstore.close_window`) and returns False, falling back to the setup menu
   with `main.CANT_CLOSE_MSG` via `menu.set_status`. Never end the loop
   (`pygame.quit()`) directly on the web build.
+- **A game has no Quit; Esc goes to the setup menu.** In-game Quit only opened
+  the confirm modal, which on the web can do no more than Menu, so its footer
+  slot is Retry (T), which restarts this match from turn 0 (the win overlay's
+  fork, `log.fork(0)`). That is the one way back to the start of a game with no
+  history to rewind through, a daily. Not in a shared match (`Ui.can_retry`).
+  Quitting is the menu's (its Esc), and closing the window still asks.
 
 ## Send popup and spectating: the rules in full
 

@@ -142,7 +142,7 @@ def test_portrait_end_turn_stands_clear_of_the_gesture_bar_and_answers_its_whole
 
 @pytest.mark.parametrize("landscape", [True, False])
 def test_the_exits_fold_into_the_overflow_list_and_still_work(screen_for, landscape):
-    """On a phone Quit, Menu and New map live behind the strip's "more" button:
+    """On a phone Retry, Menu and New map live behind the strip's "more" button:
     zeroed until the list is open, then pressable from it — and any press closes
     the list again."""
     screen = screen_for(landscape)
@@ -150,13 +150,13 @@ def test_the_exits_fold_into_the_overflow_list_and_still_work(screen_for, landsc
     ui = _make_ui(state)
     render.draw(screen, state, ui)
     assert ui.more_button_rect[2]
-    assert not ui.quit_button_rect[2] and not ui.menu_button_rect[2]
+    assert not ui.retry_live_button_rect[2] and not ui.menu_button_rect[2]
 
     game_input.handle_event(_press(pygame.Rect(ui.more_button_rect).center), state, ui)
     assert ui.more_open
     render.draw(screen, state, ui)
     menu_rect = pygame.Rect(ui.more_menu_rect)
-    for attr in ("quit_button_rect", "menu_button_rect", "restart_live_button_rect"):
+    for attr in ("retry_live_button_rect", "menu_button_rect", "restart_live_button_rect"):
         assert menu_rect.contains(pygame.Rect(getattr(ui, attr))), attr
     action = game_input.handle_event(_press(pygame.Rect(ui.menu_button_rect).center), state, ui)
     assert action == "menu" and not ui.more_open
@@ -186,7 +186,7 @@ def test_a_narrow_desktop_strip_folds_rather_than_drops():
         ui.more_open = True
         render.draw(screen, state, ui)
         live = {a for a in FOOTER_RECTS if getattr(ui, a)[2]}
-        assert {"quit_button_rect", "menu_button_rect", "clear_button_rect",
+        assert {"retry_live_button_rect", "menu_button_rect", "clear_button_rect",
                 "autoplay_button_rect", "play_pause_rect"} <= live
     finally:
         config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H

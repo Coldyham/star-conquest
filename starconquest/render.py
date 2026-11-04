@@ -1921,22 +1921,22 @@ _FOOTER_RECTS = FOOTER_RECTS
 
 def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     """The bottom bar's button strip, left of the sidebar / End Turn column: touch
-    equivalents of the P / A / H / N / G / F / M / X keys plus Quit/Esc, so every
-    live-play action is reachable without a keyboard.
+    equivalents of the P / A / H / N / G / F / M / T / X keys, so every live-play
+    action is reachable without a keyboard.
 
     Each button is sized to its own measured label. The strip is two independently
-    anchored clusters rather than one row: the buttons that leave this game (Quit,
-    Menu, New map) are pinned to the left edge, and the buttons that hand control
+    anchored clusters rather than one row: the buttons that leave this game
+    (Retry, Menu, New map) are pinned to the left edge, and the buttons that hand control
     to the AI or a review mode (History, Clear, Route, Autoplay, Play, Fast
     forward) are packed to the right, against the side panel. Pulling the exit
     group away from the rest means there's normally a gap between them, so an
-    idle tap near the control cluster can't land on Quit by accident — the two
+    idle tap near the control cluster can't land on Retry by accident — the two
     clusters only butt up when the strip is squeezed too narrow to keep them
     apart. Where the strip is too narrow to hold every button — a portrait phone,
     or a shrunken desktop window — the least essential are dropped (rects zeroed)
     rather than drawn overlapping. The ranking matters because a touch player has
     no keys to fall back on: Menu survives longest, since it reaches the setup
-    screen and Quit from there, and Clear goes first, since the popup's own Cancel
+    screen (and Esc goes there too), and Clear goes first, since the popup's own Cancel
     and Delete already do its job. Fast forward ranks just below
     those two, because it is only ever offered in the one situation it is the
     point of the screen — watching a match you are out of.
@@ -1977,12 +1977,14 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         _lay_out_footer(surface, ui, specs, y, fbh, font)
         return
 
-    # quit is the only touch equivalent of Esc — without it a player with no
-    # keyboard has no way out. Opens the confirm modal, like Esc; on the web that
-    # can only ask the browser to close the window (see main.leave_app). Pinned
-    # left with the rest of the "leaves this game" group, away from the
-    # control-cluster taps on the right.
-    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8, "left"))
+    # Retry restarts this match from turn 0, the same fork as the win overlay's
+    # Retry: the one way back to the start of a game that has no history to
+    # rewind through (a daily). No confirm, like New map beside it. It took Quit's
+    # place: Quit only opened a modal, which on the web can do no more than Menu
+    # (main.leave_app), so Esc goes to the menu instead. Pinned left with the
+    # rest of the "leaves this game" group, away from the control-cluster taps.
+    if ui.can_retry:
+        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_RED, 8, "left"))
     specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the N key exactly. (R is reset-view, and has no button here: the
@@ -3335,7 +3337,6 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     nxt = ui.offers_next_stage(state)
     second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
     labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("History & coach", "H")]
-    quit_label = _key_hint("Quit", "Esc")
     # A daily's result goes out as a line, not a link: everyone has its map.
     share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
     board_label = _board_label(ui)
@@ -3344,7 +3345,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # everywhere (see `paths`), and resolving one costs a DOM read that this must
     # not be doing once a frame.
     board = share and bool(paths.LEADERBOARD_ORIGIN)
-    bw = max(_btn_w(normal, s) for s in labels + [quit_label])
+    bw = max(_btn_w(normal, s) for s in labels)
     bh = max(config.s(40), normal.get_height() + config.s(16))
     gap = config.s(12)
     pad = config.s(12)
@@ -3360,7 +3361,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     stack_share = board and 2 * share_w + gap > room
     # A quick post's summary can outrun a phone's width, so it wraps.
     notes = _wrap(_fonts()["small"], ui.share_msg, room) if (share and ui.share_msg) else []
-    rows = (4 + stack_share) if share else 3
+    rows = (3 + stack_share) if share else 2
     stack = (
         _row_h(head_kind)
         + sum(_row_h(kind) for kind, _t, _c in result)
@@ -3383,8 +3384,8 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Retry replays this exact match from the opening position (a fork of the
     # finished log, so the completed record stays intact) — the main way back
     # in after a loss, so it leads and sits beside New map's fresh seed.
-    # Setup menu and History & coach follow; Challenge a friend (when offered)
-    # comes next; Quit is always last, opening the same confirm modal as Esc.
+    # Setup menu (Esc too) and History & coach follow; Challenge a friend (when
+    # offered) comes last.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
     ui.restart_button_rect = (0, 0, 0, 0)
     if nxt:
@@ -3427,8 +3428,6 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     else:
         ui.share_button_rect = (0, 0, 0, 0)
         ui.leaderboard_button_rect = (0, 0, 0, 0)
-
-    ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
 # How much of a name the leaderboard button shows.
