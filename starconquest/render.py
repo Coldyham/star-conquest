@@ -1803,16 +1803,24 @@ def _draw_zoom_controls(surface, ui: Ui, bottom: int | None = None) -> None:
 def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     w, h = surface.get_size()
 
-    _draw_side_panel(surface, state, ui)
-
     # top bar: turn counter, then the scoreboard starting clear of it (measured,
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
+    # Drawn before the side panel, which sits wholly below it, so the panel
+    # can take the bar's right-hand notes when they don't fit.
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
     turn = _draw_ships_lost(surface, state, ui, turn)
-    scoreboard_right = _draw_stage_label(
-        surface, ui, w, _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w)))
-    _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
+    x0 = turn.right + config.HUD_PAD * 2
+    notes = _top_notes(ui)
+    if _top_notes_fit(state, ui, notes, x0, w):
+        scoreboard_right = _draw_stage_label(
+            surface, ui, w, _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w)))
+        notes = []
+    else:
+        scoreboard_right = w
+    _draw_scoreboard(surface, state, ui, scoreboard_right, x0)
+
+    _draw_side_panel(surface, state, ui, notes)
 
     # bottom bar (in portrait, the strip and the End Turn row under it)
     by = config.footer_rect(ui.history)[1]
@@ -2232,6 +2240,55 @@ def _draw_stage_label(surface, ui: Ui, w: int, right: int) -> int:
     return label.left - config.HUD_PAD
 
 
+def _top_notes(ui: Ui) -> list[tuple[str, tuple[int, int, int]]]:
+    """The top bar's right-hand notes as (text, colour), right to left: the
+    challenge target, the campaign reminder, the gauntlet stage. The same text
+    the three `_draw_*` above draw, for measuring and for the side panel."""
+    notes: list[tuple[str, tuple[int, int, int]]] = []
+    if ui.challenge_target is not None:
+        turns, lost = ui.challenge_target
+        who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
+        notes.append((f"Beat {who}{turns}t / {lost} lost", _BTN_TEAL[1]))
+    if ui.campaign_label:
+        notes.append((ui.campaign_label, config.COLOR_CAMPAIGN))
+    if ui.stage_label:
+        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, _BTN_TEAL[1]))
+    return notes
+
+
+def _top_notes_fit(state: GameState, ui: Ui, notes, x0: int, w: int) -> bool:
+    """Whether the notes fit in the top bar beside the scoreboard at its
+    tersest (ships only). If not, they go to the side panel (`_panel_notes`)
+    rather than over the player key: a portrait phone's bar has room for one or
+    the other."""
+    if not notes:
+        return True
+    font = _fonts()["small"]
+    need = sum(font.size(text)[0] + config.HUD_PAD for text, _c in notes)
+    return x0 + _scoreboard_min_w(state, ui) + need <= w - config.HUD_PAD
+
+
+def _scoreboard_min_w(state: GameState, ui: Ui) -> int:
+    """The scoreboard's width with every seat shed down to its ship count, the
+    least `_draw_scoreboard` ever draws."""
+    font = _fonts()["small"]
+    sw_w, gap = config.s(12) + config.s(6), config.s(14)
+    width = 0
+    for pid in sorted(state.players):
+        v = _score_vis(state, ui, pid)
+        if state.players[pid].is_neutral or v == "hidden":
+            continue
+        you = " (you)" if ui.in_pbp and pid == ui.human_id else ""
+        if v == "out":
+            text = f"out{you}"
+        else:
+            ships = (_player_stats(state, pid) if v == "live" else ui.player_intel[pid])[1]
+            text = f"{ships}{'' if v == 'live' else ' ?'}{you}"
+        width += sw_w + font.size(text)[0] + gap
+    return width
+
+
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
     """Per-player standings in the top bar: swatch, systems, ships, production.
 
@@ -2371,7 +2428,7 @@ def _popup_docked(ui: Ui) -> bool:
     return config.compact and ui.mode == CHOOSING and not ui.history
 
 
-def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
+def _draw_side_panel(surface, state: GameState, ui: Ui, notes=()) -> None:
     # The panel's own footer is the big End Turn button (see _draw_hud), not the
     # ordinary bottom bar under the map — it reserves config.END_TURN_H instead.
     # History mode never draws that button (the scrubber owns the bottom bar
@@ -2389,12 +2446,12 @@ def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     # bars, which a portrait panel, a fraction of the screen tall, would reach.
     surface.set_clip((px, py, pw, ph))
     try:
-        _draw_side_panel_body(surface, state, ui, px, py, pw, ph)
+        _draw_side_panel_body(surface, state, ui, px, py, pw, ph, notes)
     finally:
         surface.set_clip(None)
 
 
-def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> None:
+def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph, notes=()) -> None:
     global _PANEL_COLUMN_W
     # `content_bottom` is where the details have to stop: the panel's own floor.
     content_bottom = py + ph - config.s(8)
@@ -2402,6 +2459,11 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     if ui.in_pbp:
         y = _panel_you_are(surface, ui, x, y)
+    # The top bar's notes, when it had no room for them (`_top_notes_fit`): at
+    # the column's head, or (a portrait band being a few rows tall) only while
+    # nothing is in focus, as the stage hint, below.
+    if notes and not config.portrait:
+        y = _panel_notes(surface, notes, x, y, content_bottom)
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
         ui.clear_dangerous_rect = (0, 0, 0, 0)
@@ -2434,6 +2496,8 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
         if dangerous:
             y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     if not focused:
+        if notes and config.portrait:
+            y = _panel_notes(surface, notes, x, y, content_bottom)
         if ui.stage_hint and not ui.history:
             y = _panel_stage_hint(surface, ui, x, y, content_bottom)
             if config.compact:
@@ -2930,6 +2994,17 @@ def _stage_hint_lines(hint: str) -> list[str]:
     """The stage hint reflowed to the panel, the one place it is measured, so the
     test holding the panel's length counts what is drawn."""
     return _wrap(_fonts()["small"], hint, _panel_w())
+
+
+def _panel_notes(surface, notes, x, y, bottom: int) -> int:
+    """The top bar's overflowed notes (`_top_notes`), one wrapped block each,
+    in their bar colours, stage first as the bar reads left to right."""
+    for text, color in reversed(notes):
+        for line in _wrap(_fonts()["small"], text, _panel_w()):
+            if y + _row_h() > bottom:
+                return y
+            y = _row(surface, x, y, line, color)
+    return y + config.ROW_GAP * 2
 
 
 def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
