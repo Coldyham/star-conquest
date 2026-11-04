@@ -328,7 +328,7 @@ def open_run(ms: MenuState, settings: Settings, fresh: bool
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
-    """Keep the top bar's campaign reminder current for the game being played.
+    """Keep the side panel's campaign reminder current for the game being played.
 
     The menu's own watcher is reused, so a setup it already looked up shows at
     once, and the lookup is refreshed every `campaign.REFRESH_S` while the

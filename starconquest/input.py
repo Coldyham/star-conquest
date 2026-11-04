@@ -1,7 +1,7 @@
 """Event handling: translate pygame input into selection/targeting changes and
 high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
-engine. Returns an action string ('end_turn', 'restart', 'retry', 'quit',
+engine. Returns an action string ('end_turn', 'restart', 'retry',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
 'toggle_route', 'hint', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
 None.
@@ -488,7 +488,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
     if ui.history:
         return _handle_history_event(event, state, ui)
 
-    # Game over: restart / back-to-menu / quit, plus entering history to review
+    # Game over: retry / restart / back-to-menu, plus entering history to review
     # the finished game behind the fog of war.
     if state.winner is not None:
         if event.type == pygame.KEYDOWN:
@@ -499,7 +499,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
                 if ui.in_stage:
                     return "next_stage" if ui.offers_next_stage(state) else None
                 return "restart"
-            if event.key == pygame.K_m:
+            if event.key in (pygame.K_m, pygame.K_ESCAPE):
                 return "menu"
             if event.key == pygame.K_h:
                 return "toggle_history"
@@ -507,8 +507,6 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
                 return "share"
             if event.key == pygame.K_l:
                 return "leaderboard"
-            if event.key == pygame.K_ESCAPE:
-                return "quit"
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if ui.share_button_rect[2] and _point_in_rect(event.pos, ui.share_button_rect):
                 return "share"
@@ -524,8 +522,6 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
                 return "menu"
             if ui.history_button_rect[2] and _point_in_rect(event.pos, ui.history_button_rect):
                 return "toggle_history"
-            if ui.quit_button_rect[2] and _point_in_rect(event.pos, ui.quit_button_rect):
-                return "quit"
         return None
 
     # Route mode is its own interaction scene: a group selection and a destination
@@ -694,6 +690,8 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         return None
     if event.key == pygame.K_m:
         return "menu"
+    if event.key == pygame.K_t:
+        return "retry" if ui.can_retry else None
     if event.key == pygame.K_h:
         return "toggle_history"
     if event.key == pygame.K_g:
@@ -708,7 +706,7 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
             _cancel(ui)
             return None
-        return "quit"
+        return "menu"
     return None
 
 
@@ -867,8 +865,8 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, "restart"
     if ui.menu_button_rect[2] and _point_in_rect(pos, ui.menu_button_rect):
         return True, "menu"
-    if ui.quit_button_rect[2] and _point_in_rect(pos, ui.quit_button_rect):
-        return True, "quit"
+    if ui.retry_live_button_rect[2] and _point_in_rect(pos, ui.retry_live_button_rect):
+        return True, "retry"
     if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
         _clear_selected(ui)
         return True, None

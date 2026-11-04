@@ -104,17 +104,21 @@ def test_only_a_small_touch_screen_is_compact():
 
 @pytest.mark.parametrize("landscape", [True, False])
 def test_the_game_screens_regions_tile_without_overlapping(screen_for, landscape):
-    """Map, panel, button strip and End Turn are four regions that cover the
-    screen below the top bar between them, and never overlap."""
+    """Top bar, map, panel, button strip and End Turn are five regions that
+    cover the screen between them, and never overlap. In landscape the panel
+    runs to the top, beside a bar over the map alone."""
     screen_for(landscape)
     w, h = config.SCREEN_W, config.SCREEN_H
-    regions = [pygame.Rect(r) for r in (config.play_rect(), config.side_panel_rect(),
-                                        config.footer_rect(), config.end_turn_rect())]
+    bar = pygame.Rect(0, 0, config.top_bar_w(), config.HUD_TOP_H)
+    regions = [bar] + [pygame.Rect(r) for r in (config.play_rect(), config.side_panel_rect(),
+                                                config.footer_rect(), config.end_turn_rect())]
     for i, a in enumerate(regions):
-        assert pygame.Rect(0, config.HUD_TOP_H, w, h - config.HUD_TOP_H).contains(a)
+        assert pygame.Rect(0, 0, w, h).contains(a)
         for b in regions[i + 1:]:
             assert not a.colliderect(b), (a, b)
-    assert sum(r.w * r.h for r in regions) == w * (h - config.HUD_TOP_H)
+    assert sum(r.w * r.h for r in regions) == w * h
+    if landscape:
+        assert config.side_panel_rect()[1] == 0
     if not landscape:
         play = pygame.Rect(config.play_rect())
         assert play.w == w and play.h > h // 3   # the map takes the full width
@@ -142,7 +146,7 @@ def test_portrait_end_turn_stands_clear_of_the_gesture_bar_and_answers_its_whole
 
 @pytest.mark.parametrize("landscape", [True, False])
 def test_the_exits_fold_into_the_overflow_list_and_still_work(screen_for, landscape):
-    """On a phone Quit, Menu and New map live behind the strip's "more" button:
+    """On a phone Retry, Menu and New map live behind the strip's "more" button:
     zeroed until the list is open, then pressable from it — and any press closes
     the list again."""
     screen = screen_for(landscape)
@@ -150,13 +154,13 @@ def test_the_exits_fold_into_the_overflow_list_and_still_work(screen_for, landsc
     ui = _make_ui(state)
     render.draw(screen, state, ui)
     assert ui.more_button_rect[2]
-    assert not ui.quit_button_rect[2] and not ui.menu_button_rect[2]
+    assert not ui.retry_live_button_rect[2] and not ui.menu_button_rect[2]
 
     game_input.handle_event(_press(pygame.Rect(ui.more_button_rect).center), state, ui)
     assert ui.more_open
     render.draw(screen, state, ui)
     menu_rect = pygame.Rect(ui.more_menu_rect)
-    for attr in ("quit_button_rect", "menu_button_rect", "restart_live_button_rect"):
+    for attr in ("retry_live_button_rect", "menu_button_rect", "restart_live_button_rect"):
         assert menu_rect.contains(pygame.Rect(getattr(ui, attr))), attr
     action = game_input.handle_event(_press(pygame.Rect(ui.menu_button_rect).center), state, ui)
     assert action == "menu" and not ui.more_open
@@ -186,7 +190,7 @@ def test_a_narrow_desktop_strip_folds_rather_than_drops():
         ui.more_open = True
         render.draw(screen, state, ui)
         live = {a for a in FOOTER_RECTS if getattr(ui, a)[2]}
-        assert {"quit_button_rect", "menu_button_rect", "clear_button_rect",
+        assert {"retry_live_button_rect", "menu_button_rect", "clear_button_rect",
                 "autoplay_button_rect", "play_pause_rect"} <= live
     finally:
         config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H

@@ -284,7 +284,7 @@ The game and the board are one site, so the game can ask before it plays.
   (a node lost before Start now reads `late-start`), or would be one only
   inside the grace (`campaign.confirm`). An open node, your
   own node, or a player with no name yet starts straight away.
-- **The top bar label is text `main` writes** (`main.campaign_tick` into
+- **The side panel's reminder is text `main` writes** (`main.campaign_tick` into
   `Ui.campaign_label`). `campaign` imports `pbp`, which imports `engine`, and
   `render` must never pull that in, even indirectly.
 - **The board says it before the game does.** game.html on a live node shows

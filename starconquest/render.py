@@ -1803,16 +1803,16 @@ def _draw_zoom_controls(surface, ui: Ui, bottom: int | None = None) -> None:
 def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     w, h = surface.get_size()
 
-    _draw_side_panel(surface, state, ui)
-
     # top bar: turn counter, then the scoreboard starting clear of it (measured,
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
-    pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
+    # The bar is the scoreboard's alone: the match's notes (target, campaign,
+    # stage) head the side panel (`_panel_notes`), so the key sheds less detail.
+    _draw_side_panel(surface, state, ui)
+    bar_w = config.top_bar_w()
+    pygame.draw.rect(surface, (18, 20, 30), (0, 0, bar_w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
     turn = _draw_ships_lost(surface, state, ui, turn)
-    scoreboard_right = _draw_stage_label(
-        surface, ui, w, _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w)))
-    _draw_scoreboard(surface, state, ui, scoreboard_right, turn.right + config.HUD_PAD * 2)
+    _draw_scoreboard(surface, state, ui, bar_w, turn.right + config.HUD_PAD * 2)
 
     # bottom bar (in portrait, the strip and the End Turn row under it)
     by = config.footer_rect(ui.history)[1]
@@ -1921,25 +1921,30 @@ _FOOTER_RECTS = FOOTER_RECTS
 
 def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     """The bottom bar's button strip, left of the sidebar / End Turn column: touch
-    equivalents of the P / A / H / N / G / F / M / X keys plus Quit/Esc, so every
-    live-play action is reachable without a keyboard.
+    equivalents of the P / A / H / N / G / F / M / T / X keys, so every live-play
+    action is reachable without a keyboard.
 
     Each button is sized to its own measured label. The strip is two independently
-    anchored clusters rather than one row: the buttons that leave this game (Quit,
-    Menu, New map) are pinned to the left edge, and the buttons that hand control
+    anchored clusters rather than one row: the buttons that leave this game
+    (Retry, Menu, New map) are pinned to the left edge, and the buttons that hand control
     to the AI or a review mode (History, Clear, Route, Autoplay, Play, Fast
     forward) are packed to the right, against the side panel. Pulling the exit
     group away from the rest means there's normally a gap between them, so an
-    idle tap near the control cluster can't land on Quit by accident — the two
+    idle tap near the control cluster can't land on Retry by accident — the two
     clusters only butt up when the strip is squeezed too narrow to keep them
     apart. Where the strip is too narrow to hold every button — a portrait phone,
-    or a shrunken desktop window — the least essential are dropped (rects zeroed)
-    rather than drawn overlapping. The ranking matters because a touch player has
-    no keys to fall back on: Menu survives longest, since it reaches the setup
-    screen and Quit from there, and Clear goes first, since the popup's own Cancel
-    and Delete already do its job. Fast forward ranks just below
-    those two, because it is only ever offered in the one situation it is the
-    point of the screen — watching a match you are out of.
+    or a shrunken desktop window — the least essential fold behind a "more"
+    button (`_lay_out_footer`) rather than drawn overlapping. The ranking matters because a touch player has
+    no keys to fall back on, and runs in three tiers, kept longest first:
+
+    - acting in this game: Clear, Route, Hint (its ✗/✓ pair alike);
+    - looking at or handing it over: History, Play, Autoplay;
+    - leaving it: Menu, Retry, New map — Menu last of these to go, since it
+      reaches everything else (Esc goes there too).
+
+    Fast forward outranks them all, because it is only ever offered in the one
+    situation it is the point of the screen: watching a match you are out of,
+    when there is nothing left to act on.
 
     Route mode gets a strip of its own rather than extra buttons on this one — see
     the branch below.
@@ -1977,30 +1982,34 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         _lay_out_footer(surface, ui, specs, y, fbh, font)
         return
 
-    # quit is the only touch equivalent of Esc — without it a player with no
-    # keyboard has no way out. Opens the confirm modal, like Esc; on the web that
-    # can only ask the browser to close the window (see main.leave_app). Pinned
-    # left with the rest of the "leaves this game" group, away from the
-    # control-cluster taps on the right.
-    specs.append(("quit_button_rect", _key_hint("Quit", "Esc"), *_BTN_RED, 8, "left"))
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
+    # The "leaves this game" group, pinned left away from the control-cluster
+    # taps, Menu first (and first in the folded list), then the two restarts
+    # side by side in the win overlay's colours. Menu is where Esc goes too.
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 4, "left"))
+    # Retry restarts this match from turn 0, the same fork as the win overlay's
+    # Retry: the one way back to the start of a game that has no history to
+    # rewind through (a daily). No confirm, like New map beside it. It took Quit's
+    # place: Quit only opened a modal, which on the web can do no more than Menu
+    # (main.leave_app), so Esc goes to the menu instead.
+    if ui.can_retry:
+        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_AMBER, 3, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the N key exactly. (R is reset-view, and has no button here: the
     # on-map zoom cluster carries it.)
     # Not in a gauntlet stage: its seed is pinned, so a new map would leave it.
     if not ui.in_stage:
-        specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
+        specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_GREEN, 2, "left"))
     if ui.can_review(state):
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 1, "right"))
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 7, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
     if not ui.spectating:   # a spectator has nothing to clear
-        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 4, "right"))
+        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 12, "right"))
     # Route mode: multi-select a group of systems and forward them all to one
     # destination. Gated on the same predicate as the G key, so the button is
     # drawn exactly when the mode means something.
     if ui.can_route(state):
-        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
+        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 11, "right"))
     # Hint: a bot's suggested sends, as training help. Its first press in a game
     # not yet hinted asks (`main.press_hint`), since a hinted game is never
     # posted (`Ui.can_post`). While it is up it splits in two: put it away, or
@@ -2009,11 +2018,11 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
         if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 3, "right"))
+            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 10, "right"))
             if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 2, "right"))
+                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 10, "right"))
         else:
-            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 3, "right"))
+            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 10, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -2022,7 +2031,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # guarded, the same treatment End Turn gets while we are waiting — and
     # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
     if not ui.in_pbp:
-        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
+        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 5, "right"))
         if not ui.autoplay:
             specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
@@ -2031,7 +2040,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # something.
     if ui.can_fast_forward(state):
         specs.append(
-            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 7, "right")
+            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 13, "right")
         )
 
     _lay_out_footer(surface, ui, specs, y, fbh, font)
@@ -2173,54 +2182,22 @@ def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> py
     return turn.union(label)
 
 
-def _draw_challenge_target(surface, ui: Ui, w: int) -> int:
-    """The score to beat, pinned in the top bar's right corner for as long as the
-    match runs — not just on the win overlay at the end of it, since the point of
-    a persistent reminder is not having to hold the number in your head (or reopen
-    a finished game to recall it). Teal ties it to the same accent as the
-    "Challenge a friend" button that made this a challenge in the first place.
-
-    Returns the x the scoreboard must stay clear of (``w`` when there is nothing
-    to draw), the same measured-not-hardcoded handoff the turn counter gives it.
-    """
-    if ui.challenge_target is None:
-        return w
-    turns, lost = ui.challenge_target
-    who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
-    text = f"Beat {who}{turns}t / {lost} lost"
-    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
-                  midright=(w - config.HUD_PAD, config.HUD_TOP_H // 2))
-    return label.left - config.HUD_PAD
-
-
-def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
-    """The weekly campaign's reminder ("Node 3: post within 12 min"), just left of
-    the challenge target, in gold like the campaign page's timers. `main` writes
-    the text once a frame, so the countdown moves without this module reading
-    any clock or knowing the rules.
-
-    Returns the x the scoreboard must stay clear of, the same handoff
-    `_draw_challenge_target` makes.
-    """
-    if not ui.campaign_label:
-        return right
-    edge = w - config.HUD_PAD if right >= w else right
-    label = _text(surface, _fonts()["small"], ui.campaign_label, config.COLOR_CAMPAIGN,
-                  midright=(edge, config.HUD_TOP_H // 2))
-    return label.left - config.HUD_PAD
-
-
-def _draw_stage_label(surface, ui: Ui, w: int, right: int) -> int:
-    """Which gauntlet stage this is ("Tutorial 3/10 · Defender's edge"), and its
-    target if it has one (" · target 14"), left of the campaign reminder, with
-    the same measured handoff to the scoreboard."""
-    if not ui.stage_label:
-        return right
-    edge = w - config.HUD_PAD if right >= w else right
-    text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
-    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
-                  midright=(edge, config.HUD_TOP_H // 2))
-    return label.left - config.HUD_PAD
+def _match_notes(ui: Ui) -> list[tuple[str, tuple[int, int, int]]]:
+    """What this match is for, as (text, colour) lines for the head of the side
+    panel (`_panel_notes`): the gauntlet stage and its target, the campaign
+    reminder, the challenge target. Not in the top bar, which they would share
+    with the scoreboard (on a portrait phone, by covering it)."""
+    notes: list[tuple[str, tuple[int, int, int]]] = []
+    if ui.stage_label:
+        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, _BTN_TEAL[1]))
+    if ui.campaign_label:
+        notes.append((ui.campaign_label, config.COLOR_CAMPAIGN))
+    if ui.challenge_target is not None:
+        turns, lost = ui.challenge_target
+        who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
+        notes.append((f"Beat {who}{turns}t / {lost} lost", _BTN_TEAL[1]))
+    return notes
 
 
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
@@ -2266,7 +2243,10 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         return f"{name}{stats_}{mark}{you}"
 
     def row_width(with_name: bool, terse: int = 0) -> int:
-        return sum(sw_w + font.size(label(pid, vis(pid), with_name, terse))[0] + gap for pid in seats)
+        # gaps between entries only, at the spacing that level draws with
+        between = config.s(14) if terse else gap
+        return (sum(sw_w + font.size(label(pid, vis(pid), with_name, terse))[0] for pid in seats)
+                + between * (len(seats) - 1))
 
     # Shed detail until the row fits: names, then (a phone's top bar) production,
     # then systems, then the unit — ships, the number a fight turns on, stays. Tapping a seat's
@@ -2393,6 +2373,12 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     if ui.in_pbp:
         y = _panel_you_are(surface, ui, x, y)
+    # The match's notes (`_match_notes`): at the column's head, or (a portrait
+    # band being a few rows tall) only while nothing is in focus, as the stage
+    # hint, below.
+    notes = _match_notes(ui)
+    if notes and not config.portrait:
+        y = _panel_notes(surface, notes, x, y, content_bottom)
     if ui.mode == ROUTING:
         ui.clear_forward_rect = (0, 0, 0, 0)
         ui.clear_dangerous_rect = (0, 0, 0, 0)
@@ -2425,6 +2411,8 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
         if dangerous:
             y = _draw_clear_dangerous_button(surface, ui, px, y, len(dangerous))
     if not focused:
+        if notes and config.portrait:
+            y = _panel_notes(surface, notes, x, y, content_bottom)
         if ui.stage_hint and not ui.history:
             y = _panel_stage_hint(surface, ui, x, y, content_bottom)
             if config.compact:
@@ -2923,6 +2911,16 @@ def _stage_hint_lines(hint: str) -> list[str]:
     return _wrap(_fonts()["small"], hint, _panel_w())
 
 
+def _panel_notes(surface, notes, x, y, bottom: int) -> int:
+    """The match's notes (`_match_notes`), one wrapped block each."""
+    for text, color in notes:
+        for line in _wrap(_fonts()["small"], text, _panel_w()):
+            if y + _row_h() > bottom:
+                return y
+            y = _row(surface, x, y, line, color)
+    return y + config.ROW_GAP * 2
+
+
 def _panel_stage_hint(surface, ui: Ui, x, y, bottom: int) -> int:
     """A gauntlet stage's reminder, above the legend whenever nothing is in focus.
 
@@ -3335,7 +3333,6 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     nxt = ui.offers_next_stage(state)
     second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
     labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("History & coach", "H")]
-    quit_label = _key_hint("Quit", "Esc")
     # A daily's result goes out as a line, not a link: everyone has its map.
     share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
     board_label = _board_label(ui)
@@ -3344,7 +3341,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # everywhere (see `paths`), and resolving one costs a DOM read that this must
     # not be doing once a frame.
     board = share and bool(paths.LEADERBOARD_ORIGIN)
-    bw = max(_btn_w(normal, s) for s in labels + [quit_label])
+    bw = max(_btn_w(normal, s) for s in labels)
     bh = max(config.s(40), normal.get_height() + config.s(16))
     gap = config.s(12)
     pad = config.s(12)
@@ -3360,7 +3357,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     stack_share = board and 2 * share_w + gap > room
     # A quick post's summary can outrun a phone's width, so it wraps.
     notes = _wrap(_fonts()["small"], ui.share_msg, room) if (share and ui.share_msg) else []
-    rows = (4 + stack_share) if share else 3
+    rows = (3 + stack_share) if share else 2
     stack = (
         _row_h(head_kind)
         + sum(_row_h(kind) for kind, _t, _c in result)
@@ -3383,8 +3380,8 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     # Retry replays this exact match from the opening position (a fork of the
     # finished log, so the completed record stays intact) — the main way back
     # in after a loss, so it leads and sits beside New map's fresh seed.
-    # Setup menu and History & coach follow; Challenge a friend (when offered)
-    # comes next; Quit is always last, opening the same confirm modal as Esc.
+    # Setup menu (Esc too) and History & coach follow; Challenge a friend (when
+    # offered) comes last.
     left, right = w // 2 - bw - gap // 2, w // 2 + gap // 2
     ui.restart_button_rect = (0, 0, 0, 0)
     if nxt:
@@ -3427,8 +3424,6 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     else:
         ui.share_button_rect = (0, 0, 0, 0)
         ui.leaderboard_button_rect = (0, 0, 0, 0)
-
-    ui.quit_button_rect = _btn(surface, pygame.Rect(w // 2 - bw // 2, y, bw, bh), quit_label, *_BTN_RED)
 
 
 # How much of a name the leaderboard button shows.
