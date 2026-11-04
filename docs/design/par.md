@@ -429,6 +429,25 @@ finds nothing sooner or with fewer lost: **no plan of up to 4 launch orders beat
 states, and on a 3-system map the plain search (20 s) beat K = 4 (over 80 s).
 `--splits` adds sends down two lanes at once; it was not needed here.
 
+**Yesterday's puzzle (`2026-11-03`, 6 systems, heuristic).** The beam says 12 turns,
+7 lost (also at width 1500). Plans of up to 4 launch orders win on turn 10 with 10
+lost (33 s for K up to 3, nothing found; K = 4 found it): faster, for more ships.
+Nothing with 3 or fewer launches beats 12/7.
+
+**Strike candidates (`par_search.strike_sends`, on by default; `--no-strikes`).**
+The beam's candidates are bots' orders, all-in sends, holding and one-order
+variants, so a send sized to a target (6 of 10 ships) never appears. The new
+candidates step the board forward holding, with the rivals deciding for real, read
+what each target will hold when a fleet launched now lands, and offer sends in a
+band of `STRIKE_BAND` = 2 ships around it, plus pairs of sends from different
+systems (`PAIR_CAP`). The band is needed: a send changes what a rival does
+(rusherplus goes for the weakest neighbour), so the projection is a few ships off,
+and the first version, without it, offered 7 and 8 and never 6. On 2026-11-04's
+puzzle the beam alone stays at 11/3 up to width 1500; with the candidates it finds
+11/2 at widths 50 and 300 and 10/3 at 1500 (114 s). The ranking is the limit: a
+child is scored by how marshal or actuary would finish from it, and the 10-turn
+line scores badly until the turn-6 fight.
+
 Still open: a bound that counts the ships a fight needs (the floor counts only
 travel), and whether K = 5 or more finds anything.
 
