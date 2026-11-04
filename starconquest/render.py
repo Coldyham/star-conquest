@@ -1808,10 +1808,11 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # The bar is the scoreboard's alone: the match's notes (target, campaign,
     # stage) head the side panel (`_panel_notes`), so the key sheds less detail.
     _draw_side_panel(surface, state, ui)
-    pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
+    bar_w = config.top_bar_w()
+    pygame.draw.rect(surface, (18, 20, 30), (0, 0, bar_w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
     turn = _draw_ships_lost(surface, state, ui, turn)
-    _draw_scoreboard(surface, state, ui, w, turn.right + config.HUD_PAD * 2)
+    _draw_scoreboard(surface, state, ui, bar_w, turn.right + config.HUD_PAD * 2)
 
     # bottom bar (in portrait, the strip and the End Turn row under it)
     by = config.footer_rect(ui.history)[1]

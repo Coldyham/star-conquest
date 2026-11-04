@@ -104,17 +104,21 @@ def test_only_a_small_touch_screen_is_compact():
 
 @pytest.mark.parametrize("landscape", [True, False])
 def test_the_game_screens_regions_tile_without_overlapping(screen_for, landscape):
-    """Map, panel, button strip and End Turn are four regions that cover the
-    screen below the top bar between them, and never overlap."""
+    """Top bar, map, panel, button strip and End Turn are five regions that
+    cover the screen between them, and never overlap. In landscape the panel
+    runs to the top, beside a bar over the map alone."""
     screen_for(landscape)
     w, h = config.SCREEN_W, config.SCREEN_H
-    regions = [pygame.Rect(r) for r in (config.play_rect(), config.side_panel_rect(),
-                                        config.footer_rect(), config.end_turn_rect())]
+    bar = pygame.Rect(0, 0, config.top_bar_w(), config.HUD_TOP_H)
+    regions = [bar] + [pygame.Rect(r) for r in (config.play_rect(), config.side_panel_rect(),
+                                                config.footer_rect(), config.end_turn_rect())]
     for i, a in enumerate(regions):
-        assert pygame.Rect(0, config.HUD_TOP_H, w, h - config.HUD_TOP_H).contains(a)
+        assert pygame.Rect(0, 0, w, h).contains(a)
         for b in regions[i + 1:]:
             assert not a.colliderect(b), (a, b)
-    assert sum(r.w * r.h for r in regions) == w * (h - config.HUD_TOP_H)
+    assert sum(r.w * r.h for r in regions) == w * h
+    if landscape:
+        assert config.side_panel_rect()[1] == 0
     if not landscape:
         play = pygame.Rect(config.play_rect())
         assert play.w == w and play.h > h // 3   # the map takes the full width

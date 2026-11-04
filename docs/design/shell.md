@@ -743,7 +743,9 @@ about 0.2 s natively, small beside fetching and compiling the runtime.
   (`render._match_notes`), on every screen, so there is one place to look and
   the key sheds less. They sat right of the scoreboard, which on a portrait
   phone they covered. A portrait band shows them only while nothing is in
-  focus, as the stage hint.
+  focus, as the stage hint. A landscape phone's column runs to the screen's
+  top beside a bar over the map alone (`config.top_bar_w`), so the notes sit
+  where the bar's right end was and the legend keeps its last line.
 - **Portrait End Turn stands off the gesture bar but answers its whole row.**
   A mobile browser takes a tap near the screen's foot for its own (Safari
   raises its toolbar), and the bar there used to reach almost to the edge, so

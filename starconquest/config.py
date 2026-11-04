@@ -611,12 +611,22 @@ PORTRAIT_PANEL_H = 118
 def side_panel_rect(history: bool = False) -> tuple[int, int, int, int]:
     """The info panel: the right-hand column above End Turn (above the bottom bar
     while reviewing history, which has no End Turn), or, in portrait, the band
-    between the map and the button strip."""
+    between the map and the button strip. A landscape phone's column runs to
+    the screen's top, beside a top bar over the map alone (`top_bar_w`), so its
+    head (the match's notes) sits where the bar's right end was and its legend
+    keeps the rows the bar would take."""
     if portrait:
         h = s(PORTRAIT_PANEL_H)
         return (0, SCREEN_H - END_TURN_H - HUD_BOTTOM_H - h, SCREEN_W, h)
     foot = HUD_BOTTOM_H if history else END_TURN_H
-    return (SCREEN_W - HUD_RIGHT_W, HUD_TOP_H, HUD_RIGHT_W, SCREEN_H - HUD_TOP_H - foot)
+    top = 0 if compact else HUD_TOP_H
+    return (SCREEN_W - HUD_RIGHT_W, top, HUD_RIGHT_W, SCREEN_H - top - foot)
+
+
+def top_bar_w() -> int:
+    """The top bar's width: the screen's, or on a landscape phone the map's,
+    the side column taking the rest (`side_panel_rect`)."""
+    return SCREEN_W - HUD_RIGHT_W if compact and not portrait else SCREEN_W
 
 
 def footer_rect(history: bool = False) -> tuple[int, int, int, int]:
