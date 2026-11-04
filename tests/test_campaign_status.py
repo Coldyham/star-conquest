@@ -292,7 +292,9 @@ def test_a_campaign_confirm_and_a_slow_warning_share_one_modal(monkeypatch):
         pygame.quit()
 
 
-def test_the_top_bar_shows_the_label_beside_the_challenge_target():
+def test_the_side_panel_shows_the_label_above_the_challenge_target():
+    """The reminder heads the side panel, not the top bar, which is the
+    scoreboard's alone; the challenge target follows it."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -300,14 +302,11 @@ def test_the_top_bar_shows_the_label_beside_the_challenge_target():
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
         ui.visible = ui.seen = set(state.systems)
-        w = screen.get_width()
-        assert render._draw_campaign_label(screen, ui, w, w) == w      # nothing to show
+        assert render._match_notes(ui) == []      # nothing to show
         ui.campaign_label = "Node 3: post within 12 min"
-        alone = render._draw_campaign_label(screen, ui, w, w)
-        assert alone < w - config.HUD_PAD
         ui.challenge_target = (40, 3)
-        target = render._draw_challenge_target(screen, ui, w)
-        assert render._draw_campaign_label(screen, ui, w, target) < target
+        texts = [text for text, _c in render._match_notes(ui)]
+        assert texts == ["Node 3: post within 12 min", "Beat 40t / 3 lost"]
         render.draw(screen, state, ui)
     finally:
         pygame.quit()

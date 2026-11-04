@@ -693,12 +693,12 @@ board, and no key moves. Boons cannot do that.
   `Gauntlet`. The win overlay says which it was ("Win in 14 turns or fewer: met
   · Stage cleared", "…: not yet", or "…: not this time · your best clears it"),
   with Retry alone where Next stage would be when it is not cleared.
-- **The briefing card, the top bar and the stage list show the target**, so it
+- **The briefing card, the side panel and the stage list show the target**, so it
   is never a surprise on the win overlay: a note at the card's foot ("Target:
   Win in 14 turns or fewer", one of `render._draw_card`'s notes, which always show),
-  " · target 14" after the top bar's stage label, and "18 turns / 3 lost ·
-  target 14" on a won row short of it. It is kept out of the side panel's hint,
-  so `HINT_MAX` keeps its row budget.
+  " · target 14" after the stage label heading the side panel, and "18 turns / 3 lost ·
+  target 14" on a won row short of it. It is kept out of the panel's hint
+  itself, so `HINT_MAX` keeps its row budget.
 - **A win short of the target leaves the stage open**: `open_stages` takes the
   won stages as well as the cleared ones, so a stage won out of order from a
   challenge link stays open to try again, but opens nothing beyond.

@@ -31,7 +31,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     `Ui.film`/`Ui.film_ms`), so a test drives a film frame by setting a field.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s), and returns an
     action string (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`,
-    `"toggle_history"`, `"rewind"`, `"restart"`, `"menu"`, `"quit"`) or `None`
+    `"toggle_history"`, `"rewind"`, `"restart"`, `"retry"`, `"menu"`) or `None`
     for `main.py` to act on.
   - `menu.py` has the same split: `draw` only reads `Settings`, `handle_event`
     mutates `MenuState`/`Settings` and returns `"start"`/`"quit"`/`None`;
