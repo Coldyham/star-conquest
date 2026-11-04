@@ -431,8 +431,11 @@ states, and on a 3-system map the plain search (20 s) beat K = 4 (over 80 s).
 
 **Yesterday's puzzle (`2026-11-03`, 6 systems, heuristic).** The beam says 12 turns,
 7 lost (also at width 1500). Plans of up to 4 launch orders win on turn 10 with 10
-lost (33 s for K up to 3, nothing found; K = 4 found it): faster, for more ships.
-Nothing with 3 or fewer launches beats 12/7.
+lost (K up to 3 took 33 s and found nothing; K = 4 found it): faster, for more ships.
+Nothing with 3 or fewer launches beats 12/7. **K = 5 (577 s, 2.1M order sets in its widest
+layer, 440k boards kept, no cap reached) finds nothing better than 10/10: no plan of up to
+5 launch orders wins sooner, or on turn 10 with fewer lost.** That is exact for those plans
+and says nothing about plans with six or more.
 
 **Strike candidates (`par_search.strike_sends`, on by default; `--no-strikes`).**
 The beam's candidates are bots' orders, all-in sends, holding and one-order
