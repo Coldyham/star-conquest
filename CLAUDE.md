@@ -93,7 +93,7 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -373,6 +373,9 @@ stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup
 matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
 `from_dict` never raises. Render never sees a `Gauntlet` (`main.stage_ui`).
+**A run (`run.py`) is the one stored progress**: a single-path gauntlet with a
+target, in order, one life. It judges only its own game (`run.finish`), so a
+Retry is free play; Continue resumes that game's log, never a fresh copy.
 **A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
 `/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
 page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but
