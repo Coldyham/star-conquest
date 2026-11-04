@@ -50,6 +50,7 @@ import json
 import math
 import multiprocessing
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -63,6 +64,7 @@ from starconquest.settings import Settings, build_state
 from tools import par_search as ps
 
 LEVELS = ("coarse", "quarters", "all")
+CHUNK_BOARDS = 256   # boards per task, so a wave in flight stays small
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +193,35 @@ def hopeless(board: GameState, me: int, deadline: int, ratio: float) -> bool:
 _W: dict = {}
 
 
+def _dup(obj):
+    """A shallow copy of a plain (slot-less) dataclass instance, without the
+    generic machinery of `copy.copy`."""
+    out = object.__new__(obj.__class__)
+    out.__dict__.update(obj.__dict__)
+    return out
+
+
+def fast_clone(state: GameState, rng: random.Random) -> GameState:
+    """`par_search.clone`, minus its per-board rng copy: ``rng`` is a scratch
+    stream every board here shares, since each turn is `replay.reseed`-ed before
+    anything reads it."""
+    out = _dup(state)
+    out.systems = {}
+    for sid, s in state.systems.items():
+        c = _dup(s)
+        c.neighbors = list(s.neighbors)
+        out.systems[sid] = c
+    out.fleets = [_dup(f) for f in state.fleets]
+    out.players = {}
+    for pid, p in state.players.items():
+        c = _dup(p)
+        c.ai_params = _dup(p.ai_params)
+        out.players[pid] = c
+    out.adjacency = {sid: dict(nbrs) for sid, nbrs in state.adjacency.items()}
+    out.rng = rng
+    return out
+
+
 def configure(cfg_dict: dict, seed: int, me: int, levels: str, max_branch: int, splits: bool,
               ratio: float, max_turns: int) -> None:
     """Set a process up to expand boards: the rules' globals come from
@@ -233,12 +264,13 @@ def expand_chunk(task):
     wins: list[tuple] = []
     expanded = 0
     exact = True
+    scratch = random.Random()
     for pos, node_board in enumerate(boards):
         sets, ok = order_sets(node_board, me, levels, _W["max_branch"], _W["splits"])
         exact &= ok
         decide = _shared_decide()
         for orders in sets:
-            board = ps.clone(node_board)
+            board = fast_clone(node_board, scratch)
             replay.reseed(board)
             engine.end_turn(board, human_orders=orders, decide=decide)
             expanded += 1
@@ -307,6 +339,14 @@ def line_log(root: GameState, cfg: Settings, seed: int, strategies: dict[int, st
         log.record_turn(record, human_ai=False)
     log.mark_finished(me)
     return log
+
+
+def waves(pool, tasks: list, workers: int):
+    """``pool.map`` over ``tasks`` a few chunks per worker at a time, in order, so
+    finished chunks are merged (and freed) instead of piling up in the queue."""
+    step = max(1, workers * 2)
+    for i in range(0, len(tasks), step):
+        yield from pool.map(expand_chunk, tasks[i:i + step])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -379,10 +419,10 @@ def main(argv: list[str] | None = None) -> int:
         while layer and time.perf_counter() - started < args.budget:
             depth += 1
             n_chunks = max(1, min(len(layer), args.workers * 4))
-            size = math.ceil(len(layer) / n_chunks)
+            size = min(math.ceil(len(layer) / n_chunks), CHUNK_BOARDS)
             chunks = [layer[i:i + size] for i in range(0, len(layer), size)]
             tasks = [([b for b, _ in chunk], incumbent["turn"], incumbent["lost"]) for chunk in chunks]
-            results = pool.imap(expand_chunk, tasks) if pool else map(expand_chunk, tasks)
+            results = waves(pool, tasks, args.workers) if pool else map(expand_chunk, tasks)
             nxt: dict[tuple, tuple[int, GameState, tuple]] = {}
             expanded = 0
             best_win: tuple | None = None
@@ -393,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
                     if best_win is None or (turn, lost) < best_win[:2]:
                         best_win = (turn, lost, (chunk[pos][1], packed))
                 for key, lost, board, pos, packed in children:
+                    board.lanes = root.lanes   # one shared copy, as `ps.clone` leaves it
                     old = nxt.get(key)
                     if old is None or lost < old[0]:
                         nxt[key] = (lost, board, (chunk[pos][1], packed))
