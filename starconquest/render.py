@@ -1933,13 +1933,18 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     idle tap near the control cluster can't land on Retry by accident — the two
     clusters only butt up when the strip is squeezed too narrow to keep them
     apart. Where the strip is too narrow to hold every button — a portrait phone,
-    or a shrunken desktop window — the least essential are dropped (rects zeroed)
-    rather than drawn overlapping. The ranking matters because a touch player has
-    no keys to fall back on: Menu survives longest, since it reaches the setup
-    screen (and Esc goes there too), and Clear goes first, since the popup's own Cancel
-    and Delete already do its job. Fast forward ranks just below
-    those two, because it is only ever offered in the one situation it is the
-    point of the screen — watching a match you are out of.
+    or a shrunken desktop window — the least essential fold behind a "more"
+    button (`_lay_out_footer`) rather than drawn overlapping. The ranking matters because a touch player has
+    no keys to fall back on, and runs in three tiers, kept longest first:
+
+    - acting in this game: Clear, Route, Hint (its ✗/✓ pair alike);
+    - looking at or handing it over: History, Play, Autoplay;
+    - leaving it: Menu, Retry, New map — Menu last of these to go, since it
+      reaches everything else (Esc goes there too).
+
+    Fast forward outranks them all, because it is only ever offered in the one
+    situation it is the point of the screen: watching a match you are out of,
+    when there is nothing left to act on.
 
     Route mode gets a strip of its own rather than extra buttons on this one — see
     the branch below.
@@ -1980,14 +1985,14 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # The "leaves this game" group, pinned left away from the control-cluster
     # taps, Menu first (and first in the folded list), then the two restarts
     # side by side in the win overlay's colours. Menu is where Esc goes too.
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 4, "left"))
     # Retry restarts this match from turn 0, the same fork as the win overlay's
     # Retry: the one way back to the start of a game that has no history to
     # rewind through (a daily). No confirm, like New map beside it. It took Quit's
     # place: Quit only opened a modal, which on the web can do no more than Menu
     # (main.leave_app), so Esc goes to the menu instead.
     if ui.can_retry:
-        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_AMBER, 8, "left"))
+        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_AMBER, 3, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the N key exactly. (R is reset-view, and has no button here: the
     # on-map zoom cluster carries it.)
@@ -1995,16 +2000,16 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if not ui.in_stage:
         specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_GREEN, 2, "left"))
     if ui.can_review(state):
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 1, "right"))
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 7, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
     if not ui.spectating:   # a spectator has nothing to clear
-        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 4, "right"))
+        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 12, "right"))
     # Route mode: multi-select a group of systems and forward them all to one
     # destination. Gated on the same predicate as the G key, so the button is
     # drawn exactly when the mode means something.
     if ui.can_route(state):
-        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 5, "right"))
+        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 11, "right"))
     # Hint: a bot's suggested sends, as training help. Its first press in a game
     # not yet hinted asks (`main.press_hint`), since a hinted game is never
     # posted (`Ui.can_post`). While it is up it splits in two: put it away, or
@@ -2013,11 +2018,11 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
         if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 3, "right"))
+            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 10, "right"))
             if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 2, "right"))
+                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 10, "right"))
         else:
-            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 3, "right"))
+            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 10, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -2026,7 +2031,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # guarded, the same treatment End Turn gets while we are waiting — and
     # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
     if not ui.in_pbp:
-        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 4, "right"))
+        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 5, "right"))
         if not ui.autoplay:
             specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
@@ -2035,7 +2040,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # something.
     if ui.can_fast_forward(state):
         specs.append(
-            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 7, "right")
+            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 13, "right")
         )
 
     _lay_out_footer(surface, ui, specs, y, fbh, font)
