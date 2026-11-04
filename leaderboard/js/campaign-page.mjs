@@ -180,7 +180,7 @@ function drawFeed() {
       move.from
         ? [` took node ${move.nodeId} from `, el("a", { href: userHref([move.from]), text: move.from })]
         : ` claimed ${graph.nodes.find((n) => n.id === move.nodeId)?.kind === "home" ? "home" : "node"} ${move.nodeId}`,
-      `, ${move.turns} turns `,
+      `, ${move.turns} turns · ${move.lost} lost `,
       el("span", { class: "when", text: relativeTime(new Date(move.at).toISOString()) }),
     ].flat())))
     : el("p", { class: "empty", text: current ? "No moves yet this week." : "Nobody moved that week." }));
@@ -200,8 +200,8 @@ const momentLabel = (ms) => new Date(ms).toLocaleString(undefined,
   { weekday: "short", hour: "2-digit", minute: "2-digit" });
 /** One move in a sentence, for the replay's caption. */
 const moveText = (move) => (move.from
-  ? `${move.taker} took node ${move.nodeId} from ${move.from} (${move.turns} turns)`
-  : `${move.taker} claimed ${kindOf(move.nodeId)} ${move.nodeId} (${move.turns} turns)`);
+  ? `${move.taker} took node ${move.nodeId} from ${move.from} (${move.turns} turns · ${move.lost} lost)`
+  : `${move.taker} claimed ${kindOf(move.nodeId)} ${move.nodeId} (${move.turns} turns · ${move.lost} lost)`);
 
 /** The week's first and last instants on the chart: Monday to now, or to the close. */
 function span() {
