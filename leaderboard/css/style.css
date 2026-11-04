@@ -120,13 +120,14 @@ a { color: var(--cyan); }
   line-height: 1.4;
   text-decoration: none;
   text-transform: uppercase;
-  box-shadow: 0 3px 0 #0a3345;
+  box-shadow: 0 3px 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.28);
   transition: transform 0.06s, box-shadow 0.06s;
-  /* A <button class="btn"> would otherwise pulse with the coin button's glow. */
+  /* Only a page's default action pulses (a form's plain <button>, the coin);
+   * a <button class="btn"> would otherwise inherit that pulse. */
   animation: none;
 }
 .btn:hover { background: #10283f; }
-.btn:active { transform: translateY(3px); box-shadow: 0 0 0 #0a3345; }
+.btn:active { transform: translateY(3px); box-shadow: 0 0 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.4); }
 
 /* The marquee's right-hand side, tucked inside the `.menu` dropdown below. "My
  * scores" is added there at runtime for a browser that has posted before
@@ -649,11 +650,6 @@ div.card-body { position: relative; }
   white-space: nowrap;
 }
 
-/* The glow is kept for the few doors that matter: the gold Play buttons
- * (.play) and a form's one submit button (plain <button>, the pulsing coin).
- * Everything else, menu items, tabs, steppers, sort toggles, sits flat. A
- * secondary way to play (.play.alt) keeps the gold but not the glow. */
-
 /* Top three wear cabinet medals; the leader gets the glow. */
 /* "Watch this replay" — sits in the result cell (see scoreRow), so it is styled
  * as a quiet trailing action rather than another column of the board. */
@@ -684,7 +680,6 @@ div.card-body { position: relative; }
 
 .play { margin-top: 0.75rem; border-color: var(--gold); color: var(--gold); box-shadow: 0 3px 0 #4a3400, 0 0 14px rgba(255, 210, 63, 0.3); }
 .play:hover { background: #241c05; }
-.play.alt { box-shadow: 0 3px 0 #4a3400; }
 .bar-end .play { margin-top: 0; }   /* the header's Play, beside the menu */
 .map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 

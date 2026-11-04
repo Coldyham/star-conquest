@@ -86,7 +86,7 @@ function groupToggle(filters) {
 function randomSetupButton(filters) {
   if (!GAME_URL) return null;
   const button = el("button", {
-    class: "btn play alt", type: "button", text: "Random setup",
+    class: "btn play", type: "button", text: "Random setup",
     title: isFiltered(filters)
       ? "Open the game on a random setup matching these filters, on a fresh map"
       : "Open the game on a random setup from the board, on a fresh map",
@@ -349,7 +349,7 @@ async function newSeedLink(game) {
     return null;
   }
   return el("a", {
-    class: "btn play alt",
+    class: "btn play",
     href: `${GAME_URL}#${token}`,
     title: "Open the game on this setup, with a freshly rolled map",
     text: "Play a new seed",
