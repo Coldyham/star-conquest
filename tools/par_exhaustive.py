@@ -118,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--levels", choices=LEVELS, default="quarters")
     ap.add_argument("--max-branch", type=int, default=4000, help="order sets per board before falling back")
     ap.add_argument("--max-frontier", type=int, default=200_000, help="boards kept per layer")
+    ap.add_argument("--assume-turn", type=int,
+                    help="a turn you know is reachable: prune as if a win on it (any losses) were in hand")
     ap.add_argument("--seed-budget", type=float, default=20.0, help="seconds of beam search for the first incumbent")
     ap.add_argument("--budget", type=float, default=3600.0, help="seconds in all")
     ap.add_argument("--max-turns", type=int, default=120)
@@ -145,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
           f"levels {args.levels}", flush=True)
     best = search.run()
     bound = min((best.turn, best.lost), resume_bound(ledger))
+    if args.assume_turn is not None and args.assume_turn < bound[0]:
+        bound = (args.assume_turn, math.inf)
     print(f"incumbent: turn {bound[0]}, lost {bound[1]} (beam {best.turn}/{best.lost})", flush=True)
     if best.turn < math.inf:
         record({"event": "best", "turn": best.turn, "lost": best.lost, "source": "beam"})
