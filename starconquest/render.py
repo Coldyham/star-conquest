@@ -1805,22 +1805,13 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
 
     # top bar: turn counter, then the scoreboard starting clear of it (measured,
     # not a fixed column — "Turn 137" in a scaled-up font is far wider than one).
-    # Drawn before the side panel, which sits wholly below it, so the panel
-    # can take the bar's right-hand notes when they don't fit.
+    # The bar is the scoreboard's alone: the match's notes (target, campaign,
+    # stage) head the side panel (`_panel_notes`), so the key sheds less detail.
+    _draw_side_panel(surface, state, ui)
     pygame.draw.rect(surface, (18, 20, 30), (0, 0, w, config.HUD_TOP_H))
     turn = _text(surface, _fonts()["normal"], f"Turn {state.turn}", config.COLOR_TEXT, midleft=(config.HUD_PAD, config.HUD_TOP_H // 2))
     turn = _draw_ships_lost(surface, state, ui, turn)
-    x0 = turn.right + config.HUD_PAD * 2
-    notes = _top_notes(ui)
-    if _top_notes_fit(state, ui, notes, x0, w):
-        scoreboard_right = _draw_stage_label(
-            surface, ui, w, _draw_campaign_label(surface, ui, w, _draw_challenge_target(surface, ui, w)))
-        notes = []
-    else:
-        scoreboard_right = w
-    _draw_scoreboard(surface, state, ui, scoreboard_right, x0)
-
-    _draw_side_panel(surface, state, ui, notes)
+    _draw_scoreboard(surface, state, ui, w, turn.right + config.HUD_PAD * 2)
 
     # bottom bar (in portrait, the strip and the End Turn row under it)
     by = config.footer_rect(ui.history)[1]
@@ -2190,103 +2181,22 @@ def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> py
     return turn.union(label)
 
 
-def _draw_challenge_target(surface, ui: Ui, w: int) -> int:
-    """The score to beat, pinned in the top bar's right corner for as long as the
-    match runs — not just on the win overlay at the end of it, since the point of
-    a persistent reminder is not having to hold the number in your head (or reopen
-    a finished game to recall it). Teal ties it to the same accent as the
-    "Challenge a friend" button that made this a challenge in the first place.
-
-    Returns the x the scoreboard must stay clear of (``w`` when there is nothing
-    to draw), the same measured-not-hardcoded handoff the turn counter gives it.
-    """
-    if ui.challenge_target is None:
-        return w
-    turns, lost = ui.challenge_target
-    who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
-    text = f"Beat {who}{turns}t / {lost} lost"
-    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
-                  midright=(w - config.HUD_PAD, config.HUD_TOP_H // 2))
-    return label.left - config.HUD_PAD
-
-
-def _draw_campaign_label(surface, ui: Ui, w: int, right: int) -> int:
-    """The weekly campaign's reminder ("Node 3: post within 12 min"), just left of
-    the challenge target, in gold like the campaign page's timers. `main` writes
-    the text once a frame, so the countdown moves without this module reading
-    any clock or knowing the rules.
-
-    Returns the x the scoreboard must stay clear of, the same handoff
-    `_draw_challenge_target` makes.
-    """
-    if not ui.campaign_label:
-        return right
-    edge = w - config.HUD_PAD if right >= w else right
-    label = _text(surface, _fonts()["small"], ui.campaign_label, config.COLOR_CAMPAIGN,
-                  midright=(edge, config.HUD_TOP_H // 2))
-    return label.left - config.HUD_PAD
-
-
-def _draw_stage_label(surface, ui: Ui, w: int, right: int) -> int:
-    """Which gauntlet stage this is ("Tutorial 3/10 · Defender's edge"), and its
-    target if it has one (" · target 14"), left of the campaign reminder, with
-    the same measured handoff to the scoreboard."""
-    if not ui.stage_label:
-        return right
-    edge = w - config.HUD_PAD if right >= w else right
-    text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
-    label = _text(surface, _fonts()["small"], text, _BTN_TEAL[1],
-                  midright=(edge, config.HUD_TOP_H // 2))
-    return label.left - config.HUD_PAD
-
-
-def _top_notes(ui: Ui) -> list[tuple[str, tuple[int, int, int]]]:
-    """The top bar's right-hand notes as (text, colour), right to left: the
-    challenge target, the campaign reminder, the gauntlet stage. The same text
-    the three `_draw_*` above draw, for measuring and for the side panel."""
+def _match_notes(ui: Ui) -> list[tuple[str, tuple[int, int, int]]]:
+    """What this match is for, as (text, colour) lines for the head of the side
+    panel (`_panel_notes`): the gauntlet stage and its target, the campaign
+    reminder, the challenge target. Not in the top bar, which they would share
+    with the scoreboard (on a portrait phone, by covering it)."""
     notes: list[tuple[str, tuple[int, int, int]]] = []
+    if ui.stage_label:
+        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, _BTN_TEAL[1]))
+    if ui.campaign_label:
+        notes.append((ui.campaign_label, config.COLOR_CAMPAIGN))
     if ui.challenge_target is not None:
         turns, lost = ui.challenge_target
         who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
         notes.append((f"Beat {who}{turns}t / {lost} lost", _BTN_TEAL[1]))
-    if ui.campaign_label:
-        notes.append((ui.campaign_label, config.COLOR_CAMPAIGN))
-    if ui.stage_label:
-        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
-        notes.append((text, _BTN_TEAL[1]))
     return notes
-
-
-def _top_notes_fit(state: GameState, ui: Ui, notes, x0: int, w: int) -> bool:
-    """Whether the notes fit in the top bar beside the scoreboard at its
-    tersest (ships only). If not, they go to the side panel (`_panel_notes`)
-    rather than over the player key: a portrait phone's bar has room for one or
-    the other."""
-    if not notes:
-        return True
-    font = _fonts()["small"]
-    need = sum(font.size(text)[0] + config.HUD_PAD for text, _c in notes)
-    return x0 + _scoreboard_min_w(state, ui) + need <= w - config.HUD_PAD
-
-
-def _scoreboard_min_w(state: GameState, ui: Ui) -> int:
-    """The scoreboard's width with every seat shed down to its ship count, the
-    least `_draw_scoreboard` ever draws."""
-    font = _fonts()["small"]
-    sw_w, gap = config.s(12) + config.s(6), config.s(14)
-    width = 0
-    for pid in sorted(state.players):
-        v = _score_vis(state, ui, pid)
-        if state.players[pid].is_neutral or v == "hidden":
-            continue
-        you = " (you)" if ui.in_pbp and pid == ui.human_id else ""
-        if v == "out":
-            text = f"out{you}"
-        else:
-            ships = (_player_stats(state, pid) if v == "live" else ui.player_intel[pid])[1]
-            text = f"{ships}{'' if v == 'live' else ' ?'}{you}"
-        width += sw_w + font.size(text)[0] + gap
-    return width
 
 
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
@@ -2428,7 +2338,7 @@ def _popup_docked(ui: Ui) -> bool:
     return config.compact and ui.mode == CHOOSING and not ui.history
 
 
-def _draw_side_panel(surface, state: GameState, ui: Ui, notes=()) -> None:
+def _draw_side_panel(surface, state: GameState, ui: Ui) -> None:
     # The panel's own footer is the big End Turn button (see _draw_hud), not the
     # ordinary bottom bar under the map — it reserves config.END_TURN_H instead.
     # History mode never draws that button (the scrubber owns the bottom bar
@@ -2446,12 +2356,12 @@ def _draw_side_panel(surface, state: GameState, ui: Ui, notes=()) -> None:
     # bars, which a portrait panel, a fraction of the screen tall, would reach.
     surface.set_clip((px, py, pw, ph))
     try:
-        _draw_side_panel_body(surface, state, ui, px, py, pw, ph, notes)
+        _draw_side_panel_body(surface, state, ui, px, py, pw, ph)
     finally:
         surface.set_clip(None)
 
 
-def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph, notes=()) -> None:
+def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> None:
     global _PANEL_COLUMN_W
     # `content_bottom` is where the details have to stop: the panel's own floor.
     content_bottom = py + ph - config.s(8)
@@ -2459,9 +2369,10 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph, not
     x, y = px + config.PANEL_PAD, py + config.PANEL_PAD
     if ui.in_pbp:
         y = _panel_you_are(surface, ui, x, y)
-    # The top bar's notes, when it had no room for them (`_top_notes_fit`): at
-    # the column's head, or (a portrait band being a few rows tall) only while
-    # nothing is in focus, as the stage hint, below.
+    # The match's notes (`_match_notes`): at the column's head, or (a portrait
+    # band being a few rows tall) only while nothing is in focus, as the stage
+    # hint, below.
+    notes = _match_notes(ui)
     if notes and not config.portrait:
         y = _panel_notes(surface, notes, x, y, content_bottom)
     if ui.mode == ROUTING:
@@ -2997,9 +2908,8 @@ def _stage_hint_lines(hint: str) -> list[str]:
 
 
 def _panel_notes(surface, notes, x, y, bottom: int) -> int:
-    """The top bar's overflowed notes (`_top_notes`), one wrapped block each,
-    in their bar colours, stage first as the bar reads left to right."""
-    for text, color in reversed(notes):
+    """The match's notes (`_match_notes`), one wrapped block each."""
+    for text, color in notes:
         for line in _wrap(_fonts()["small"], text, _panel_w()):
             if y + _row_h() > bottom:
                 return y

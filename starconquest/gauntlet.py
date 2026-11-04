@@ -101,7 +101,7 @@ class Target:
         return f"Win within {self.score_text()}"
 
     def short(self) -> str:
-        """For a tight row (the stage list, the top bar): "target 14"."""
+        """For a tight row (the stage list, the side panel's stage line): "target 14"."""
         return ("beat " if self.beat else "target ") + (
             f"{self.turns}/{self.lost}" if self.lost is not None else str(self.turns))
 

@@ -474,7 +474,7 @@ class Ui:
     # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
     # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown
-    # moves; `render` only draws it, beside the challenge target.
+    # moves; `render` only draws it, at the side panel's head (`_match_notes`).
     campaign_label: str | None = None
     # The campaign's answer for this setup when this match was started
     # (`campaign.stamp`), carried onto a posted score as `Challenge.campaign`.

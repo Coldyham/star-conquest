@@ -6,7 +6,7 @@ to a node you hold, or to (or on) one held within the last half hour. Those rule
 one place, ``leaderboard/js/campaign.mjs``, and this module never repeats
 them. It asks the site (``/api/campaign``, which runs that same code) what a
 win here would do for this player right now, then shows the answer: a confirm
-before Start (``menu``) and a reminder in the top bar (``render``).
+before Start (``menu``) and a reminder heading the side panel (``render``).
 
 The grace only covers a game started while the player still had access to the
 node, so the game says which game is asking: the menu asks for a game about to
@@ -163,7 +163,7 @@ def confirm(status: Status | None, now: float | None = None) -> tuple[str, list[
 
 
 def label(status: Status | None, now: float | None = None) -> str | None:
-    """The top bar's one-line campaign reminder, or None for no node."""
+    """The side panel's one-line campaign reminder, or None for no node."""
     if status is None:
         return None
     name = status.name
