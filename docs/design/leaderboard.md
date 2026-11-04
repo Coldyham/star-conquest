@@ -801,6 +801,12 @@ this section gives the reasons.
 - `auth.mjs` runs the PKCE flow over plain fetch, on the same reasoning as
   `api.mjs` loading no client library. PKCE rather than the implicit flow keeps
   the token out of the address bar and history.
+- Compared on 2026-11-04 for the lightest option. Email one-time codes are
+  about as little code, but sending them needs an email provider (Supabase's
+  built-in mailer is for testing). Passkeys were a Supabase beta (opt-in API,
+  liable to change), and they still need a first sign-in and a recovery route.
+  Every method gives the same Supabase account, so either can be added beside
+  Google later with nothing changed in the database.
 
 **Why only an unused name can be claimed by its claimant.**
 - A name with scores behind it was typed by somebody, and nothing on the site
