@@ -1977,21 +1977,23 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         _lay_out_footer(surface, ui, specs, y, fbh, font)
         return
 
+    # The "leaves this game" group, pinned left away from the control-cluster
+    # taps, Menu first (and first in the folded list), then the two restarts
+    # side by side in the win overlay's colours. Menu is where Esc goes too.
+    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
     # Retry restarts this match from turn 0, the same fork as the win overlay's
     # Retry: the one way back to the start of a game that has no history to
     # rewind through (a daily). No confirm, like New map beside it. It took Quit's
     # place: Quit only opened a modal, which on the web can do no more than Menu
-    # (main.leave_app), so Esc goes to the menu instead. Pinned left with the
-    # rest of the "leaves this game" group, away from the control-cluster taps.
+    # (main.leave_app), so Esc goes to the menu instead.
     if ui.can_retry:
-        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_RED, 8, "left"))
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 9, "left"))
+        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_AMBER, 8, "left"))
     # new map reseeds mid-game too (not just at game end), with no confirmation —
     # matching the N key exactly. (R is reset-view, and has no button here: the
     # on-map zoom cluster carries it.)
     # Not in a gauntlet stage: its seed is pinned, so a new map would leave it.
     if not ui.in_stage:
-        specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_AMBER, 2, "left"))
+        specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_GREEN, 2, "left"))
     if ui.can_review(state):
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 1, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
