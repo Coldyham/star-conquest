@@ -619,6 +619,62 @@ Opening the same seeded link again saves the same file, which is the same row.
 A dealt stage already passes `checkBody` (stages carry an integer `seed`, the
 briefing lines are short), so the server needs no change.
 
+## Runs (built 2026-11-04)
+
+A **run** plays a gauntlet's stages in order, each won within its target, with
+one life. It is the first, linear step towards the roguelite run below: no
+branching and no boons. It needs no format change, so a gauntlet already made
+can be run, and in particular a generated one with stage targets (the form's
+"Stage targets", from the probes' wins) or one built on the board with "Beat
+the best bot". The working plan for the rest is
+[`graphical-gauntlet-maker.md`](../graphical-gauntlet-maker.md).
+
+- **Offered only where it adds something** (`run.offered`). The gauntlet must be
+  a single path (`gauntlet.chain`: one start, and one way on from each stage),
+  and at least one stage must carry a target. On the tutorial, which has none,
+  a run would be the stage list again, so the list shows no run there.
+- **Only this game's score counts.** A run game's Next stage asks
+  `can_post` and `met_target` on this game, never `stage_met_before`, so a fast
+  free-play win on a stage doesn't carry a run over it
+  (`Ui.offers_next_stage`). A loss, a win short of the target, or a win not
+  played by hand ends the run (`run.judge`), and so does being knocked out
+  while the bots play on.
+- **Run games are ordinary games.** They post, file bests and clear stages as
+  any other. Nothing reaches `Settings` or the log, so the board and the
+  verifier never see a run.
+- **A run is stored, not derived** (`paths.WEB_RUNS_KEY`). This is the one
+  exception to "Progress is derived, never stored". A run is a sequence of
+  games, one per stage, and bests keep only the best game on each stage, so
+  no read of them could say how far a run got. A step is written when its game
+  starts and again the moment that game is decided. The store keeps the active
+  run and the last 20 finished.
+- **A run judges only its own game.** Each step names its game's log file.
+  Only that game moves the run, and only once (`run.finish`). A Retry, a rewind
+  or a fork after the game is decided is free play: `main.run_ui` marks only
+  the run's own game, and the run has already recorded the result. So none of
+  them is blocked. They just aren't the run. While the game is undecided it
+  plays ironman, as the daily does (no History, so no rewind), and the Hint is
+  not offered (`Ui.can_hint`).
+- **Quitting doesn't escape a bad game.** Continue run resumes the step's own
+  log, never a fresh copy of the stage (`main.open_run`), and so does the boot
+  resume prompt when the latest game is the run's (`run.is_playing`). On the
+  web build `games/` is MEMFS and doesn't survive a reload, so the active
+  step's log is also kept in `webstore` (`paths.WEB_RUN_LOG_KEY`, rewritten
+  every turn by `run.keep_log`). A game that can no longer be loaded, or whose
+  rules have moved on, ends the run (`GONE`) rather than restarting the stage,
+  since restarting would reward a reload.
+- **One run at a time.** Starting another gauntlet's run abandons the one
+  under way, after a second press. Abandon run also takes two.
+- **An edited gauntlet ends its run.** A run stores a hash of its stages' setups
+  and targets (`run.fingerprint`). A desktop file changed under a run makes it
+  a different gauntlet, as an edited stage is a new one (`run.active_for`).
+- **In the list:** a line under the stages ("Best run: 5/8 stages", "Run
+  complete ✓", or what a run is), then **Start run**, or **Continue run** and
+  **Abandon run**. The stage the run is on reads "run · …" in its row. On
+  the overlay, the run's line ("Run: stage 2/8 done · Next stage carries it
+  on", "Run over at stage 3/8: Win in 14 turns or fewer not met") takes the
+  stage verdict's place.
+
 ## The gauntlet: proposed, not built
 
 A seeded single-player run on a graph, FTL / Slay-the-Spire style: you choose

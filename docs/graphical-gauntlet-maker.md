@@ -64,6 +64,24 @@ What is given up by not building in the game, judged acceptable:
 
 ## Phase 0: a linear run (no format change, no boons, no branching)
 
+**Built 2026-11-04 on `gauntlet-run`.** The reasons as built are in
+`docs/design/gauntlet.md`, *Runs*. Where the build differs from what follows:
+- **Retry and rewind after a run game is decided are not blocked.** The run
+  judges only its own game, by log name, and only once (`run.finish`). A Retry
+  or fork afterwards is unmarked free play, so it can't move the run.
+- **While the game is undecided, the daily's ironman is reused** for "no
+  rewind" (History hidden); no new gates were needed. `restart` was already
+  kept out of a stage.
+- **The active step's log is also kept in `webstore`** (`WEB_RUN_LOG_KEY`,
+  rewritten every turn), because `games/` is MEMFS on the web build and a
+  reload would otherwise lose the run's game.
+- **There are two more outcomes**: `void` (won, but not by hand) and `gone`
+  (the game couldn't be loaded). `abandoned` is a third, for a run given up
+  from the list.
+- **The run's stage is marked "run · …" in its row, not with ▶.** The menu
+  font's glyph coverage is uncertain (render draws its ▶ rather than typing it).
+- **`run.py` imports as `gauntlet_run` in `main`**, which has its own `run()`.
+
 The first piece to build, because it is usable at once on what exists. Generate
 a gauntlet on the board with "Stage targets" (the slowest or fastest probe win
 plus slack, `gauntletgen.target`), or build one from links with "Beat the best
