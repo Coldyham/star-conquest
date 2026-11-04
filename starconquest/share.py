@@ -355,7 +355,7 @@ def post_summary(body: str, turns: int, lost: int, name: str) -> tuple[str, str]
             others = holders - 1
             return key, f"Posted  ·  joint best with {others} other{'s' if others > 1 else ''}  ·  {scores}"
         return key, f"Posted  ·  you lead  ·  {scores}"
-    figures = f"{best[0]} turns" + (f", {best[1]} lost" if best[0] == turns else "")
+    figures = f"{best[0]} turns, {best[1]} lost"
     return key, f"Posted  ·  best is {figures} by {short_name(leader or 'anonymous')}  ·  {scores}"
 
 

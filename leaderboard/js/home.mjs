@@ -402,15 +402,16 @@ function row(game, campaigns, mine) {
   const ranked = game.best_turns != null;
   const holder = ranked ? leaderCredit(game) : "No verified score yet";
   const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
-  // While embargoed, the card keeps the leader and the turn count next to
-  // them (the headline figure below) — a target to chase — but drops every
-  // other detail this line would otherwise carry: lost/hand say more about
+  // While embargoed, the card keeps the leader, the turn count next to them
+  // (the headline figure below) and their ships lost (the tie-break, so the
+  // target is whole) — but drops every other detail this line would
+  // otherwise carry: hand says more about
   // *how* a score was made than the bare turn count does, and last activity
   // is exactly the kind of "who's trying, and when" signal an embargo is
   // meant to keep from the rest of the group. See game.mjs's renderEmbargoed
   // for the same cut on the map's own page.
   const detail = embargoNote(game.embargo_until)
-    ? scoreCount
+    ? [ranked ? `${game.best_lost} lost` : null, scoreCount].filter(Boolean).join(" · ")
     : [
         ranked ? `${game.best_lost} lost` : null,
         ranked && game.best_hand < game.best_turns ? `${game.best_hand} by hand` : null,

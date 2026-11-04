@@ -1917,9 +1917,10 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 
 
 # The footer's daily challenges (`main.open_daily`): one button opening a list
-# of the board and the puzzle, each item the key its click is handled as.
+# of the puzzle and the board, puzzle first as on the board site, each item the
+# key its click is handled as.
 _DAILY_LABEL = "Daily"
-_DAILY_ITEMS = (("daily", "Daily board"), ("puzzle", "Daily puzzle"))
+_DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily board"))
 
 
 def _daily_button(surface, ms: MenuState, x: int, y: int) -> None:

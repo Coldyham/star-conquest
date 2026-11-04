@@ -382,10 +382,11 @@ async function replayVersions(scores) {
  * which is `game_embargoes` in schema.sql: a map's own reveal date, or the end
  * of a live campaign week it is a node of) — a compromise, not a blackout. The full per-score list is
  * never even requested here, so a competitor cannot see who else has played,
- * when, or how: lost, hand and submission time all say more about *how* a
+ * when, or how: hand and submission time say more about *how* a
  * score was made than the bare turn count does, and that "how" is exactly
  * what an embargo exists to keep back. What does show is `game_summary`'s own
- * aggregate — who currently holds the best turn count, and how many scores
+ * aggregate — who currently holds the best score, its turns and ships lost
+ * (the two figures that rank it, so the target is whole), and how many scores
  * exist in total — because the embargo is meant to leave something to chase,
  * not nothing at all: without a target, there is no reason to keep trying
  * before the reveal.
@@ -398,7 +399,7 @@ async function replayVersions(scores) {
  *
  * The play link is always the setup alone (`freshPlayLink`), never a score's
  * `raw_token` — that token is a full challenge link and would smuggle out the
- * very lost/hand/by fields this view is holding back, sitting right there in
+ * very hand/by fields this view is holding back, sitting right there in
  * the page's own HTML whether or not they're ever rendered as text.
  */
 async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
@@ -415,7 +416,7 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
     ? el("p", { class: "lede" }, [
         "Currently ahead: ",
         el("strong", { text: leaderCredit(game) }),
-        ` — ${game.best_turns} turns. `,
+        ` — ${game.best_turns} turns, ${game.best_lost} lost. `,
         "Every other score, and every replay, stays hidden until the embargo lifts.",
       ])
     : game.score_count

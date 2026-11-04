@@ -126,3 +126,15 @@ def test_an_unknown_rollout_bot_is_refused():
                                    policies=("marshal", "no-such-bot"), budget=1)
         with pytest.raises(ValueError, match="no-such-bot"):
             search.run()
+
+
+def test_lane_sends_offer_all_in_or_every_count():
+    with _preserve_config():
+        state = build_state(Settings(players=2, nodes=8, seed=3), 3)
+        human = state.human()
+        assert human is not None
+        home = next(s for s in state.systems.values() if s.owner_id == human.id)
+        sends = {(o.dest_id, o.ships) for o in par_search._lane_sends(state, human.id, False)}
+        assert sends == {(nbr, home.ships) for nbr in home.neighbors}
+        every = {(o.dest_id, o.ships) for o in par_search._lane_sends(state, human.id, True)}
+        assert every == {(nbr, n) for nbr in home.neighbors for n in range(1, home.ships + 1)}

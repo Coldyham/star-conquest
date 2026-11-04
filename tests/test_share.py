@@ -486,7 +486,7 @@ def test_a_shared_best_says_how_many_share_it():
 def test_behind_names_the_best_and_its_losses_only_on_level_turns():
     behind = share.post_summary(_answer(score_count=7, best_turns=21, best_lost=4,
                                         best_user_name="Bob"), 30, 4, "Ada")
-    assert behind == ("abc", "Posted  ·  best is 21 turns by Bob  ·  7 scores on this map")
+    assert behind == ("abc", "Posted  ·  best is 21 turns, 4 lost by Bob  ·  7 scores on this map")
     level = share.post_summary(_answer(score_count=7, best_turns=30, best_lost=2,
                                        best_user_name="Bob"), 30, 4, "Ada")
     assert level == ("abc", "Posted  ·  best is 30 turns, 2 lost by Bob  ·  7 scores on this map")
