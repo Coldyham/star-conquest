@@ -2243,7 +2243,10 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         return f"{name}{stats_}{mark}{you}"
 
     def row_width(with_name: bool, terse: int = 0) -> int:
-        return sum(sw_w + font.size(label(pid, vis(pid), with_name, terse))[0] + gap for pid in seats)
+        # gaps between entries only, at the spacing that level draws with
+        between = config.s(14) if terse else gap
+        return (sum(sw_w + font.size(label(pid, vis(pid), with_name, terse))[0] for pid in seats)
+                + between * (len(seats) - 1))
 
     # Shed detail until the row fits: names, then (a phone's top bar) production,
     # then systems, then the unit — ships, the number a fight turns on, stays. Tapping a seat's
