@@ -35,7 +35,7 @@ SPECTATE_ROW = -1
 # Every hit-rect the footer strip can record, so a frame can zero the lot before
 # drawing whichever survive — a stale rect would otherwise still answer clicks.
 FOOTER_RECTS = (
-    "quit_button_rect",
+    "retry_live_button_rect",
     "clear_button_rect",
     "menu_button_rect",
     "restart_live_button_rect",
@@ -474,7 +474,7 @@ class Ui:
     # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
     # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown
-    # moves; `render` only draws it, beside the challenge target.
+    # moves; `render` only draws it, at the side panel's head (`_match_notes`).
     campaign_label: str | None = None
     # The campaign's answer for this setup when this match was started
     # (`campaign.stamp`), carried onto a posted score as `Challenge.campaign`.
@@ -500,6 +500,17 @@ class Ui:
     stage_met_before: bool = False
     next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The run this match is the undecided game of (`run.Run.id`), or blank. Set
+    # by `main.run_ui` only on the run's own game: a Retry or fork of it is free
+    # play. A run game plays ironman and offers no Hint, and its Next stage
+    # follows this game's score alone. `run_note` is the overlay's line once
+    # `main.record_run_step` has judged the game (blank before), `run_ok` its
+    # colour. `run_at`/`run_total` are the stage's place in the run ("3/8").
+    run_id: str = ""
+    run_at: int = 0
+    run_total: int = 0
+    run_note: str = ""
+    run_ok: bool = True
     # The system whose star info card (`starlore`) is up over the board, or None.
     # The i button beside a selected system's name in the side panel
     # (`lore_button_rect`) and the I key open it; any press closes it.
@@ -535,10 +546,11 @@ class Ui:
     # Drawn (and hit-tested) only while the human is knocked out and the match is
     # still running — the one situation `fast_forward` applies to.
     fast_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Quit (Esc) and Clear/cancel (X) touch equivalents. quit_button_rect is
-    # shared between the live footer and the game-over overlay, like
-    # menu_button_rect above; clear_button_rect is live-play only.
-    quit_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Retry (T) and Clear/cancel (X) touch equivalents, live play only. Retry
+    # restarts this same match from turn 0 (`retry_button_rect`'s fork, mid-game):
+    # the one way back to the start of a game with no history to rewind through,
+    # a daily's. Never in a shared match (`can_retry`).
+    retry_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The footer's overflow: a strip too narrow for every button folds the least
     # essential behind one "more" button (and a compact screen always folds the
@@ -785,6 +797,15 @@ class Ui:
         return bool(self.pbp_match)
 
     @property
+    def can_retry(self) -> bool:
+        """Whether live play offers Retry (T): restarting this match from turn 0.
+
+        Not in a shared match, whose log is the table's record and is decided
+        once (`pbp.settled_turn`), not one seat's to start over.
+        """
+        return not self.in_pbp
+
+    @property
     def spectating(self) -> bool:
         """Whether we are watching a shared match from no seat at all.
 
@@ -849,8 +870,9 @@ class Ui:
     def can_hint(self, state: GameState) -> bool:
         """Is the Hint control offered? Only on our own live turn: not in a shared
         match (a bot's advice against friends), not while reviewing, under
-        autoplay or spectating, and not once the game is decided or we are out."""
-        return (not self.in_pbp and not self.history and not self.autoplay
+        autoplay or spectating, and not once the game is decided or we are out.
+        Not in a run's game either: a run is a test of the player's own play."""
+        return (not self.in_pbp and not self.run_id and not self.history and not self.autoplay
                 and not self.watched and state.winner is None
                 and self.human_id in state.players and self.human_id != 0
                 and not state.is_defeated(self.human_id))
@@ -935,7 +957,11 @@ class Ui:
     def offers_next_stage(self, state: GameState) -> bool:
         """Is Next stage on the win overlay? Only for a win that leaves the stage
         cleared (`stage_cleared`), so the button never leads to a stage the list
-        would still show locked."""
+        would still show locked. In a run only this game's score counts: an
+        earlier best on the stage doesn't carry the run on."""
+        if self.run_id:
+            return (self.in_stage and self.has_next_stage and self.can_post(state)
+                    and self.met_target(state))
         return self.in_stage and self.has_next_stage and self.stage_cleared(state)
 
     # -- ship accounting ---------------------------------------------------- #

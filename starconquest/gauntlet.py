@@ -101,7 +101,7 @@ class Target:
         return f"Win within {self.score_text()}"
 
     def short(self) -> str:
-        """For a tight row (the stage list, the top bar): "target 14"."""
+        """For a tight row (the stage list, the side panel's stage line): "target 14"."""
         return ("beat " if self.beat else "target ") + (
             f"{self.turns}/{self.lost}" if self.lost is not None else str(self.turns))
 
@@ -336,6 +336,24 @@ def next_stage(g: Gauntlet, sid: int) -> int | None:
         return None
     deeper = [n for n in g.onward(sid) if depth.get(n, -1) > depth[sid]]
     return deeper[0] if len(deeper) == 1 else None
+
+
+def chain(g: Gauntlet) -> list[int] | None:
+    """The stage ids in playing order when ``g`` is a single path, else None.
+
+    A path has one start, one lane fewer than it has stages, and from each stage
+    exactly one way on to a stage not yet visited, so every stage is on it once.
+    A fork, a shortcut or a stranded stage is not a path. A two-way lane's way
+    back leads to a visited stage, so it doesn't count as a second way on."""
+    if len(g.start) != 1 or len(g.lanes) != len(g.stages) - 1:
+        return None
+    order = [g.start[0]]
+    while len(order) < len(g.stages):
+        ways = g.onward(order[-1]) - set(order)
+        if len(ways) != 1:
+            return None
+        order.append(ways.pop())
+    return order
 
 
 def stage_of(g: Gauntlet, settings: Settings) -> int | None:

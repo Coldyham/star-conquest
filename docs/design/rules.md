@@ -31,7 +31,7 @@ headlessly. Respect these boundaries — they are load-bearing, not stylistic:
     `Ui.film`/`Ui.film_ms`), so a test drives a film frame by setting a field.
   - `input.py` mutates **only** `Ui` (and queues human `Order`s), and returns an
     action string (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`,
-    `"toggle_history"`, `"rewind"`, `"restart"`, `"menu"`, `"quit"`) or `None`
+    `"toggle_history"`, `"rewind"`, `"restart"`, `"retry"`, `"menu"`) or `None`
     for `main.py` to act on.
   - `menu.py` has the same split: `draw` only reads `Settings`, `handle_event`
     mutates `MenuState`/`Settings` and returns `"start"`/`"quit"`/`None`;
@@ -599,6 +599,16 @@ Reasons: `docs/design/gauntlet.md`.
   pinned); Next stage appears only for a win that leaves it cleared, this
   game's or an earlier best meeting the target (`Ui.stage_cleared`,
   `Ui.offers_next_stage`).
+- **A run** (`run.py`) plays a single-path gauntlet with at least one target
+  (`run.offered`, `gauntlet.chain`) in order, each stage within its target,
+  with one life. It is the one piece of gauntlet progress that is stored
+  (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
+  decided. Only the step's own game moves it, once (`run.finish`), so a Retry
+  or fork is free play. That game plays ironman with no Hint, and its Next
+  stage reads this game's score alone. Continue resumes the step's log (kept
+  in `webstore` too, `run.keep_log`), never a fresh copy, and a log that can't
+  be loaded ends the run. A run adds nothing to `Settings` or the log, and run
+  games post as ordinary games (`tests/test_run.py`).
 - **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
   the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in

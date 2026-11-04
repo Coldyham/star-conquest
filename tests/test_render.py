@@ -207,7 +207,7 @@ def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
     assert render._board_label(ui).startswith("Post on leaderboard")
 
 
-def test_a_long_quick_post_summary_wraps_above_quit():
+def test_a_long_quick_post_summary_wraps_and_fits():
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((360, 740))
@@ -219,11 +219,10 @@ def test_a_long_quick_post_summary_wraps_above_quit():
         ui.post_state = "posted"
         ui.share_msg = "Posted  ·  best is 30 turns, 2 lost by Somebody Long  ·  12 scores on this map"
         render.draw(screen, state, ui)
-        board, quit_ = ui.leaderboard_button_rect, ui.quit_button_rect
+        board = ui.leaderboard_button_rect
         notes = render._wrap(render._fonts()["small"], ui.share_msg, 360 - 2 * config.HUD_PAD)
         assert len(notes) > 1
-        assert quit_[1] >= board[1] + board[3] + len(notes) * render._row_h()
-        assert quit_[1] + quit_[3] <= 740
+        assert board[1] + board[3] + len(notes) * render._row_h() <= 740
     finally:
         pygame.quit()
 
@@ -365,10 +364,9 @@ def test_scoreboard_full_table_and_eliminated():
 
 
 def test_challenge_target_shown_throughout_play_not_only_on_win():
-    """The score to beat sits in the top bar's right corner for the whole match,
-    not just the win overlay's after-the-fact verdict — so it survives an
-    in-progress frame with no winner set, and makes room for the scoreboard
-    rather than drawing under it."""
+    """The score to beat heads the side panel for the whole match, not just the
+    win overlay's after-the-fact verdict — so it survives an in-progress frame
+    with no winner set, and leaves the top bar to the scoreboard."""
     pygame.init()
     render._FONTS.clear()
     screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
@@ -376,16 +374,14 @@ def test_challenge_target_shown_throughout_play_not_only_on_win():
         state = mapgen.generate_random(1, num_nodes=18, num_players=3)
         ui = _make_ui(state)
         assert state.winner is None
-
-        w = screen.get_width()
-        assert render._draw_challenge_target(screen, ui, w) == w   # nothing set
+        render.draw(screen, state, ui)
+        plain = [r for _p, r in ui.score_rects]
 
         ui.challenge_target = (137, 412)
         ui.challenge_by = "Ada"
-        right = render._draw_challenge_target(screen, ui, w)
-        assert right < w - config.HUD_PAD   # the scoreboard must stay clear of it
-
+        assert render._match_notes(ui)[0][0] == "Beat Ada's 137t / 412 lost"
         render.draw(screen, state, ui)   # the whole frame, mid-game, no crash
+        assert [r for _p, r in ui.score_rects] == plain   # the key keeps its room
     finally:
         pygame.quit()
 
@@ -745,7 +741,7 @@ def _hud_rects(ui):
     """The bottom bar's recorded hit-rects, as pygame Rects (skipping zeroed ones)."""
     names = ("end_turn_rect", "play_pause_rect", "autoplay_button_rect",
              "history_button_rect", "restart_live_button_rect", "menu_button_rect",
-             "clear_button_rect", "quit_button_rect", "exit_history_rect",
+             "clear_button_rect", "retry_live_button_rect", "exit_history_rect",
              "rewind_button_rect", "fast_forward_rect", "route_button_rect",
              "route_cancel_rect", "route_confirm_rect", "route_mode_rect",
              "route_auto_rect", "history_prev_rect", "history_next_rect")
