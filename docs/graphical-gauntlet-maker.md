@@ -20,7 +20,10 @@ canvas past about 25 stages.
 - boons carried between stages, decided against because a boon edits the setup,
   so it scores as a different map (*Carry-over*).
 
-This plan builds all three:
+This plan builds all three, after a first step that needs none of them: a
+linear **run** of an existing gauntlet, played in order within its targets with
+one life (Phase 0). It is usable at once with a generated gauntlet's targets.
+Then:
 1. lane editing on the board's existing gauntlet page: each stage card gets a
    row of "Leads to" chips, and a lit chip carries the lane's options (two-way,
    a target, hidden). A diagram drawn by the page shows the shape;
@@ -58,6 +61,107 @@ What is given up by not building in the game, judged acceptable:
   Hand-written files still work on desktop, and the page's `.json` download
   covers getting a board-made one onto disk.
 - **"Use menu setup" in place of Get Link.** A convenience, not a capability.
+
+## Phase 0: a linear run (no format change, no boons, no branching)
+
+The first piece to build, because it is usable at once on what exists. Generate
+a gauntlet on the board with "Stage targets" (the slowest or fastest probe win
+plus slack, `gauntletgen.target`), or build one from links with "Beat the best
+bot", then **run** it: every stage in order, each won within its target, with
+one life. It needs no format change and no board change, and it is the start of
+`run.py`, which Phase 5 grows.
+
+- **Offered only where it means something:**
+  - The gauntlet must be a chain (`gauntlet.is_chain`): one start, and from
+    each stage but the last exactly one `next_stage`.
+  - At least one stage must have a target.
+  - The tutorial (no targets) and any branching gauntlet show no run button
+    until Phase 5. A chain with targets on only some stages is still offered:
+    a stage without one asks for any win.
+- **The rule.** Starting from the first stage, play each stage in list order.
+  Each must be won by hand (`Ui.can_post`), meeting its target with *this game's*
+  score. An earlier best doesn't count, so `stage_met_before` is ignored in a
+  run.
+- **What ends a run:**
+  - **Losing a stage** ends it.
+  - **A win short of the target** ends it too. The overlay says by how much:
+    "Run over: 18 turns, target 14".
+  - **Winning the last stage within its target completes the run.**
+- **One life, no second goes.** In a run game:
+  - **Retry**, both rewinds (mid-game and after the end), `restart` and New map
+    are not offered. `main.py:2599` already keeps `restart` out of a stage, and
+    the same gates extend to `Ui.in_run`.
+  - **The Hint** is not offered (`can_hint`). A run is a test, and a hinted win
+    can't be posted anyway.
+  - **History** stays available for looking back.
+- **Run games are ordinary games.** They post, file bests and clear free-play
+  stages exactly as now. A run adds nothing to `Settings` or to `GameLog`, so the
+  verifier and the board never see a difference.
+- **The record (core `run.py`, pure):**
+  - It holds `{id, gauntlet_id, gauntlet_hash, started_at, status: active |
+    complete | over, active_log, steps: [{stage, log, outcome: met | missed |
+    lost, turns, lost}]}`.
+  - `gauntlet_hash` is a hash of the kept file's canonical JSON.
+  - `from_dict` is total and never raises.
+  - It is stored in `webstore` under a new `paths.WEB_RUNS_KEY`: the active run
+    plus the last 20 finished. `webstore` is `localStorage` on the web build and
+    `kv.json` on desktop.
+  - It is written when a stage starts (`active_log` set) and the moment its
+    result is known, never only at the end of the run.
+  - This is the one piece of gauntlet progress that is stored rather than
+    derived. A run is a sequence of events, and can't be read back from bests,
+    which keep only the best game on each stage.
+- **Quitting mid-game keeps the run.**
+  - The game is saved as usual. **Continue run** reopens `active_log` by path
+    (`replay.load`) and re-applies `stage_ui` with the run marker. A resumed
+    save otherwise forgets that it was a stage (`gauntlet.md`, "Next stage"),
+    which is why the record holds the log.
+  - The boot resume prompt (`main.py:2003-2008`, `replay.latest_log`) does the
+    same when the latest log is the active run's.
+  - The stage can't be started fresh while the run is active, so quitting a
+    game that is going badly gains nothing.
+  - If the log can no longer be loaded (cleared storage, or a moved
+    `RULES_VERSION`, which `latest_log` skips), the run is over, with the
+    outcome "lost its game".
+- **Only one active run at a time.** Starting a run while another is active asks
+  to abandon the old one. A run whose gauntlet's hash has changed (a desktop file
+  edited) is over.
+- **In the gauntlet list (today's list, no graph needed):**
+  - Beside Leave and Copy link: **Start run**. While a run is active: **Continue
+    run · stage 3/8** and **Abandon run** (with a confirm).
+  - A line under the heading: "Best run: 5/8", or "Run complete ✓". It is read
+    from the records, as the furthest any run of this gauntlet reached.
+  - A ▶ marks the run's current stage row.
+- **In the game:**
+  - The top bar's stage label gains " · run".
+  - **On a win within the target, Next stage (N) continues the run.**
+    `Ui.offers_next_stage` in a run is `can_post and met_target(state)`.
+  - On the last stage the win says "Run complete".
+  - **A missed target or a loss** shows "Run over · reached stage 3/8" in place
+    of the stage verdict, with **Back to the gauntlet** (to the list).
+- **`Ui` and main.**
+  - `stage_ui(..., run=run_id)` sets `Ui.in_run`.
+  - `main.record_run_step` writes the step on the same end-of-game path that
+    files a best (`main.py:1474`).
+  - The Next stage path (`main.py:2603-2608`) also writes the next step's
+    `active_log` when in a run.
+
+Tests:
+- `tests/test_run.py` (pure):
+  - the offered rule (the tutorial: no; a chain with a target: yes; a fork: no);
+  - each outcome, completion, and "over" on a hash change;
+  - a step is recorded at both start and end;
+  - `from_dict` is tolerant;
+  - the best-run summary.
+- `tests/test_viewstate.py`: in a run, an earlier best doesn't offer Next stage,
+  and the Hint is not offered.
+- A main test: no Retry or rewind in a run game; Continue run resumes the
+  active log.
+- `tests/test_menu*.py`: the buttons per case.
+
+Size: about 450 lines of code (`run.py` ~150, menu ~120, main ~120, `viewstate`,
+render and input ~60) and about 350 of tests. Run the full suite, since it
+touches `main` and `viewstate`.
 
 ## Phase 1: the format grows (core `gauntlet.py`, board `gauntlet-build.mjs`)
 
@@ -346,6 +450,17 @@ Then run the full suite, since this touches `replay` and `main`.
 
 ## Phase 5: runs (core `run.py`, menu graph overlay, main)
 
+**This grows Phase 0's run rather than starting one.** The record, its storage,
+Continue run through `active_log`, the boot prompt, no Retry or rewind, no Hint,
+and one active run all stay as Phase 0 built them. What Phase 5 adds:
+- movement over a graph, which lifts `is_chain` from the offered rule;
+- lane gates judged on the run's own score;
+- lives;
+- boons, and with them the boon-pick card and the Use boons switch.
+
+The record's new fields (`seed`, `lives_left`, `boons_in_play` and `boon_taken`
+per step) are read tolerantly, so a Phase 0 record stays readable.
+
 **The record (pure, `run.py`).** A run is a complete record, not derived
 progress (memory: complete records beat compact ones).
 - It holds:
@@ -448,7 +563,9 @@ Main wiring tests:
 
 ## Order and PR shape
 
-There are five PRs, each usable on its own:
+There are six PRs, each usable on its own:
+0. a linear run, first: no format, board or replay change, and immediately
+   playable on generated gauntlets with targets;
 1. the format;
 2. the graph view, `stagegraph` and the shared layout, which are useful at once
    for existing gauntlets;
@@ -469,14 +586,17 @@ design.
 
 | Phase | New or changed code | Tests | Size | Main reuse |
 |---|---|---|---|---|
+| 0. Linear run | ~450 (`run.py` ~150, menu ~120, main ~120, the rest ~60) | ~350 | Small-medium; touches `main` (run the full suite) | the stage list, `Target`, Next stage, `stage_ui`, `replay.load`, `webstore` |
 | 1. Format | ~230 (`gauntlet.py` ~170, `checkBody` ~60) | ~250 | Small | `Target`, `_target`, the existing `from_dict` and `checkBody` |
 | 2. Graph view, `stagegraph`, `layout` | ~520 (replaces ~150 in menu; `layout` ~70) | ~250 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
 | 3. Lanes on the board | ~550 (`gauntlet-graph.mjs` ~150, page ~300, build ~50, CSS ~50) | ~250 | Medium | the stage cards, `applyAim`, `linkTarget`/`botTarget`, `checkBody`, `readDraft` |
 | 4. Boons in the log | ~250 | ~200 | Small, but it touches replay (run the full suite) | the Hint's unpostable path, the `strategies` stamp in `reconstruct` |
-| 5. Runs | ~900 (`run.py` ~300, run view and boon pick ~400, wiring ~200) | ~450 | Medium-large | the Phase 2 graph view, `webstore`, the `stage_ui` pattern |
+| 5. Runs, grown | ~700 (`run.py` +150, run view and boon pick ~400, wiring ~150) | ~350 | Medium | Phase 0's record and wiring, the Phase 2 graph view |
 | Docs | ~400 lines of prose | n/a | Small | mostly moving *proposed* sections to *built* |
 
-The total is about 2,450 lines of code and 1,400 of tests. Against the in-game
+The total is about 2,700 lines of code and 1,650 of tests. Phase 0 costs about
+250 lines over building runs once at the end, because Phase 5 then extends a
+record and wiring that already exist instead of writing them. Against the in-game
 maker this replaces (Phase 3a, the `editkit` extraction, ~750; Phase 3b, the
 editor and `GauntletDraft`, ~1,100 plus ~900 of tests), the maker is about a
 third of the size, and mapmaker is not touched at all. The parts most likely to
