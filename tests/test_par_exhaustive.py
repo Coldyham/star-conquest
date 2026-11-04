@@ -122,3 +122,16 @@ def _run(tmp_path, workers: int) -> list[dict]:
 def test_worker_count_does_not_change_the_search(tmp_path):
     one, two = _run(tmp_path, 1), _run(tmp_path, 2)
     assert one == two and one[-1]["event"] == "done" and sum(r["event"] == "layer" for r in one) >= 3
+
+
+def test_ratio_rank_keeps_the_stronger_board_and_floor_rank_the_earlier_one():
+    cfg = _setup()
+    board = build_state(cfg, cfg.seed)
+    me = board.human().id
+    floors = pe.FloorTable()
+    stronger = ps.clone(board)
+    next(s for s in stronger.systems.values() if s.owner_id == me).ships += 8
+    nxt = {1: (0, board, ()), 2: (0, stronger, ())}
+    assert list(pe.trim(nxt, 1, me, 10, floors, "ratio")) == [2]
+    assert pe.rank_key(stronger, me, 10, floors, "ratio") < pe.rank_key(board, me, 10, floors, "ratio")
+    assert set(pe.trim(nxt, 5, me, 10, floors, "floor")) == {1, 2}   # under the cap: nothing dropped

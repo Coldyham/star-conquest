@@ -22,7 +22,7 @@ If it finishes with ``exact`` true, the reported (turns, ships lost) is the
 optimum **within that order model**: no line of those orders does better. A
 board whose turn would fan out past ``--max-branch`` falls back (first to no
 splits, then to the coarse levels) and clears ``exact``; a layer wider than
-``--max-frontier`` keeps the best-floored boards and clears it too; ``--ratio``
+``--max-frontier`` keeps the best-ranked boards (``--rank``) and clears it too; ``--ratio``
 is a heuristic prune and clears it as well. It never claims more than that.
 
 Speed, none of it costing exactness (`tests/test_par_exhaustive.py`):
@@ -187,6 +187,33 @@ def hopeless(board: GameState, me: int, deadline: int, ratio: float) -> bool:
     return mine < ratio * theirs
 
 
+RANKS = ("ratio", "floor")
+
+
+def rank_key(board: GameState, me: int, horizon: int, floors: FloorTable, mode: str) -> tuple:
+    """Where a board sorts when a layer is too wide to keep (smaller is kept first).
+
+    ``floor``: the earliest possible win, then fewest losses. It favours boards
+    that have not fought, so it throws away a line that trades ships early.
+    ``ratio`` (the default): material first, `potential` over the strongest
+    rival's, then the floor and the losses. On the 2026-11-04 puzzle's known
+    10-turn line it ranks #1 in layer 6 where ``floor`` ranks #426,307 of 536,731."""
+    lost = board.players[me].ships_lost
+    floor = floors.floor(board, me, horizon)
+    if mode == "floor":
+        return (floor, lost)
+    left = horizon - board.turn
+    mine = potential(board, me, left)
+    theirs = max((potential(board, r, left) for r in ps.rivals_of(board, me)), default=0.0)
+    return (-(mine / max(theirs, 0.1)), floor, lost)
+
+
+def trim(nxt: dict, keep: int, me: int, horizon: int, floors: FloorTable, mode: str) -> dict:
+    """The ``keep`` best-ranked boards of ``nxt`` (values are ``(lost, board, path)``)."""
+    ranked = sorted(nxt.items(), key=lambda kv: rank_key(kv[1][1], me, horizon, floors, mode))
+    return dict(ranked[:keep])
+
+
 # --------------------------------------------------------------------------- #
 # Expanding a layer (in this process, or in a worker)
 # --------------------------------------------------------------------------- #
@@ -208,17 +235,14 @@ def fast_clone(state: GameState, rng: random.Random) -> GameState:
     out = _dup(state)
     out.systems = {}
     for sid, s in state.systems.items():
-        c = _dup(s)
-        c.neighbors = list(s.neighbors)
-        out.systems[sid] = c
+        out.systems[sid] = _dup(s)   # `neighbors` is shared: only map generation writes it
     out.fleets = [_dup(f) for f in state.fleets]
     out.players = {}
     for pid, p in state.players.items():
         c = _dup(p)
         c.ai_params = _dup(p.ai_params)
         out.players[pid] = c
-    out.adjacency = {sid: dict(nbrs) for sid, nbrs in state.adjacency.items()}
-    out.rng = rng
+    out.rng = rng   # `adjacency` and `lanes` stay shared too
     return out
 
 
@@ -359,9 +383,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="also try one system sending down two different lanes in a turn")
     ap.add_argument("--max-branch", type=int, default=4000, help="order sets per board before falling back")
     ap.add_argument("--max-frontier", type=int, default=200_000, help="boards kept per layer")
+    ap.add_argument("--rank", choices=RANKS, default="ratio",
+                    help="which boards survive when a layer exceeds --max-frontier "
+                         "(ratio: material first; floor: earliest possible win first)")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 1, help="processes (1 = this one)")
     ap.add_argument("--assume-turn", type=int,
                     help="a turn you know is reachable: prune as if a win on it (any losses) were in hand")
+    ap.add_argument("--assume-lost", type=int,
+                    help="with --assume-turn: also assume that many ships lost, so only a strictly "
+                         "better line (sooner, or the same turn with fewer lost) counts")
     ap.add_argument("--ratio", type=float, default=0.0,
                     help="drop a board whose potential is under RATIO x the strongest rival's "
                          "(0 = off; 0.5 is a cautious start). Not exact.")
@@ -395,8 +425,9 @@ def main(argv: list[str] | None = None) -> int:
           f"levels {args.levels}{' +splits' if args.splits else ''}, {args.workers} worker(s)", flush=True)
     best = search.run()
     bound = min((best.turn, best.lost), resume_bound(ledger))
-    if args.assume_turn is not None and args.assume_turn < bound[0]:
-        bound = (args.assume_turn, math.inf)
+    if args.assume_turn is not None:
+        assumed = (args.assume_turn, math.inf if args.assume_lost is None else args.assume_lost)
+        bound = min(bound, assumed)
     print(f"incumbent: turn {bound[0]}, lost {bound[1]} (beam {best.turn}/{best.lost})", flush=True)
     if best.turn < math.inf:
         record({"event": "best", "turn": best.turn, "lost": best.lost, "source": "beam"})
@@ -437,6 +468,10 @@ def main(argv: list[str] | None = None) -> int:
                     old = nxt.get(key)
                     if old is None or lost < old[0]:
                         nxt[key] = (lost, board, (chunk[pos][1], packed))
+                if len(nxt) > 2 * args.max_frontier:   # never hold a whole oversized layer
+                    exact = False
+                    nxt = trim(nxt, args.max_frontier, me, int(min(incumbent["turn"], args.max_turns)),
+                               floors, args.rank)
             if best_win and (best_win[0], best_win[1]) < (incumbent["turn"], incumbent["lost"]):
                 incumbent.update(turn=best_win[0], lost=best_win[1])
                 record({"event": "best", "turn": best_win[0], "lost": best_win[1], "source": "exhaustive"})
@@ -447,10 +482,8 @@ def main(argv: list[str] | None = None) -> int:
             horizon = int(min(incumbent["turn"], args.max_turns))
             if len(nxt) > args.max_frontier:
                 exact = False
-                keep = sorted(nxt.values(), key=lambda v: (floors.floor(v[1], me, horizon), v[0]))
-                layer = [(b, p) for _, b, p in keep[: args.max_frontier]]
-            else:
-                layer = [(b, p) for _, b, p in nxt.values()]
+                nxt = trim(nxt, args.max_frontier, me, horizon, floors, args.rank)
+            layer = [(b, p) for _, b, p in nxt.values()]
             record({"event": "layer", "depth": depth, "expanded": expanded, "frontier": len(layer),
                     "best": [incumbent["turn"], incumbent["lost"]], "exact": exact})
             print(f"layer {depth}: {expanded} expanded, {len(layer)} kept, best "
