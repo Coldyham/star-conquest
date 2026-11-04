@@ -55,6 +55,33 @@ export function weekdayOf(day) {
   return (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7;
 }
 
+/** The seven days, Monday first, of the week holding `day`. */
+export function weekDays(day) {
+  const monday = addDays(day, -weekdayOf(day));
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
+/** The first of the month `n` months after the one holding `day`. */
+export function addMonths(day, n) {
+  const d = new Date(`${day.slice(0, 7)}-01T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return dayParam(d);
+}
+
+/**
+ * The month holding `day` as calendar rows, Monday first: each row seven
+ * days, with null in the cells before the 1st and after the month's end.
+ */
+export function monthWeeks(day) {
+  const first = `${day.slice(0, 7)}-01`;
+  const next = addMonths(first, 1);
+  const rows = [];
+  for (let monday = addDays(first, -weekdayOf(first)); monday < next; monday = addDays(monday, 7)) {
+    rows.push(weekDays(monday).map((d) => (d >= first && d < next ? d : null)));
+  }
+  return rows;
+}
+
 /** "Wed 28 Oct": a day as the result line and the page name it. */
 export function shortDate(day) {
   const d = new Date(`${day}T00:00:00Z`);
@@ -151,14 +178,34 @@ export function postedOn(submittedAt, day) {
  * Returns `{board, puzzle}`, each `{days, onTheDay}` (0 when none is running).
  */
 export function playerStreaks(scores, dailyGames, today) {
+  const won = playerDays(scores, dailyGames);
+  const out = {};
+  for (const kind of KINDS) {
+    const wins = [...won[kind]].map(([day, how]) => ({ name: "", day, onTheDay: how === "day" }));
+    const [run] = streaks(wins, today);
+    out[kind] = run ? { days: run.days, onTheDay: run.onTheDay } : { days: 0, onTheDay: 0 };
+  }
+  return out;
+}
+
+/**
+ * Which days' dailies one player has won, of each kind, from the same inputs
+ * as playerStreaks: `{board, puzzle}`, each a Map of day to `"day"` (a counted
+ * win posted within the day) or `"later"` (won only from the archive). The
+ * player card's streak calendar draws these.
+ */
+export function playerDays(scores, dailyGames) {
   const out = {};
   for (const kind of KINDS) {
     const dayOf = new Map(dailyGames.filter((g) => (g.kind || "board") === kind).map((g) => [g.game_key, g.day]));
-    const wins = scores
-      .filter((s) => s.hand > 0 && dayOf.has(s.game_key))
-      .map((s) => ({ name: "", day: dayOf.get(s.game_key), onTheDay: postedOn(s.submitted_at, dayOf.get(s.game_key)) }));
-    const [run] = streaks(wins, today);
-    out[kind] = run ? { days: run.days, onTheDay: run.onTheDay } : { days: 0, onTheDay: 0 };
+    const won = new Map();
+    for (const s of scores) {
+      if (!(s.hand > 0) || !dayOf.has(s.game_key)) continue;
+      const day = dayOf.get(s.game_key);
+      if (postedOn(s.submitted_at, day)) won.set(day, "day");
+      else if (!won.has(day)) won.set(day, "later");
+    }
+    out[kind] = won;
   }
   return out;
 }

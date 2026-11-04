@@ -5,7 +5,7 @@ import { weekParam, weekStart } from "./crowns.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botLeadBadge, campaignBadge, clear, configBadge, difficultyBadge, el, embargoBadge, embargoNote, fogBadge,
-  leaderCredit, mapSummary, relativeTime, setupSummary, showError,
+  leaderLink, mapSummary, relativeTime, setupSummary, showError,
 } from "./format.mjs";
 import {
   familyQueries, filtersFromParams, FIRST_SEEN_QUERY, isFiltered, listQuery, MAX_EXCLUDED, MODES, pickRandom, PLAYER_COUNTS, randomPoolQuery, SORTS, sortFor,
@@ -86,7 +86,7 @@ function groupToggle(filters) {
 function randomSetupButton(filters) {
   if (!GAME_URL) return null;
   const button = el("button", {
-    class: "btn play", type: "button", text: "Random setup",
+    class: "btn play alt", type: "button", text: "Random setup",
     title: isFiltered(filters)
       ? "Open the game on a random setup matching these filters, on a fresh map"
       : "Open the game on a random setup from the board, on a fresh map",
@@ -349,7 +349,7 @@ async function newSeedLink(game) {
     return null;
   }
   return el("a", {
-    class: "btn play",
+    class: "btn play alt",
     href: `${GAME_URL}#${token}`,
     title: "Open the game on this setup, with a freshly rolled map",
     text: "Play a new seed",
@@ -400,7 +400,7 @@ function row(game, campaigns, mine) {
   // game_summary's best is the best *counted* score, so a map whose scores
   // all wait on a check (or failed one) has scores but no record.
   const ranked = game.best_turns != null;
-  const holder = ranked ? leaderCredit(game) : "No verified score yet";
+  const holder = ranked ? leaderLink(game) : ["No verified score yet"];
   const scoreCount = `${game.score_count} ${game.score_count === 1 ? "score" : "scores"}`;
   // While embargoed, the card keeps the leader, the turn count next to them
   // (the headline figure below) and their ships lost (the tie-break, so the
@@ -419,10 +419,12 @@ function row(game, campaigns, mine) {
         relativeTime(game.last_activity),
       ].filter(Boolean).join(" · ");
 
-  const body = el("a", { class: "card-body", href: `game.html?key=${encodeURIComponent(game.game_key)}` }, [
+  // The setup line is the card's link, stretched over the body (.card-link),
+  // so the leader's name can be a link to their card of its own.
+  const body = el("div", { class: "card-body" }, [
     el("div", { class: "card-main" }, [
-      el("div", { class: "setup", text: mapSummary(game) }),
-      el("div", { class: "credit", text: holder }),
+      el("a", { class: "setup card-link", href: `game.html?key=${encodeURIComponent(game.game_key)}`, text: mapSummary(game) }),
+      el("div", { class: "credit" }, holder),
       el("div", { class: "card-meta", text: detail }),
     ]),
     // The headline figure, cabinet-style: the score alone, big.
