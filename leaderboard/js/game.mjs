@@ -11,6 +11,7 @@ import {
 } from "./format.mjs";
 import { mountMyScores, myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
+import { ownName } from "./post.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
 import {
@@ -60,12 +61,13 @@ function verifiedMark() {
   });
 }
 
+/** `rank` null leaves the row unplaced (`ownScores`), shown as a dash. */
 function scoreRow(score, rank, replays, lift) {
   const version = replays.get(score.match_id);
   const watchable = version === CURRENT_RULES_VERSION;
   const outdated = version !== undefined && !watchable;
-  return el("li", { class: rank <= 3 ? `score rank-${rank}` : "score" }, [
-    el("span", { class: "rank", text: ordinal(rank) }),
+  return el("li", { class: rank != null && rank <= 3 ? `score rank-${rank}` : "score" }, [
+    el("span", { class: "rank", text: rank == null ? "—" : ordinal(rank) }),
     // The dot leader is its own flexible element rather than trailing dots on the
     // name: a name long enough to wrap used to drag the dots into the middle of it.
     el("span", { class: "who" }, [
@@ -402,6 +404,37 @@ async function replayVersions(scores) {
  * very hand/by fields this view is holding back, sitting right there in
  * the page's own HTML whether or not they're ever rendered as text.
  */
+/**
+ * The signed-in caller's own scores on an embargoed map: by their claimed name
+ * only (`ownName`, schema.sql's `my_name`), never the remembered one, which
+ * anyone can type. Unplaced, since the rest of the field stays unread, and with
+ * no Watch: `public_replays` holds back every replay here, the owner's too.
+ * Null when signed out, owning no name, with nothing posted here, or on failure.
+ */
+async function ownScores() {
+  const name = await ownName();
+  if (!name) return null;
+  let rows;
+  try {
+    rows = await select(
+      `scores?select=id,turns,lost,hand,by_name,submitted_at,match_id,users!inner(name,name_key),` +
+        `score_checks(verdict)&game_key=${eq(gameKey)}&users.name_key=${eq(name.trim().toLowerCase())}` +
+        `&order=turns.asc,lost.asc,submitted_at.asc`,
+    );
+  } catch {
+    return null;
+  }
+  if (!rows.length) return null;
+  return el("section", { class: "own-scores" }, [
+    el("h2", { text: "Your scores" }),
+    el("p", {
+      class: "lede",
+      text: `Shown because you are signed in as ${name}. Their replays stay hidden until the embargo lifts too.`,
+    }),
+    el("ol", { class: "scores" }, rows.map((score) => scoreRow(score, null, new Map(), null))),
+  ]);
+}
+
 async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
   subtitle.textContent = [
     game.score_count
@@ -423,8 +456,8 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
       ? el("p", { class: "lede", text: "No verified score yet. Every score, and every replay, stays hidden until the embargo lifts." })
       : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
-  const link = await freshPlayLink(game);
-  clear(target).append(lede, ...mapActions(link, campaign, await note, daily));
+  const [link, own] = await Promise.all([freshPlayLink(game), ownScores()]);
+  clear(target).append(lede, ...[own].filter(Boolean), ...mapActions(link, campaign, await note, daily));
 
   const best = ranked ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);

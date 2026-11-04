@@ -692,6 +692,15 @@ h1::after {
  * machine table is cyan where the human one is gold, and everything that never
  * took the map is dimmed out of the running entirely. */
 .bots { margin-top: 2.5rem; }
+.own-scores { margin: 1.5rem 0; }
+.own-scores h2 {
+  margin: 0 0 0.6rem;
+  font-family: var(--pixel);
+  font-size: 0.95rem;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .bots h2 {
   margin: 0 0 0.6rem;
   font-family: var(--pixel);

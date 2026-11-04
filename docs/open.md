@@ -14,6 +14,7 @@ ships or is dropped, delete its line here (and add it to
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
+- leaderboard.md · Watch links on an owner's own scores while their map is embargoed: `replay.mjs` asking Auth who calls, as `pbp.mjs` does, and serving that owner's logs past `public_replays`. *Claimed names.*
 - training.md · Drill stages and a tutorial stage each for rusherplus, evolved and knower; choosing the hint's advisor. *Proposed, not built.*
 - gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
 - shell.md · The phone's setup menu at device resolution, if the panel's height can be had without a pixel scan; the idle side panel's how-to cut off on a landscape phone; the same send-finishes-its-source rule on desktop. *Phones: the compact layout.*

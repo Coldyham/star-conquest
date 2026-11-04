@@ -74,15 +74,20 @@ campaign fleets proposal (decided against). Split out of
     `game_summary`'s own aggregate (`best_turns`/`best_user_name`/
     `best_holders`/`score_count`), so there is nothing for the page or its
     network tab to hand out beyond who is ahead and by how many turns. Lost,
-    hand and submission time stay off the page entirely, along with every
+    hand and submission time stay off the map page, along with every
     other score — a stricter cut would leave nothing to chase, which
     defeats a deadline built to be raced against. `home.mjs`'s card makes
-    the same cut on the list. Scores and rankings themselves are otherwise
-    unaffected by an embargo — they post and rank normally throughout,
-    since there is no account system here to tell a submitter's own later
-    read apart from anyone else's, so the only boundary that can be
-    enforced for everyone alike, the setter included, is on *how* a score
-    was made rather than on whether one exists.
+    the same cut on the list. The one exception is a signed-in owner's own
+    scores, by their claimed name (`ownScores`, [`leaderboard.md`](leaderboard.md),
+    "Claimed names"), still without placing or Watch.
+  - **Only the replay cut is enforced by the database.** `scores` stays
+    publicly readable, and the player page (`user.mjs`) lists a name's best
+    on every map it has played, embargoed ones included, with lost, hand,
+    tries and placing. So the score-list cut keeps the map page from
+    broadcasting the field; it does not hide any of it from someone who goes
+    looking. Scores and rankings post and rank normally throughout an
+    embargo. Moving the cut into RLS on `scores` would blank `game_summary`'s
+    leader line and the daily streaks, which read `scores` as the caller.
   - **No bot is replayed on an embargoed map** until the embargo lifts
     (`bot_replay.pending`), so the bot column has no Watch link to copy a
     line from either ([`leaderboard.md`](leaderboard.md), "The bot column:

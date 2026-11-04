@@ -845,6 +845,19 @@ own check (`claims.nameBlocked`) exists so a refused post says why, rather than
 surfacing PostgREST's bare "violates row-level security policy". `42501` maps to
 the same sentence as a backstop.
 
+**An owner sees their own scores on an embargoed map (2026-11-04).**
+- Asked for by a tester who wanted every attempt he had posted on a live
+  embargo. `game.mjs`'s `ownScores` lists them under the leader line, by the
+  name `my_name` returns. The remembered name never counts: anyone can type
+  one, and the point was that posting under someone's name shows you nothing.
+- Unplaced, because the page still never reads the rest of the field, and with
+  no Watch, because `public_replays` holds back the owner's replays too.
+- It is a page-level cut, like the rest of `renderEmbargoed`. `scores` is
+  publicly readable, so this gives the owner a view and hides nothing new
+  ([`campaign.md`](campaign.md), "Crowns, the weekly campaign and embargoes").
+- Watching their own replays would need `replay.mjs` to ask Auth who is calling,
+  as `pbp.mjs` does below. Not built (`open.md`).
+
 **Play-by-post asks Auth, not a JWT library.**
 - `pbp.mjs` verifies a bearer by calling `/auth/v1/user`, so it holds no
   signing secret, and a revoked session is refused the same way as a missing
