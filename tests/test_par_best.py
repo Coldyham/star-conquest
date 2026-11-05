@@ -32,6 +32,7 @@ def _setup_file(tmp_path):
 def _run(tmp_path, setup):
     return par_best.main(["--daily", str(setup), "--width", "6", "--beam-budget", "1", "--start-k", "2",
                           "--max-k", "2", "--levels", "coarse", "--proof-budget", "0", "--k-budget", "60", "--max-turns", "40",
+                          "--open-depth", "0", "--local-seconds", "0",
                           "--results-dir", str(tmp_path / "out")])
 
 
@@ -49,10 +50,14 @@ def test_each_stage_is_recorded_once_and_a_rerun_repeats_nothing(tmp_path):
 
 
 def test_a_pass_looks_only_for_something_better_than_the_best_so_far(tmp_path):
-    args = par_best.argparse.Namespace(levels="all", k_budget=50.0, max_frontier=1000, max_turns=60)
+    args = par_best.argparse.Namespace(levels="all", k_budget=50.0, max_frontier=1000, max_turns=60,
+                                       turn_first=True)
     argv = par_best.pass_args(tmp_path / "s.json", 4, 4, (10, 3), args, tmp_path / "k4")
     assert argv[argv.index("--assume-turn") + 1] == "10" and argv[argv.index("--assume-lost") + 1] == "3"
     assert argv[argv.index("--max-launches") + 1] == "4" and argv[argv.index("--from-launches") + 1] == "4"
+    assert "--turn-only" in argv   # turns come first: a pass looks only for an earlier win
+    assert "--turn-only" not in par_best.pass_args(tmp_path / "s.json", 4, 4, (10, 3), args, tmp_path / "t",
+                                                   turn_only=False)
     nothing = par_best.pass_args(tmp_path / "s.json", 1, 1, (math.inf, math.inf), args, tmp_path / "k1")
     assert "--assume-turn" not in nothing   # no line yet: nothing to beat
 
@@ -109,3 +114,19 @@ def test_the_suggested_commands_keep_the_results_dir_so_a_rerun_resumes(tmp_path
     v = par_best.verdict(_summary(), [{"stage": "k", "k": 4, "first": 4, "exact": True, "seconds": 9.0}], [],
                          _args(results_dir=tmp_path / "out"), tmp_path / "s.json")
     assert all(f"--results-dir {tmp_path / 'out'}" in n["command"] for n in v["next"])
+
+
+def test_the_opening_and_local_stages_run_once_and_resume(tmp_path):
+    setup = _setup_file(tmp_path)
+    argv = ["--daily", str(setup), "--width", "6", "--beam-budget", "1", "--start-k", "2", "--max-k", "2",
+            "--levels", "coarse", "--proof-budget", "0", "--k-budget", "60", "--max-turns", "40",
+            "--open-depth", "2", "--open-budget", "1", "--open-width", "6", "--refine", "2", "--refine-width", "6",
+            "--refine-budget", "1", "--workers", "1", "--local-seconds", "2", "--results-dir", str(tmp_path / "out")]
+    par_best.main(argv)
+    ledger = tmp_path / "out" / "t_k.jsonl"
+    first = ledger.read_text()
+    rows = [json.loads(line) for line in first.splitlines()]
+    assert [r["stage"] for r in rows] == ["beam", "k", "open", "local", "done"]
+    assert rows[-1]["turn"] <= rows[0]["turn"]
+    par_best.main(argv)
+    assert ledger.read_text() == first
