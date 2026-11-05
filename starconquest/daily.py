@@ -15,6 +15,11 @@ What is kept is only which setups were dailies, and of which day and kind
 overlay copies a result line instead of a challenge link. Progress is a best
 on the key like any map's, derived and never stored here.
 
+A puzzle's **par** is the best score the par tools found on it, stored offline
+(``tools/puzzle_par.py``) and never sent to the game whole: at a win the game
+asks whether its result matches or beats it (``par_check``), and only a player
+whose result does is told the par and congratulated (``par_note``).
+
 Like ``campaign``, nothing here is load-bearing: off the web with no board, or
 with the board unreachable, there is no daily and the game plays as before.
 
@@ -26,6 +31,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+from dataclasses import dataclass
 
 from . import ai, dealer, gauntletgen, pbp, webstore
 from .paths import LEADERBOARD_DAILY_PATH, WEB_DAILIES_KEY
@@ -169,3 +175,55 @@ def result_line(day: str, settings: Settings, turns: int, lost: int, kind: str =
             else f"Star Conquest daily · {short_date(day)} · {settings.system_count()} systems")
     lines = [head, f"Won in {turns} turns, {lost} ships lost"]
     return "\n".join(lines + ([link] if link else []))
+
+
+@dataclass(frozen=True)
+class Par:
+    """A puzzle's par, as the board answers a result that matched or beat it."""
+
+    turns: int
+    lost: int
+    proved: bool        # a full search finished: no faster win exists
+    turns_only: bool    # ...for the turn; the ships lost are the fewest found
+
+
+def par_check(day: str, turns: int, lost: int) -> pbp.Request | None:
+    """Start asking whether ``(turns, lost)`` matches or beats ``day``'s puzzle
+    par. None when there is no board to ask."""
+    endpoint = webstore.leaderboard_url(LEADERBOARD_DAILY_PATH)
+    if not endpoint or not valid_day(day) or turns < 1 or lost < 0:
+        return None
+    return pbp.request(f"{endpoint}?day={day}&kind={PUZZLE}&turns={int(turns)}&lost={int(lost)}")
+
+
+def par_from_reply(body: str) -> Par | None:
+    """The par a check answered, or None: no par, a result short of it, or an
+    unreadable reply."""
+    try:
+        reply = json.loads(body)
+    except ValueError:
+        return None
+    par = reply.get("par") if isinstance(reply, dict) else None
+    if not isinstance(par, dict):
+        return None
+    turns, lost = par.get("turns"), par.get("lost")
+    if not isinstance(turns, int) or not isinstance(lost, int) or isinstance(turns, bool) or isinstance(lost, bool):
+        return None
+    return Par(turns, lost, par.get("status") == "proved", bool(par.get("turns_only")))
+
+
+def par_note(par: Par, turns: int, lost: int) -> str:
+    """The win overlay's congratulation for a result that met ``par``. The board
+    answers only such a result; a par the result is short of says nothing."""
+    if (turns, lost) > (par.turns, par.lost):
+        return ""
+    score = f"{par.turns} turns / {par.lost} lost"
+    if turns < par.turns:
+        return f"Beyond par! You won faster than the par of {score}"
+    if lost < par.lost:
+        return f"Beyond par! The par's {par.turns} turns with fewer ships lost than its {par.lost}"
+    if par.proved and not par.turns_only:
+        return f"Perfect puzzle! You matched the proven best: {score}"
+    if par.proved:
+        return f"Perfect puzzle! You matched the par of {score}, proven the fastest win"
+    return f"Par! You matched the best line our search found: {score}"

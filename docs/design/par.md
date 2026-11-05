@@ -324,6 +324,12 @@ board shows.
 
 Reopened on 2026-10-28 as a frozen star target and set aside again ([`other-games.md`](other-games.md), "Star tiers on every map").
 
+**The daily puzzle has a par now (the author, 2026-11-05)**, and it is still not on the
+board. `tools/puzzle_par.py` runs `par_best` on each stored puzzle and saves the result,
+proved or likely, to `puzzle_pars`. The game tells only a player whose result matches or
+beats it ([`daily.md`](daily.md), "The puzzle's par"). Every other map stays as decided
+here.
+
 ## evolved as a candidate (2026-11-02)
 
 **What prompted it.** On the puzzle daily of 2026-11-01 (`e60a6d946d4a010b`: 6
@@ -388,12 +394,245 @@ What it says:
 So evolved is a useful candidate to try by hand (`--candidates ... evolved`)
 when a person beats the search on a small map, not a default.
 
+## Exhaustive search (`tools/par_exhaustive.py`, 2026-11-04)
+
+The beam samples a few orders a turn. `par_exhaustive.py` walks **every** order
+set of a stated model, a turn at a time on the real keyed dice, merging equal
+boards and dropping any whose floor cannot beat the incumbent. A finished run is
+optimal *within that model* and says so; a layer wider than `--max-frontier`, a
+fallback past `--max-branch` or `--ratio` clears `exact`.
+
+**The puzzle `2026-11-04_puzzle` (5 systems, rusherplus).** The floor is 7, the
+beam found 11/3, and a person found 10 turns. Within the model that is a win on
+10 with 3 ships lost, from three launches: 6 of 10 ships from home to Dust-Ball
+on turn 2, the last 5 on turn 6, and Dust-Ball's 3 survivors on to Asterope the
+same turn. It works by waiting: rusherplus sends 9 ships at turn 0, which empties
+Asterope.
+
+**Why the first runs missed it.** The cap kept boards by (floor, losses), which
+prefers boards that have not fought. This line takes its 3 losses at turn 6 and
+ranked #426,307 of 536,731 in layer 6, under a cap of 200,000. Ranked by
+potential over the strongest rival's (`--rank ratio`, now the default) it is #1
+there, and #4,048 and #54,452 in layers 4 and 5, so a cap under about 55,000
+would still lose it. One line on one map tuned that key; it is not shown to
+generalise. Launch sizes matter too: `quarters` offers 10, 9, 7, 5 and 2 of ten
+ships, never 6.
+
+**What did not help.** The rival decides once per board (`_shared_decide`), the
+floor is a table, boards share their lane tables and layers expand in parallel
+(`--workers`). Layer counts match the plain version exactly, and the first three
+save about a third of the time. Four workers were *slower* on every map tried,
+since nearly every child survives and the boards cost more to send than to make. On the passes
+for plans of at most K launches, which keep only 10 to 25 percent of their children, eight workers
+on a laptop (11-01, K = 6) expanded about 34,000 order sets a second against about 31,000 for
+one worker on K = 5 there: a few percent, not a speed-up, so `par_best` stays single-process.
+The floor stays weak (7 against a true 10), so a turn-9 bound prunes no more
+than a turn-10 one: both expand the same 8.2M order sets in layer 7.
+
+**Plans of up to K launches (`--max-launches K`).** Waiting is free, so a line
+with few launches is found by counting launches, not turns. Position includes
+the launches spent; K = 1, 2, 3, ... run in turn, each exact. On the puzzle K = 3
+reaches 10/3 in 22 s (against 52 minutes for the capped search), and K = 4 (163 s)
+finds nothing sooner or with fewer lost: **no plan of up to 4 launch orders beats
+10 turns, 3 lost.** K = 5 (722 s; the widest layer 2.9M order sets expanded, 545k boards
+kept, under the cap) finds nothing either: the same holds for plans of up to 5. Each launch
+added has cost about 5 to 6 times as much (20 s, 130 s, 722 s for K up to 3, 4 and 5). It
+is not a general speedup: spent launches multiply the
+states, and on a 3-system map the plain search (20 s) beat K = 4 (over 80 s).
+`--splits` adds sends down two lanes at once; it was not needed here.
+
+**Yesterday's puzzle (`2026-11-03`, 6 systems, heuristic).** The beam says 12 turns,
+7 lost (also at width 1500). Plans of up to 4 launch orders win on turn 10 with 10
+lost (K up to 3 took 33 s and found nothing; K = 4 found it): faster, for more ships.
+Nothing with 3 or fewer launches beats 12/7. **K = 5 (577 s, 2.1M order sets in its widest
+layer, 440k boards kept, no cap reached) finds nothing better than 10/10: no plan of up to
+5 launch orders wins sooner, or on turn 10 with fewer lost.** That is exact for those plans
+and says nothing about plans with six or more.
+
+**Strike candidates (`par_search.strike_sends`, on by default; `--no-strikes`).**
+The beam's candidates are bots' orders, all-in sends, holding and one-order
+variants, so a send sized to a target (6 of 10 ships) never appears. The new
+candidates step the board forward holding, with the rivals deciding for real, read
+what each target will hold when a fleet launched now lands, and offer sends in a
+band of `STRIKE_BAND` = 2 ships around it, plus pairs of sends from different
+systems (`PAIR_CAP`). The band is needed: a send changes what a rival does
+(rusherplus goes for the weakest neighbour), so the projection is a few ships off,
+and the first version, without it, offered 7 and 8 and never 6. On 2026-11-04's
+puzzle the beam alone stays at 11/3 up to width 1500; with the candidates it finds
+11/2 at widths 50 and 300 and 10/3 at 1500 (114 s). The ranking is the limit: a
+child is scored by how marshal or actuary would finish from it, and the 10-turn
+line scores badly until the turn-6 fight.
+
+**The blend (`tools/par_best.py`).** The three tools do different jobs, so it runs them in
+order and records how far to trust the answer. A beam (strike candidates on) gives a
+starting bound and is never what the answer rests on. Then launch-limited passes,
+K = 1..3 together and K by K after, each starting from the best bound so far, so each
+looks only for something strictly better and each finished pass is exact for its family.
+It stops when two passes in a row improve nothing, at `--max-k`, or when a pass ends
+unfinished (a time budget or the frontier cap). The report says `exact up to K`: no plan of
+at most K launch orders is better, which says nothing about plans with more. On the
+2026-11-04 puzzle: beam 11/2, K = 3 gives 10/3 (20 s), K = 4 confirms it (130 s). Each
+stage is appended to `results/par/best/<name>.jsonl` and a rerun repeats nothing; it takes
+`--daily FILE`, or deals days itself (`--days`, `--last N`) with the worker's `daily.make`,
+which is not guaranteed to be the posted map. Launch sizes default to every count
+(`--levels all`); on a 3-system map that was over 60 s a pass where `coarse` took 5.
+
+**Proving it (`par_best`'s proof stage, and 2026-11-02).** Once the first passes have set a
+tight bound, `par_best` tries the plain search over every order set (no launch limit),
+then again with two-lane sends, each under `--proof-budget` (a pass stops inside a layer
+when its time is spent, so it cannot overrun by a layer). If one finishes, the answer is
+optimal *within that model* and the K passes stop. 2026-11-02's puzzle (8 systems, heuristic,
+floor 6): the beam's 6/7 sits on the floor, so every later search only has to look for a turn-6
+win with fewer than 7 lost. The plain search finishes in 6.5 s and the two-lane one in 102 s,
+no cap reached: **6 turns, 7 lost is optimal** for one or two launches per system per turn.
+Not covered: three or more lanes from one system in a turn. On the 11-04 puzzle, where the
+beam is 4 turns over the floor, the same attempt does not finish (it ran out of its budget
+and the passes carried on).
+
+**Playing a line (`tools/par_show.py`).** `par_show.py results/par/best/<name>.best.json` replays a
+saved line through `replay.reconstruct` and prints the map, your orders by system name with the
+exact counts (and the turns to press End Turn with nothing sent), the rivals' orders in that line,
+and the board at the start of every turn, so the first turn a real game departs from the line is
+visible. A line only works while the rivals play the same; 2026-11-01's was played on the real
+map and they did (see the table below).
+
+**What `par_best` prints (2026-11-05).** After its table it gives each setup a verdict: whether
+the result is exact, the model it is exact in (the setup file as dealt, every launch size,
+one lane per system per turn, plans of at most K launch orders or every order set, no
+cap trimmed), what that leaves out, and the commands to run next to be surer, each with an
+estimate of its cost taken from the passes already run (the ratio between the last two, at
+least 2). The commands keep `--results-dir`, so a rerun resumes. It never says
+"optimal" on a pass that did not finish.
+
+**The puzzles so far** (all dealt locally, none compared with the posted map):
+
+| Day | Systems | Beam | Best | Rests on |
+| --- | --- | --- | --- | --- |
+| 11-01 | 6 | 12/9 (sandbox), 10/9 (laptop) | **10/9** | exact for plans of at most 6 launch orders. Laptop: K = 3 12 s, K = 4 70 s, K = 5 237 s, K = 6 241 s (8 workers); nothing beat 10/9. Sandbox, from the beam's 12/9: K = 3 95 s (nothing), K = 4 699 s (11/11), K = 5 1765 s (10/10); the full search did not finish in 300 s |
+| 11-02 | 8 | 6/7 | **6/7** | proved, with two-lane sends (6.5 s, 102 s) |
+| 11-03 | 6 | 12/7 | **10/10** | exact for plans of at most 5 launch orders (K = 4 found it) |
+| 11-04 | 5 | 11/3 | **10/3** | exact for plans of at most 5 launch orders (K = 3 found it) |
+| 11-05 | 6 | 5/3 | **5/3** | proved, with two-lane sends (1 s, 19 s) |
+
+What separates a board that proves from one that does not is the gap between the floor and
+the beam's line: on 11-02 and 11-05 the beam already sits on (or one turn off) the floor, so
+the search only looks for a win that is no later with fewer lost, and it finishes in seconds.
+The boards with a gap of four turns or more do not finish in any budget tried. The cost of
+one more launch order was 7 times (K = 3 to 4) and 2.5 times (K = 4 to 5) on 11-01, and 6 and
+5.5 times on 11-04, so the estimate in the verdict is rough.
+
+On 11-01 the answer depended on the machine: the beam is time-limited (90 s), so the sandbox's
+slower clock left it at 12/9 and the passes then climbed (K = 3 found nothing, K = 4 found 11/11,
+K = 5 found 10/10: a line that needs five launches, which a beam does not propose and a pass over
+fewer cannot reach), while a laptop about seven times faster had the beam land on 10/9 itself, and
+passes up to K = 6 then found nothing better. 10/9 is the best known and is exact only for plans of
+at most six launch orders. The line a person posted for that day (11/9) was a turn slower. **The 10/10 line was then played
+on the real map and reproduced it** (2026-11-05, by the author): five launches (11 ships
+Antinous to Zhang on turn 2, 3 more on turn 4, 11 on to Bajamar Star on turn 6, 5 on to Peacock on
+turn 7, 3 more on turn 8), against actuary, which sent 13 ships from Peacock on turn 3 and 3 more
+on turn 6 exactly as the search had it. So for that day the map dealt locally was the posted map,
+and a live actuary, which is time-budgeted, played as the search's unlimited-budget one did on
+the moves that mattered. It is one board; the other days' maps have not been checked. (The 10/9 line has not been played.)
+
+Still open: a bound that counts the ships a fight needs (the floor counts only
+travel).
+
+## Beyond K launches: openings and local search (2026-11-05)
+
+**The goal is fewest turns; ships lost only break a tie** (the author's ruling). Every
+verdict below is read that way.
+
+**Every human-played puzzle.** The live board's `daily_games` view lists nine puzzle days
+with human scores (2026-10-28 to 11-05). Each day's stored settings were read from
+`dailies` with the publishable key, and for 11-01 to 11-05 they equal the files in
+`tools/par_inputs/`. The best human replays came from `public_replays` (none was public for
+11-05; its 5/3 is the board's score).
+
+**What a winning human line looks like.** On 10-30 the best human line (10/9) has 12 launches
+and the passes had stopped at 11/7. Replayed against the live rivals with each launch dropped
+in turn, 7 launches are needed, 3 can go with no change, and 2 only cost a ship: 9 launches at
+least, more than any pass covers. Of its launches only 3 send part of a garrison; 8 of its 9
+relays send a whole one. Across 24 lines (the human bests and the search's own) 46 of 88
+attacks send a whole garrison, and the sized ones sit just above what the target holds.
+Two prunes that look safe are not: 16 of 42 sized sends do *not* beat the target's garrison
+at launch (a softening strike, then the capture: 4 vs 7 then 8 vs 6 on 11-03), and 29 of 88
+relays move *away* from the nearest rival system.
+
+**What did not work.**
+- *A launch budget that counts only partial sends* (whole-garrison sends free): it reaches the
+  human line's family, but each layer grows about 8 times and it did not reach turn 10.
+- *A tail search* (fix the first P turns of a good line, search the rest with every order
+  set): even from the human's own turn-6 board it ran out of time in layer 3, because every
+  send size from every system is millions of order sets a layer.
+- *An exhaustive search over a smaller move model* (the `strike` level: hold, whole garrison,
+  all but one or two, and sizes within 3 of the projected landing garrison, which covers 154 of
+  the 176 orders in those lines): it still grows about 20 times a layer and the floor, 4 turns
+  under the best line, prunes almost nothing. A capped frontier dropped the right boards.
+- *Local search over whole plans from nothing or from the beam's line* (`par_local`): about
+  1,200 plans a second, and it trims a line (14 launches to 8, 11/7 to 11/6), but it never
+  crossed from the beam's opening to the human's.
+
+**What did: search the openings (`tools/par_open.py`).** With the human's first three turns
+fixed, a beam (width 100, 40 s) finishes 10/10, and with five 10/9; with only turn 0 fixed it
+stays at 11/7. So the beam finishes well and the opening is what it misses: its ranking reads
+a board by how a bot would finish, which undervalues a sized strike on turn 2 whose payoff
+comes later. `par_open` enumerates every opening of `--depth` turns in the `strike` model
+(2,296 distinct boards at depth 3 on 10-30, the human's among them), finishes each with a cheap
+beam (width 30, 2 s), then redoes the best 100 with a wide one (width 100, 40 s). The cheap
+pass alone stays at 11/7 (the human's opening finishes 11/9 there); the refine found **10/8**
+in about six minutes on six cores, and `par_local` then trimmed it to **10/7** (5 launches).
+Both stages are in `par_best` now, after the first passes and the proof attempt, so a board
+that proves never pays for them, and the K passes after them start from the better bound.
+
+**Turn-first (`par_exhaustive --turn-only`, the default in `par_best`).** A pass looks only for
+a win on an earlier turn than the best so far, so every board that could at best tie the turn
+is dropped. It is exact for the turn and says nothing about ships lost at that turn
+(`par_best --tiebreak` runs one more pass for that). Side by side on 11-03, K = 4: 179 s for the
+full pass, 125 s turn-only; K = 5 251 s against 468 s. From the opening search's bounds 10-31
+went K = 3, 4, 5 in 28, 157 and 588 s (the full passes from the old bound took 73, 466 and
+1,484 s) and 10-30's K = 4 took 210 s against 888 s. From a loose bound it saves little, which
+is why the passes now run after the opening search.
+
+**Proofs only where they can finish (`--proof-gap`, default 2).** The full search proved the
+three days whose best line sat within a turn of the floor and spent its whole budget on the
+other six, so it is now tried only when the best line is at most two turns over the floor, and
+tried again if the opening or local search tightens the bound.
+
+**Checkpoints.** `par_exhaustive` saves its frontier after a layer once `--checkpoint-secs`
+(120 s) have passed, and a rerun resumes from it if the search's settings match; `par_best`
+keeps a cut-off pass's folder. A checkpoint from before an option was removed still loads while
+that option was at its default.
+
+**Every human-played puzzle, against the best human** (dealt locally; turns, then ships lost):
+
+| Day | Search | Best human | Rests on |
+| --- | --- | --- | --- |
+| 10-28 | **7/9** | 8/7 | sooner; exact up to K = 4 |
+| 10-29 | **6/7** | 7/6 | sooner; proved, with two-lane sends |
+| 10-30 | **10/7** | 10/9 | fewer lost; opening search + local search; no win before turn 10 up to K = 4 |
+| 10-31 | **11/5** | 17/5 | sooner; opening search + local search; no win before turn 11 up to K = 5 |
+| 11-01 | 10/9 | 10/9 | equal; exact up to K = 4 |
+| 11-02 | 6/7 | 6/7 | equal; proved, with two-lane sends |
+| 11-03 | 10/10 | 10/10 | equal; exact up to K = 5 |
+| 11-04 | 10/3 | 10/3 | equal; exact up to K = 5 |
+| 11-05 | 5/3 | 5/3 | equal; proved, with two-lane sends |
+
+The search matches or beats the best human on all nine. The opening and local stages found
+nothing on 10-28, 11-01 or 11-04. None of the new lines has been played on the real game.
+
 ## Next, if it goes further
 
-- **Search quality.** Rolling out with more than one bot is built ("The
-  rollout bot"). Next: wider beams, and candidates that aren't some bot's idea
-  (the maps where people still win sooner suggest these exist). Throwaway
-  orders no longer re-roll anything, so they are not worth searching.
+- **A stronger bound.** Neutral systems never move and their garrisons only grow, so reaching a
+  rival through neutrals means beating each garrison on the way; counting the ships that needs
+  against the ships you can have by turn T would close part of the 4-turn gap between the floor
+  and the best line. It must use the best-case combat ratio to stay sound.
+- **A relay as one decision.** Most launches in good lines forward a whole garrison; if setting
+  "forward everything from A to B" cost one launch however often it fires, those lines would
+  fit inside K = 5 or 6 and the exact claim would cover them.
+- **Cheaper openings.** Successive halving (0.5 s each, then 2 s for the best third, then the
+  wide beam for the best 100): on 10-30, 852 of 2,296 openings never won at all.
+- **Deterministic budgets.** The beam and the opening finishes are limited by time, so a slower
+  machine gets a different answer (11-01); a node budget would not.
 - **Cost.** Anything with knower as a rival wants its own time budget.
 
 ## A gap this exposes in `verify_scores`

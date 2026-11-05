@@ -584,6 +584,21 @@ def land_quick_post(ui: Ui, figures: tuple[int, int], status: str, body: str) ->
     ui.posted_key, ui.share_msg = summary
 
 
+def wants_par(state: GameState, ui: Ui) -> bool:
+    """Whether this win asks for the puzzle's par: a daily puzzle the player won
+    with every turn played by hand (a hint already takes it off the board,
+    ``Ui.can_post``)."""
+    return (ui.daily_kind == daily.PUZZLE and bool(ui.daily_day) and ui.can_post(state)
+            and ui.hand_turns >= state.turn)
+
+
+def land_par(ui: Ui, figures: tuple[int, int], status: str, body: str) -> None:
+    """Put the par's congratulation on the win overlay when the board says the
+    result ``figures`` met it; say nothing otherwise, failures included."""
+    par = daily.par_from_reply(body) if status == pbp.OK else None
+    ui.par_note = daily.par_note(par, *figures) if par is not None else ""
+
+
 def land_post_name(ui: Ui, status: str, body: str) -> None:
     """Put the signed-in player's claimed name on the quick post button, if the
     board answered one. Too late once a post has started: the answer it lands on
@@ -1571,6 +1586,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         # Read here, once the result is ours, never in `render`.
         ui.post_as = share.quick_post_name()
         ui.post_name_due = True
+        if not was_over and wants_par(state, ui):
+            ui.par_due = (state.turn, state.players[ui.human_id].ships_lost)
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
     if ui.in_pbp and not ui.spectating:
@@ -2085,6 +2102,8 @@ async def main() -> None:
     pending_post: tuple[Ui, pbp.Request, tuple[int, int]] | None = None
     # The signed-in name a decided game's quick post asked for, and its Ui.
     pending_name: tuple[Ui, pbp.Request] | None = None
+    # A won puzzle's par check: the Ui it reports to, the request, and the result asked about.
+    pending_par: tuple[Ui, pbp.Request, tuple[int, int]] | None = None
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         asked = daily.link(webstore.url_token())
         if asked is not None:
@@ -2155,6 +2174,15 @@ async def main() -> None:
             if nstate != pbp.PENDING:
                 land_post_name(pending_name[0], nstate, nbody)
                 pending_name = None
+        if ui is not None and ui.par_due is not None:
+            figures, ui.par_due = ui.par_due, None
+            asked = daily.par_check(ui.daily_day, *figures)
+            pending_par = None if asked is None else (ui, asked, figures)
+        if pending_par is not None:
+            rstate, rbody = pending_par[1].poll()
+            if rstate != pbp.PENDING:
+                land_par(pending_par[0], pending_par[2], rstate, rbody)
+                pending_par = None
         if pending_post is not None:
             pstate, pbody = pending_post[1].poll()
             if pstate != pbp.PENDING:

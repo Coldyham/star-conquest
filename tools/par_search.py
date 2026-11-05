@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import copy
 import heapq
+import itertools
 import math
 import random
 import sys
@@ -233,11 +234,72 @@ def _lane_sends(state: GameState, me: int, every_count: bool) -> Iterator[Order]
                     yield Order(me, s.id, nbr, n)
 
 
+STRIKE_REACH = 6   # turns of holding looked ahead, at most
+STRIKE_BAND = 2    # ships either side of the projected garrison that are tried
+PAIR_CAP = 60      # two-system order sets added per board
+
+
+def strike_sends(state: GameState, me: int, band: int = STRIKE_BAND) -> list[list[Order]]:
+    """Sends sized to the garrison their target will hold when they land.
+
+    The rivals' moves are not a guess: hold ``state`` forward (``step`` with no
+    orders, every rival deciding as it will) and read each target off the board
+    on the turn before a fleet launched now would land. A rival that empties a
+    system this turn, or loses a fight on the way, shows up as a small garrison,
+    which a bot's all-in send and a bot's own pricing (it reads the garrison
+    *now*) both miss. For each lane to a system that is not ``me``'s, the sizes
+    run from ``STRIKE_BAND`` under the garrison to ``STRIKE_BAND`` over its
+    break-even multiple (`combat.edge_attacking`), those under the source's
+    garrison (all-in is `_lane_sends`'). Also one set that sends the smallest of
+    these down every source's best lane at once. Meant for the beam's
+    candidates, not a rule: nothing here is exact."""
+    lanes: list[tuple[int, int, int]] = []
+    for s in state.systems.values():
+        if s.owner_id == me and s.ships > 0:
+            for nbr in s.neighbors:
+                turns = state.travel_turns(s.id, nbr)
+                if turns is not None and state.systems[nbr].owner_id != me:
+                    lanes.append((s.id, nbr, min(turns, STRIKE_REACH)))
+    if not lanes:
+        return []
+    futures = [state]
+    for _ in range(max(turns for _, _, turns in lanes) - 1):
+        nxt = clone(futures[-1])
+        if nxt.winner is not None:
+            break
+        step(nxt, [])
+        futures.append(nxt)
+    edge = combat.edge_attacking()
+    out: list[list[Order]] = []
+    smallest: dict[tuple[int, int], int] = {}
+    for src, dst, turns in lanes:
+        board = futures[min(turns, len(futures)) - 1]
+        if board.systems[dst].owner_id == me:
+            continue
+        held = combat.garrison_after(board, dst, 1)
+        have = state.systems[src].ships
+        # A band, not a point: the hold-forward cannot see how a rival answers the
+        # send itself (rusherplus goes for the weakest neighbour, and a send
+        # leaves the source weaker), so the garrison it finds is a few ships out.
+        for n in range(max(1, held - band), math.ceil(held * edge) + band + 1):
+            if 1 <= n < have:
+                out.append([Order(me, src, dst, n)])
+                smallest.setdefault((src, dst), n)
+    best_per_source: dict[int, tuple[int, int]] = {}
+    for (src, dst), n in smallest.items():
+        if src not in best_per_source or n < best_per_source[src][1]:
+            best_per_source[src] = (dst, n)
+    if len(best_per_source) > 1:
+        out.append([Order(me, src, dst, n) for src, (dst, n) in best_per_source.items()])
+    return out
+
+
 def candidates(state: GameState, me: int, names: tuple[str, ...] = CANDIDATES,
-               every_count: bool = False) -> list[list[Order]]:
+               every_count: bool = False, strikes: bool = True) -> list[list[Order]]:
     """Distinct order sets worth trying for ``me`` this turn: each borrowed bot's,
-    each sent all-in, holding, one launch down each lane (`_lane_sends`), and the
-    first bot's with one strike dropped."""
+    each sent all-in, holding, one launch down each lane (`_lane_sends`), the
+    first bot's with one strike dropped, and (``strikes``) sends sized to what each
+    target will hold when they land (`strike_sends`)."""
     found: list[list[Order]] = []
     seen: set[tuple] = set()
 
@@ -259,9 +321,21 @@ def candidates(state: GameState, me: int, names: tuple[str, ...] = CANDIDATES,
     for order in _lane_sends(state, me, every_count):
         add([order])
     if first:
-        strikes = [o for o in first if state.systems[o.dest_id].owner_id != me]
-        for o in strikes[:DROP_ONE_CAP]:
+        hostile = [o for o in first if state.systems[o.dest_id].owner_id != me]
+        for o in hostile[:DROP_ONE_CAP]:
             add([x for x in first if x is not o])
+    if strikes:
+        sized = strike_sends(state, me)
+        for orders in sized:
+            add(orders)
+        # Two systems launching at once, as a plan often does (a wave, and the
+        # survivors of the last one passed on): pairs of single sends.
+        singles = [[o] for o in _lane_sends(state, me, every_count)] + [s for s in sized if len(s) == 1]
+        pairs = 0
+        for a, b in itertools.combinations(singles, 2):
+            if a[0].source_id != b[0].source_id and pairs < PAIR_CAP:
+                add(a + b)
+                pairs += 1
     return found
 
 
@@ -322,7 +396,7 @@ class Search:
                  budget: float = 600.0, max_turns: int = MAX_TURNS,
                  verbose: bool = False,
                  strategies: dict[int, str] | None = None,
-                 every_count: bool = False) -> None:
+                 every_count: bool = False, strikes: bool = True) -> None:
         self.cfg, self.seed = cfg, seed
         self.root = build_state(cfg, seed)
         for pid, name in (strategies or {}).items():
@@ -335,7 +409,7 @@ class Search:
         self.me = human.id
         self.dice, self.width, self.names, self.policies = dice, width, names, policies
         self.budget, self.max_turns, self.verbose = budget, max_turns, verbose
-        self.every_count = every_count
+        self.every_count, self.strikes = every_count, strikes
         self.best = Best()
         self.stats = Stats()
         self.started = 0.0
@@ -372,7 +446,7 @@ class Search:
 
     def expand(self, node: Node) -> Iterator[Node]:
         self.stats.expanded += 1
-        for orders in candidates(node.board, self.me, self.names, self.every_count):
+        for orders in candidates(node.board, self.me, self.names, self.every_count, self.strikes):
             board = clone(node.board)
             record = step(board, orders)
             yield Node(board, node, record)
@@ -547,6 +621,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--max-turns", type=int, default=MAX_TURNS)
     ap.add_argument("--every-count", action="store_true",
                     help="try every size of launch down each lane, not only all-in")
+    ap.add_argument("--no-strikes", action="store_true",
+                    help="leave out the sends sized to the garrison their target will hold on landing")
     ap.add_argument("--out", help="save the best line as a game log here")
     ap.add_argument("--verbose", action="store_true")
     return ap.parse_args(argv)
@@ -560,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     search = Search(cfg, seed, dice=args.dice, width=args.width,
                     names=tuple(args.candidates), policies=tuple(args.policy), budget=args.budget,
                     max_turns=args.max_turns, verbose=args.verbose,
-                    strategies=strategies, every_count=args.every_count)
+                    strategies=strategies, every_count=args.every_count, strikes=not args.no_strikes)
     rivals = [search.root.players[p].ai_strategy for p in sorted(rivals_of(search.root, search.me))]
     root_floor = floor(search.root, search.me)
     print(f"setup: {cfg.mode}, {len(search.root.systems)} systems, {cfg.players} players, "

@@ -3212,6 +3212,35 @@ def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeyp
     assert ms.status == "There's no daily puzzle for that day"
 
 
+def test_a_puzzle_won_by_hand_asks_for_its_par_and_only_a_match_is_congratulated(_gauntlet_store):
+    settings = Settings.from_dict(PUZZLE_SETUP)
+    main.daily.remember("2026-10-28", settings, "puzzle")
+    state = build_state(settings, settings.seed)
+    ui = main.new_ui(state, False, settings)
+    for system in state.systems.values():   # the rival has nothing left: this turn wins
+        if system.owner_id not in (0, ui.human_id):
+            system.owner_id = 0
+    main.resolve_turn(state, ui, settings=settings)
+    assert state.winner == ui.human_id
+    figures = (state.turn, state.players[ui.human_id].ships_lost)
+    assert ui.par_due == figures
+
+    met = json.dumps({"par": {"turns": figures[0], "lost": figures[1], "status": "likely"}})
+    main.land_par(ui, figures, main.pbp.OK, met)
+    assert ui.par_note.startswith("Par!")
+    for status, body in ((main.pbp.OK, json.dumps({"par": None})), ("error", met), (main.pbp.OK, "<html>")):
+        main.land_par(ui, figures, status, body)
+        assert ui.par_note == ""
+
+    # Not a puzzle, a hinted game, or one partly autoplayed: no par is asked for.
+    ui.daily_kind = "board"
+    assert not main.wants_par(state, ui)
+    ui.daily_kind, ui.hinted = "puzzle", True
+    assert not main.wants_par(state, ui)
+    ui.hinted, ui.hand_turns = False, 0
+    assert not main.wants_par(state, ui)
+
+
 @pytest.mark.parametrize("state,body,msg", [
     ("missing", '{"error": "no daily"}', "DAILY_MISSING_MSG"),
     ("error", "", "DAILY_UNREACHABLE_MSG"),

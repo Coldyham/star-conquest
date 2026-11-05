@@ -855,6 +855,14 @@ test bot within a turn cap that grows from 80 to 110.
   board, the game opens it with the menu's Daily ▸ Daily puzzle or `#puzzle` /
   `#puzzle=<day>` (`/api/daily?kind=puzzle`), and it has its own embargo,
   standings, streaks and badges.
+- **The puzzle's par** (`puzzle_pars`, written by `tools/puzzle_par.py` on the
+  worker's `puzzle-par` job): the best score the par tools found, proved or
+  likely. Nobody reads the table; `/api/daily?day=…&kind=puzzle&turns=T&lost=L`
+  asks `sc_puzzle_par`, which answers the par only to a result that matches or
+  beats it, so the game congratulates only that player. The puzzle page and the
+  map page show the same line to a signed-in player whose own posted score met
+  it (`sc_my_puzzle_par`, `post.mjs`'s `ownPar`). Tests:
+  `tests/test_puzzle_par_sql.py`, `tests/daily.test.mjs`.
 
 ## Badges
 

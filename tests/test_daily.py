@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 
 import pytest
 
@@ -246,3 +247,54 @@ def test_a_puzzle_result_names_its_opponent():
                                         f" vs {name}")
         assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#puzzle")
         assert game_daily.label("2026-10-28", s, "puzzle").endswith(f"vs {name}")
+
+
+# --------------------------------------------------------------------------- #
+# The puzzle's par
+# --------------------------------------------------------------------------- #
+def test_a_par_check_asks_about_the_result(monkeypatch):
+    asked = []
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_url", lambda path: "https://x" + path)
+    monkeypatch.setattr(game_daily.pbp, "request", lambda url: asked.append(url) or url)
+    game_daily.par_check("2026-11-04", 10, 3)
+    assert asked == ["https://x/api/daily?day=2026-11-04&kind=puzzle&turns=10&lost=3"]
+    assert game_daily.par_check("soon", 10, 3) is None
+    assert game_daily.par_check("2026-11-04", 0, 3) is None
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_url", lambda path: "")
+    assert game_daily.par_check("2026-11-04", 10, 3) is None
+
+
+def test_a_par_reply_is_read_only_when_it_names_the_par():
+    reply = {"day": "2026-11-04", "kind": "puzzle",
+             "par": {"turns": 10, "lost": 3, "status": "proved", "turns_only": True, "beaten": False}}
+    assert game_daily.par_from_reply(json.dumps(reply)) == game_daily.Par(10, 3, True, True)
+    likely = dict(reply, par={"turns": 10, "lost": 3, "status": "likely"})
+    assert game_daily.par_from_reply(json.dumps(likely)) == game_daily.Par(10, 3, False, False)
+    for bad in ("", "nope", json.dumps({"par": None}), json.dumps({"par": {"turns": "10", "lost": 3}}),
+                json.dumps({"par": {"turns": True, "lost": 3}}), json.dumps([1])):
+        assert game_daily.par_from_reply(bad) is None
+
+
+def test_the_congratulation_is_only_for_a_result_that_met_the_par():
+    proved, likely = game_daily.Par(10, 3, True, False), game_daily.Par(10, 3, False, False)
+    assert game_daily.par_note(proved, 10, 3).startswith("Perfect puzzle!")
+    assert "proven the fastest" in game_daily.par_note(game_daily.Par(10, 3, True, True), 10, 3)
+    assert game_daily.par_note(likely, 10, 3).startswith("Par!")
+    assert game_daily.par_note(likely, 9, 8).startswith("Beyond par! You won faster")
+    assert game_daily.par_note(proved, 10, 2).startswith("Beyond par! The par's 10 turns")
+    assert game_daily.par_note(likely, 10, 4) == ""
+    assert game_daily.par_note(likely, 11, 0) == ""
+
+
+def test_the_board_says_it_in_the_games_words():
+    """`leaderboard/js/daily.mjs`'s `parNote` mirrors `par_note`: every sentence
+    the game can say is in the board's file, and the JS test pins the same cases."""
+    js = (Path(__file__).resolve().parent.parent / "leaderboard" / "js" / "daily.mjs").read_text()
+    cases = [(game_daily.Par(10, 3, True, False), 10, 3), (game_daily.Par(10, 3, True, True), 10, 3),
+             (game_daily.Par(10, 3, False, False), 10, 3), (game_daily.Par(10, 3, False, False), 9, 8),
+             (game_daily.Par(10, 3, True, False), 10, 2)]
+    tests = (Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "daily.test.mjs").read_text()
+    for par, turns, lost in cases:
+        text = game_daily.par_note(par, turns, lost)
+        assert f'"{text}"' in tests, text
+        assert text.split("!")[0] + "!" in js

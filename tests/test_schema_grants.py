@@ -84,6 +84,8 @@ def _function_uses() -> set[tuple[str, str]]:
         text = path.read_text()
         for pattern in (r"/rest/v1/(\w+)", r"""call\(\s*[`"']/(\w+)"""):
             for match in re.finditer(pattern, text):
+                if match.group(1) == "rpc":     # a function call: `test_every_rpc_…`
+                    continue
                 window = text[match.start(): match.start() + 400]
                 if '"PATCH"' in window:
                     privilege = "update"
@@ -105,6 +107,21 @@ def test_the_schema_grants_everything_the_worker_reads_and_writes():
         + ". A secret key bypasses RLS but not GRANT, so these fail outright — and"
         " only for the worker, which is why nothing on the site would show it.")
 
+
+
+def test_every_rpc_a_function_calls_is_granted_execute():
+    """A Netlify function's `/rest/v1/rpc/<fn>` call needs `execute` on it for some
+    role the functions hold: anon (the publishable key) or service_role."""
+    called = set()
+    for path in sorted(FUNCTIONS.glob("*.mjs")):
+        called.update(re.findall(r"/rest/v1/rpc/(\w+)", path.read_text()))
+    grants = re.findall(r"^grant\s+execute\s+on\s+function\s+(.+?)\s+to\s+([\w,\s]+);",
+                        SCHEMA.read_text(), re.MULTILINE | re.DOTALL)
+    granted = {re.sub(r"\(.*", "", fn.strip()).removeprefix("public.")
+               for fns, roles in grants if {"anon", "service_role"} & {r.strip() for r in roles.split(",")}
+               for fn in re.split(r",\s*(?=public\.)", fns)}
+    assert called, "no rpc calls found: has the pattern moved?"
+    assert called <= granted, f"no execute grant for: {sorted(called - granted)}"
 
 
 def _public_uses() -> set[str]:

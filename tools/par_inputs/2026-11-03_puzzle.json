@@ -1,0 +1,159 @@
+{
+ "day": "2026-11-03",
+ "kind": "puzzle",
+ "settings": {
+  "mode": "random",
+  "players": 2,
+  "nodes": 6,
+  "seed": 20826981,
+  "node_jitter": 0.8,
+  "relax_min_sep_frac": 0.45,
+  "lloyd_passes": 0,
+  "extra_edge_fraction": 0.95,
+  "max_edge_length_frac": 0.55,
+  "ship_ly_per_turn": 19.5,
+  "home_start_ships": 11,
+  "garrison_base": 4,
+  "garrison_k": 10,
+  "combat_jitter": 0.06,
+  "defender_advantage": 1.1,
+  "ai": [
+   {
+    "reserve_fraction": 0.25,
+    "reserve_floor": 2,
+    "expand_margin": 1.3,
+    "attack_margin": 1.5,
+    "reinforce_margin": 2,
+    "aux": 1.0
+   },
+   {
+    "reserve_fraction": 0.0,
+    "reserve_floor": 0,
+    "expand_margin": 1.3,
+    "attack_margin": 1.5,
+    "reinforce_margin": 2,
+    "aux": 1.0
+   }
+  ]
+ },
+ "spec": {
+  "stages": 1,
+  "roll": false,
+  "rules": {
+   "mode": {
+    "fix": "random"
+   },
+   "fog": {
+    "fix": false
+   },
+   "players": {
+    "fix": 2
+   },
+   "systems": {
+    "range": [
+     5,
+     8
+    ]
+   },
+   "node_jitter": {
+    "range": [
+     0.3,
+     1.0
+    ]
+   },
+   "relax_min_sep_frac": {
+    "range": [
+     0.3,
+     1.2
+    ]
+   },
+   "lloyd_passes": {
+    "range": [
+     0,
+     2
+    ]
+   },
+   "extra_edge_fraction": {
+    "range": [
+     0.4,
+     1.0
+    ]
+   },
+   "max_edge_length_frac": {
+    "range": [
+     0.5,
+     1.0
+    ]
+   },
+   "ship_ly_per_turn": {
+    "range": [
+     15.0,
+     20.0
+    ]
+   },
+   "ship_speed_growth_pct": {
+    "fix": 0.0
+   },
+   "home_start_ships": {
+    "range": [
+     10,
+     14
+    ]
+   },
+   "home_production": {
+    "range": [
+     1,
+     4
+    ]
+   },
+   "garrison_base": {
+    "range": [
+     2,
+     4
+    ]
+   },
+   "garrison_k": {
+    "range": [
+     9,
+     14
+    ]
+   },
+   "garrison_jitter": {
+    "range": [
+     2,
+     4
+    ]
+   },
+   "combat_jitter": {
+    "range": [
+     0.04,
+     0.1
+    ]
+   },
+   "defender_advantage": {
+    "range": [
+     1.0,
+     1.1
+    ]
+   }
+  },
+  "opponents": {
+   "in": [
+    "heuristic"
+   ]
+  },
+  "candidate": 0,
+  "turn_cap": 60,
+  "opponent": "heuristic+lean"
+ },
+ "probes": [
+  {
+   "bot": "heuristic+lean",
+   "won": true,
+   "turns": 20,
+   "lost": 9,
+   "timed_out": false
+  }
+ ],
+ "rules_version": 2
+}

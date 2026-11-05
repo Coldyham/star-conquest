@@ -138,3 +138,26 @@ def test_lane_sends_offer_all_in_or_every_count():
         assert sends == {(nbr, home.ships) for nbr in home.neighbors}
         every = {(o.dest_id, o.ships) for o in par_search._lane_sends(state, human.id, True)}
         assert every == {(nbr, n) for nbr in home.neighbors for n in range(1, home.ships + 1)}
+
+
+def test_strike_sends_size_a_send_to_what_the_target_will_hold():
+    """On 2026-11-04's puzzle at turn 2 rusherplus's 9 ships are one turn from taking
+    Dust-Ball, so the target holds about 6 when a fleet sent now lands, not the 7
+    it holds today. The sizes come from stepping the board forward with the rival
+    deciding, and run a band around that garrison, so the 6 a person sent is there."""
+    import json
+    from pathlib import Path
+
+    data = json.loads((Path(par_search.ROOT) / "tools" / "par_inputs" / "2026-11-04_puzzle.json").read_text())
+    cfg = Settings.from_dict(data["settings"])
+    board = build_state(cfg, cfg.seed)
+    me = board.human().id
+    for _ in range(2):
+        par_search.step(board, [])
+    sends = {(o.source_id, o.dest_id, o.ships) for orders in par_search.strike_sends(board, me) for o in orders}
+    assert (0, 4, 6) in sends
+    assert all(n < board.systems[s].ships for s, _, n in sends)   # all-in is `_lane_sends`'
+    offered = par_search.candidates(board, me, names=("marshal",))
+    none = par_search.candidates(board, me, names=("marshal",), strikes=False)
+    assert any(len(s) == 1 and (s[0].source_id, s[0].dest_id, s[0].ships) == (0, 4, 6) for s in offered)
+    assert not any(len(s) == 1 and (s[0].source_id, s[0].dest_id, s[0].ships) == (0, 4, 6) for s in none)
