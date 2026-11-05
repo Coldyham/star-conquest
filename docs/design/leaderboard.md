@@ -785,28 +785,54 @@ in [`campaign.md`](campaign.md).
 
 ## Claimed names
 
-One Google account may own one name, and only that account can then post under
-it: scores, which also covers campaign moves, and play-by-post seat names.
+One account may own one name, and only that account can then post under it:
+scores, which also covers campaign moves, and play-by-post seat names. An
+account is a private login and a password (Google sign-in until 2026-11-05).
 Signing in is optional. Every unclaimed name works exactly as before, and that
 includes every name that existed before claiming did. Rules are in `CLAUDE.md`;
 this section gives the reasons.
 
-**Why Supabase Auth with Google.**
+**Why Supabase Auth.**
 - The board already runs on Supabase, so the session it issues is what RLS
   reads (`auth.uid()`). The database enforces the claim for the plain PostgREST
   inserts `submit.mjs` makes, with no function in front of them.
-- The Google client secret lives in Supabase's dashboard. No new Netlify
-  variable means nothing new for a fork's deploy preview to reach, so the
-  "Require approval" policy stays as it is.
-- `auth.mjs` runs the PKCE flow over plain fetch, on the same reasoning as
-  `api.mjs` loading no client library. PKCE rather than the implicit flow keeps
-  the token out of the address bar and history.
-- Compared on 2026-11-04 for the lightest option. Email one-time codes are
-  about as little code, but sending them needs an email provider (Supabase's
-  built-in mailer is for testing). Passkeys were a Supabase beta (opt-in API,
-  liable to change), and they still need a first sign-in and a recovery route.
-  Every method gives the same Supabase account, so either can be added beside
-  Google later with nothing changed in the database.
+- Nothing about it lives on Netlify, so there is nothing new for a fork's
+  deploy preview to reach, and the "Require approval" policy stays as it is.
+- `auth.mjs` talks to it over plain fetch, on the same reasoning as `api.mjs`
+  loading no client library.
+- Every sign-in method gives the same kind of account, so changing the method
+  touched only `auth.mjs`, the account page and `admin.py`, never the database.
+
+**Why a login and password, not Google (2026-11-05).**
+- It holds the least about a person: no email, no real name, no Google account
+  id, and no third party in the sign-in. That is what let the privacy notice
+  drop its age limit and its Google section.
+- It needs nothing set up: no OAuth client, and no email provider, since
+  nothing is ever sent.
+- The cost is that a forgotten password is a message to the owner
+  (`admin.py set-password`), and that an account is free to make, so an unused
+  name is free to squat. Supabase limits sign-ups per IP address; a captcha
+  (Turnstile) is the next step if squatting is ever seen.
+- Compared on 2026-11-04 and 2026-11-05: Google (kept the data above, and the
+  13+ limit), email one-time codes (need an email provider; Supabase's built-in
+  mailer is for testing), passkeys (a Supabase beta API, liable to change, and
+  still needing a first sign-in and a recovery route), and Cloudflare Access or
+  a hosted sign-in box such as Auth0 or Clerk (Access gates whole pages, caps
+  free users and issues its own token that RLS cannot read; a hosted box loads
+  a third-party script and adds a processor).
+
+**Why the login is stored only as a hash.**
+- Supabase needs an email for a password account. `accountEmail` gives it the
+  first 40 hex digits of SHA-256 of the folded login at `ACCOUNT_DOMAIN`, an
+  address that receives nothing. Email confirmation is off, so no mail is ever
+  sent.
+- A login may be any text, an email address included, and the site never holds
+  it. The browser keeps it in the session only to say who is signed in.
+- `admin.py`'s `account_email` makes the same address from the login a person
+  tells the owner (`test_leaderboard_sync`). `ACCOUNT_DOMAIN` can never change:
+  every account's address ends in it.
+- Unsalted, so whoever can read Supabase Auth could test a guessed login
+  against it. That is the project's owner, who could read a plain login anyway.
 
 **Why only an unused name can be claimed by its claimant.**
 - A name with scores behind it was typed by somebody, and nothing on the site
@@ -815,11 +841,11 @@ this section gives the reasons.
   that failed after `ensureUser`). The test is a query, so there is no flag to
   keep in step.
 - Names that are in use go through `tools/admin.py assign-name`, judged by the
-  owner. It needs the account to exist (the person signs in once), so no
-  pending-by-email state is ever stored.
+  owner. It needs the account to exist (the person makes it first), so no
+  pending state is ever stored.
 
 **Folding several names into one.**
-- `assign-name NAME EMAIL --fold OLD…` moves each old name's scores and tags
+- `assign-name NAME LOGIN --fold OLD…` moves each old name's scores and tags
   onto the kept row, then deletes the old rows.
 - The folded names are freed rather than kept as aliases. Aliases would need a
   table and a lookup in `submit.mjs`, `pbp.mjs`, `sc_may_use_user` and the
@@ -886,6 +912,8 @@ the same sentence as a backstop.
   that has scores.
 - Storing a pending email for `assign-name`: it would put an email on a row,
   and buys only skipping one sign-in.
+- Google sign-in, as the only way in (built, then replaced 2026-11-05): see
+  "Why a login and password, not Google".
 - Checking a JWT's signature inside `pbp.mjs`: it would need the project's JWT
   secret in Netlify.
 - Keeping folded names as aliases of the kept one: freed instead (see

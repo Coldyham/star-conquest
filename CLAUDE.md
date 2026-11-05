@@ -260,9 +260,10 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   sensitive-variable policy stays on "Require approval". Board pages are
   Jinja2 templates on `leaderboard/templates/base.html` (`tools/render_board.py`,
   whose `PAGES` is the servable allow-list); shared chrome goes in the base.
-- **A claimed name is its owner's alone.** Signing in with Google is optional
-  (`leaderboard/js/auth.mjs`); only the owner posts, tags or names a pbp seat
-  under it (`sc_may_use_user`, `pbp.mjs` `nameAllowed`). `claim_name` takes only
+- **A claimed name is its owner's alone.** An account (a private login and
+  password, held only as a hash, `leaderboard/js/auth.mjs`) is optional; only
+  the owner posts, tags or names a pbp seat under it (`sc_may_use_user`,
+  `pbp.mjs` `nameAllowed`). `claim_name` takes only
   an unused name; a used one goes through `admin.py assign-name`. `users.owner`
   is never public: `users` is granted by column.
 

@@ -13,8 +13,8 @@ tables serve are explained in [`leaderboard.md`](leaderboard.md) and
 No accounts needed. Anyone may read nearly everything and insert a user, a
 game or a score. The public can never update or delete. Scores are
 append-only, and "the best score" is a query, never a row that gets
-overwritten. The one exception is opt-in: a person signed in with Google
-(Supabase Auth) may claim one name nobody has used (`claim_name`), or the
+overwritten. The one exception is opt-in: a person signed in
+(Supabase Auth, a private login and a password) may claim one name nobody has used (`claim_name`), or the
 owner assigns them one that is in use (`tools/admin.py assign-name`), and then
 only they post under it (`leaderboard.md`, "Claimed names").
 

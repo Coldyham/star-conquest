@@ -378,8 +378,9 @@ already resolve simultaneously. The rationale for each rule is in
   `tools/render_board.py` (whose `PAGES` is the servable allow-list); put shared
   chrome in the base, never back into a page. Detail:
   `docs/design/leaderboard.md`.
-- **A claimed name is its owner's alone.** One name per Google account
-  (Supabase Auth, `leaderboard/js/auth.mjs`, PKCE over plain fetch). Only the
+- **A claimed name is its owner's alone.** One name per account
+  (Supabase Auth, `leaderboard/js/auth.mjs`: a private login and a password,
+  over plain fetch; the login is held only as a hash, `accountEmail`). Only the
   owner may post a score or tag (`schema.sql`'s `sc_may_use_user` on the
   insert policies) or name a pbp seat (`pbp.mjs` `nameAllowed`) under it.
   `claim_name` is the only self-service writer, and only for an unused name. A
