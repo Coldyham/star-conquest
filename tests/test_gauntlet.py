@@ -375,20 +375,42 @@ def test_the_tutorial_hides_a_bonus_stage_behind_the_hunt():
     72 lost, met, not beaten), the tutorial's last stage reveals a bonus one."""
     g = _tutorial()
     hunt = next(s for s in g.stages if s.title == "The hunt")
-    bonus = g.stages[-1]
+    bonus = next(s for s in g.stages if s.title == "Long odds")
     assert gauntlet.lane_label(g, hunt.id, bonus.id) == gauntlet.BONUS
     assert g.lane_targets[(hunt.id, bonus.id)] == gauntlet.Target(turns=86, lost=72)
-    assert g.hidden_stages() == {bonus.id} and gauntlet.goals(g) == {hunt.id}
-    assert gauntlet.chain(g) == [s.id for s in g.stages[:-1]]
-    assert gauntlet.place(g, hunt.id) == f"{len(g.stages) - 1}/{len(g.stages) - 1}"
+    after = next(s for s in g.stages if s.title == "No way out")
+    assert g.hidden_stages() == {bonus.id, after.id} and gauntlet.goals(g) == {hunt.id}
+    main = [s for s in g.stages if s.id not in (bonus.id, after.id)]
+    assert gauntlet.chain(g) == [s.id for s in main]
+    assert gauntlet.place(g, hunt.id) == f"{len(main)}/{len(main)}"
     cfg = gauntlet.stage_settings(bonus)
     assert cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
     shown = lambda: [s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))]
-    for stage in g.stages[:-1]:
+    for stage in main:
         _score(stage, 87, 0)
     assert bonus.id not in shown()
     _score(hunt, 86, 72)
     assert bonus.id in shown() and bonus.id in gauntlet.open_stages(g)
+    assert after.id not in shown()
+
+
+def test_beating_actuary_on_long_odds_reveals_one_more_stage():
+    """Black-box actuary (Field) in the human seat won Long odds in 211 turns /
+    195 lost, the only bot win there; beating it, not meeting it, opens the next."""
+    g = _tutorial()
+    bonus = next(s for s in g.stages if s.title == "Long odds")
+    after = next(s for s in g.stages if s.title == "No way out")
+    assert g.lane_targets[(bonus.id, after.id)] == gauntlet.Target(turns=211, lost=195, bot="actuary", beat=True)
+    assert gauntlet.lane_label(g, bonus.id, after.id) == gauntlet.BONUS
+    assert gauntlet.place(g, after.id) == "bonus"
+    cfg = gauntlet.stage_settings(after)
+    assert cfg.seed == 1705 and cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
+    assert [cfg.ai[i].aux for i in (2, 3)] == [3.0, 3.0]
+    shown = lambda: {s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))}
+    _score(bonus, 211, 195)
+    assert after.id not in shown()
+    _score(bonus, 211, 194)
+    assert after.id in shown()
 
 
 def test_next_stage_is_offered_when_replaying_a_cleared_stage():

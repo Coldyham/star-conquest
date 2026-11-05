@@ -59,7 +59,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## gauntlet.md
 - gauntlet.md · **The tutorial ladder.** Data, never `Settings`; progress from `webstore.best`; `menu.active_stage`; the stash and Leave tutorial; `gauntlet.next_stage`; the briefing card and `HINT_MAX`.
-- gauntlet.md · *The stages:* the ten, how their seeds were picked (`tools/gauntlet_check.py`), and the hidden bonus stage behind The hunt (86 turns / 72 lost).
+- gauntlet.md · *The stages:* the ten, how their seeds were picked (`tools/gauntlet_check.py`), and the hidden bonus stages behind The hunt (86 turns / 72 lost) and Long odds (beat actuary's black-box 211 / 195).
 - gauntlet.md · **The file format.** `stages`/`lanes`/`start`, one-way lanes unless `two_way`, a lane's target and `hidden`, reachability (`gauntlet.problems`, `checkBody`), text limits, `to_dict`, user gauntlets.
 - gauntlet.md · **Gauntlets made on the board.** `/api/gauntlet`, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, `gauntlet.remember`, `#gauntlet=`, remixing, admin listing.
 - gauntlet.md · **Relation to the weekly campaign.** Uncontested, so no server; graph and bordering rule shared in spirit; gauntlet lanes run one way.

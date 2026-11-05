@@ -105,6 +105,7 @@ so the card can always be brought back.
 | 9 | Marshal | one of the strongest bots | marshal |
 | 10 | The hunt | actuary at its strongest stop, Hunt | actuary · Hunt |
 | 11 | Long odds (hidden bonus) | an unfair start, opened by a hidden lane from The hunt | marshal, knower · Search, actuary · Hunt |
+| 12 | No way out (hidden bonus) | a worse start, opened by beating the best bot on Long odds | marshal, knower · Council, actuary · Hunt |
 
 **The bonus stage** (added 2026-11-05) is reached only by a hidden lane from
 The hunt, gated at the best human score on The hunt's setup on the board that
@@ -114,6 +115,19 @@ at Hunt. You start 7 turns from actuary and 10 from marshal, while knower sits
 17 or more from everyone. It isn't listed, numbered or counted until the lane
 opens (`gauntlet.shown`, `gauntlet.place`), and it isn't on the tutorial's
 path, so it never joins a run (`gauntlet.chain`).
+
+**No way out** (added the same day) is behind a hidden lane from Long odds,
+gated at the best bot's win there, to beat: **actuary, 211 turns / 195 lost**.
+It is the only bot win on Long odds, and it counts only played as a *black
+box*: the seat stays flagged human, so knower models it as it would a person
+rather than reading its orders. Measured that way, actuary at Field (aux 1)
+wins and actuary at Hunt loses (turn 243). Played the board's way
+(`tools/bot_replay.py`, which hands the seat over so knower reads it exactly,
+`tests/sim.py` `_hand_over`), every roster bot loses Long odds, so a bot column
+there would set no target. The map is Long odds' knobs on seed 1705, picked from
+5,000 seeds for a worse start: actuary 7 turns from you, marshal 8, knower (at
+Council) 18, the rivals at least 15 apart, and one system nearer you than any
+rival. Black-box actuary at Hunt was out by turn 72 there.
 
 **How the seeds were chosen.** Each stage's setup was played on 24 candidate
 seeds by marshal, evolved, thinker, heuristic and rusherplus in the human's seat
