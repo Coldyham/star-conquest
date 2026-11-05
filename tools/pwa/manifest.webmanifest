@@ -30,6 +30,29 @@
       "purpose": "maskable"
     }
   ],
+  "shortcuts": [
+    {
+      "name": "Daily challenge",
+      "short_name": "Daily",
+      "description": "Play today's daily board",
+      "url": "/game/#daily",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Daily puzzle",
+      "short_name": "Puzzle",
+      "description": "Play today's daily puzzle",
+      "url": "/game/#puzzle",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Campaign",
+      "short_name": "Campaign",
+      "description": "Open the campaign map on the board",
+      "url": "/board/campaign.html",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "screenshots": [
     {
       "src": "screenshot-wide.png",
