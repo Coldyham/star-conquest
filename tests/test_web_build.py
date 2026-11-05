@@ -198,13 +198,13 @@ def test_the_manifest_keeps_its_id_and_launches_the_router():
 
 
 def test_the_manifest_shortcuts_open_the_dailies_and_the_campaign():
-    """A long press on the installed icon offers today's two dailies (in the
+    """A long press on the installed icon offers today's two dailies, puzzle first, (in the
     game, by the fragment `daily.link` reads) and the campaign (on the board)."""
     import json
     from starconquest import daily
     manifest = json.loads((ROOT / "tools" / "pwa" / "manifest.webmanifest").read_text())
     urls = [s["url"] for s in manifest["shortcuts"]]
-    assert urls == ["/game/#daily", "/game/#puzzle", "/board/campaign.html"]
+    assert urls == ["/game/#puzzle", "/game/#daily", "/board/campaign.html"]
     assert daily.link("daily") == (daily.BOARD, "")
     assert daily.link("puzzle") == (daily.PUZZLE, "")
     assert "campaign.html" in render_board.PAGES
