@@ -1761,6 +1761,27 @@ def test_a_landed_quick_post_turns_the_button_into_the_maps_page():
     assert ui.share_msg == "Posted  ·  you lead  ·  3 scores on this map"
 
 
+def test_the_signed_in_name_replaces_the_remembered_one_until_a_post_starts():
+    """Signed in, the claimed name; signed out (""), or unanswered, the name the
+    last post remembered; neither, the entry form."""
+    ui = Ui(view=None, human_id=1)  # type: ignore[arg-type]
+    ui.post_as = "Old name"
+    main.land_post_name(ui, pbp.OK, "  Claimed  ")
+    assert ui.post_as == "Claimed"
+    ui.post_as = "Old name"
+    main.land_post_name(ui, pbp.OK, "")
+    main.land_post_name(ui, pbp.ERROR, "my_name missing")
+    assert ui.post_as == "Old name"
+    ui.post_as = ""
+    main.land_post_name(ui, pbp.OK, "")
+    assert ui.board_action() == "enter"
+    main.land_post_name(ui, pbp.OK, "Claimed")
+    assert ui.board_action() == "post"
+    ui.post_as, ui.post_state = "Old name", "posting"
+    main.land_post_name(ui, pbp.OK, "Claimed")
+    assert ui.post_as == "Old name"
+
+
 def test_a_failed_quick_post_leaves_the_entry_form(monkeypatch):
     ui = Ui(view=None, human_id=1)  # type: ignore[arg-type]
     ui.post_as, ui.post_state = "Ada", "posting"

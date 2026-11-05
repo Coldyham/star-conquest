@@ -1,0 +1,15 @@
+{% extends "templates/base.html" %}
+{% set title = "Your account" %}
+{% set script = "js/account-page.mjs" %}
+
+{% block main %}
+  <!-- The account panel moved onto the player card (user.html); this page only
+       forwards old links there, to this browser's own card when it knows one. -->
+  <h1>Your account</h1>
+  <p class="lede">
+    Your account is now on <a href="user.html" id="forward">your player card</a>.
+  </p>
+{% endblock %}
+
+{% block footer %}No account needed &nbsp;·&nbsp;
+  <a href="index.html">Back to the board</a>{% endblock %}

@@ -256,6 +256,12 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   sensitive-variable policy stays on "Require approval". Board pages are
   Jinja2 templates on `leaderboard/templates/base.html` (`tools/render_board.py`,
   whose `PAGES` is the servable allow-list); shared chrome goes in the base.
+- **A claimed name is its owner's alone.** An account (a private login and
+  password, held only as a hash, `leaderboard/js/auth.mjs`) is optional; only
+  the owner posts, tags or names a pbp seat under it (`sc_may_use_user`,
+  `pbp.mjs` `nameAllowed`). `claim_name` takes only
+  an unused name; a used one goes through `admin.py assign-name`. `users.owner`
+  is never public: `users` is granted by column.
 
 **The AI** (rules in full: `docs/design/bots.md`, "Per-seat AI and pricing a
 fight: the rules in full")

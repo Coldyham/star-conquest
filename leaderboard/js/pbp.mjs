@@ -10,6 +10,7 @@
 // There is no account behind it; the game owns the store and this page never
 // prunes it.
 
+import { authHeader } from "./auth.mjs";
 import { profileLabel, seatProfile } from "./bots.mjs";
 import { GAME_URL, PLAYER_COLORS, PLAYER_NAMES } from "./config.mjs";
 import { clear, el, mapSummary, relativeTime, showError } from "./format.mjs";
@@ -293,7 +294,9 @@ async function fetchList(ids = null) {
 async function claim(matchId, seat, name) {
   const response = await fetch(`${ENDPOINT}?action=claim`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // Signed in, so a seat may carry the caller's own claimed name (pbp.mjs's
+    // nameAllowed); signed out, any name nobody has claimed.
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
     body: JSON.stringify({ match_id: matchId, seat, name }),
   });
   const body = await response.json().catch(() => ({}));
@@ -427,7 +430,8 @@ function claimControl(match, seat, mine, onClaimed) {
       onClaimed(slot);
       return;
     }
-    const message = status === 409 ? (body.error || "already taken") : status === 400 ? (body.error || "refused") : "could not take it";
+    const message = status === 409 ? (body.error || "already taken")
+      : status === 400 || status === 403 ? (body.error || "refused") : "could not take it";
     clear(slot).append(el("span", { class: "hint", text: `${seatName(seat)}: ${message}` }));
   });
   return slot;

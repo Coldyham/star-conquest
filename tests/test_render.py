@@ -194,7 +194,7 @@ def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
     map's page; without a name, or after a failure, it is the entry form."""
     monkeypatch.setattr(config, "touch_ui", False)
     ui = _make_ui(mapgen.generate_random(1, num_nodes=18, num_players=3))
-    assert render._board_label(ui).startswith("Enter on leaderboard")
+    assert render._board_label(ui).startswith("Post on leaderboard")
     ui.post_as = "Ada"
     assert render._board_label(ui).startswith("Post as Ada")
     ui.post_as = "A" * 40
@@ -204,7 +204,7 @@ def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
     ui.post_state = "posted"
     assert render._board_label(ui).startswith("View on board")
     ui.post_state = "failed"
-    assert render._board_label(ui).startswith("Enter on leaderboard")
+    assert render._board_label(ui).startswith("Post on leaderboard")
 
 
 def test_a_long_quick_post_summary_wraps_and_fits():

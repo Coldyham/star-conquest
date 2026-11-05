@@ -3443,7 +3443,7 @@ def _board_label(ui: Ui) -> str:
         if len(name) > _POST_NAME_SHOWN:
             name = name[:_POST_NAME_SHOWN - 1].rstrip() + "…"
         return _key_hint(f"Post as {name}", "L")
-    return _key_hint("Enter on leaderboard", "L")
+    return _key_hint("Post on leaderboard", "L")
 
 
 _COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is

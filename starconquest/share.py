@@ -267,17 +267,34 @@ def _post_desktop(body: str, headers: dict[str, str]) -> bool:
 _NAME_SHOWN = 16
 
 
-def quick_post_name() -> str:
-    """The name a win can be posted under from the overlay, or ``""`` for the
-    entry form instead.
+def _quick_post_module() -> str:
+    """The board's posting module's URL, or ``""`` where quick post can't run:
+    off the web (the module runs in the page) or with no board configured."""
+    return webstore.leaderboard_url(LEADERBOARD_POST_MODULE_PATH) if is_web() else ""
 
-    Web only: the board's posting module runs in the page (``quick_post``). The
-    name is the one the board and the play-by-post prompt remember
+
+def quick_post_name() -> str:
+    """The name a win can be posted under from the overlay until the signed-in
+    one answers (``signed_in_name``), or ``""`` for the entry form instead.
+
+    The name the board and the play-by-post prompt remember
     (``webstore.pbp_name``), so it is set by posting once through the form.
     """
-    if not is_web() or not webstore.leaderboard_url(LEADERBOARD_POST_MODULE_PATH):
-        return ""
-    return webstore.pbp_name()
+    return webstore.pbp_name() if _quick_post_module() else ""
+
+
+def signed_in_name() -> pbp.Request | None:
+    """Ask the board's posting module for the claimed name the signed-in player
+    owns (``post.mjs``'s ``ownName``). It answers ``""`` when signed out or
+    owning none, and None means it can't be asked (``_quick_post_module``).
+
+    The board's own lookup, so the session token stays in the page and the game
+    keeps no copy of who is signed in.
+    """
+    module = _quick_post_module()
+    if not module:
+        return None
+    return pbp.settle(f"import({json.dumps(module)}).then(function(m){{return m.ownName()}})")
 
 
 def quick_post(token: str, name: str) -> pbp.Request | None:

@@ -604,9 +604,15 @@ and the fork-preview risk is held by the "Require approval" policy.
 ### Quick post
 
 **One press posts a win, without the entry form.** Built 2026-11-02. Once
-this browser has a posting name (`sc_pbp_name`, set by posting once through
-the form or by claiming a play-by-post seat), the win overlay's leaderboard
-button reads *Post as <name>*. Pressing it uploads the log as the form's
+this browser has a posting name, the win overlay's leaderboard button reads
+*Post as <name>*. The name is the claimed name of the player signed in on the
+board, if they own one (`post.mjs`'s `ownName`, asked through `pbp.settle` as
+the game is decided: `share.signed_in_name`). Failing that, it is the name the
+browser remembers (`sc_pbp_name`, set by posting once through the form or by
+claiming a play-by-post seat). With neither, the button is *Post on
+leaderboard*, which opens the form. A claimed name that answers after a post
+has started is ignored, so the summary names who the score went in as.
+Pressing it uploads the log as the form's
 button does, then imports the board's own `leaderboard/js/post.mjs` into the
 page and calls `quickPost(token, name)` (`share.quick_post`, through
 `pbp.settle`'s mailbox). That module is also what the submit page posts with
@@ -618,14 +624,15 @@ lookup, user lookup and grant-checked insert are written once.
   (`share.post_summary`). After that the button becomes *View on board*.
 - **Failure falls back to the form.** If the post can't start (desktop, no
   bridge), the press opens the form. If it is refused, the button becomes
-  *Enter on leaderboard*. Once the score is in, the summary read is quiet
+  *Post on leaderboard*. Posting under a name someone else has claimed is
+  refused this way, before the score is sent (`ensureUser`). Once the score is in, the summary read is quiet
   (`.catch(() => [])`), so a later failure can never send the player to the
   form to post a second time.
 - **No embargo, no tags, no other name.** The form still covers those. If
   the setter of a brand-new map wants an embargo, they use *Challenge a
   friend* and paste the link into the form. The button only becomes quick
-  post once a name is remembered, so a browser that has never posted still
-  goes through the form.
+  post once there is a name, so a browser that has never posted and isn't
+  signed in still goes through the form.
 - **Web only.** Desktop has no page to run the module in, and keeps opening
   the form. `/board/js/*` is served with `Access-Control-Allow-Origin: *`, so
   a game on a local server or a custom domain can import the module from the
@@ -639,7 +646,8 @@ something the browser already does.
 ### The pages are templates
 
 Every page carried an identical copy of the head and the menu, so adding a page
-or a menu entry meant editing all of them. Each page is now a Jinja2 template
+or a menu entry meant editing all of them, and the privacy link went into
+every footer by hand. Each page is now a Jinja2 template
 extending `leaderboard/templates/base.html`, rendered by
 `tools/render_board.py` inside `build_web.sh`. A page sets `title`,
 `description`, `main_class` and `script` (a list for more than one module), and
@@ -660,7 +668,21 @@ page, and a page with no `footer` block has no footer.
   renders first (`leaderboard/README.md`, "Local development"). The allow-list
   of servable files moved from `build_web.sh` into `render_board.PAGES`,
   `STATIC_FILES` and `STATIC_DIRS`, and `tests/test_web_build.py` checks that
-  every page renders with exactly one, identical header.
+  every page renders with exactly one, identical header and one privacy link.
+
+### The header (2026-11-05)
+
+- **Play opens what the page has picked.** `nav.mjs` copies the href of the
+  one `a.btn.play` in `<main>` (a map's *Play this map*, the selected campaign
+  node, the day on a daily page) and follows it as the page redraws; with none
+  or several, Play opens the game's menu. No page sets it by hand.
+- **Daily sits beside Play**, out of the menu: it is the most visited page, and
+  most scores are posted from inside the game, so *Enter score* stays in it.
+- **One "You" entry**, the same colour as the rest of the menu, replaces "My
+  scores" and "Your name". It opens this browser's own player card, which
+  carries the account panel (`account.mjs`) on your own card or with no name
+  chosen. Signing in to a name, or claiming one, opens that card.
+  `account.html` only forwards old links.
 
 The weekly campaign (crowns, embargoes, the grace period, campaign fleets) is
 in [`campaign.md`](campaign.md).
@@ -774,3 +796,143 @@ in [`campaign.md`](campaign.md).
   replay outlive *any* future rules change, at the cost of the size and
   bot-independence properties `replay.py`'s module doc argues for) — worth
   revisiting if snapshotting ever happens, but not before.
+
+## Claimed names
+
+One account may own one name, and only that account can then post under it:
+scores, which also covers campaign moves, and play-by-post seat names. An
+account is a private login and a password (Google sign-in until 2026-11-05).
+Signing in is optional. Every unclaimed name works exactly as before, and that
+includes every name that existed before claiming did. Rules are in `CLAUDE.md`;
+this section gives the reasons.
+
+**Why Supabase Auth.**
+- The board already runs on Supabase, so the session it issues is what RLS
+  reads (`auth.uid()`). The database enforces the claim for the plain PostgREST
+  inserts `submit.mjs` makes, with no function in front of them.
+- Nothing about it lives on Netlify, so there is nothing new for a fork's
+  deploy preview to reach, and the "Require approval" policy stays as it is.
+- `auth.mjs` talks to it over plain fetch, on the same reasoning as `api.mjs`
+  loading no client library.
+- Every sign-in method gives the same kind of account, so changing the method
+  touched only `auth.mjs`, the account panel and `admin.py`, never the database.
+
+**Why a login and password, not Google (2026-11-05).**
+- It holds the least about a person: no email, no real name, no Google account
+  id, and no third party in the sign-in. That is what let the privacy notice
+  drop its age limit and its Google section.
+- It needs nothing set up: no OAuth client, and no email provider, since
+  nothing is ever sent.
+- The cost is that a forgotten password is a message to the owner
+  (`admin.py set-password`), and that an account is free to make, so an unused
+  name is free to squat. Supabase limits sign-ups per IP address; a captcha
+  (Turnstile) is the next step if squatting is ever seen.
+- Compared on 2026-11-04 and 2026-11-05: Google (kept the data above, and the
+  13+ limit), email one-time codes (need an email provider; Supabase's built-in
+  mailer is for testing), passkeys (a Supabase beta API, liable to change, and
+  still needing a first sign-in and a recovery route), and Cloudflare Access or
+  a hosted sign-in box such as Auth0 or Clerk (Access gates whole pages, caps
+  free users and issues its own token that RLS cannot read; a hosted box loads
+  a third-party script and adds a processor).
+
+**Why the login is stored only as a hash.**
+- Supabase needs an email for a password account. `accountEmail` gives it the
+  first 40 hex digits of SHA-256 of the folded login at `ACCOUNT_DOMAIN`, an
+  address that receives nothing. Email confirmation is off, so no mail is ever
+  sent.
+- A login may be any text, an email address included, and the site never holds
+  it. The browser keeps it in the session only to say who is signed in.
+- `admin.py`'s `account_email` makes the same address from the login a person
+  tells the owner (`test_leaderboard_sync`). `ACCOUNT_DOMAIN` can never change:
+  every account's address ends in it.
+- Unsalted, so whoever can read Supabase Auth could test a guessed login
+  against it. That is the project's owner, who could read a plain login anyway.
+
+**Why only an unused name can be claimed by its claimant.**
+- A name with scores behind it was typed by somebody, and nothing on the site
+  can say who.
+- "Unused" means no `users` row, or a row with no score and no tag (a submission
+  that failed after `ensureUser`). The test is a query, so there is no flag to
+  keep in step.
+- Names that are in use go through `tools/admin.py assign-name`, judged by the
+  owner. It needs the account to exist (the person makes it first), so no
+  pending state is ever stored.
+
+**Folding several names into one.**
+- `assign-name NAME LOGIN --fold OLD…` moves each old name's scores and tags
+  onto the kept row, then deletes the old rows.
+- The folded names are freed rather than kept as aliases. Aliases would need a
+  table and a lookup in `submit.mjs`, `pbp.mjs`, `sc_may_use_user` and the
+  player page.
+- The cost: someone else can then post under a freed name, and an old `?u=`
+  link shows an empty card.
+- Crowns, steals and campaign standing are derived from `counted_scores`, so
+  they recompute on the merged row, and a person's two names stop counting as
+  two players.
+- The audit row keeps the folded rows and which score and tag ids moved, so a
+  fold can be undone by hand.
+
+**Why one name per account.** It is a partial unique index on `users.owner`,
+nothing more. More than one name per account would let a single account
+reserve names it never plays under.
+
+**Why the owner uuid is never public.**
+- `users` is granted by column, without `owner`, and pages read the generated
+  `claimed` column instead.
+- The uuid is a durable per-person identifier. Publishing it would build the
+  cross-session tracking id the "durable client id" rejection refused.
+- The claim itself is opt-in and attached to a name the person chose. Anonymous
+  play never mints one.
+- `claim_name`, `release_name`, `my_name` and `sc_may_use_user` are
+  `security definer`, so they can read `owner` on the caller's behalf.
+
+**Why a check in the page and in the database.** RLS is the boundary. The page's
+own check (`claims.nameBlocked`) exists so a refused post says why, rather than
+surfacing PostgREST's bare "violates row-level security policy". `42501` maps to
+the same sentence as a backstop.
+
+**An owner sees their own scores on an embargoed map (2026-11-04).**
+- Asked for by a tester who wanted every attempt he had posted on a live
+  embargo. `game.mjs`'s `ownScores` lists them under the leader line, by the
+  name `my_name` returns. The remembered name never counts: anyone can type
+  one, and the point was that posting under someone's name shows you nothing.
+- Unplaced, because the page still never reads the rest of the field, and with
+  no Watch, because `public_replays` holds back the owner's replays too.
+- It is a page-level cut, like the rest of `renderEmbargoed`. `scores` is
+  publicly readable, so this gives the owner a view and hides nothing new
+  ([`campaign.md`](campaign.md), "Crowns, the weekly campaign and embargoes").
+- Watching their own replays would need `replay.mjs` to ask Auth who is calling,
+  as `pbp.mjs` does below. Not built (`open.md`).
+
+**Play-by-post asks Auth, not a JWT library.**
+- `pbp.mjs` verifies a bearer by calling `/auth/v1/user`, so it holds no
+  signing secret, and a revoked session is refused the same way as a missing
+  one.
+- It only asks when the name is actually claimed, so an ordinary create costs
+  one extra select and no Auth call.
+- `CLAIMED_NAME` is the refusal text, pinned against `main.PBP_CLAIMED_ERROR`.
+
+**The game.**
+- The web game shares the board's origin, so it reads `sc_auth` in JS at fetch
+  time for `?action=create`, and the token never passes through Python.
+- It never refreshes the session. An expired one is refused like none, and the
+  player is pointed at the board's Menu > You, whose account panel refreshes on
+  load.
+- Desktop and Android have no session at all. A claimed name is refused there,
+  which is the honest answer for a build that cannot sign in.
+
+**Decided against.**
+- A per-week campaign token: covered by claims.
+- Claiming any name on first sign-in, used or not: anyone could take a name
+  that has scores.
+- Storing a pending email for `assign-name`: it would put an email on a row,
+  and buys only skipping one sign-in.
+- Google sign-in, as the only way in (built, then replaced 2026-11-05): see
+  "Why a login and password, not Google".
+- Checking a JWT's signature inside `pbp.mjs`: it would need the project's JWT
+  secret in Netlify.
+- Keeping folded names as aliases of the kept one: freed instead (see
+  "Folding several names into one").
+- Making `claimed` gate reading: claims change who may write, and nothing about
+  what anyone can see.
+

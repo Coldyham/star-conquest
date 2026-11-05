@@ -445,6 +445,22 @@ def test_quick_post_needs_the_web_a_board_and_a_name(configured, monkeypatch):
     assert share.quick_post("eNoTOKEN", "Ada") is None
 
 
+def test_the_signed_in_name_is_the_boards_own_lookup(configured, monkeypatch):
+    """The game asks post.mjs's ownName rather than reading the session itself;
+    off the web, or with no board, it doesn't ask."""
+    monkeypatch.setattr(share, "is_web", lambda: False)
+    assert share.signed_in_name() is None
+    window = _EvalWindow()
+    _web_bridge(monkeypatch, window)
+    monkeypatch.setattr(share, "is_web", lambda: True)
+    assert share.signed_in_name() is not None
+    script = window.scripts[0]
+    assert f'import("https://example.test{paths.LEADERBOARD_POST_MODULE_PATH}")' in script
+    assert "m.ownName()" in script
+    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
+    assert share.signed_in_name() is None
+
+
 def _answer(**fields) -> str:
     return json.dumps({"game_key": "abc", **fields})
 

@@ -15,7 +15,6 @@ import {
   WEEKDAYS,
 } from "./daily.mjs";
 import { clear, el, leaderLink, setupSummary, showError, userHref } from "./format.mjs";
-import { mountMyScores } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
 // How far back streaks are read. A streak reaching back that far shows as
@@ -162,7 +161,6 @@ function drawStreaks(list) {
 
 async function load() {
   mountNav();
-  mountMyScores();
   keepDayInTabs();
   drawDays();
   if (!configured()) {

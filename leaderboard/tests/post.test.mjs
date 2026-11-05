@@ -101,3 +101,17 @@ test("no name, or a link without a score, posts nothing", async () => {
     restore();
   }
 });
+
+test("a name someone else has claimed is refused before any score is sent", async () => {
+  const { calls, restore } = mockFetch([
+    [/\/games\?select=game_key&game_key=/, [{ game_key: scored.expect.gameKey }]],
+    [/\/users\?select=id/, [{ id: 7, name: "Ada", claimed: true }]],
+    [/\/scores$/, [{ id: 99 }]],
+  ]);
+  try {
+    await assert.rejects(() => quickPost(scored.token, "Ada"), /claimed/);
+    assert.ok(!calls.some((c) => c.method === "POST" && /\/scores$/.test(c.url)));
+  } finally {
+    restore();
+  }
+});

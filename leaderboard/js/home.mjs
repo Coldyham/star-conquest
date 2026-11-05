@@ -12,7 +12,7 @@ import {
   urlFor, viewKind,
 } from "./listing.mjs";
 import { families, familyForest, paceLabel, withFirstSeen } from "./families.mjs";
-import { mountMyScores, myName } from "./me.mjs";
+import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { configTitle } from "./setup.mjs";
 import { compareScores } from "./standings.mjs";
@@ -547,7 +547,6 @@ async function loadFamilies(filters) {
 
 async function load() {
   mountNav();
-  mountMyScores();
   if (!configured()) {
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
     return;

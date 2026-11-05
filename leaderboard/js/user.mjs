@@ -1,10 +1,11 @@
+import { mountAccount } from "./account.mjs";
 import { configured, inList, select } from "./api.mjs";
 import { drawBadges } from "./badges-card.mjs";
 import { drawStreaks } from "./streaks-card.mjs";
 import {
   clear, el, mapSummary, ordinal, relativeTime, scoreSummary, shortTime, showError, userHref,
 } from "./format.mjs";
-import { mountMyScores, myName } from "./me.mjs";
+import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { BASELINE } from "./playstyle-baseline.mjs";
 import { MIN_GAMES, ROWS, pool, summary } from "./playstyle.mjs";
@@ -68,6 +69,22 @@ function mountCompare() {
     button.addEventListener("click", () => go([...asked, mine]));
     extras.append(button);
   }
+}
+
+/**
+ * The account panel: on this browser's own card (its remembered name, alone),
+ * or with nobody chosen yet, where a first visit from the menu's "You" lands.
+ * Signing in to a name, or claiming one, opens that name's card.
+ */
+function mountOwnAccount() {
+  const mine = myName();
+  if (asked.length && !(asked.length === 1 && mine && has(mine))) return;
+  document.getElementById("account").hidden = false;
+  mountAccount({
+    onName: (name) => {
+      if (!(asked.length === 1 && has(name))) go([name]);
+    },
+  });
 }
 
 form.addEventListener("submit", (event) => {
@@ -266,8 +283,8 @@ const asEntry = (row) => ({
 
 async function load() {
   mountNav();
-  mountMyScores();
   mountCompare();
+  mountOwnAccount();
   setHeading(asked);
 
   if (!asked.length) {

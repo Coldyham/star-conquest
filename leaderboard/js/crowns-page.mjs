@@ -3,7 +3,6 @@ import { clear, el, mapSummary, relativeTime, showError, userHref } from "./form
 import {
   crownTable, parseWeek, stealFeed, weekAfter, weekBefore, weekParam, weekStart,
 } from "./crowns.mjs";
-import { mountMyScores } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
 const weeksNav = document.getElementById("weeks");
@@ -82,7 +81,6 @@ function drawFeed(steals, games) {
 
 async function load() {
   mountNav();
-  mountMyScores();
   drawWeeks();
   if (!configured()) {
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
