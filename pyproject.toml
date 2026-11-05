@@ -35,9 +35,3 @@ ignore = ["S110", "S112", "RUF023", "I001", "ISC004"]
 # The browser/storage bridges: every DOM or filesystem call is guarded wholesale.
 "starconquest/{webstore,softkeyboard,paths,settings,main}.py" = ["BLE001"]
 "tools/{check_bot,config_census}.py" = ["BLE001"]
-
-[tool.pyright]
-typeCheckingMode = "basic"
-venvPath = "."
-venv = ".venv"
-exclude = ["results", "web", "build", "dist", "**/.*", "**/__pycache__", "**/node_modules"]

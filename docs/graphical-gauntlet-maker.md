@@ -181,53 +181,23 @@ Size: about 450 lines of code (`run.py` ~150, menu ~120, main ~120, `viewstate`,
 render and input ~60) and about 350 of tests. Run the full suite, since it
 touches `main` and `viewstate`.
 
-## Phase 1: the format grows (core `gauntlet.py`, board `gauntlet-build.mjs`)
+## Phase 1: the format grows (landed 2026-11-05)
 
-This follows *Later: targets on lanes* in `gauntlet.md` as written. Every
-addition is optional, so no existing file changes meaning.
+Built as planned; the rules and reasons are in `gauntlet.md`, "Targets on
+lanes". What later phases lean on: `Gauntlet.lane_targets`/`hidden`,
+`ways()`, `onward(sid, gated=False)`, `depths()` over ungated lanes,
+`reachable()`, `hidden_stages()`, `goals`, `lane_label` (`BONUS`/`SHORTCUT`/
+`GATED`), `shown`, `place`, `way_in`, `to_dict`, and
+`open_stages(g, done, won, found)`. On the board: `checkLane` inside
+`checkBody`, `branches()` (the page's "would make it linear" warning), and the
+shared fixture `leaderboard/tests/fixtures/gauntlet-lanes.json`.
 
-- **A target on a lane:** `[a, b, {"turns": 12, "lost": 30, "hidden": true, "two_way": true}]`.
-  - Parse with the existing `_target`, so the bot shape
-    (`{"turns", "lost", "bot", "beat": true}`) works on a lane as on a stage.
-  - `Gauntlet` gains `lane_targets: dict[(a, b), Target]` and `hidden: frozenset`.
-  - A bad target means the lane has none. `hidden` on an ungated lane is
-    dropped: there is nothing to reveal it.
-- **Run end stages are derived, never stored** (`gauntlet.goals`). A goal is a
-  reachable stage with no ungated lane out that is a start or has an ungated lane
-  in. A bonus dead end behind a gate is therefore never a goal. There is no
-  `goal` field: the board page has no control to set one, and the rule gives the
-  right ends for every shape in the mockup. If a shape ever needs a goal the
-  rule can't give, an explicit field can be added then; `checkBody` would learn
-  it at that point.
-- **Run settings are config defaults, not file fields:** `config.RUN_LIVES` (1)
-  and `config.BOON_KINDS` (all three). A per-gauntlet `run` field waits for a
-  page that sets it, and would be a format addition when it comes.
-- **Rules:**
-  - `open_stages` covers the starts, every won stage, and each stage a lane
-    leads to whose condition the near end's best meets. An ungated lane's
-    condition is the stage's own target.
-  - `depths()` walks ungated lanes only, so a shortcut doesn't steal Next stage.
-  - `problems()` reachability ignores targets.
-  - A stage reached only by hidden lanes is not shown until one of those lanes
-    opens.
-- **Derived labels, never stored.** A gated lane is a "Bonus" when its far end
-  reaches no goal, or else a "Shortcut" when it skips a column ("Layout",
-  Phase 2), or otherwise plain "Gated". The game's stage detail strip and the
-  board's lane options use the same three words.
-- **New `to_dict(g)`.** It writes the canonical file, and
-  `from_dict(to_dict(g)) == g` gets a test.
-- **`checkBody` / `_from_dict` parity.** `checkBody` learns the lane keys
-  `turns`/`lost`/`bot`/`beat`/`hidden` (today it refuses any lane key but
-  `two_way`). The top-level keys are unchanged. Add a shared
-  fixture read by both the Python and JS suites, the way `gauntlet-spec.json`
-  works.
-- **Until Phase 3 lands**, `gauntlet.html` opened on a gauntlet with lanes says
-  "this gauntlet branches; saving here would make it linear" instead of
-  silently flattening it. Phase 3 replaces the warning with real editing.
-
-Tests: extend `tests/test_gauntlet.py` (lane gates, hidden, depth over ungated,
-derived goals and labels, round trip) and
-`leaderboard/tests/gauntlet-build.test.mjs`.
+Two things Phase 1 did that this plan had left to Phase 2:
+- **The menu's stage list already hides a hidden stage** (`gauntlet.shown`)
+  and says what a gated way needs ("locked · Bonus: target 86/72",
+  `gauntlet.way_in`), since the tutorial's bonus stage shipped with it.
+- **`gauntlet.chain` walks ungated lanes only**, so a linear gauntlet with a
+  bonus stage can still be run and the bonus is never a run step.
 
 ## Phase 2: the graph view replaces the stage list (`menu.py`)
 
@@ -615,20 +585,13 @@ Phase 3 needs only Phase 1 to save and Phase 2's layout fixture to draw, so it
 can be built alongside Phase 2. Phase 4 has no UI entry point until phase 5,
 but it is tested headless.
 
-### Afterwards: hidden stages in the tutorial
+### Afterwards: hidden stages in the tutorial (one landed with Phase 1)
 
-Once Phases 1 and 2 have landed, add a hidden bonus stage or two to the
-tutorial (`starconquest/assets/gauntlets/tutorial.json`) as easter eggs. Each
-one is reached by a hidden, gated lane from a tutorial stage, for example
-"win stage 3 in ≤ N turns". This also shows players that hidden lanes exist
-before they meet one elsewhere.
-- **Progress is safe.** Stage progress is keyed by each stage's
-  `challenge_key()`, so adding stages leaves existing bests where they are.
-- **Place each bonus stage last in its column.** Layout leaves a gap where a
-  hidden stage will appear, and putting it last keeps that gap at the edge.
-- **Its own small PR, after Phase 2.** It is a data change plus a test that
-  the tutorial still passes `problems()` and that the bonus stages start
-  hidden.
+The tutorial has one hidden bonus stage, "Long odds", behind a hidden lane from
+The hunt gated at its best human score (86 turns / 72 lost): `gauntlet.md`,
+"The stages". It shipped with Phase 1 rather than after Phase 2, because Phase
+1's list already keeps it hidden. More can follow; place each one last in its
+column, since layout leaves a gap where a hidden stage will appear.
 
 ### Size estimate
 
@@ -656,8 +619,7 @@ needs its notes and its async bot lookup) and the main wiring for runs.
 
 ## Verification
 
-- **Per phase:** the tests named above, `uvx ruff check .`, and `uvx pyright`
-  on touched files. Run `node --test leaderboard/tests/*.test.mjs` in phase 1.
+- **Per phase:** the tests named above and `uvx ruff check .`. Run `node --test leaderboard/tests/*.test.mjs` in phase 1.
   Run it again in phases 2 and 3 (the layout fixture).
   Run the full `uv run pytest` after phases 4 and 5 (they touch `replay`,
   `main` and `viewstate`).
