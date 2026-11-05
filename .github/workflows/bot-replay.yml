@@ -1,15 +1,16 @@
-# The leaderboard's whole backend, as five independent jobs:
+# The leaderboard's whole backend, as six independent jobs:
 #   bot-scores   fill in the "how would each bot have done?" column (tools/bot_replay.py)
 #   verify       check each posted score against the replay uploaded with it
 #   playstyle    read each posted replay for the player page's Playstyle panel
 #   campaign     make this week's campaign map, if it hasn't been made yet
 #   daily        make today's and tomorrow's daily challenge, if not made yet
+#   puzzle-par   search today's and tomorrow's puzzle for its par, if it has none yet
 #
 # Every answer is a pure function of what is stored and the code, so each only
 # ever needs computing once and there is nothing to serve live: a scheduled
 # workflow that writes into Supabase leaves no service to keep up.
 #
-# The hourly schedule runs all five. *Run workflow* runs only the ones ticked,
+# The hourly schedule runs all six. *Run workflow* runs only the ones ticked,
 # with each job's own options below them. The jobs share nothing but the secrets
 # check, so a long bot replay never holds up the cheap three, and one failing
 # never stops the others.
@@ -86,6 +87,14 @@ on:
         default: true
       daily_day:
         description: "Daily: make only this day, YYYY-MM-DD (blank = today and tomorrow)"
+        required: false
+        default: ""
+      puzzle_par:
+        description: "Puzzle par: search each puzzle for its par"
+        type: boolean
+        default: true
+      puzzle_par_days:
+        description: "Puzzle par: these days instead, space-separated YYYY-MM-DD (blank = today and tomorrow); a day with a par is skipped, so a cut-off back-fill resumes"
         required: false
         default: ""
 
@@ -265,3 +274,39 @@ jobs:
             args+=(--day "$DAY")
           fi
           python tools/daily.py "${args[@]}"
+
+  # Each daily puzzle's par (tools/puzzle_par.py): the par tools' best score on
+  # the stored map, proved or the best line found, which the game congratulates
+  # a player for matching. Tomorrow's puzzle is made a day ahead, so its par is
+  # normally stored before its day starts; a day that has one is skipped. The
+  # budgets keep a search to about two and a half hours at worst, well inside
+  # the timeout: a search stores its par only when it finishes.
+  puzzle-par:
+    needs: check
+    if: needs.check.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.puzzle_par)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    concurrency:
+      group: leaderboard-puzzle-par
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Puzzle par
+        env:
+          DAYS: ${{ inputs.puzzle_par_days }}
+        run: |
+          args=()
+          if [ -n "$DAYS" ]; then
+            read -r -a days <<< "$DAYS"
+            for day in "${days[@]}"; do
+              if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                echo "puzzle_par_days must be YYYY-MM-DD dates, got: $day" >&2
+                exit 1
+              fi
+            done
+            args+=(--days "${days[@]}")
+          fi
+          python tools/puzzle_par.py "${args[@]}" -- --workers 4 --k-budget 1800 --proof-budget 300

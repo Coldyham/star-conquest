@@ -587,6 +587,55 @@ weakest first as the worker plays them:
   players on Monday, never a duel, so the two never overlap (see "The board
   grows through the week").
 
+### The puzzle's par (built 2026-11-05)
+
+**What it is.** Each puzzle has a par: the best score the par tools
+(`docs/design/par.md`, "The blend") find on its stored map, saved with what it
+rests on. `proved` means a full search finished, so no faster win exists within
+its model (one or two lanes from a system a turn); with `turns_only` the turn is
+proved and the ships lost are the fewest found, since the passes look for a
+sooner turn first. `likely` means the best line found, exact for plans of at most
+`exact_up_to` launch orders. The author asked for both (2026-11-05): a floor if
+proved, else the likely best.
+
+**Who sees it: only a player who matches or beats it.** At a puzzle win played
+wholly by hand (no hint, no autoplayed turn: `main.wants_par`) the game asks
+`/api/daily?day=…&kind=puzzle&turns=T&lost=L` (`daily.par_check`). The function
+calls `sc_puzzle_par`, a security-definer SQL function that answers the par only
+when `(T, L)` is no worse than it, turns first and then ships lost, and only for a
+day that has started and a par found under the puzzle's rules. Anything else
+answers `par: null` and the game says nothing. A match puts a gold line under the
+score on the win overlay (`Ui.par_note`, `daily.par_note`): *Perfect puzzle!* for a
+proved par, *Par!* for a likely one, *Beyond par!* for a result better than it.
+Nothing is stored or posted, and *Copy daily result* does not mention it.
+
+**A convenience, not a secret.** `puzzle_pars` has no policy and no public grant,
+and its `line` (the winning `GameLog`, the solution) never leaves the table. But
+the check takes a claimed result, so a forged claim of 1 turn reads the par. A
+real check would need the server to replay the game, which it does not do ("Thin
+server" in `pbp.md`), so the par is guarded as fog is: kept out of every reply and
+page a player sees before matching it.
+
+**Made by its own worker, a day ahead.** `tools/puzzle_par.py` reads each puzzle
+row with the secret key (which reads tomorrow's before it starts), runs
+`par_best.solve` on its own settings, never a map dealt locally, and upserts the
+row once that day is solved. It records each stage under
+`results/par/puzzle/<challenge key>/` and resumes from it. The hourly worker's
+`puzzle-par` job runs it for today and tomorrow, skipping a day that has a par,
+with budgets that hold a search to about two and a half hours at worst (four
+processes for the opening search, 30 minutes for each pass). A stored par is only
+ever improved (`puzzle_par.better`): a lower score, the same score proved, or a
+higher `exact_up_to`. A rerun on a slower machine cannot make it worse. *Run
+workflow* with days listed back-fills them, each stored as it finishes and a day
+with a par skipped, so a run cut off by the timeout resumes; `--refresh` (by
+hand) searches a day again and stores only an improvement.
+
+**What it rests on.** The search plays against the opponent with an unlimited
+decide budget (`ai.set_budget_scale(inf)`), and the game's actuary is
+time-budgeted. On 11-01 a live actuary played as the search's had it on the
+moves that mattered (`par.md`, "The puzzles so far"), but a par found on a
+Sunday is only as good as that match.
+
 ## Interactions
 
 - **No `Settings` field, no key moves.** A daily is an ordinary dealt setup
@@ -602,6 +651,9 @@ weakest first as the worker plays them:
   probe has played. The worker stamps `rules_version` so the archive can say
   which rules a day was checked under. A day is not remade: at most today's and
   tomorrow's rows were checked under the old rules.
+- **`RULES_VERSION` and the par**: a par is stamped with the rules it was found
+  under and is answered only while they are the puzzle's own; the worker skips a
+  puzzle stored under other rules.
 - **The campaign**: none. The campaign picks seeds nobody has played, and a
   daily's seed simply becomes a played one.
 - **Play-by-post**: none. A daily is single-player.

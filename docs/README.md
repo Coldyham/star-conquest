@@ -113,6 +113,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `par_open.py` | Every opening of a few turns, each finished by a beam, the best redone widely (local only; a `par_best` stage) | par.md |
 | `par_local.py` | Local search over whole plans from a saved line: trims launches and ships lost (local only; a `par_best` stage) | par.md |
 | `par_exhaustive.py` | Exhaustive search for the best score on a small setup: every order set, or every plan of up to K launches; `--turn-only`, checkpoints (local only) | par.md |
+| `puzzle_par.py` | Each stored daily puzzle's par (`par_best` on its own settings) into `puzzle_pars`, only ever improved; the hourly worker's `puzzle-par` job | daily.md, par.md |
 | `seat_play.py` | Play a posted map's seat by hand | seat-play.md |
 | `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md |
 | `playstyle.py --baseline`, `playstyle_worker.py` | Regenerate the Playstyle bots column; the readings worker | leaderboard.md |

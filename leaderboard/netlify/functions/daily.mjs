@@ -12,6 +12,12 @@
  *
  * 200 {day, kind, now, settings, rules_version}; 404 when there is no daily of
  * that kind that day.
+ *
+ * GET /api/daily?day=YYYY-MM-DD&kind=puzzle&turns=T&lost=L — the puzzle's par,
+ * asked at a win (`daily.par_check`): 200 {day, kind, par}, where par is
+ * {turns, lost, status, turns_only, beaten} when the result matches or beats
+ * it and null otherwise (no par stored, or a result short of it). The par is
+ * never sent to a result short of it (`sc_puzzle_par`, schema.sql).
  */
 
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../../js/config.mjs";
@@ -36,6 +42,34 @@ export function askedDay(params, now) {
   return validDay(day) ? day : null;
 }
 
+/**
+ * The result a par check claims, `{turns, lost}`; undefined when the request
+ * is not a par check, null when it is one but unreadable.
+ */
+export function askedResult(params) {
+  if (!params.has("turns") && !params.has("lost")) return undefined;
+  if (!params.get("turns") || !params.get("lost")) return null;
+  const turns = Number(params.get("turns"));
+  const lost = Number(params.get("lost"));
+  if (!Number.isInteger(turns) || !Number.isInteger(lost) || turns < 1 || lost < 0
+      || turns > 100000 || lost > 1000000) return null;
+  return { turns, lost };
+}
+
+/** The par check: what `sc_puzzle_par` answers for `day` and `result`. */
+async function parReply(day, kind, result) {
+  if (kind !== "puzzle") return reply(400, { error: "only a puzzle has a par" });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/sc_puzzle_par`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json" },
+    body: JSON.stringify({ p_day: day, p_turns: result.turns, p_lost: result.lost }),
+  });
+  if (!response.ok) throw new Error(`sc_puzzle_par ${response.status}`);
+  const par = await response.json();
+  return reply(200, { day, kind, par: par && typeof par === "object" ? par : null });
+}
+
 /** The kind a request asks for, or null when `kind` is given but unknown. */
 export function askedKind(params) {
   const kind = params.get("kind");
@@ -53,7 +87,10 @@ export default async function handler(request) {
   if (day === null) return reply(400, { error: "bad day" });
   const kind = askedKind(params);
   if (kind === null) return reply(400, { error: "bad kind" });
+  const result = askedResult(params);
+  if (result === null) return reply(400, { error: "bad result" });
   try {
+    if (result !== undefined) return await parReply(day, kind, result);
     const response = await fetch(
       `${SUPABASE_URL}/rest/v1/dailies?select=day,kind,settings,rules_version&day=eq.${day}&kind=eq.${kind}`,
       { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } });
@@ -63,7 +100,7 @@ export default async function handler(request) {
     const row = rows[0];
     return reply(200, { day: row.day, kind: row.kind, now, settings: row.settings, rules_version: row.rules_version });
   } catch (err) {
-    console.error("daily lookup failed", err.message);
+    console.error(result ? "par lookup failed" : "daily lookup failed", err.message);
     return reply(502, { error: "lookup failed" });
   }
 }

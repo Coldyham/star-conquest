@@ -477,6 +477,49 @@ join public.games g
  and (g.settings_json - array['seed', 'autoplay']) = (d.settings - array['seed', 'autoplay']);
 
 -- ---------------------------------------------------------------------------
+-- puzzle_pars: each daily puzzle's par, the best score the par tools found on
+-- its stored map (tools/puzzle_par.py, docs/design/daily.md, "The puzzle's
+-- par"). status is 'proved' (a full search finished; turns_only: the turn is
+-- proved, the ships lost are the fewest found) or 'likely' (the best line
+-- found, exact for plans of at most exact_up_to launch orders). line is the
+-- winning GameLog, the solution, and never leaves the table.
+--
+-- No policy and no public grant: nobody reads a par. sc_puzzle_par answers a
+-- claimed result with the par only when the result matches or beats it, so
+-- the congratulation reaches only the players who earned it. A forged claim
+-- can read it: like fog, a convenience, not a secret.
+-- ---------------------------------------------------------------------------
+create table if not exists public.puzzle_pars (
+  day           date primary key,
+  turns         integer not null check (turns >= 1),
+  lost          integer not null check (lost >= 0),
+  status        text not null check (status in ('proved', 'likely')),
+  turns_only    boolean not null default false,
+  exact_up_to   integer not null default 0,
+  floor         integer not null default 0,
+  rests_on      text not null default '',
+  line          jsonb not null,
+  rules_version integer not null,
+  updated_at    timestamptz not null default now()
+);
+
+-- The par of p_day's puzzle when (p_turns, p_lost) matches or beats it (fewer
+-- turns, then fewer lost), else null; never for a day not yet started.
+create or replace function public.sc_puzzle_par(p_day date, p_turns integer, p_lost integer)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('turns', p.turns, 'lost', p.lost, 'status', p.status,
+                            'turns_only', p.turns_only,
+                            'beaten', (p_turns, p_lost) < (p.turns, p.lost))
+  from public.puzzle_pars p
+  join public.dailies d on d.day = p.day and d.kind = 'puzzle'
+  where p.day = p_day
+    and p.day <= (now() at time zone 'UTC')::date
+    and p.rules_version = d.rules_version
+    and p_turns >= 1 and p_lost >= 0
+    and (p_turns, p_lost) <= (p.turns, p.lost)
+$$;
+
+-- ---------------------------------------------------------------------------
 -- game_embargoes: the embargo in force on each map: the latest of
 -- games.embargo_until, the end of a live campaign week the map is a node of
 -- (Monday 00:00 UTC, as campaign_scores counts), and the end of a live day the
@@ -886,6 +929,7 @@ alter table public.score_checks enable row level security;
 alter table public.campaigns enable row level security;
 alter table public.dailies enable row level security;
 alter table public.playstyle_readings enable row level security;
+alter table public.puzzle_pars enable row level security;
 
 -- Whether the caller may post as this user row: it is unclaimed, or theirs.
 -- Security definer because the public cannot read users.owner (see the grants).
@@ -1038,6 +1082,9 @@ revoke execute on function public.claim_name(text), public.release_name(),
 grant execute on function public.claim_name(text), public.release_name(),
   public.my_name() to authenticated;
 grant execute on function public.sc_may_use_user(bigint) to anon, authenticated;
+-- puzzle_pars is in neither list: a par is read only through sc_puzzle_par.
+revoke execute on function public.sc_puzzle_par(date, integer, integer) from public;
+grant execute on function public.sc_puzzle_par(date, integer, integer) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Grants to service_role, the secret key the workers and functions hold. It
@@ -1060,6 +1107,8 @@ grant select, insert, delete on public.campaigns to service_role;
 grant select on public.counted_scores to service_role;
 -- tools/daily.py writes each day's map, after checking it is not made yet.
 grant select, insert on public.dailies to service_role;
+-- tools/puzzle_par.py reads each puzzle's stored par and upserts a better one.
+grant select, insert, update on public.puzzle_pars to service_role;
 -- The workers read replays and prune superseded ones; netlify/functions/log.mjs
 -- inserts.
 grant select, insert, delete on public.game_logs to service_role;

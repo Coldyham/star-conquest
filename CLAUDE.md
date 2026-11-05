@@ -42,6 +42,7 @@ uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a
 
 uv run python tools/daily.py --dry-run          # deal today's and tomorrow's dailies (board, puzzle), store nothing
 uv run python tools/try_daily.py sat            # play a fresh Saturday daily map (--puzzle, --probe, --seed, --week)
+uv run python tools/puzzle_par.py --daily FILE  # a puzzle's par, stored nothing (with SUPABASE_*: today's and tomorrow's)
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column (needs SUPABASE_*)
 uv run python tools/verify_scores.py --dry-run  # check each posted score's log
@@ -250,6 +251,11 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   each with its own streaks and badges. A day is never remade. A day's map is embargoed
   until the day ends (`game_embargoes`); its winner, standings and streaks
   (mended, and true) are derived. `docs/design/daily.md`.
+- **A puzzle's par is computed offline and told only to a player who meets it**
+  (`tools/puzzle_par.py` into `puzzle_pars`, no public read; `sc_puzzle_par`
+  answers a claimed result only when it matches or beats the par). A stored par
+  is only ever improved (`puzzle_par.better`). `docs/design/daily.md`, "The
+  puzzle's par".
 - **The game and board are one site** (`/game/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. `tools/pwa/sw.js` never touches `/api/`. The

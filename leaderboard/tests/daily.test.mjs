@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import handler, { askedDay, askedKind } from "../netlify/functions/daily.mjs";
+import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
   addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, playerDays, playerStreaks, postedOn,
   shortDate, standings, streaks, validDay, weekDays, weekdayOf,
@@ -114,6 +114,41 @@ test("the handler reads the day's row and says 404 for a missing day", async () 
     assert.equal((await handler(new Request("https://x/api/daily?day=bad"))).status, 400);
     assert.equal((await handler(new Request("https://x/api/daily", { method: "POST" }))).status, 405);
     assert.ok(asked.at(-1).includes(`day=eq.`));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a par check reads a whole result, or none", () => {
+  assert.equal(askedResult(new URLSearchParams("day=2026-10-01")), undefined);
+  assert.deepEqual(askedResult(new URLSearchParams("turns=10&lost=3")), { turns: 10, lost: 3 });
+  assert.equal(askedResult(new URLSearchParams("turns=10")), null);
+  assert.equal(askedResult(new URLSearchParams("turns=0&lost=3")), null);
+  assert.equal(askedResult(new URLSearchParams("turns=1.5&lost=3")), null);
+  assert.equal(askedResult(new URLSearchParams("turns=10&lost=-1")), null);
+});
+
+test("the par check asks sc_puzzle_par and passes on only what it answers", async () => {
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url, init) => {
+    asked.push([String(url), JSON.parse(init.body)]);
+    const { p_turns: turns } = JSON.parse(init.body);
+    const body = turns <= 10 ? { turns: 10, lost: 3, status: "proved", turns_only: false, beaten: turns < 10 } : null;
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+  try {
+    const met = await handler(new Request("https://x/api/daily?day=2026-10-01&kind=puzzle&turns=10&lost=3"));
+    assert.equal(met.status, 200);
+    assert.deepEqual((await met.json()).par, { turns: 10, lost: 3, status: "proved", turns_only: false, beaten: false });
+    assert.ok(asked[0][0].endsWith("/rest/v1/rpc/sc_puzzle_par"));
+    assert.deepEqual(asked[0][1], { p_day: "2026-10-01", p_turns: 10, p_lost: 3 });
+
+    const short = await handler(new Request("https://x/api/daily?day=2026-10-01&kind=puzzle&turns=12&lost=0"));
+    assert.equal((await short.json()).par, null);
+    assert.equal((await handler(new Request("https://x/api/daily?day=2026-10-01&turns=10&lost=3"))).status, 400);
+    assert.equal((await handler(new Request("https://x/api/daily?kind=puzzle&turns=x&lost=3"))).status, 400);
+    assert.equal(asked.length, 2);
   } finally {
     globalThis.fetch = realFetch;
   }

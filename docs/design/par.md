@@ -324,6 +324,12 @@ board shows.
 
 Reopened on 2026-10-28 as a frozen star target and set aside again ([`other-games.md`](other-games.md), "Star tiers on every map").
 
+**The daily puzzle has a par now (the author, 2026-11-05)**, and it is still not on the
+board. `tools/puzzle_par.py` runs `par_best` on each stored puzzle and saves the result,
+proved or likely, to `puzzle_pars`. The game tells only a player whose result matches or
+beats it ([`daily.md`](daily.md), "The puzzle's par"). Every other map stays as decided
+here.
+
 ## evolved as a candidate (2026-11-02)
 
 **What prompted it.** On the puzzle daily of 2026-11-01 (`e60a6d946d4a010b`: 6

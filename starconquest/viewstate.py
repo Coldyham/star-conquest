@@ -471,6 +471,12 @@ class Ui:
     # ...and which daily it is, "board" or "puzzle" (`daily.KINDS`), blank with
     # the day.
     daily_kind: str = ""
+    # A puzzle won wholly by hand asks the board whether its (turns, lost) met
+    # the par (`main`, on `par_due`, which it clears); `par_note` is the
+    # congratulation, blank unless it did (`daily.par_note`). The par itself
+    # never reaches a player short of it.
+    par_due: tuple[int, int] | None = None
+    par_note: str = ""
     # The weekly campaign's reminder for this setup, e.g. "Node 3: post within 12
     # min", or None when it isn't a campaign node (or nobody could ask).
     # Written by `main` once a frame from `campaign.label`, so the countdown
