@@ -529,14 +529,104 @@ and a live actuary, which is time-budgeted, played as the search's unlimited-bud
 the moves that mattered. It is one board; the other days' maps have not been checked. (The 10/9 line has not been played.)
 
 Still open: a bound that counts the ships a fight needs (the floor counts only
-travel), and whether K = 5 or more finds anything.
+travel).
+
+## Beyond K launches: openings and local search (2026-11-05)
+
+**The goal is fewest turns; ships lost only break a tie** (the author's ruling). Every
+verdict below is read that way.
+
+**Every human-played puzzle.** The live board's `daily_games` view lists nine puzzle days
+with human scores (2026-10-28 to 11-05). Each day's stored settings were read from
+`dailies` with the publishable key, and for 11-01 to 11-05 they equal the files in
+`tools/par_inputs/`. The best human replays came from `public_replays` (none was public for
+11-05; its 5/3 is the board's score).
+
+**What a winning human line looks like.** On 10-30 the best human line (10/9) has 12 launches
+and the passes had stopped at 11/7. Replayed against the live rivals with each launch dropped
+in turn, 7 launches are needed, 3 can go with no change, and 2 only cost a ship: 9 launches at
+least, more than any pass covers. Of its launches only 3 send part of a garrison; 8 of its 9
+relays send a whole one. Across 24 lines (the human bests and the search's own) 46 of 88
+attacks send a whole garrison, and the sized ones sit just above what the target holds.
+Two prunes that look safe are not: 16 of 42 sized sends do *not* beat the target's garrison
+at launch (a softening strike, then the capture: 4 vs 7 then 8 vs 6 on 11-03), and 29 of 88
+relays move *away* from the nearest rival system.
+
+**What did not work.**
+- *A launch budget that counts only partial sends* (whole-garrison sends free): it reaches the
+  human line's family, but each layer grows about 8 times and it did not reach turn 10.
+- *A tail search* (fix the first P turns of a good line, search the rest with every order
+  set): even from the human's own turn-6 board it ran out of time in layer 3, because every
+  send size from every system is millions of order sets a layer.
+- *An exhaustive search over a smaller move model* (the `strike` level: hold, whole garrison,
+  all but one or two, and sizes within 3 of the projected landing garrison, which covers 154 of
+  the 176 orders in those lines): it still grows about 20 times a layer and the floor, 4 turns
+  under the best line, prunes almost nothing. A capped frontier dropped the right boards.
+- *Local search over whole plans from nothing or from the beam's line* (`par_local`): about
+  1,200 plans a second, and it trims a line (14 launches to 8, 11/7 to 11/6), but it never
+  crossed from the beam's opening to the human's.
+
+**What did: search the openings (`tools/par_open.py`).** With the human's first three turns
+fixed, a beam (width 100, 40 s) finishes 10/10, and with five 10/9; with only turn 0 fixed it
+stays at 11/7. So the beam finishes well and the opening is what it misses: its ranking reads
+a board by how a bot would finish, which undervalues a sized strike on turn 2 whose payoff
+comes later. `par_open` enumerates every opening of `--depth` turns in the `strike` model
+(2,296 distinct boards at depth 3 on 10-30, the human's among them), finishes each with a cheap
+beam (width 30, 2 s), then redoes the best 100 with a wide one (width 100, 40 s). The cheap
+pass alone stays at 11/7 (the human's opening finishes 11/9 there); the refine found **10/8**
+in about six minutes on six cores, and `par_local` then trimmed it to **10/7** (5 launches).
+Both stages are in `par_best` now, after the first passes and the proof attempt, so a board
+that proves never pays for them, and the K passes after them start from the better bound.
+
+**Turn-first (`par_exhaustive --turn-only`, the default in `par_best`).** A pass looks only for
+a win on an earlier turn than the best so far, so every board that could at best tie the turn
+is dropped. It is exact for the turn and says nothing about ships lost at that turn
+(`par_best --tiebreak` runs one more pass for that). Side by side on 11-03, K = 4: 179 s for the
+full pass, 125 s turn-only; K = 5 251 s against 468 s. From the opening search's bounds 10-31
+went K = 3, 4, 5 in 28, 157 and 588 s (the full passes from the old bound took 73, 466 and
+1,484 s) and 10-30's K = 4 took 210 s against 888 s. From a loose bound it saves little, which
+is why the passes now run after the opening search.
+
+**Proofs only where they can finish (`--proof-gap`, default 2).** The full search proved the
+three days whose best line sat within a turn of the floor and spent its whole budget on the
+other six, so it is now tried only when the best line is at most two turns over the floor, and
+tried again if the opening or local search tightens the bound.
+
+**Checkpoints.** `par_exhaustive` saves its frontier after a layer once `--checkpoint-secs`
+(120 s) have passed, and a rerun resumes from it if the search's settings match; `par_best`
+keeps a cut-off pass's folder. A checkpoint from before an option was removed still loads while
+that option was at its default.
+
+**Every human-played puzzle, against the best human** (dealt locally; turns, then ships lost):
+
+| Day | Search | Best human | Rests on |
+| --- | --- | --- | --- |
+| 10-28 | **7/9** | 8/7 | sooner; exact up to K = 4 |
+| 10-29 | **6/7** | 7/6 | sooner; proved, with two-lane sends |
+| 10-30 | **10/7** | 10/9 | fewer lost; opening search + local search; no win before turn 10 up to K = 4 |
+| 10-31 | **11/5** | 17/5 | sooner; opening search + local search; no win before turn 11 up to K = 5 |
+| 11-01 | 10/9 | 10/9 | equal; exact up to K = 4 |
+| 11-02 | 6/7 | 6/7 | equal; proved, with two-lane sends |
+| 11-03 | 10/10 | 10/10 | equal; exact up to K = 5 |
+| 11-04 | 10/3 | 10/3 | equal; exact up to K = 5 |
+| 11-05 | 5/3 | 5/3 | equal; proved, with two-lane sends |
+
+The search matches or beats the best human on all nine. The opening and local stages found
+nothing on 10-28, 11-01 or 11-04. None of the new lines has been played on the real game.
 
 ## Next, if it goes further
 
-- **Search quality.** Rolling out with more than one bot is built ("The
-  rollout bot"). Next: wider beams, and candidates that aren't some bot's idea
-  (the maps where people still win sooner suggest these exist). Throwaway
-  orders no longer re-roll anything, so they are not worth searching.
+- **A stronger bound.** Neutral systems never move and their garrisons only grow, so reaching a
+  rival through neutrals means beating each garrison on the way; counting the ships that needs
+  against the ships you can have by turn T would close part of the 4-turn gap between the floor
+  and the best line. It must use the best-case combat ratio to stay sound.
+- **A relay as one decision.** Most launches in good lines forward a whole garrison; if setting
+  "forward everything from A to B" cost one launch however often it fires, those lines would
+  fit inside K = 5 or 6 and the exact claim would cover them.
+- **Cheaper openings.** Successive halving (0.5 s each, then 2 s for the best third, then the
+  wide beam for the best 100): on 10-30, 852 of 2,296 openings never won at all.
+- **Deterministic budgets.** The beam and the opening finishes are limited by time, so a slower
+  machine gets a different answer (11-01); a node budget would not.
 - **Cost.** Anything with knower as a rival wants its own time budget.
 
 ## A gap this exposes in `verify_scores`

@@ -224,6 +224,9 @@ nor rejected are in [`open.md`](open.md); the file index is
 - other-games.md · Stars on every map (win / every bot / honest par, frozen targets): set aside 2026-10-28. Par times out on knower maps; with bot-only tiers 66% of posted bests already beat every bot (59% on keyed dice), from one main player. Repeat the check when the board has more players. *Set aside: the board's scores.*
 - other-games.md · A rating from pairwise bests on shared maps, bots included (Bradley-Terry): set aside 2026-10-28; only 12 of 190 maps have two people. *A rating against the bot ladder.*
 - par.md · A hidden bonus star for beating lucky par: a second par run per map, nearly unreachable on keyed dice, and where met it marks a short search. Hidden targets go to gauntlet lanes. *Star tiers on every map* (`other-games.md`).
+- par.md · A launch budget that counts only partial sends (`par_exhaustive --sized`): layers grew about 8 times each and never reached the human line's turn; removed. *Beyond K launches.*
+- par.md · A tail search (`--prefix-line`: fix a good line's first turns, search the rest with every order set): out of time in layer 3 even from the human's own turn-6 board; removed. *Beyond K launches.*
+- par.md · Pruning to forward-only relays or to sized sends that capture: 29 of 88 relays in winning lines move away from the nearest rival, and 16 of 42 sized sends are softening strikes. *Beyond K launches.*
 - par.md · Lucky dice as a ceiling: withdrawn, since rival fights still roll and honest dice beat lucky in 2 of 18 pairs. *Dice modes.*
 
 ## pbp.md (Play-by-post)

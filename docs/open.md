@@ -48,4 +48,4 @@ ships or is dropped, delete its line here (and add it to
 - learner.md · Whether the failed gate is a power problem, and a strike curve that tells the bots apart. *The gate.*
 - learning.md · Improving Learning's memory against people (it stays; dropping it is decided against). Blocked on data: too few posted games against actuary at Learning to measure. *Memory off: the prior alone.*
 - learning.md · The counter-strike's people-profile question: people sit far from the prior on emptying frontiers. *The counter-strike.*
-- par.md · Wider beams, candidates that aren't some bot's idea, a time budget for knower rivals. *Next, if it goes further.*
+- par.md · A stronger bound (ships needed through neutrals), a relay as one decision, successive halving for openings, node budgets instead of time, a time budget for knower rivals. *Next, if it goes further.*

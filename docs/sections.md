@@ -112,8 +112,9 @@ line gives only the verdict. Ideas that lost are in
 - par.md · *The blend (`par_best.py`, 2026-11-04):* beam bound, then launch-limited passes K by K, each exact for its family; what "exact up to K" does and does not say.
 - par.md · *Strike candidates (2026-11-04):* beam sends sized to what each target will hold on landing (stepped forward with the rivals deciding); needed a band, finds the 10-turn line only at width 1500.
 - par.md · *evolved as a candidate (2026-11-02):* won the puzzle daily `e60a6d946d4a010b` (15 → 11) but a wash across par.md's maps (6 better, 9 worse, 15 same); a by-hand `--candidates` option, not a default.
+- par.md · *Beyond K launches (2026-11-05):* every human-played puzzle; what a winning line looks like (relays, softening strikes); what failed (sized budget, tail search, strike-model exhaustive, local search alone); the opening search found 10-30's 10/7; turn-first passes; proofs only near the floor; checkpoints; the nine days against the best human.
 - par.md · **A gap this exposes in `verify_scores`.** The dice half closed for keyed turns; the bot-orders half open by design.
-- par.md · **Next, if it goes further.** Wider beams, candidates that aren't a bot's idea, a budget for knower rivals.
+- par.md · **Next, if it goes further.** A stronger bound, a relay as one decision, cheaper openings, deterministic budgets, a budget for knower rivals.
 
 ## seat-play.md
 - seat-play.md · **What decided the games.** Bots evacuate into the system you struck from; covering every exit kills stacks; dead ends bottle a stack; a free-for-all goes to the swap war.
