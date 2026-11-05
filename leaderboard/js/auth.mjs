@@ -1,10 +1,16 @@
-// Signing in with Google, for one thing only: owning a claimed name.
+// Signing in with a private login and a password, for one thing only: owning a
+// claimed name.
 //
-// Supabase Auth runs the Google round trip; this file is the PKCE flow over
-// plain fetch, for the same reason api.mjs loads no client library. Nobody has
-// to sign in to play, post or watch — an unclaimed name works exactly as it
-// always did — so every failure here degrades to "signed out", never an error a
-// page can't render past.
+// Supabase Auth keeps the accounts; this file talks to it over plain fetch, for
+// the same reason api.mjs loads no client library. Nobody has to sign in to
+// play, post or watch — an unclaimed name works exactly as it always did — so
+// every failure here degrades to "signed out", never an error a page can't
+// render past.
+//
+// Supabase wants an email for a password account, so the login is turned into
+// one that names nothing: a hash of it at ACCOUNT_DOMAIN (`accountEmail`). The
+// login can be any text, an email address included, and Supabase never holds
+// it. Nothing is ever mailed: email confirmation is off in the project.
 //
 // The session lives in localStorage under SESSION_KEY. The board shares the
 // game's origin, so the web game reads the same value (`paths.WEB_AUTH_KEY`,
@@ -13,7 +19,11 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.mjs";
 
 export const SESSION_KEY = "sc_auth";
-const VERIFIER_KEY = "sc_auth_verifier";
+// Never change it: every account's stored email ends in it, so a new one would
+// lock every existing account out. `tools/admin.py` mirrors it
+// (tests/test_leaderboard_sync.py).
+export const ACCOUNT_DOMAIN = "star-conquest.netlify.app";
+export const MIN_PASSWORD = 8;
 // Refresh this long before the access token would lapse, so a request never
 // leaves with one that expires in flight.
 const REFRESH_EARLY_S = 60;
@@ -44,43 +54,17 @@ function write(kind, key, value) {
   }
 }
 
-function base64url(bytes) {
-  let text = "";
-  for (const byte of bytes) text += String.fromCharCode(byte);
-  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
+/** A login as the account knows it: case and surrounding space folded. */
+export const loginKey = (login) => String(login || "").trim().toLowerCase();
 
-/** A fresh PKCE verifier: 32 random bytes, base64url. */
-export function newVerifier() {
-  return base64url(crypto.getRandomValues(new Uint8Array(32)));
-}
-
-/** RFC 7636's S256 challenge for `verifier`. */
-export async function challengeFor(verifier) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return base64url(new Uint8Array(digest));
-}
-
-/** Where Google sends the browser back: the account page on this deploy. */
-export function returnUrl(loc = globalThis.location) {
-  return new URL("account.html", loc.href).href.split(/[?#]/)[0];
-}
-
-/** The authorize URL to leave for. Separate from signIn() so a test can read it. */
-export async function authorizeUrl(verifier, redirectTo) {
-  const params = new URLSearchParams({
-    provider: "google",
-    redirect_to: redirectTo,
-    code_challenge: await challengeFor(verifier),
-    code_challenge_method: "s256",
-  });
-  return `${SUPABASE_URL}/auth/v1/authorize?${params}`;
-}
-
-export async function signIn() {
-  const verifier = newVerifier();
-  write("sessionStorage", VERIFIER_KEY, verifier);
-  globalThis.location.assign(await authorizeUrl(verifier, returnUrl()));
+/**
+ * The email Supabase holds for `login`: the first 40 hex digits of its key's
+ * SHA-256, at ACCOUNT_DOMAIN. `tools/admin.py`'s `account_email` is the same.
+ */
+export async function accountEmail(login) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(loginKey(login)));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 40)}@${ACCOUNT_DOMAIN}`;
 }
 
 export function signOut() {
@@ -88,17 +72,17 @@ export function signOut() {
 }
 
 /** Supabase's token answer, cut down to what this site keeps. */
-function kept(body, now) {
+function kept(body, now, login) {
   return {
     access_token: body.access_token,
     refresh_token: body.refresh_token,
     expires_at: body.expires_at || Math.floor(now / 1000) + (body.expires_in || 3600),
-    email: body.user?.email || "",
+    login: login || "",
     user_id: body.user?.id || "",
   };
 }
 
-async function tokenCall(grant, payload, now) {
+async function tokenCall(grant, payload, now, login) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=${grant}`, {
     method: "POST",
     headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
@@ -107,38 +91,90 @@ async function tokenCall(grant, payload, now) {
   if (!res.ok) return null;
   const body = await res.json();
   if (!body.access_token) return null;
-  const session = kept(body, now);
+  const session = kept(body, now, login);
   write("localStorage", SESSION_KEY, session);
   return session;
 }
 
 /**
- * Finish the round trip on the account page: trade `?code=` for a session.
- * Returns the session, or null when there is no code here or the trade failed.
- * Either way the code leaves the address bar, so a reload doesn't retry it.
+ * Auth's refusal as a sentence. Supabase answers `{error_code, msg}`; an older
+ * server `{error, error_description}`.
  */
-export async function finishSignIn(loc = globalThis.location, now = Date.now()) {
-  const url = new URL(loc.href);
-  const code = url.searchParams.get("code");
-  if (!code) return null;
-  url.searchParams.delete("code");
-  try {
-    globalThis.history?.replaceState(null, "", url.pathname + url.search + url.hash);
-  } catch {
-    // A page with no history API keeps the code in view; harmless, it is spent.
+export function authError(body) {
+  const code = body?.error_code || body?.code || body?.error || "";
+  switch (code) {
+    case "invalid_credentials":
+    case "invalid_grant":
+      return "That login and password don't match.";
+    case "user_already_exists":
+    case "email_exists":
+      return "That login is taken. Sign in instead, or pick another.";
+    case "weak_password":
+      return `Choose a longer or less common password (at least ${MIN_PASSWORD} characters).`;
+    case "over_request_rate_limit":
+      return "Too many tries. Wait a few minutes and try again.";
+    case "signup_disabled":
+      return "New accounts are turned off at the moment.";
+    default:
+      return body?.msg || body?.error_description || body?.message || "Couldn't sign in.";
   }
-  let verifier = null;
-  try {
-    verifier = store("sessionStorage")?.getItem(VERIFIER_KEY) || null;
-  } catch {
-    // Blocked storage: no verifier, so no session — the signed-out case.
+}
+
+async function credentials(path, login, password, now) {
+  if (!loginKey(login)) return { error: "Type a login." };
+  if (String(password || "").length < MIN_PASSWORD) {
+    return { error: `A password is at least ${MIN_PASSWORD} characters.` };
   }
-  write("sessionStorage", VERIFIER_KEY, null);
-  if (!verifier) return null;
+  let res;
+  let body;
   try {
-    return await tokenCall("pkce", { auth_code: code, code_verifier: verifier }, now);
+    res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: await accountEmail(login), password }),
+    });
+    body = await res.json().catch(() => ({}));
   } catch {
-    return null;
+    return { error: "Couldn't reach the sign-in server." };
+  }
+  if (!res.ok) return { error: authError(body) };
+  // A sign-up answered with no session means the project still asks for email
+  // confirmation, which can never arrive here.
+  if (!body.access_token) return { error: "Sign-up needs email confirmation turned off in Supabase." };
+  const session = kept(body, now, login.trim());
+  write("localStorage", SESSION_KEY, session);
+  return { session };
+}
+
+/** Make an account and sign in to it: `{session}` or `{error}`, never a throw. */
+export function signUp(login, password, now = Date.now()) {
+  return credentials("signup", login, password, now);
+}
+
+/** Sign in to an existing account: `{session}` or `{error}`, never a throw. */
+export function signIn(login, password, now = Date.now()) {
+  return credentials("token?grant_type=password", login, password, now);
+}
+
+/** Set a new password for the signed-in account: "" when done, else why not. */
+export async function changePassword(password) {
+  if (String(password || "").length < MIN_PASSWORD) return `A password is at least ${MIN_PASSWORD} characters.`;
+  const live = await session();
+  if (!live) return "Sign in first.";
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: "PUT",
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${live.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ password }),
+    });
+    if (res.ok) return "";
+    return authError(await res.json().catch(() => ({})));
+  } catch {
+    return "Couldn't reach the sign-in server.";
   }
 }
 
@@ -158,7 +194,8 @@ export async function session(now = Date.now()) {
   if (!current) return null;
   if (current.expires_at - REFRESH_EARLY_S > now / 1000) return current;
   try {
-    const fresh = await tokenCall("refresh_token", { refresh_token: current.refresh_token }, now);
+    const fresh = await tokenCall("refresh_token", { refresh_token: current.refresh_token }, now,
+      current.login);
     if (fresh) return fresh;
   } catch {
     // Unreachable auth server: treat as signed out for this request, but keep

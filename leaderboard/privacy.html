@@ -10,7 +10,7 @@
     watch replays without an account. This page says what is kept, where it is
     kept, and how to have it removed.
   </p>
-  <p class="updated">Last updated 5 October 2026.</p>
+  <p class="updated">Last updated 5 November 2026.</p>
 
   <h2 class="section-title">Who runs this site</h2>
   <p>
@@ -26,17 +26,18 @@
     scripts. The pages, scripts and fonts are all served from this site.
   </p>
 
-  <h2 class="section-title">If you sign in with Google</h2>
+  <h2 class="section-title">If you make an account</h2>
   <p>
-    Signing in is optional, and it does one thing: it lets you claim a name so
-    nobody else can post under it.
+    An account is optional, and it does one thing: it lets you claim a name so
+    nobody else can post under it. It is a login and a password you choose. No
+    email address or real name is asked for.
   </p>
   <ul>
     <li>
-      When you sign in, Google passes your <strong>email address, name, profile
-      picture link and Google account ID</strong> to Supabase, the service that
-      runs sign-in for this site. Google always sends the name and picture as
-      part of a standard sign-in, but this site never uses or shows them.
+      Your login is never stored as you typed it. Supabase, the service that
+      runs sign-in for this site, keeps only a scrambled form of it (a hash),
+      along with a hash of your password. So even if you use your email address
+      as your login, the site never holds it, and nobody is ever emailed.
     </li>
     <li>
       Supabase also records each sign-in: <strong>when it happened, your IP
@@ -48,10 +49,9 @@
       who claimed it.
     </li>
     <li>
-      Your email is used to show you who you are signed in as. If you ask for a
-      name you have already been posting under, the site's owner also uses it
-      to find your account so the name can be assigned to you. It is never
-      shown to anyone else, and nobody is ever emailed.
+      If you ask for a name you have already been posting under, or for a new
+      password, you tell the site's owner your login so they can find your
+      account. It is not written down anywhere.
     </li>
   </ul>
   <p>
@@ -77,9 +77,6 @@
     with its seat names.
   </p>
   <p>
-    Any name you type is public, so choose one you are happy for anyone to see.
-  </p>
-  <p>
     <strong>Why:</strong> posting a score or joining a match is what you came to
     do, and a fair public leaderboard needs its scores to be checkable.
     <strong>How long:</strong> until removed. Ask, and the scores under your
@@ -103,7 +100,7 @@
     The game and the board keep some things in your browser's local storage:
     your settings, your best scores, the game in progress and saved replays,
     your shared-match seat links, your preferences (such as animated turns and
-    <em>Share replays</em>) and, if you sign in, your sign-in session and email.
+    <em>Share replays</em>) and, if you sign in, your sign-in session and login.
     None of this is a tracking cookie. Each item leaves your device only when you
     use the feature it belongs to. Signing out removes the session, and clearing
     this site's data in your browser removes the rest.
@@ -113,11 +110,6 @@
   <ul>
     <li><strong>Supabase</strong> runs the database and sign-in. Its servers for this site are in eu-west-2 (London).</li>
     <li><strong>Netlify</strong> hosts the site and its server functions.</li>
-    <li>
-      <strong>Google</strong> handles the sign-in step itself. What Google does
-      with your account is covered by
-      <a href="https://policies.google.com/privacy">Google's own privacy policy</a>.
-    </li>
   </ul>
   <p>
     Supabase and Netlify handle this data only on the site's behalf, under their
@@ -127,8 +119,8 @@
 
   <h2 class="section-title">Children</h2>
   <p>
-    Signing in is for people aged 13 and over. The rest of the site needs no
-    account and collects nothing about who you are.
+    An account asks for no email address or real name, and the rest of the site
+    needs no account and collects nothing about who you are.
   </p>
 
   <h2 class="section-title">Your rights</h2>

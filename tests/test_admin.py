@@ -174,15 +174,20 @@ def test_deleting_a_score_that_does_not_exist_is_refused():
 # Claimed names
 # --------------------------------------------------------------------------- #
 class AuthFakeApi(FakeApi):
-    """FakeApi plus Auth's account list, by email."""
+    """FakeApi plus Auth's account list. ``accounts`` maps a login to its uid;
+    Auth itself only ever sees the login's hashed email."""
 
     def __init__(self, answers, accounts=None, **kw):
         super().__init__(answers, **kw)
-        self.accounts = accounts or {}
+        self.accounts = {admin.account_email(login): uid for login, uid in (accounts or {}).items()}
+        self.passwords: list[tuple[str, str]] = []
 
     def auth_user(self, email: str) -> dict | None:
-        uid = self.accounts.get(email.strip().lower())
+        uid = self.accounts.get(email)
         return {"id": uid, "email": email} if uid else None
+
+    def set_password(self, uid: str, password: str) -> None:
+        self.passwords.append((uid, password))
 
 
 ANN = "11111111-1111-1111-1111-111111111111"
@@ -221,10 +226,38 @@ def test_assigning_a_name_nobody_has_used_creates_it_owned():
     assert api.writes[-1] == ("insert", "users", [{"name": "Ann", "owner": ANN}])
 
 
-def test_assigning_to_an_account_that_never_signed_in_is_refused():
+def test_assigning_to_a_login_with_no_account_is_refused():
     api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])])
-    with pytest.raises(admin.Refused, match="sign in"):
+    with pytest.raises(admin.Refused, match="account page"):
         admin.plan_assign_name(api, "Ann", "ann@example.com")
+
+
+def test_a_login_is_stored_only_as_a_hash():
+    email = admin.account_email(" Ann@Example.com ")
+    assert email == admin.account_email("ann@example.com"), "case and spaces fold"
+    local, domain = email.split("@")
+    assert domain == admin.ACCOUNT_DOMAIN
+    assert len(local) == 40 and "ann" not in local
+
+
+def test_set_password_prints_it_once_and_audits_only_the_account(capsys):
+    api = AuthFakeApi([], {"ann": ANN})
+    admin.apply(api, admin.plan_set_password(api, "Ann"), yes=False, reason="")
+    assert api.passwords == [] and api.writes == []
+    assert "new password" not in capsys.readouterr().out, "a dry run shows no password"
+
+    admin.apply(api, admin.plan_set_password(api, "Ann"), yes=True, reason="forgot it")
+    (uid, password), = api.passwords
+    assert uid == ANN and len(password) >= 12
+    assert f"new password: {password}" in capsys.readouterr().out
+    (audit,) = api.writes
+    assert audit[2][0]["detail"] == {"account": ANN}
+    assert password not in str(audit) and "ann" not in str(audit).lower()
+
+
+def test_set_password_for_an_unknown_login_is_refused():
+    with pytest.raises(admin.Refused, match="account page"):
+        admin.plan_set_password(AuthFakeApi([]), "nobody")
 
 
 def test_an_account_owns_one_name():

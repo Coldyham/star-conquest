@@ -1,19 +1,24 @@
-// account.html: sign in with Google, then claim, show or release one name.
-// Every rule is the database's (schema.sql's claim_name/release_name/my_name);
-// this page only asks and reports.
+// account.html: sign in with a private login and password, then claim, show or
+// release one name. Every rule is the database's (schema.sql's
+// claim_name/release_name/my_name); this page only asks and reports.
 
 import { configured, rpc } from "./api.mjs";
-import { finishSignIn, session, signIn, signOut } from "./auth.mjs";
+import { changePassword, session, signIn, signOut, signUp } from "./auth.mjs";
 import { claimError } from "./claims.mjs";
 import { mountMyScores, rememberName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
 const who = document.getElementById("who");
-const signInButton = document.getElementById("sign-in");
+const credentialsForm = document.getElementById("credentials");
+const loginField = document.getElementById("login");
+const passwordField = document.getElementById("password");
+const signUpButton = document.getElementById("sign-up");
 const signOutButton = document.getElementById("sign-out");
 const claimForm = document.getElementById("claim");
 const nameField = document.getElementById("name");
 const releaseButton = document.getElementById("release");
+const passwordForm = document.getElementById("new-password");
+const newPasswordField = document.getElementById("password-new");
 const status = document.getElementById("status");
 
 function say(message, kind = "") {
@@ -22,39 +27,57 @@ function say(message, kind = "") {
 }
 
 async function refresh() {
-  signInButton.hidden = signOutButton.hidden = claimForm.hidden = releaseButton.hidden = true;
+  for (const part of [credentialsForm, signOutButton, claimForm, releaseButton, passwordForm]) part.hidden = true;
   const live = await session();
   if (!live) {
     who.textContent = "Not signed in.";
-    signInButton.hidden = false;
+    credentialsForm.hidden = false;
     return;
   }
-  signOutButton.hidden = false;
+  signOutButton.hidden = passwordForm.hidden = false;
+  const as = live.login ? `Signed in as ${live.login}` : "Signed in";
   let owned = "";
   try {
     owned = (await rpc("my_name", {})) || "";
   } catch (err) {
-    who.textContent = `Signed in as ${live.email || "a Google account"}.`;
+    who.textContent = `${as}.`;
     say(`Couldn't read your name: ${err.message}`, "error");
     return;
   }
   if (owned) {
-    who.textContent = `Signed in as ${live.email || "a Google account"} — your name is “${owned}”.`;
+    who.textContent = `${as} — your name is “${owned}”.`;
     rememberName(owned);
     releaseButton.hidden = false;
   } else {
-    who.textContent = `Signed in as ${live.email || "a Google account"}. You haven't claimed a name yet.`;
+    who.textContent = `${as}. You haven't claimed a name yet.`;
+    // The login is private and may be an email, so it is never offered as the
+    // public name.
     claimForm.hidden = false;
   }
 }
 
-signInButton.addEventListener("click", () => {
+async function enter(how) {
   if (!configured()) {
     say("This leaderboard isn't connected to its database yet.", "error");
     return;
   }
-  signIn().catch((err) => say(`Couldn't start signing in: ${err.message}`, "error"));
+  say(how === signUp ? "Creating your account…" : "Signing in…");
+  const { error } = await how(loginField.value, passwordField.value);
+  if (error) {
+    say(error, "error");
+    return;
+  }
+  passwordField.value = "";
+  say(how === signUp ? "Account made. Now claim a name." : "");
+  await refresh();
+}
+
+credentialsForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  enter(signIn);
 });
+
+signUpButton.addEventListener("click", () => enter(signUp));
 
 signOutButton.addEventListener("click", async () => {
   signOut();
@@ -91,13 +114,17 @@ releaseButton.addEventListener("click", async () => {
   await refresh();
 });
 
+passwordForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const problem = await changePassword(newPasswordField.value);
+  if (problem) {
+    say(problem, "error");
+    return;
+  }
+  newPasswordField.value = "";
+  say("Password changed.");
+});
+
 mountNav();
 mountMyScores();
-(async () => {
-  // Back from Google: trade the code for a session. A refusal arrives as
-  // ?error_description= instead (the person cancelled, or the provider is off).
-  const refused = new URL(location.href).searchParams.get("error_description");
-  if (refused) say(refused, "error");
-  else await finishSignIn();
-  await refresh();
-})();
+refresh();

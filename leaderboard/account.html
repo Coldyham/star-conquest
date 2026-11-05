@@ -9,31 +9,51 @@
        account. What signing in buys is that nobody else can post a score, make
        a campaign move or take a play-by-post seat under the name you claim. -->
   <p class="lede">
-    You never need to sign in to play or post. Signing in with Google lets you
-    claim one name, so nobody else can post scores, make campaign moves or take
-    a shared-match seat under it.
+    You never need an account to play or post. An account lets you claim one
+    name, so nobody else can post scores, make campaign moves or take a
+    shared-match seat under it.
   </p>
   <p class="lede">
     Only a name nobody has used on the board yet can be claimed here. If you
     have already been posting under a name, ask the board's owner to assign it
-    to you once you have signed in.
+    to you once you have an account.
   </p>
 
   <div class="form">
     <p class="hint" id="who">Checking…</p>
-    <button id="sign-in" type="button" hidden>Sign in with Google</button>
-    <p class="hint">
-      Signing in shares your Google email with this site.
-      <a href="privacy.html">What is stored, and why</a>.
-    </p>
+
+    <form id="credentials" class="form" hidden>
+      <label for="login">Login</label>
+      <input id="login" name="username" type="text" autocomplete="username" maxlength="200"
+             autocapitalize="none" spellcheck="false" placeholder="Login">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password"
+             placeholder="Password">
+      <button id="sign-in" type="submit">Sign in</button>
+      <button id="sign-up" type="button" class="ghost">Create account</button>
+      <p class="hint">
+        Your login is private: it is never shown on the board, and it can be an
+        email address or anything else. Nothing is ever emailed, so there is no
+        reset by email. If you forget your password, ask the board's owner.
+        <a href="privacy.html">What is stored, and why</a>.
+      </p>
+    </form>
 
     <form id="claim" class="form" autocomplete="off" hidden>
-      <label for="name">Name to claim</label>
+      <label for="name">Name to claim (public)</label>
       <input id="name" name="name" type="text" maxlength="60" placeholder="Name">
       <button id="claim-go" type="submit">Claim</button>
     </form>
 
     <button id="release" type="button" hidden>Release this name</button>
+
+    <form id="new-password" class="form" hidden>
+      <label for="password-new">New password</label>
+      <input id="password-new" name="new-password" type="password" autocomplete="new-password"
+             placeholder="New password">
+      <button type="submit" class="ghost">Change password</button>
+    </form>
+
     <button id="sign-out" type="button" class="ghost" hidden>Sign out</button>
     <p class="status" id="status" role="status" aria-live="polite"></p>
   </div>

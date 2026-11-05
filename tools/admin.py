@@ -24,20 +24,24 @@ why, and the rows it is about to remove or overwrite. A deletion is therefore
 undoable by hand from that row, and no moderation happens without a trace.
 
 A claimed name (`users.owner`, see `leaderboard/schema.sql`) belongs to one
-Google account, and only that account may post under it. A person claims an
-*unused* name for themselves on the board's account page; a name that is
-already in use is handed over here, since nothing on the site can prove who
-posted under it:
+account, and only that account may post under it. An account is a private
+login and a password, made on the board's account page. A person claims an
+*unused* name for themselves there; a name that is already in use is handed
+over here, since nothing on the site can prove who posted under it:
 
-    assign-name NAME EMAIL [--fold OLD...]
-                             give NAME to the account signed in with EMAIL.
-                             They must have signed in on the board once, so
-                             the account exists. Refused if the account owns
-                             another name, or someone else owns this one.
+    assign-name NAME LOGIN [--fold OLD...]
+                             give NAME to the account with that LOGIN, which
+                             the person tells you. They must have made the
+                             account on the board first. Refused if the
+                             account owns another name, or someone else owns
+                             this one.
                              --fold moves each OLD name's scores and tags onto
                              NAME and deletes OLD, which is then free for
                              anyone: one person's several names become one.
     release-name NAME        make NAME an ordinary unclaimed name again.
+    set-password LOGIN       give that account a new random password, printed
+                             here once, for someone who forgot theirs. Nothing
+                             is ever emailed, so this is the only reset.
     names [--claimed]        list names and who (by account id) owns them.
 
 Three different things can be done to a play-by-post seat, and they are not
@@ -87,9 +91,33 @@ from tools.bot_replay import (
 # `leaderboard/js/config.mjs`'s GAME_URL_FALLBACK: where a printed seat link opens.
 GAME_URL = "https://star-conquest.netlify.app/game/"
 
+# `leaderboard/js/auth.mjs`'s ACCOUNT_DOMAIN (tests/test_leaderboard_sync.py).
+ACCOUNT_DOMAIN = "star-conquest.netlify.app"
+
+
+def account_email(login: str) -> str:
+    """The email Supabase holds for an account's login, as `auth.mjs`'s
+    `accountEmail` makes it: a hash of the folded login, so the login itself
+    (which may be a real email) is never stored."""
+    digest = hashlib.sha256(login.strip().lower().encode("utf-8")).hexdigest()
+    return f"{digest[:40]}@{ACCOUNT_DOMAIN}"
+
 
 class AdminApi(Supabase):
-    """`Supabase`, plus the one Auth admin read assign-name needs."""
+    """`Supabase`, plus the Auth admin calls the account commands need."""
+
+    def set_password(self, uid: str, password: str) -> None:
+        """Replace an account's password through Auth's admin API."""
+        request = urllib.request.Request(
+            f"{self.url.rstrip('/')}/auth/v1/admin/users/{q(uid)}", method="PUT",
+            data=json.dumps({"password": password}).encode("utf-8"))
+        for name, value in self._headers().items():
+            request.add_header(name, value)
+        try:
+            with urllib.request.urlopen(request, timeout=60):
+                pass
+        except (OSError, ValueError) as err:
+            raise ApiError(f"PUT auth/v1/admin/users failed: {err}") from err
 
     def auth_user(self, email: str) -> dict | None:
         """The Supabase Auth account signed in with ``email``, or None.
@@ -395,18 +423,23 @@ def _set_owner(api: Supabase, user_id: int, was: str | None, owner: str | None) 
         raise Refused("the name changed hands while this ran; nothing was changed, run it again")
 
 
-def plan_assign_name(api: AdminApi, name: str, email: str,
+def _account(api: AdminApi, login: str) -> dict:
+    account = api.auth_user(account_email(login))
+    if not account:
+        raise Refused(f"no account has the login {login.strip()!r}; they make one on the "
+                      "board's account page first")
+    return account
+
+
+def plan_assign_name(api: AdminApi, name: str, login: str,
                      fold: list[str] | tuple[str, ...] = ()) -> Plan:
-    """Give ``name`` to the account that signed in as ``email``, folding each of
-    ``fold`` into it first: their scores and tags move onto ``name``, and their
-    rows are deleted, so those names are free for anyone again."""
+    """Give ``name`` to the account with ``login``, folding each of ``fold``
+    into it first: their scores and tags move onto ``name``, and their rows are
+    deleted, so those names are free for anyone again."""
     name = name.strip()
     if not 1 <= len(name) <= 60:
         raise Refused("a name is 1-60 characters")
-    account = api.auth_user(email)
-    if not account:
-        raise Refused(f"no account has signed in as {email!r}; they must sign in on the "
-                      "board's account page once first")
+    account = _account(api, login)
     uid = str(account["id"])
     rows = api.select("users", f"select=*&name_key=eq.{q(name_key(name))}&order=id.asc")
     user = rows[0] if rows else None
@@ -479,11 +512,30 @@ def plan_assign_name(api: AdminApi, name: str, email: str,
         # half its old scores still elsewhere.
         steps.append(lambda: _set_owner(api, user["id"], None, uid))
 
-    # The audit row names the account by id, never by email, and keeps every
+    # The audit row names the account by id, never by login, and keeps every
     # folded row and what moved off it, so a fold can be undone by hand.
     return Plan("assign-name", name if user is None else f"{user['name']} ({user['id']})",
                 summary, {"user": user, "owner": uid, "folded": folded, "moved": moved},
                 steps)
+
+
+def plan_set_password(api: AdminApi, login: str) -> Plan:
+    """A new random password for the account with ``login``, printed once.
+
+    The audit row holds the account id only: neither the login nor the
+    password is ever stored."""
+    uid = str(_account(api, login)["id"])
+    password = secrets.token_urlsafe(12)
+
+    def reset() -> str:
+        api.set_password(uid, password)
+        return (f"new password: {password}\n"
+                "give it to them privately; they can change it on the account page")
+
+    return Plan("set-password", f"account {uid}",
+                ["give that account a new random password, printed here once; "
+                 "the old one stops working"],
+                {"account": uid}, [reset])
 
 
 def plan_release_name(api: Supabase, name: str) -> Plan:
@@ -670,13 +722,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cmd = writes("rename-user", "change a player's name everywhere it shows")
     cmd.add_argument("name")
     cmd.add_argument("new_name")
-    cmd = writes("assign-name", "give a name, used or not, to a signed-in account")
+    cmd = writes("assign-name", "give a name, used or not, to an account")
     cmd.add_argument("name")
-    cmd.add_argument("email", help="the Google account's email, as it signed in")
+    cmd.add_argument("login", help="the account's private login, as the person tells you")
     cmd.add_argument("--fold", nargs="+", action="extend", default=[], metavar="OLD",
                      help="other names of theirs to merge into NAME (then deleted)")
     cmd = writes("release-name", "make a claimed name anyone's to use again")
     cmd.add_argument("name")
+    cmd = writes("set-password", "give an account a new random password, printed once")
+    cmd.add_argument("login", help="the account's private login, as the person tells you")
     cmd = writes("delete-tag", "remove a tag from every config, or one")
     cmd.add_argument("tag")
     cmd.add_argument("--config", help="only from this config_key")
@@ -714,9 +768,11 @@ def plan_for(api: AdminApi, args: argparse.Namespace) -> Plan:
         case "rename-user":
             return plan_rename_user(api, args.name, args.new_name)
         case "assign-name":
-            return plan_assign_name(api, args.name, args.email, args.fold)
+            return plan_assign_name(api, args.name, args.login, args.fold)
         case "release-name":
             return plan_release_name(api, args.name)
+        case "set-password":
+            return plan_set_password(api, args.login)
         case "delete-tag":
             return plan_delete_tag(api, args.tag, args.config)
         case "delete-config-name":

@@ -9,6 +9,7 @@ them drifting apart is a test that reads both sides as text, the same trick
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import cast
@@ -86,6 +87,19 @@ def test_the_board_reads_the_same_storage_keys_the_game_writes():
     assert _js_string_constant(js / "pbp.mjs", "SEATS_KEY") == paths.WEB_PBP_SEATS_KEY
     assert _js_string_constant(js / "me.mjs", "NAME_KEY") == paths.WEB_PBP_NAME_KEY
     assert _js_string_constant(js / "auth.mjs", "SESSION_KEY") == paths.WEB_AUTH_KEY
+
+
+def test_admin_finds_an_account_the_way_the_board_made_it():
+    """An account's email is a hash of its login at ACCOUNT_DOMAIN, made by the
+    board on sign-up and again by `admin.py` to find the account. A drift on
+    either side and assign-name and set-password find nobody."""
+    from tools import admin
+
+    js = ROOT / "leaderboard" / "js"
+    assert _js_string_constant(js / "auth.mjs", "ACCOUNT_DOMAIN") == admin.ACCOUNT_DOMAIN
+    # The hash itself: the vector auth.test.mjs pins on the JS side.
+    expected = hashlib.sha256(b"rival42").hexdigest()[:40]
+    assert admin.account_email("  Rival42 ") == f"{expected}@{admin.ACCOUNT_DOMAIN}"
 
 
 def test_the_board_paces_setups_with_the_games_defaults():

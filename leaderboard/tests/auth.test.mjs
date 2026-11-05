@@ -1,15 +1,15 @@
-// auth.mjs: the PKCE round trip and the stored session, over a stub fetch and
+// auth.mjs: login and password, and the stored session, over a stub fetch and
 // stub storage. Signing in is optional, so the property that matters as much as
 // "it works" is "a failure reads as signed out": blocked storage, a refused
-// code or a dead refresh token must never throw at a page.
+// password or a dead refresh token must never throw at a page.
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
-  authHeader, authorizeUrl, challengeFor, finishSignIn, newVerifier, SESSION_KEY,
-  session, storedSession,
+  ACCOUNT_DOMAIN, accountEmail, authHeader, changePassword, SESSION_KEY, session, signIn, signUp,
+  storedSession,
 } from "../js/auth.mjs";
 import { claimError, nameBlocked } from "../js/claims.mjs";
 
@@ -47,51 +47,72 @@ function answer(body, status = 200) {
   return calls;
 }
 
-test("the challenge is base64url SHA-256 of the verifier", async () => {
-  const verifier = newVerifier();
-  assert.match(verifier, /^[A-Za-z0-9_-]{43}$/);
-  const expected = createHash("sha256").update(verifier).digest("base64url");
-  assert.equal(await challengeFor(verifier), expected);
+test("a login becomes a hashed email that names nothing", async () => {
+  const email = await accountEmail("  Rival42 ");
+  const hex = createHash("sha256").update("rival42").digest("hex").slice(0, 40);
+  assert.equal(email, `${hex}@${ACCOUNT_DOMAIN}`);
+  assert.equal(await accountEmail("RIVAL42"), email, "case and spaces fold");
+  assert.doesNotMatch(await accountEmail("ann@example.com"), /ann|example/, "an email login is hidden too");
 });
 
-test("the authorize URL asks Google, with the challenge and the way back", async () => {
-  const url = new URL(await authorizeUrl("v".repeat(43), "https://x.netlify.app/board/account.html"));
-  assert.equal(url.pathname, "/auth/v1/authorize");
-  assert.equal(url.searchParams.get("provider"), "google");
-  assert.equal(url.searchParams.get("code_challenge_method"), "s256");
-  assert.equal(url.searchParams.get("code_challenge"), await challengeFor("v".repeat(43)));
-  assert.equal(url.searchParams.get("redirect_to"), "https://x.netlify.app/board/account.html");
-});
-
-test("a returned code is traded for a session that is then stored", withStorage(async () => {
-  sessionStorage.setItem("sc_auth_verifier", "the-verifier");
-  const calls = answer({ access_token: "a1", refresh_token: "r1", expires_in: 3600,
-                         user: { id: "uid-1", email: "p@example.com" } });
-  const got = await finishSignIn({ href: "https://x/board/account.html?code=c0de" }, 1_000_000);
-  assert.equal(got.access_token, "a1");
-  assert.equal(got.expires_at, 1000 + 3600);
-  assert.match(calls[0].url, /\/auth\/v1\/token\?grant_type=pkce$/);
-  assert.deepEqual(JSON.parse(calls[0].init.body), { auth_code: "c0de", code_verifier: "the-verifier" });
-  assert.equal(storedSession().email, "p@example.com");
-  assert.equal(sessionStorage.getItem("sc_auth_verifier"), null, "a verifier is single use");
+test("creating an account sends the hashed email and keeps the login", withStorage(async () => {
+  const calls = answer({ access_token: "a1", refresh_token: "r1", expires_in: 3600, user: { id: "uid-1" } });
+  const got = await signUp(" Rival42 ", "long enough", 1_000_000);
+  assert.equal(got.session.access_token, "a1");
+  assert.equal(got.session.expires_at, 1000 + 3600);
+  assert.match(calls[0].url, /\/auth\/v1\/signup$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body),
+    { email: await accountEmail("rival42"), password: "long enough" });
+  assert.equal(storedSession().login, "Rival42");
+  assert.equal(storedSession().email, undefined, "no email is kept");
 }));
 
-test("no code, no verifier or a refused code is simply no session", withStorage(async () => {
-  assert.equal(await finishSignIn({ href: "https://x/board/account.html" }), null);
-  answer({ access_token: "a1" });
-  assert.equal(await finishSignIn({ href: "https://x/a.html?code=c" }), null, "no verifier stored");
-  sessionStorage.setItem("sc_auth_verifier", "v");
-  answer({ error: "invalid_grant" }, 400);
-  assert.equal(await finishSignIn({ href: "https://x/a.html?code=c" }), null);
+test("signing in asks for a password grant", withStorage(async () => {
+  const calls = answer({ access_token: "a1", refresh_token: "r1", expires_in: 3600 });
+  assert.equal((await signIn("ann@example.com", "long enough")).session.login, "ann@example.com");
+  assert.match(calls[0].url, /\/auth\/v1\/token\?grant_type=password$/);
+}));
+
+test("a refusal is a sentence and no session", withStorage(async () => {
+  answer({ error_code: "invalid_credentials", msg: "Invalid login credentials" }, 400);
+  assert.deepEqual(await signIn("ann", "long enough"), { error: "That login and password don't match." });
+  answer({ error_code: "user_already_exists" }, 422);
+  assert.match((await signUp("ann", "long enough")).error, /taken/);
   assert.equal(storedSession(), null);
+}));
+
+test("a short password or no login never reaches Auth", withStorage(async () => {
+  const calls = answer({ access_token: "a1" });
+  assert.match((await signUp("ann", "short")).error, /at least 8/);
+  assert.match((await signIn("  ", "long enough")).error, /login/);
+  assert.equal(calls.length, 0);
+}));
+
+test("a sign-up with no session means confirmation is still on", withStorage(async () => {
+  answer({ id: "uid-1", email: "x" });
+  assert.match((await signUp("ann", "long enough")).error, /confirmation/);
+  assert.equal(storedSession(), null);
+}));
+
+test("a new password goes to the signed-in account", withStorage(async () => {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(
+    { access_token: "a", refresh_token: "r", expires_at: 9e9, login: "ann" }));
+  const calls = answer({ id: "uid-1" });
+  assert.equal(await changePassword("long enough"), "");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer a");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { password: "long enough" });
+  localStorage.removeItem(SESSION_KEY);
+  assert.equal(await changePassword("long enough"), "Sign in first.");
 }));
 
 test("a session near expiry is refreshed; a refused refresh signs out", withStorage(async () => {
   const now = 2_000_000;
   localStorage.setItem(SESSION_KEY, JSON.stringify(
-    { access_token: "old", refresh_token: "r1", expires_at: now / 1000 + 10 }));
+    { access_token: "old", refresh_token: "r1", expires_at: now / 1000 + 10, login: "ann" }));
   const calls = answer({ access_token: "new", refresh_token: "r2", expires_in: 3600 });
   assert.equal((await session(now)).access_token, "new");
+  assert.equal(storedSession().login, "ann", "a refresh keeps the login");
   assert.match(calls[0].url, /grant_type=refresh_token$/);
   assert.deepEqual(await authHeader(now), { Authorization: "Bearer new" });
 
