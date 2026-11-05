@@ -410,22 +410,35 @@ def test_the_tutorial_hides_a_bonus_stage_behind_the_hunt():
     assert after.id not in shown()
 
 
+def test_no_builtin_stage_plays_slowly():
+    """The menu's "may play slowly" warning is about the browser: knower stops
+    thinking at 150 ms there, so a stage that trips it plays weaker than it was
+    measured, and differently on a slow device. No built-in stage may."""
+    from starconquest import ai
+    from starconquest.settings import setup_warnings
+
+    ai.load_models()
+    for g in gauntlet.builtin():
+        for stage in g.stages:
+            assert setup_warnings(gauntlet.stage_settings(stage)) == [], (g.id, stage.title)
+
+
 def test_beating_actuary_on_long_odds_reveals_one_more_stage():
-    """Black-box actuary (Field) in the human seat won Long odds in 211 turns /
-    195 lost, the only bot win there; beating it, not meeting it, opens the next."""
+    """Black-box actuary (Hunt) in the human seat won Long odds in 129 turns /
+    108 lost, the only bot win there; beating it, not meeting it, opens the next."""
     g = _tutorial()
     bonus = next(s for s in g.stages if s.title == "Long odds")
     after = next(s for s in g.stages if s.title == "No way out")
-    assert g.lane_targets[(bonus.id, after.id)] == gauntlet.Target(turns=211, lost=195, bot="actuary", beat=True)
+    assert g.lane_targets[(bonus.id, after.id)] == gauntlet.Target(turns=129, lost=108, bot="actuary", beat=True)
     assert gauntlet.lane_label(g, bonus.id, after.id) == gauntlet.BONUS
     assert gauntlet.place(g, after.id) == "bonus"
     cfg = gauntlet.stage_settings(after)
-    assert cfg.seed == 1705 and cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
-    assert [cfg.ai[i].aux for i in (2, 3)] == [2.0, 1.0]     # Search, Field: no slow-setup warning
+    assert cfg.seed == 2350 and cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
+    assert [cfg.ai[i].aux for i in (2, 3)] == [2.0, 2.0]     # Search, Learning: no slow-setup warning
     shown = lambda: {s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))}
-    _score(bonus, 211, 195)
+    _score(bonus, 129, 108)
     assert after.id not in shown()
-    _score(bonus, 211, 194)
+    _score(bonus, 129, 107)
     assert after.id in shown()
 
 

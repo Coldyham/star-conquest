@@ -105,42 +105,47 @@ so the card can always be brought back.
 | 9 | Marshal | one of the strongest bots | marshal |
 | 10 | The hunt | actuary at its strongest stop, Hunt | actuary · Hunt |
 | 11 | Long odds (hidden bonus) | an unfair start, opened by a hidden lane from The hunt | marshal, knower · Search, actuary · Field |
-| 12 | No way out (hidden bonus) | a worse start, opened by beating the best bot on Long odds | marshal, knower · Search, actuary · Field |
+| 12 | No way out (hidden bonus) | a worse start, opened by beating the best bot on Long odds | marshal, knower · Search, actuary · Learning |
 
 **The bonus stage** (added 2026-11-05) is reached only by a hidden lane from
 The hunt, gated at the best human score on The hunt's setup on the board that
 day: 86 turns / 72 lost, by Protokletos (met, not beaten). Its map is a
 four-seat, 14-system board an author shared, with thinker swapped for actuary
-at Hunt. You start 7 turns from actuary and 10 from marshal, while knower sits
+(at Field) and knower at Search. You start 7 turns from actuary and 10 from marshal, while knower sits
 17 or more from everyone. It isn't listed, numbered or counted until the lane
 opens (`gauntlet.shown`, `gauntlet.place`), and it isn't on the tutorial's
 path, so it never joins a run (`gauntlet.chain`).
 
-**Both bonus stages play knower at Search and actuary at Field** (changed
-2026-11-05). As first shipped, Long odds had actuary at Hunt and No way out
-had knower at Council. Both set off the menu's "may play slowly" warning
-(`setup_warnings`), because knower replays actuary at every turn it looks
-ahead, and Hunt costs ~461 ms a call. In the browser knower stops thinking at
-150 ms, so it would have looked about one turn ahead, far weaker than measured
-and dependent on the device's speed. Search with Field clears the warning on
-both maps. The measurements below were taken on the first setups, with budgets
-lifted, and are being re-taken.
+**No way out** is behind a hidden lane from Long odds, gated at the best bot's
+win there, to beat: **actuary, 129 turns / 108 lost**. Its map is Long odds'
+knobs on seed 2350, picked from 5,000 seeds for a worse start: actuary 4 turns
+from you, marshal 8, knower 16, the rivals at least 11 apart, and one system
+nearer you than any rival. Actuary plays at Learning.
 
-**No way out** (added the same day) is behind a hidden lane from Long odds,
-gated at the best bot's win there, to beat: **actuary, 211 turns / 195 lost**.
-It is the only bot win on Long odds, and it counts only played as a *black
-box*: the seat stays flagged human, so knower models it as it would a person
-rather than reading its orders. Measured that way, actuary at Field (aux 1)
-wins and actuary at Hunt loses (turn 243). Played the board's way
-(`tools/bot_replay.py`, which hands the seat over so knower reads it exactly,
-`tests/sim.py` `_hand_over`), every roster bot loses Long odds, so a bot column
-there would set no target. The map is Long odds' knobs on seed 1705, picked from
-5,000 seeds for a worse start: actuary 7 turns from you, marshal 8, knower (at
-Council) 18, the rivals at least 15 apart, and one system nearer you than any
-rival. Played black box from the human seat, every roster bot loses it and the
-rival knower wins every game (2026-11-05): knower at Council lasted longest
-(turn 89), then marshal (81), actuary at Hunt (72), thinker (70), actuary at
-Field (65), evolved (57), rusherplus (48) and heuristic (47).
+**How the gates were measured.** Each roster bot (knower at Council and at
+Search, actuary at Hunt and at Field, marshal, evolved, thinker, heuristic,
+rusherplus) played the stage from the human seat as a *black box*: the seat
+stays flagged human, so knower models it as it would a person instead of
+reading its orders, and the bot's orders go in as the human's. Played the
+board's way (`tools/bot_replay.py`, which hands the seat over so knower reads it
+exactly, `tests/sim.py` `_hand_over`), a bot is handicapped against knower in a
+way a person isn't, so the board's bot column is no target for a player. Wall
+clock guards were lifted 100x, as the board's worker lifts them. On Long odds
+only actuary at Hunt won, in 129 turns / 108 lost; the rival knower took every
+other game. On No way out no bot won (2026-11-05).
+
+**Both play knower at Search, never Council, and actuary below Hunt.** As first
+shipped, Long odds had actuary at Hunt and No way out had knower at Council and
+seed 1705. Both set off the menu's "may play slowly" warning (`setup_warnings`):
+knower replays actuary at every turn it looks ahead, and Hunt costs ~461 ms a
+call, while Council on 14 systems costs ~650 ms a turn with any actuary. In the
+browser knower stops thinking at 150 ms, so it would have looked about one turn
+ahead, far weaker than measured and dependent on the device's speed.
+`test_no_builtin_stage_plays_slowly` now holds every built-in stage to it. With
+the cheaper bots, seed 1705 became easier than Long odds (five bots won it), so
+No way out moved to seed 2350. Of the alternatives measured there, Search with
+Field let one bot win (knower at Council, 128 / 93) and Search with Learning
+none; 1705 with knower at Predict and actuary at Hunt was also unbeaten.
 
 **How the seeds were chosen.** Each stage's setup was played on 24 candidate
 seeds by marshal, evolved, thinker, heuristic and rusherplus in the human's seat
