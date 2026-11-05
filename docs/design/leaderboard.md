@@ -552,7 +552,10 @@ built.
   (`sc_app_last`, written only in standalone/fullscreen display, by `nav.mjs`
   and by the game page's `tools/pwa/inject.py` head), and the game if nothing
   is recorded. So an install from before this keeps opening the game until it
-  visits the board. A fixed launch target either way would be wrong for
+  visits the board. A long press on the installed icon offers three
+  manifest `shortcuts`: today's daily puzzle and board (`/game/#puzzle`,
+  `/game/#daily`, the fragments `daily.link` reads) and the campaign
+  (`/board/campaign.html`). They go straight to their half, past the router. A fixed launch target either way would be wrong for
   someone: the board is a fine front page, but a player who installed to play
   wants the game. A per-device toggle would be one more control to find, for a
   choice the last-visited half already makes. The functions are bundled from
