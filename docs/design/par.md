@@ -507,8 +507,13 @@ one more launch order was 7 times (K = 3 to 4) and 2.5 times (K = 4 to 5) on 11-
 
 On 11-01 the first K = 3 pass found nothing, K = 4 found 11/11 and K = 5 found 10/10: the best
 line needs five launches, which a beam does not propose and a pass over fewer cannot reach.
-The line a person posted for that day (11/9) is a turn slower; if the map posted is this one,
-there is a faster line than the board's best, and if not the maps differ.
+The line a person posted for that day (11/9) was a turn slower. **The 10/10 line was then played
+on the real map and reproduced it** (2026-11-05, by the author): five launches (11 ships
+Antinous to Zhang on turn 2, 3 more on turn 4, 11 on to Bajamar Star on turn 6, 5 on to Peacock on
+turn 7, 3 more on turn 8), against actuary, which sent 13 ships from Peacock on turn 3 and 3 more
+on turn 6 exactly as the search had it. So for that day the map dealt locally was the posted map,
+and a live actuary, which is time-budgeted, played as the search's unlimited-budget one did on
+the moves that mattered. It is one board; the other days' maps have not been checked.
 
 Still open: a bound that counts the ships a fight needs (the floor counts only
 travel), and whether K = 5 or more finds anything.
