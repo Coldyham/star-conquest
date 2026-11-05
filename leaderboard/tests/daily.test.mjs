@@ -6,8 +6,8 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind } from "../netlify/functions/daily.mjs";
 import {
-  addDays, bestOnTheDay, dailyMark, dayParam, opponents, playerStreaks, postedOn, shortDate, standings, streaks, validDay,
-  weekdayOf,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, playerDays, playerStreaks, postedOn,
+  shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -147,6 +147,27 @@ test("a player's streaks are counted per kind, mended and true", () => {
     { board: { days: 0, onTheDay: 0 }, puzzle: { days: 3, onTheDay: 1 } });
   const autoplayed = scores.map((s) => ({ ...s, hand: 0 }));
   assert.deepEqual(playerStreaks(autoplayed, games, "2026-11-01").puzzle, { days: 0, onTheDay: 0 });
+  const won = playerDays(scores, games);
+  assert.deepEqual([...won.puzzle], [["2026-10-30", "day"], ["2026-10-31", "later"], ["2026-11-01", "day"]]);
+  assert.deepEqual([...won.board], [["2026-10-29", "day"]]);
+  // A win on the day outranks a later one on the same map, whichever is read first.
+  const both = [{ game_key: "p31", hand: 1, submitted_at: "2026-11-02T09:00:00Z" },
+    { game_key: "p31", hand: 1, submitted_at: "2026-10-31T09:00:00Z" }];
+  assert.equal(playerDays(both, games).puzzle.get("2026-10-31"), "day");
+});
+
+test("the streak calendar's weeks and months run Monday first", () => {
+  assert.deepEqual(weekDays("2026-11-04"),
+    ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08"]);
+  assert.equal(weekDays("2026-11-01")[0], "2026-10-26");
+  assert.equal(addMonths("2026-11-04", -1), "2026-10-01");
+  assert.equal(addMonths("2026-01-31", -1), "2025-12-01");
+  assert.equal(addMonths("2026-12-15", 1), "2027-01-01");
+  const nov = monthWeeks("2026-11-20");
+  assert.equal(nov.length, 6);   // the 1st is a Sunday, the 30th a Monday
+  assert.deepEqual(nov[0], [null, null, null, null, null, null, "2026-11-01"]);
+  assert.deepEqual(nov[5], ["2026-11-30", null, null, null, null, null, null]);
+  assert.equal(monthWeeks("2027-02-10").length, 4);   // 1 Feb 2027 is a Monday
 });
 
 test("a daily's map links to its day's page", () => {

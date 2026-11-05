@@ -275,8 +275,23 @@ two cannot drift.
 
 ### The view
 
-- **Nodes.** Stages are drawn at their `layout` cell, the grid scaled to fit the
-  panel whatever the stage count, which fixes the overflow.
+- **Nodes.** Stages are drawn at their `layout` cell. The grid scales to fit
+  the panel, but never below a minimum node size that still holds a short
+  label and is at least `config.TOUCH_MIN_TARGET`.
+- **Sideways scroll.** A gauntlet with more columns than fit at that size
+  scrolls sideways; a long linear one is the usual case, since every stage of
+  a chain is its own column. This is the one view for every gauntlet, linear
+  or branching, so it must read well at 64 columns, not only fit them.
+  - The offset is transient `MenuState`, reset when the picker changes
+    gauntlet. On opening, the view scrolls to the first open stage.
+  - The wheel (and shift-wheel), a drag, and the arrow keys scroll it. Moving
+    the selection off the edge scrolls to keep it in view.
+  - On touch, a drag past a small threshold scrolls and is not a tap.
+  - Faded edges, or a small arrow at each edge, show there is more.
+  - `stagegraph` takes the offset, clips to its rect, and returns rects only
+    for nodes it drew, so a node scrolled out of view can't be clicked.
+  - Rows still scale to fit; a graph too tall at the minimum size scrolls down
+    as well, by the same rules.
 - **Node states:** cleared ✓, won short of target, open (pulsing), locked
   (dim). Starts and goals get a small mark.
 - **Lanes** are arrows.
@@ -304,9 +319,12 @@ two cannot drift.
 
 Tests:
 - `tests/test_gauntlet.py`: the layout fixture.
-- `tests/test_menu*.py`: every node's rect is inside the panel at 1, 25 and 64
-  stages and at scale 1, 1.5 and 2. Hidden stages are absent, and a locked node
-  is not clickable.
+- `tests/test_menu*.py`: at 1, 25 and 64 stages (linear and branching) and at
+  scale 1, 1.5 and 2, every drawn node is inside the panel and at least the
+  minimum size. A 64-stage linear gauntlet scrolls, and the first open stage
+  is in view on opening. Moving the selection past the edge scrolls it into
+  view. A node scrolled out of view, a hidden stage, and a locked node are not
+  clickable.
 - `tests/test_stagegraph.py` (headless): every state draws, the returned rects
   match the cells, and a hidden lane draws nothing.
 
@@ -597,6 +615,21 @@ Phase 3 needs only Phase 1 to save and Phase 2's layout fixture to draw, so it
 can be built alongside Phase 2. Phase 4 has no UI entry point until phase 5,
 but it is tested headless.
 
+### Afterwards: hidden stages in the tutorial
+
+Once Phases 1 and 2 have landed, add a hidden bonus stage or two to the
+tutorial (`starconquest/assets/gauntlets/tutorial.json`) as easter eggs. Each
+one is reached by a hidden, gated lane from a tutorial stage, for example
+"win stage 3 in ≤ N turns". This also shows players that hidden lanes exist
+before they meet one elsewhere.
+- **Progress is safe.** Stage progress is keyed by each stage's
+  `challenge_key()`, so adding stages leaves existing bests where they are.
+- **Place each bonus stage last in its column.** Layout leaves a gap where a
+  hidden stage will appear, and putting it last keeps that gap at the edge.
+- **Its own small PR, after Phase 2.** It is a data change plus a test that
+  the tutorial still passes `problems()` and that the bonus stages start
+  hidden.
+
 ### Size estimate
 
 These are estimates scaled from code already in the repo, not counts from a
@@ -606,7 +639,7 @@ design.
 |---|---|---|---|---|
 | 0. Linear run | ~450 (`run.py` ~150, menu ~120, main ~120, the rest ~60) | ~350 | Small-medium; touches `main` (run the full suite) | the stage list, `Target`, Next stage, `stage_ui`, `replay.load`, `webstore` |
 | 1. Format | ~230 (`gauntlet.py` ~170, `checkBody` ~60) | ~250 | Small | `Target`, `_target`, the existing `from_dict` and `checkBody` |
-| 2. Graph view, `stagegraph`, `layout` | ~520 (replaces ~150 in menu; `layout` ~70) | ~250 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
+| 2. Graph view, `stagegraph`, `layout` | ~580 (replaces ~150 in menu; `layout` ~70; scroll ~60) | ~280 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
 | 3. Lanes on the board | ~550 (`gauntlet-graph.mjs` ~150, page ~300, build ~50, CSS ~50) | ~250 | Medium | the stage cards, `applyAim`, `linkTarget`/`botTarget`, `checkBody`, `readDraft` |
 | 4. Boons in the log | ~250 | ~200 | Small, but it touches replay (run the full suite) | the Hint's unpostable path, the `strategies` stamp in `reconstruct` |
 | 5. Runs, grown | ~700 (`run.py` +150, run view and boon pick ~400, wiring ~150) | ~350 | Medium | Phase 0's record and wiring, the Phase 2 graph view |
