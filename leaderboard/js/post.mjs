@@ -117,6 +117,22 @@ export async function ownName() {
 }
 
 /**
+ * The signed-in caller's par on `day`'s puzzle (schema.sql's
+ * `sc_my_puzzle_par`): `{turns, lost, status, turns_only, my_turns, my_lost}`
+ * when their own best posted score there matches or beats it, else null —
+ * signed out, short of it, no par, or on failure. Never anyone else's.
+ */
+export async function ownPar(day) {
+  if (!storedSession()) return null;
+  try {
+    const par = await rpc("sc_my_puzzle_par", { p_day: day });
+    return par && typeof par === "object" ? par : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Find or create the user, keyed by name — same race handling as above. A name
  * someone else has claimed is refused here, before the score insert that the
  * database would refuse anyway (schema.sql's `sc_may_use_user`), so the player

@@ -366,6 +366,23 @@ already resolve simultaneously. The rationale for each rule is in
   never stored: the mended streak counts a missed day won later, the true one
   only days won on the day (`js/daily.mjs`'s `streaks`). Detail:
   `docs/design/daily.md`.
+- **A puzzle's par is computed offline and told only to a player who meets
+  it.** `tools/puzzle_par.py` (the hourly job's `puzzle-par`) runs
+  `par_best.solve` on each stored puzzle's own settings and upserts
+  `puzzle_pars`: `proved` (a full search finished; `turns_only` when only the
+  turn is), or `likely` (the best line found, exact up to `exact_up_to` launch
+  orders), stamped with its rules. A stored par is only ever improved
+  (`puzzle_par.better`). The table has no policy and no public grant, and its
+  `line` never leaves it; `/api/daily?…&turns=T&lost=L` asks `sc_puzzle_par`,
+  which answers the par only when `(T, L)` matches or beats it, on a started day,
+  under the puzzle's rules. The game asks only at a puzzle win played wholly by
+  hand (`main.wants_par`) and shows the gold line only for that answer
+  (`Ui.par_note`); nothing is stored or posted. A forged claim can read the par:
+  a convenience, not a secret. The board's `puzzle.html` and map page show the
+  same line (`parNote`) to a signed-in player whose own counted, all-by-hand
+  score there met it (`sc_my_puzzle_par`, from `auth.uid()` alone), and to
+  nobody else. Detail: `docs/design/daily.md`, "The puzzle's
+  par".
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's

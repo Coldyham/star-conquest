@@ -4,10 +4,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import handler, { askedDay, askedKind } from "../netlify/functions/daily.mjs";
+import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
-  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, playerDays, playerStreaks, postedOn,
-  shortDate, standings, streaks, validDay, weekDays, weekdayOf,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, parNote, playerDays, playerStreaks,
+  postedOn, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -119,6 +119,41 @@ test("the handler reads the day's row and says 404 for a missing day", async () 
   }
 });
 
+test("a par check reads a whole result, or none", () => {
+  assert.equal(askedResult(new URLSearchParams("day=2026-10-01")), undefined);
+  assert.deepEqual(askedResult(new URLSearchParams("turns=10&lost=3")), { turns: 10, lost: 3 });
+  assert.equal(askedResult(new URLSearchParams("turns=10")), null);
+  assert.equal(askedResult(new URLSearchParams("turns=0&lost=3")), null);
+  assert.equal(askedResult(new URLSearchParams("turns=1.5&lost=3")), null);
+  assert.equal(askedResult(new URLSearchParams("turns=10&lost=-1")), null);
+});
+
+test("the par check asks sc_puzzle_par and passes on only what it answers", async () => {
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url, init) => {
+    asked.push([String(url), JSON.parse(init.body)]);
+    const { p_turns: turns } = JSON.parse(init.body);
+    const body = turns <= 10 ? { turns: 10, lost: 3, status: "proved", turns_only: false, beaten: turns < 10 } : null;
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+  try {
+    const met = await handler(new Request("https://x/api/daily?day=2026-10-01&kind=puzzle&turns=10&lost=3"));
+    assert.equal(met.status, 200);
+    assert.deepEqual((await met.json()).par, { turns: 10, lost: 3, status: "proved", turns_only: false, beaten: false });
+    assert.ok(asked[0][0].endsWith("/rest/v1/rpc/sc_puzzle_par"));
+    assert.deepEqual(asked[0][1], { p_day: "2026-10-01", p_turns: 10, p_lost: 3 });
+
+    const short = await handler(new Request("https://x/api/daily?day=2026-10-01&kind=puzzle&turns=12&lost=0"));
+    assert.equal((await short.json()).par, null);
+    assert.equal((await handler(new Request("https://x/api/daily?day=2026-10-01&turns=10&lost=3"))).status, 400);
+    assert.equal((await handler(new Request("https://x/api/daily?kind=puzzle&turns=x&lost=3"))).status, 400);
+    assert.equal(asked.length, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("opponents name each bot once, at its stop, and the lean heuristic", () => {
   const board = { players: 4, ai_strategy: ["heuristic", "thinker", "marshal", "thinker"],
     ai: [{}, { aux: 0 }, {}, { aux: 0 }] };
@@ -189,4 +224,18 @@ test("a streak that reaches back to the first day read is only a lower bound", (
   ]);
   assert.deepEqual(streaks([on("cy", "2026-10-31"), on("cy", "2026-11-01")], "2026-11-01", "2026-10-31"),
     [{ name: "cy", days: 2, onTheDay: 2, daysAtLeast: true, onTheDayAtLeast: true }]);
+});
+
+test("the par's congratulation is only for a score that met it, in the game's words", () => {
+  const proved = { turns: 10, lost: 3, status: "proved", turns_only: false };
+  const likely = { turns: 10, lost: 3, status: "likely", turns_only: false };
+  assert.equal(parNote(proved, 10, 3), "Perfect puzzle! You matched the proven best: 10 turns / 3 lost");
+  assert.equal(parNote({ ...proved, turns_only: true }, 10, 3),
+    "Perfect puzzle! You matched the par of 10 turns / 3 lost, proven the fastest win");
+  assert.equal(parNote(likely, 10, 3), "Par! You matched the best line our search found: 10 turns / 3 lost");
+  assert.equal(parNote(likely, 9, 8), "Beyond par! You won faster than the par of 10 turns / 3 lost");
+  assert.equal(parNote(proved, 10, 2), "Beyond par! The par's 10 turns with fewer ships lost than its 3");
+  assert.equal(parNote(likely, 10, 4), "");
+  assert.equal(parNote(likely, 11, 0), "");
+  assert.equal(parNote(null, 10, 3), "");
 });

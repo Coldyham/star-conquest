@@ -11,11 +11,12 @@
 
 import { configured, inList, select } from "./api.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, opponents, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, opponents, parNote, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
 import { clear, el, leaderLink, setupSummary, showError, userHref } from "./format.mjs";
 import { mountNav } from "./nav.mjs";
+import { ownPar } from "./post.mjs";
 
 // How far back streaks are read. A streak reaching back that far shows as
 // "60+", since it may run further.
@@ -83,6 +84,16 @@ function drawToday(row, keys) {
       el("a", { class: "btn play", href: playHref(day), text: "▶ Play" }),
     ]),
   ]));
+}
+
+/** The puzzle's par, for a signed-in player whose own posted score met it,
+ * under the day's card; nothing for anyone else (`ownPar`). */
+async function drawOwnPar() {
+  if (kind !== "puzzle") return;
+  const par = await ownPar(day);
+  const note = par ? parNote(par, par.my_turns, par.my_lost) : "";
+  if (!note) return;
+  todayBox.append(el("p", { class: "par-note", text: note }));
 }
 
 /** Today, under embargo: who is ahead and by how many turns, from
@@ -174,6 +185,7 @@ async function load() {
       select(`daily_games?select=day,game_key&kind=eq.${kind}&day=gte.${from < day ? from : day}`),
     ]);
     drawToday(rows[0], games.filter((g) => g.day === day).map((g) => g.game_key));
+    if (rows[0]) drawOwnPar();   // its own fetch, never holding up the standings
 
     // Today's map is embargoed: its names only (for the streaks), and its
     // standing from game_summary's aggregate. Every past day's in full.

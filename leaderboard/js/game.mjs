@@ -2,7 +2,7 @@ import { configured, eq, select } from "./api.mjs";
 import { attemptLines, attemptStatus, campaignMark, fold, weekQueries } from "./campaign.mjs";
 import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
 import { weekStart } from "./crowns.mjs";
-import { dailyMark, dayParam } from "./daily.mjs";
+import { dailyMark, dayParam, parNote } from "./daily.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import {
   botChips, botProfile, botSummary, campaignBadge, clear, competitionRanks, configBadge, credit, dailyBadge,
@@ -11,7 +11,7 @@ import {
 } from "./format.mjs";
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
-import { ownName } from "./post.mjs";
+import { ownName, ownPar } from "./post.mjs";
 import { aliasFor } from "./token-decode.mjs";
 import { botWatchSetup, encodeToken } from "./token-encode.mjs";
 import {
@@ -435,7 +435,18 @@ async function ownScores() {
   ]);
 }
 
-async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
+/**
+ * On a map that was a day's puzzle, the par's congratulation for a signed-in
+ * player whose own posted score met it (`ownPar`), and null for anyone else.
+ */
+async function parBox(entry) {
+  if (!entry || entry.kind !== "puzzle") return null;
+  const par = await ownPar(entry.day);
+  const text = par ? parNote(par, par.my_turns, par.my_lost) : "";
+  return text ? el("p", { class: "par-note", text }) : null;
+}
+
+async function renderEmbargoed(game, embargoText, bots, campaign, note, daily, par) {
   subtitle.textContent = [
     game.score_count
       ? `${game.score_count} ${game.score_count === 1 ? "score" : "scores"} posted`
@@ -456,8 +467,8 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
       ? el("p", { class: "lede", text: "No verified score yet. Every score, and every replay, stays hidden until the embargo lifts." })
       : el("p", { class: "lede", text: "No scores yet — be the first, and set the target everyone else has to beat." });
 
-  const [link, own] = await Promise.all([freshPlayLink(game), ownScores()]);
-  clear(target).append(lede, ...[own].filter(Boolean), ...mapActions(link, campaign, await note, daily));
+  const [link, own, mine] = await Promise.all([freshPlayLink(game), ownScores(), par]);
+  clear(target).append(lede, ...[mine, own].filter(Boolean), ...mapActions(link, campaign, await note, daily));
 
   const best = ranked ? { turns: game.best_turns, lost: game.best_lost } : null;
   await renderBots(bots, best, game.settings_json);
@@ -524,6 +535,7 @@ async function load() {
     const campaign = nodes.length ? campaignMark(nodes[0], weekStart(new Date())) : null;
     const note = campaignNote(nodes[0], campaign);
     const daily = dailies.length ? dailyMark(dailies[0], dayParam(Date.now())) : null;
+    const par = parBox(dailies[0]);   // started now, awaited where it is drawn
     heading.textContent = mapSummary(game);
     clear(tagsTarget).append(
       ...[difficultyBadge(game), configBadge(game), fogBadge(game), campaignBadge(campaign), dailyBadge(daily)].filter(Boolean),
@@ -531,7 +543,7 @@ async function load() {
 
     const embargo = embargoNote(game.embargo_until);
     if (embargo) {
-      await renderEmbargoed(game, embargo, bots, campaign, note, daily);
+      await renderEmbargoed(game, embargo, bots, campaign, note, daily, par);
       return;
     }
 
@@ -571,8 +583,9 @@ async function load() {
     const ranked = displayOrder(scores, sortKey);
     const ranks = competitionRanks(ranked);
     const replays = await replayVersions(scores);
+    const mine = await par;
     clear(target).append(
-      ...[liftNote(lift, leader)].filter(Boolean),
+      ...[mine, liftNote(lift, leader)].filter(Boolean),
       el("ol", { class: "scores" }, ranked.map((s, i) => scoreRow(s, ranks[i], replays, lift))),
       ...mapActions(link, campaign, await note, daily),
     );

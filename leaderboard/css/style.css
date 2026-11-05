@@ -706,6 +706,16 @@ div.card-body { position: relative; }
  * took the map is dimmed out of the running entirely. */
 .bots { margin-top: 2.5rem; }
 .own-scores { margin: 1.5rem 0; }
+/* The puzzle par's congratulation, shown only to the signed-in player whose
+ * own score met it (daily-page.mjs, game.mjs; schema.sql's sc_my_puzzle_par). */
+.par-note {
+  margin: 0.8rem 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  color: var(--gold);
+  font-weight: 600;
+}
 .own-scores h2 {
   margin: 0 0 0.6rem;
   font-family: var(--pixel);

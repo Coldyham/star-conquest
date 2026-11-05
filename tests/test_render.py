@@ -332,6 +332,19 @@ def test_result_lines_verdict_is_three_way():
     assert verdict((31, 16))[0] == "Matched 31 turns / 16 lost"
 
 
+def test_the_par_congratulation_follows_the_score_only_when_set():
+    state = mapgen.generate_random(1, num_nodes=8, num_players=2)
+    ui = _make_ui(state)
+    state.winner, state.turn, ui.hand_turns = 1, 10, 10
+    assert all(colour != render._PAR_GOLD for _k, _t, colour in render._result_lines(state, ui))
+    ui.par_note = "Par! You matched the best line our search found: 10 turns / 3 lost"
+    lines = render._result_lines(state, ui)
+    assert lines[0][1].startswith("Conquered in 10 turns")
+    assert lines[1] == ("normal", ui.par_note, render._PAR_GOLD)
+    state.winner = 2     # a loss never shows it, whatever the Ui holds
+    assert all(colour != render._PAR_GOLD for _k, _t, colour in render._result_lines(state, ui))
+
+
 def test_a_watched_result_says_whose_it_is():
     """The overlay is otherwise indistinguishable from our own win, and the two
     missing buttons would read as a broken feature rather than as the rule."""

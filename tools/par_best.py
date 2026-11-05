@@ -488,7 +488,8 @@ def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None =
     return summary
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
+    """The command line, also read by ``tools/puzzle_par.py`` for its budgets."""
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--daily", nargs="+", help="files from tools/daily.py --dry-run")
     ap.add_argument("--days", nargs="+", help="days (YYYY-MM-DD) to deal here")
@@ -526,6 +527,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-frontier", type=int, default=1_000_000, help="boards kept per layer in a pass")
     ap.add_argument("--max-turns", type=int, default=120)
     ap.add_argument("--results-dir", type=Path, default=RESULTS)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = parser()
     args = ap.parse_args(argv)
     if not (args.daily or args.days or args.last):
         ap.error("give --daily FILE, --days DAY or --last N")

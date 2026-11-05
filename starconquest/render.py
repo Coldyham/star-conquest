@@ -53,6 +53,8 @@ _BTN_GOLD = widgets.BTN_GOLD
 # Challenge verdict, on the win overlay: target beaten, dead-heated, missed.
 _VERDICT_BEAT = (130, 200, 150)
 _VERDICT_TIE = (190, 205, 225)
+# The puzzle par's congratulation (`Ui.par_note`): gold, a step above a verdict.
+_PAR_GOLD = (255, 220, 60)
 _VERDICT_MISS = (214, 172, 92)
 
 
@@ -3575,6 +3577,9 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     if ui.hand_turns < state.turn:
         line += f"  ·  {ui.hand_turns} played by hand"
     lines = [("normal", line, config.COLOR_TEXT)]
+    if ui.par_note:
+        # Only ever set for a player whose result met the puzzle's par (`main.land_par`).
+        lines.append(("normal", ui.par_note, _PAR_GOLD))
     if run_line:
         lines += run_line
     elif ui.in_stage and ui.can_post(state):
