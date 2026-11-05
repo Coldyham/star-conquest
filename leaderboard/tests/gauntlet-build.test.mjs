@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import {
-  GAUNTLET_ID, LIMITS, botTarget, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
+  GAUNTLET_ID, LIMITS, botTarget, branches, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
   draftFromBody, draftProblem, emptyDraft, emptyStage, fileName, gameLink, linkTarget, listingOf, moveStage, readDraft,
   mintId, setupProblem, slugOf, stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
@@ -143,8 +143,8 @@ test("a lane runs one way unless it says two_way, and every stage must be reacha
   assert.match(checkBody(body({ ...three, lanes: [[0, 1], [2, 1]] })), /stage 3 can't be reached/);
   assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2]], start: [1] })), /stage 1 can't be reached/);
   assert.match(checkBody(body({ ...three, lanes: [[0, 1]] })), /stage 3 can't be reached/);
-  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, { turns: 9 }]] })), /only say two_way/);
-  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, "both"]] })), /only say two_way/);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, { turns: 9, x: 1 }]] })), /can only say/);
+  assert.match(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, "both"]] })), /can only say/);
   assert.equal(typeof checkBody(body(three)), "object");
 });
 
@@ -314,4 +314,46 @@ test("a listed row reads tolerantly for the public page", () => {
   assert.equal(bare.name, "x-0123456789ab");
   assert.deepEqual(bare.titles, []);
   assert.equal(bare.by, "");
+});
+
+// fixtures/gauntlet-lanes.json is read by tests/test_gauntlet.py too, so the
+// lanes stored here are the lanes the game reads.
+const LANES = JSON.parse(readFileSync(fileURLToPath(new URL("./fixtures/gauntlet-lanes.json", import.meta.url)), "utf8"));
+
+test("a lane may carry a target and be hidden, stored as the game reads it", () => {
+  const out = checkBody(LANES.body);
+  assert.equal(typeof out, "object");
+  assert.deepEqual(out.lanes, LANES.stored_lanes);
+  assert.deepEqual(out.start, [0]);
+});
+
+test("a lane's options are refused when the game could not read them", () => {
+  const three = { stages: [stage(), stage({ id: 1 }), stage({ id: 2 })] };
+  const lanes = (how) => body({ ...three, lanes: [[0, 1], [1, 2, how]] });
+  assert.match(checkBody(lanes({ hidden: true })), /hidden lane needs a target/);
+  assert.match(checkBody(lanes({ turns: 0 })), /a lane has a target with no turns/);
+  assert.match(checkBody(lanes({ turns: 5, lost: -1 })), /bad ships-lost/);
+  assert.match(checkBody(lanes({ turns: 5, hidden: "yes" })), /hidden is not true or false/);
+  assert.match(checkBody(lanes({ two_way: 1 })), /two_way is not true or false/);
+  assert.match(checkBody(lanes({ turns: 5, colour: "red" })), /can only say/);
+  assert.deepEqual(checkBody(lanes({ hidden: false, two_way: false })).lanes, [[0, 1], [1, 2]]);
+});
+
+test("a gated lane still counts for reaching a stage", () => {
+  const three = { stages: [stage(), stage({ id: 1 }), stage({ id: 2 })] };
+  assert.deepEqual(checkBody(body({ ...three, lanes: [[0, 1], [1, 2, { turns: 9, hidden: true }]] })).lanes,
+                   [[0, 1], [1, 2, { turns: 9, hidden: true }]]);
+});
+
+test("a body branches when its lanes or start are not the list-order chain", () => {
+  const three = { stages: [stage(), stage({ id: 1 }), stage({ id: 2 })] };
+  assert.equal(branches(body(three)), false);
+  assert.equal(branches(body({ ...three, lanes: [[0, 1], [1, 2]], start: [0] })), false);
+  assert.equal(branches(body({ ...three, lanes: [[0, 1], [1, 2, { two_way: false }]] })), false);
+  assert.equal(branches(body({ ...three, lanes: [[0, 1], [0, 2]] })), true);
+  assert.equal(branches(body({ ...three, lanes: [[0, 1], [1, 2], [0, 2]] })), true);
+  assert.equal(branches(body({ ...three, lanes: [[0, 1], [1, 2, { turns: 9 }]] })), true);
+  assert.equal(branches(body({ ...three, lanes: [[0, 1], [1, 2, { two_way: true }]] })), true);
+  assert.equal(branches(body({ ...three, start: [1] })), true);
+  assert.equal(branches(LANES.body), true);
 });

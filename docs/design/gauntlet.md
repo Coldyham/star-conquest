@@ -104,6 +104,16 @@ so the card can always be brought back.
 | 8 | Thinker | a bot that prices its fights | thinker |
 | 9 | Marshal | one of the strongest bots | marshal |
 | 10 | The hunt | actuary at its strongest stop, Hunt | actuary · Hunt |
+| 11 | Long odds (hidden bonus) | an unfair start, opened by a hidden lane from The hunt | marshal, knower · Search, actuary · Hunt |
+
+**The bonus stage** (added 2026-11-05) is reached only by a hidden lane from
+The hunt, gated at the best human score on The hunt's setup on the board that
+day: 86 turns / 72 lost, by Protokletos (met, not beaten). Its map is a
+four-seat, 14-system board an author shared, with thinker swapped for actuary
+at Hunt. You start 7 turns from actuary and 10 from marshal, while knower sits
+17 or more from everyone. It isn't listed, numbered or counted until the lane
+opens (`gauntlet.shown`, `gauntlet.place`), and it isn't on the tutorial's
+path, so it never joins a run (`gauntlet.chain`).
 
 **How the seeds were chosen.** Each stage's setup was played on 24 candidate
 seeds by marshal, evolved, thinker, heuristic and rusherplus in the human's seat
@@ -143,6 +153,10 @@ For authors. A gauntlet is one JSON file:
   is missing, the stages are joined in list order, so a linear gauntlet can
   leave it out. `start` lists the stages open from the beginning (default: the
   first).
+- **A lane may carry a target** in its third element, in a stage target's
+  keys: `[9, 10, {"turns": 86, "lost": 72}]` opens 10 only once 9's best meets
+  it ("Targets on lanes", below). `"hidden": true` beside a target keeps the
+  far stage off the list until it is met.
 - **A lane runs one way**, from its first stage to its second: `[3, 4]` opens 4
   once 3 is cleared, never 3 once 4 is. `[3, 4, {"two_way": true}]` runs both
   ways. The default lanes run in list order, so a linear gauntlet only ever
@@ -156,8 +170,10 @@ For authors. A gauntlet is one JSON file:
   stranded stage just stays locked.
 - `Gauntlet.from_dict` never raises: it drops a stage with no int `id`, a
   duplicate `id` or no `settings` dict, drops a lane to a missing stage, reads a
-  lane's third element only for `two_way: true`, drops a malformed `target`
-  (the stage then has none), and clamps text to the lengths above.
+  lane's third element for `two_way: true`, a target and `hidden: true`, drops
+  a malformed `target` (the stage or lane then has none) and `hidden` on a lane
+  with no target, and clamps text to the lengths above. `gauntlet.to_dict`
+  writes the canonical file back, every lane and the start spelled out.
 - A player's own gauntlets come from two places (`gauntlet.user`): the ones
   opened from a link, kept in `webstore` under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remembered`, newest first, the last eight), and on desktop the
@@ -719,7 +735,7 @@ between stages, so the run is built on them instead.
 
 Proposed and built on 2026-10-23, beat the best bot included, and a dealt
 run's targets with it (`tools/gauntlet_gen.py --targets`, "Generated
-gauntlets"); targets on lanes are not built. An author can give a stage a score to
+gauntlets"); targets on lanes followed on 2026-11-05 ("Targets on lanes"). An author can give a stage a score to
 win within, and the stages beyond it open only once you have. This gives a gauntlet, and a later
 run, the pressure to play well rather than just win, and it leaves the setup
 alone: the stage stays the ordinary map it is, scores on it still compare on the
@@ -773,7 +789,9 @@ board, and no key moves. Boons cannot do that.
   `/api/campaign`. A target is a fixed number the author picks, so it stays on
   the device, for the reasons "Relation to the weekly campaign" gives.
 - **Not in the tutorial.** A beginner should be held up by what they have not
-  learned yet, not by how fast they won.
+  learned yet, not by how fast they won. The tutorial's one gated lane only
+  opens a hidden bonus stage past its end, so nothing a beginner needs waits on
+  a score.
 - **A dealt run has no author to set them.** The answer is a roster bot's
   score on the stage plus some slack, measured once when the run is dealt. As
   built, it is the slowest (or fastest) probe win plus `--target-slack`, from
@@ -830,38 +848,51 @@ asks an author for no number of their own.
   dealt. `gauntletgen.target` writes it as an ordinary met target, `turns` and
   `lost` (or `turns` alone with slack), not with `bot` and `beat`.
 
-### Later: targets on lanes
+### Targets on lanes (built 2026-11-05)
 
 A target on a stage gates every way out of it alike. A target on a lane gates
 one way out, and that is what branching wants: any win opens the main path, and
 a tighter score opens a shortcut that skips stages, a bonus stage off the path,
-or an alternate route to the end.
+or an alternate route to the end. Built as Phase 1 of
+`graphical-gauntlet-maker.md`; the board's page still edits order only.
 
 - **The format grows, it does not change.** A lane's third element already
-  carries `two_way`; a target joins it, `[a, b, {"turns": 12}]`. A lane without
-  one opens on a clear, as now, so no existing file changes meaning, and
-  `from_dict` reads a bad target as none. `checkBody` refuses any key but
-  `two_way` today, so it learns `turns` and `lost` with this.
+  carried `two_way`; a target joins it, `[a, b, {"turns": 12}]`, in a stage
+  target's keys (`turns`, `lost`, `bot`, `beat`), parsed by the same `_target`.
+  A lane without one opens on a clear, as before, so no existing file changes
+  meaning, and `from_dict` reads a bad target as none (`Gauntlet.lane_targets`).
 - **A gated lane opens its second stage when the first's best meets its
   target**, and a `two_way` gated lane the first from the second likewise.
-  `open_stages` becomes: the starts, every won stage, and each stage a lane
-  leads to whose condition the near end's best meets (the stage's own target
-  for an ungated lane).
-- **Depth is measured over ungated lanes only.** `Gauntlet.depths` walks every
-  lane the way it runs, so a shortcut from stage 2 to stage 5 would make 5 as
-  shallow as 4 and take Next stage away from 4. Measured over the ungated
-  lanes, the main path keeps its depths. A met gated lane out of a stage makes
-  it a fork, so Next stage sends the player to the list to choose.
-- **Reachability ignores targets.** `problems` asks whether a stage can be
-  reached at all, so a bonus stage behind a tight target passes. Whether the
-  target can be met is the author's to show, by playing it.
-- **The list names each locked way on and what it needs** ("Shortcut: win in
-  12"), so a player can see a route is there before they can take it.
-- **A lane may be hidden** (`{"turns": 12, "hidden": true}`): the list shows
-  nothing of it until its target is met, then the bonus stage appears, as
-  Mario Kart unlocks a staff ghost for a fast enough time trial. Proposed
-  2026-10-28, in place of a hidden star on board maps (`other-games.md`, "Star
-  tiers on every map"). `checkBody` learns `hidden` with the rest.
-- **It waits for a page that draws lanes.** The board's gauntlet page edits
-  order only, so lanes and their targets would be written by hand or dealt
-  until it draws the graph.
+  `open_stages` is: the starts, every won stage, and each stage a lane leads to
+  whose condition the near end meets (cleared, for an ungated lane). It reads
+  the bests (`found`); given only what is cleared, every gated lane stays shut.
+- **Depth is measured over ungated lanes only** (`Gauntlet.depths`). Walking
+  every lane, a shortcut from stage 2 to stage 5 would make 5 as shallow as 4
+  and take Next stage away from 4. `next_stage` follows ungated lanes, and with
+  the bests in hand (`main.stage_ui`, `menu.next_stage`) a met gated lane out
+  of the stage makes it a fork, so the player chooses on the list.
+- **Reachability ignores targets** (`Gauntlet.reachable`). `problems` asks
+  whether a stage can be reached at all, so a bonus stage behind a tight target
+  passes. Whether the target can be met is the author's to show, by playing it.
+- **A run's path is the ungated lanes** (`gauntlet.chain`): a shortcut is not
+  taken, and a stage reached only through a gated lane is not on it, so a
+  linear gauntlet with a bonus stage can still be run.
+- **Ends and labels are derived, never stored.** A goal (`gauntlet.goals`) is a
+  reachable stage with no ungated lane out that is a start or has an ungated
+  lane in, so a bonus dead end behind a gate is never one. A gated lane is a
+  "Bonus" when its far end reaches no goal, else a "Shortcut" when it skips a
+  depth, else "Gated" (`gauntlet.lane_label`).
+- **The list names what a locked way needs**: a stage reached only through
+  gated lanes reads "locked · Bonus: target 86/72" (`gauntlet.way_in`).
+- **A lane may be hidden** (`{"turns": 12, "hidden": true}`, ignored without a
+  target): a stage every way into which is hidden (`Gauntlet.hidden_stages`)
+  is not listed until one opens (`gauntlet.shown`), as Mario Kart unlocks a
+  staff ghost for a fast enough time trial. Banners number and count only the
+  stages a player can know about (`gauntlet.place`: "3/10", or "bonus").
+  Proposed 2026-10-28, in place of a hidden star on board maps
+  (`other-games.md`, "Star tiers on every map").
+- **The board stores what the game reads.** `checkBody` takes the same lane
+  keys and refuses what `from_dict` would drop (a hidden lane with no target, a
+  bad target); `leaderboard/tests/fixtures/gauntlet-lanes.json` is read by both
+  suites. Until the page draws lanes, opening a branching gauntlet there says
+  that saving would make it linear (`branches`).

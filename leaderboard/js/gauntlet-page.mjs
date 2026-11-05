@@ -18,7 +18,7 @@ import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
-  GAUNTLET_ID, LIMITS, botTarget, buildBody, checkBody, draftFromBody, draftProblem, emptyDraft, emptyStage,
+  GAUNTLET_ID, LIMITS, botTarget, branches, buildBody, checkBody, draftFromBody, draftProblem, emptyDraft, emptyStage,
   fileName, gameLink, linkTarget, moveStage, readDraft, setupProblem, stageSetup, targetScore, targetText,
   textLength, tidy,
 } from "./gauntlet-build.mjs";
@@ -431,7 +431,11 @@ async function load() {
       draft = await draftFromBody(answer.gauntlet, linkFor);
       history.replaceState(null, "", location.pathname);
       keep();
-      say(`Opened ${tidy(answer.gauntlet.name)}. Saving your edits makes a new link.`);
+      if (branches(answer.gauntlet)) {
+        say(`Opened ${tidy(answer.gauntlet.name)}. This gauntlet branches; saving here would make it linear.`, "error");
+      } else {
+        say(`Opened ${tidy(answer.gauntlet.name)}. Saving your edits makes a new link.`);
+      }
     } catch (err) {
       say(`Couldn't open that gauntlet (${err.message}).`, "error");
     }

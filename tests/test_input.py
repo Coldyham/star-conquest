@@ -3100,7 +3100,7 @@ def test_start_game_copies_a_stage_onto_the_ui_as_plain_values(tmp_path, monkeyp
     cfg = gauntlet.stage_settings(first)
     assert cfg.seed is not None
     _state, ui, _log = main.start_game(cfg, cfg.seed, False, (g, first))
-    assert ui.stage_label == f"{g.name} 1/{len(g.stages)} · {first.title}"
+    assert ui.stage_label == f"{g.name} 1/{len(g.stages) - len(g.hidden_stages())} · {first.title}"
     assert ui.briefing == first.briefing and ui.briefing_open
     assert ui.stage_hint == first.hint and ui.has_next_stage
 

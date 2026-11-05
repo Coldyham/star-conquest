@@ -244,7 +244,7 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     if stage is None:
         return
     g, s = stage
-    ui.stage_label = f"{g.name} {g.position(s.id)}/{len(g.stages)} · {s.title}"
+    ui.stage_label = f"{g.name} {gauntlet.place(g, s.id)} · {s.title}"
     ui.stage_target = s.target
     ui.stage_met_before = gauntlet.met(s, gauntlet.best(s))
     ui.stage_title = s.title
@@ -254,7 +254,7 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     # with the hint left blank) still needs a line in the panel to tap back to
     # its briefing.
     ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
-    ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
+    ui.has_next_stage = gauntlet.next_stage(g, s.id, gauntlet.bests(g)) is not None
 
 
 def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
