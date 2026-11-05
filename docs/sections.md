@@ -59,8 +59,8 @@ line gives only the verdict. Ideas that lost are in
 
 ## gauntlet.md
 - gauntlet.md · **The tutorial ladder.** Data, never `Settings`; progress from `webstore.best`; `menu.active_stage`; the stash and Leave tutorial; `gauntlet.next_stage`; the briefing card and `HINT_MAX`.
-- gauntlet.md · *The stages:* the ten, and how their seeds were picked (`tools/gauntlet_check.py`).
-- gauntlet.md · **The file format.** `stages`/`lanes`/`start`, one-way lanes unless `two_way`, reachability (`gauntlet.problems`, `checkBody`), text limits, user gauntlets.
+- gauntlet.md · *The stages:* the ten, how their seeds were picked (`tools/gauntlet_check.py`), and the hidden bonus stages behind The hunt (86 turns / 72 lost) and Long odds (beat actuary's black-box 129 / 108); measured black box, and held to no slow-setup warning.
+- gauntlet.md · **The file format.** `stages`/`lanes`/`start`, one-way lanes unless `two_way`, a lane's target and `hidden`, reachability (`gauntlet.problems`, `checkBody`), text limits, `to_dict`, user gauntlets.
 - gauntlet.md · **Gauntlets made on the board.** `/api/gauntlet`, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, `gauntlet.remember`, `#gauntlet=`, remixing, admin listing.
 - gauntlet.md · **Relation to the weekly campaign.** Uncontested, so no server; graph and bordering rule shared in spirit; gauntlet lanes run one way.
 - gauntlet.md · **Generated gauntlets.** A spec (`fix`/`range`/`in`/`not`, opponents, `roll`) dealt by `dealer.deal`, probed and picked by `tools/gauntlet_gen.py`; where it runs; the first run; the last stage may be unwon by every probe.
@@ -70,7 +70,7 @@ line gives only the verdict. Ideas that lost are in
 - gauntlet.md · **The gauntlet: proposed, not built.** A seeded run graph (`tools/campaign.py` `_layout`/`cut_nodes`), stages dealt like `_from_family`/`_mystery`, difficulty by `LADDER_ORDER`.
 - gauntlet.md · **Carry-over.** Boons via `custommap.from_state` and their cost on the board; decided against for stage targets.
 - gauntlet.md · **Stage targets.** A score to win within before later stages open (`gauntlet.Target`, `gauntlet.cleared`, `Ui.stage_cleared`); set from a pasted challenge link or a dealt run's probe wins; none in the tutorial.
-- gauntlet.md · *Beat the best bot:* `standings.bestBot` on the stage's setup, fixed as `{turns, lost, bot, beat}` when picked. *Later: targets on lanes* (not built).
+- gauntlet.md · *Beat the best bot:* `standings.bestBot` on the stage's setup, fixed as `{turns, lost, bot, beat}` when picked. *Targets on lanes* (built 2026-11-05): gated and hidden lanes, depth over ungated lanes, `goals` and `lane_label` derived, `shown`/`place`, the shared `gauntlet-lanes.json` fixture, the board page's "would make it linear" warning.
 
 ## leaderboard.md
 - leaderboard.md · **Bot replays (`tools/bot_replay.py`).** A scheduled job, not a service. *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`); *a loss is a result, not a score*; *a win stores its own replay*.

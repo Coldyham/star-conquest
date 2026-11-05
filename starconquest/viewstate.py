@@ -498,6 +498,9 @@ class Ui:
     has_next_stage: bool = False
     stage_target: Target | None = None
     stage_met_before: bool = False
+    # The stage's gated ways out, as (label, far stage's title, target, met by
+    # a best filed before this match): what a win here may unlock.
+    stage_gates: tuple[tuple[str, str, Target, bool], ...] = ()
     next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The run this match is the undecided game of (`run.Run.id`), or blank. Set
@@ -954,15 +957,30 @@ class Ui:
         meets its target (`gauntlet.cleared`): this game's, or an earlier one."""
         return self.can_post(state) and (self.stage_met_before or self.met_target(state))
 
+    def unlocked(self, state: GameState) -> list[tuple[str, str]]:
+        """The gated ways out this stage has open once this win is filed, as
+        (label, title): ones a best already met, and ones this win meets, filed
+        on the same `can_post` gate as the best. A way still shut says nothing,
+        so a hidden stage stays hidden."""
+        score = (state.turn, state.players[self.human_id].ships_lost)
+        return [(label, title) for label, title, target, before in self.stage_gates
+                if before or (self.can_post(state) and target.met(score))]
+
     def offers_next_stage(self, state: GameState) -> bool:
-        """Is Next stage on the win overlay? Only for a win that leaves the stage
-        cleared (`stage_cleared`), so the button never leads to a stage the list
-        would still show locked. In a run only this game's score counts: an
-        earlier best on the stage doesn't carry the run on."""
+        """Is Next stage on the win overlay? Only where it leads to a stage the
+        list would show open: on along the one ungated lane once the stage is
+        cleared (`stage_cleared`), or, with no ungated way on, to the one stage a
+        gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it. A
+        gate open beside an ungated way is a fork: choose on the list. In a run
+        only this game's score counts, and gated lanes are off its path."""
+        if not self.in_stage:
+            return False
         if self.run_id:
-            return (self.in_stage and self.has_next_stage and self.can_post(state)
-                    and self.met_target(state))
-        return self.in_stage and self.has_next_stage and self.stage_cleared(state)
+            return self.has_next_stage and self.can_post(state) and self.met_target(state)
+        gates = self.unlocked(state)
+        if self.has_next_stage:
+            return not gates and self.stage_cleared(state)
+        return len(gates) == 1
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

@@ -270,6 +270,178 @@ def test_a_stage_no_start_reaches_is_a_problem():
         assert gauntlet.problems(g) == [], g.id
 
 
+# --------------------------------------------------------------------------- #
+# Targets on lanes: shortcuts, gated ways and hidden bonus stages
+# --------------------------------------------------------------------------- #
+_LANES = Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "fixtures" / "gauntlet-lanes.json"
+
+
+def _lanes_fixture() -> dict:
+    return json.loads(_LANES.read_text(encoding="utf-8"))
+
+
+def _branching() -> gauntlet.Gauntlet:
+    fx = _lanes_fixture()
+    g = gauntlet.Gauntlet.from_dict({**fx["body"], "lanes": fx["stored_lanes"]})
+    assert g is not None
+    return g
+
+
+def test_the_board_stores_lanes_the_game_reads():
+    """leaderboard/tests/fixtures/gauntlet-lanes.json: the lanes checkBody keeps
+    read here as the fixture says, and the author's raw lanes read the same."""
+    fx = _lanes_fixture()
+    game = fx["game"]
+    for g in (_branching(), gauntlet.Gauntlet.from_dict(fx["body"])):
+        assert g is not None
+        assert g.lane_targets == {(a, b): gauntlet._target(t) for a, b, t in game["lane_targets"]}
+        assert g.hidden == {tuple(p) for p in game["hidden"]}
+        assert g.two_way == frozenset()
+        assert g.depths() == {int(k): v for k, v in game["depths"].items()}
+        assert gauntlet.goals(g) == set(game["goals"])
+        assert g.hidden_stages() == set(game["hidden_stages"])
+        assert gauntlet.chain(g) == game["chain"]
+        for a, b, label in game["labels"]:
+            assert gauntlet.lane_label(g, a, b) == label, (a, b)
+        assert gauntlet.problems(g) == []
+    assert gauntlet.to_dict(_branching())["lanes"] == fx["stored_lanes"]
+
+
+def test_the_canonical_file_reads_back_to_the_same_gauntlet():
+    for g in [_branching(), _tutorial(), _targeted({"turns": 9, "lost": 2})]:
+        again = gauntlet.Gauntlet.from_dict(json.loads(json.dumps(gauntlet.to_dict(g))))
+        assert again is not None and again == g
+        assert [s.settings for s in again.stages] == [s.settings for s in g.stages]
+    two = gauntlet.Gauntlet.from_dict({"stages": [{"id": i, "settings": _setup(i)} for i in range(2)],
+                                       "lanes": [[0, 1, {"two_way": True, "turns": 4, "hidden": True}]]})
+    assert two is not None and gauntlet.Gauntlet.from_dict(gauntlet.to_dict(two)) == two
+
+
+@pytest.mark.parametrize("how", [{"hidden": True}, {"turns": 0, "hidden": True}, {"turns": "9"},
+                                 {"turns": 9, "lost": None}, "x"])
+def test_a_bad_lane_target_leaves_a_plain_lane(how):
+    g = gauntlet.Gauntlet.from_dict({"stages": [{"id": i, "settings": _setup(i)} for i in range(2)],
+                                     "lanes": [[0, 1, how]]})
+    assert g is not None
+    assert g.lanes == ((0, 1),) and g.lane_targets == {} and g.hidden == frozenset()
+
+
+def test_a_gated_lane_opens_on_a_best_that_meets_it_and_a_plain_one_on_a_clear():
+    g = _branching()
+    a, b, c = g.stages[0], g.stages[1], g.stages[2]
+    _score(a, 31, 0)                        # misses 0->5's beat 30
+    assert gauntlet.open_stages(g) == {0, 1}
+    _score(a, 29, 50)                       # beats turns; lost only breaks a tie
+    assert gauntlet.open_stages(g) == {0, 1, 5}
+    _score(b, 21, 0)
+    assert gauntlet.open_stages(g) == {0, 1, 2, 5}
+    _score(b, 20, 0)                        # the shortcut's 20 is met, not beaten
+    assert gauntlet.open_stages(g) == {0, 1, 2, 3, 5}
+    _score(c, 15, 11)
+    assert 4 not in gauntlet.open_stages(g)
+    _score(c, 15, 10)
+    assert 4 in gauntlet.open_stages(g)
+    # Given only what is cleared, every gated lane stays shut.
+    assert gauntlet.open_stages(g, {0, 1, 2}, set()) == {0, 1, 2, 3}
+
+
+def test_a_hidden_stage_is_not_listed_until_its_lane_opens():
+    g = _branching()
+    listed = lambda: [s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))]
+    assert listed() == [0, 1, 2, 3, 5]      # 5's lane is gated but not hidden
+    assert gauntlet.place(g, 3) == "4/5" and gauntlet.place(g, 4) == "bonus"
+    _score(g.stages[2], 16, 0)
+    assert listed() == [0, 1, 2, 3, 5]
+    _score(g.stages[2], 14, 0)
+    assert listed() == [0, 1, 2, 3, 4, 5]
+    assert gauntlet.way_in(g, 5) == ("Gated", gauntlet.Target(turns=30, lost=40, bot="marshal", beat=True))
+    assert gauntlet.way_in(g, 4) == ("Bonus", gauntlet.Target(turns=15, lost=10))
+    assert gauntlet.way_in(g, 3) is None
+
+
+def test_next_stage_follows_plain_lanes_and_forks_at_a_met_gate():
+    g = _branching()
+    assert gauntlet.next_stage(g, 1) == 2
+    assert gauntlet.next_stage(g, 3) is None
+    _score(g.stages[1], 25, 0)
+    assert gauntlet.next_stage(g, 1, gauntlet.bests(g)) == 2
+    _score(g.stages[1], 18, 0)               # the shortcut is open: choose on the list
+    assert gauntlet.next_stage(g, 1) == 2
+    assert gauntlet.next_stage(g, 1, gauntlet.bests(g)) is None
+
+
+def test_next_stage_leads_into_a_bonus_stage_a_win_unlocks():
+    """With no ungated way on, a gated lane the best meets is where Next stage
+    goes: the end of the tutorial leads into Long odds once it is unlocked."""
+    g = _tutorial()
+    hunt = next(s for s in g.stages if s.title == "The hunt")
+    bonus = next(s for s in g.stages if s.title == "Long odds")
+    assert gauntlet.next_stage(g, hunt.id) is None
+    assert gauntlet.next_stage(g, hunt.id, gauntlet.bests(g)) is None
+    _score(hunt, 90, 0)
+    assert gauntlet.next_stage(g, hunt.id, gauntlet.bests(g)) is None
+    _score(hunt, 57, 34)
+    assert gauntlet.next_stage(g, hunt.id, gauntlet.bests(g)) == bonus.id
+    assert gauntlet.gates_out(g, hunt.id) == [("Bonus", "Long odds", gauntlet.Target(turns=86, lost=72))]
+    assert gauntlet.gates_out(g, g.stages[0].id) == []
+
+
+def test_the_tutorial_hides_a_bonus_stage_behind_the_hunt():
+    """Won within the best human score on The Hunt when it was added (86 turns /
+    72 lost, met, not beaten), the tutorial's last stage reveals a bonus one."""
+    g = _tutorial()
+    hunt = next(s for s in g.stages if s.title == "The hunt")
+    bonus = next(s for s in g.stages if s.title == "Long odds")
+    assert gauntlet.lane_label(g, hunt.id, bonus.id) == gauntlet.BONUS
+    assert g.lane_targets[(hunt.id, bonus.id)] == gauntlet.Target(turns=86, lost=72)
+    after = next(s for s in g.stages if s.title == "No way out")
+    assert g.hidden_stages() == {bonus.id, after.id} and gauntlet.goals(g) == {hunt.id}
+    main = [s for s in g.stages if s.id not in (bonus.id, after.id)]
+    assert gauntlet.chain(g) == [s.id for s in main]
+    assert gauntlet.place(g, hunt.id) == f"{len(main)}/{len(main)}"
+    cfg = gauntlet.stage_settings(bonus)
+    assert cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
+    shown = lambda: [s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))]
+    for stage in main:
+        _score(stage, 87, 0)
+    assert bonus.id not in shown()
+    _score(hunt, 86, 72)
+    assert bonus.id in shown() and bonus.id in gauntlet.open_stages(g)
+    assert after.id not in shown()
+
+
+def test_no_builtin_stage_plays_slowly():
+    """The menu's "may play slowly" warning is about the browser: knower stops
+    thinking at 150 ms there, so a stage that trips it plays weaker than it was
+    measured, and differently on a slow device. No built-in stage may."""
+    from starconquest import ai
+    from starconquest.settings import setup_warnings
+
+    ai.load_models()
+    for g in gauntlet.builtin():
+        for stage in g.stages:
+            assert setup_warnings(gauntlet.stage_settings(stage)) == [], (g.id, stage.title)
+
+
+def test_beating_actuary_on_long_odds_reveals_one_more_stage():
+    """Black-box actuary (Hunt) in the human seat won Long odds in 129 turns /
+    108 lost, the only bot win there; beating it, not meeting it, opens the next."""
+    g = _tutorial()
+    bonus = next(s for s in g.stages if s.title == "Long odds")
+    after = next(s for s in g.stages if s.title == "No way out")
+    assert g.lane_targets[(bonus.id, after.id)] == gauntlet.Target(turns=129, lost=108, bot="actuary", beat=True)
+    assert gauntlet.lane_label(g, bonus.id, after.id) == gauntlet.BONUS
+    assert gauntlet.place(g, after.id) == "bonus"
+    cfg = gauntlet.stage_settings(after)
+    assert cfg.seed == 2350 and cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
+    assert [cfg.ai[i].aux for i in (2, 3)] == [2.0, 2.0]     # Search, Learning: no slow-setup warning
+    shown = lambda: {s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))}
+    _score(bonus, 129, 108)
+    assert after.id not in shown()
+    _score(bonus, 129, 107)
+    assert after.id in shown()
+
+
 def test_next_stage_is_offered_when_replaying_a_cleared_stage():
     g = _tutorial()
     first, second = g.stages[0], g.stages[1]

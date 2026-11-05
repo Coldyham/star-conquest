@@ -244,7 +244,7 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     if stage is None:
         return
     g, s = stage
-    ui.stage_label = f"{g.name} {g.position(s.id)}/{len(g.stages)} · {s.title}"
+    ui.stage_label = f"{g.name} {gauntlet.place(g, s.id)} · {s.title}"
     ui.stage_target = s.target
     ui.stage_met_before = gauntlet.met(s, gauntlet.best(s))
     ui.stage_title = s.title
@@ -255,6 +255,11 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     # its briefing.
     ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
     ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
+    # Gated ways out (a hidden bonus stage, say), and whether a best already
+    # meets each, so the win overlay can say what this win unlocks.
+    mine = gauntlet.best(s)
+    ui.stage_gates = tuple((label, title, target, mine is not None and target.met(mine))
+                           for label, title, target in gauntlet.gates_out(g, s.id))
 
 
 def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:

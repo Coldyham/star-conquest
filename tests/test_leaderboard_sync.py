@@ -213,11 +213,16 @@ def test_the_graduate_badge_knows_the_tutorials_last_stage():
     """The player card's Graduate badge is a posted win on the tutorial's last
     stage, which the board can only recognise by key: it can't compute
     `challenge_key()`. Every key the game reads that stage's best under must be
-    in `badges.mjs`'s `TUTORIAL_FINAL_KEYS` (old ones stay, for older scores)."""
+    in `badges.mjs`'s `TUTORIAL_FINAL_KEYS` (old ones stay, for older scores).
+    The last stage is the tutorial's one goal (`gauntlet.goals`): its path ends
+    there, and the hidden bonus stage past it is not the end."""
     from starconquest import gauntlet
 
     tutorial = next(g for g in gauntlet.builtin() if g.id == gauntlet.TUTORIAL_ID)
-    keys = gauntlet.stage_settings(tutorial.stages[-1]).challenge_keys()
+    (final,) = gauntlet.goals(tutorial)
+    stage = tutorial.stage(final)
+    assert stage is not None
+    keys = gauntlet.stage_settings(stage).challenge_keys()
     listed = _js_string_list(ROOT / "leaderboard" / "js" / "badges.mjs", "TUTORIAL_FINAL_KEYS")
     assert set(keys) <= set(listed), f"add {sorted(set(keys) - set(listed))} to TUTORIAL_FINAL_KEYS"
 

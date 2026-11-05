@@ -616,7 +616,7 @@ def next_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, ga
     if found is None:
         return None
     g, stage = found
-    nxt = gauntlet.next_stage(g, stage.id)
+    nxt = gauntlet.next_stage(g, stage.id, gauntlet.bests(g))
     if nxt is None:
         return None
     return _load_stage(ms, settings, g, nxt)
@@ -689,7 +689,7 @@ def _stage_lines(ms: MenuState, settings: Settings) -> list[tuple[str, tuple[int
         return [(f"{g.name.upper()} — settings changed", _WARN),
                 (f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave", _WARN)]
     _g, stage = found
-    head = f"{g.name.upper()} {g.position(stage.id)}/{len(g.stages)} — {stage.title}"
+    head = f"{g.name.upper()} {gauntlet.place(g, stage.id)} — {stage.title}"
     bits = _stage_bits(settings)
     mine = webstore.best(*settings.challenge_keys())
     if mine is not None:
@@ -826,8 +826,10 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     A stage is open if it is a start, is won, or a lane leads to it from a
     cleared one (`gauntlet.open_stages`): a win short of the stage's target
     leaves it open but opens nothing beyond. A locked one is greyed and is no
-    hit target. A picker row appears only when there is more than one gauntlet
-    to choose.
+    hit target; one behind a gated lane says what the lane needs ("Bonus:
+    target 86/72"), and one behind only hidden lanes isn't listed until they
+    open (`gauntlet.shown`). A picker row appears only when there is more than
+    one gauntlet to choose.
     Measured rows, like `_draw_pbp_prompt`.
     """
     g = _picked(ms)
@@ -839,7 +841,8 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         ms.stage_bests[g.id] = gauntlet.bests(g)
     bests = ms.stage_bests[g.id]
     done = gauntlet.cleared(g, bests)
-    opened = gauntlet.open_stages(g, done, set(bests))
+    opened = gauntlet.open_stages(g, done, set(bests), bests)
+    listed = gauntlet.shown(g, opened)
     found = active_stage(ms, settings)
     here = found[1].id if found is not None and found[0].id == g.id else None
 
@@ -849,7 +852,7 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     bw = max(f["normal"].size(s)[0] for s in (leave, close, _COPY_GAUNTLET)) + 2 * 18
     bh = 40
     status_w = f["small"].size("999 turns / 999 lost · beat 999/999")[0]
-    title_w = max(f["normal"].size(f"{i + 1:>2}  {s.title}")[0] for i, s in enumerate(g.stages))
+    title_w = max(f["normal"].size(f"{i + 1:>2}  {s.title}")[0] for i, s in enumerate(listed))
     pw = max(title_w + status_w + 3 * pad, buttons * bw + (buttons - 1) * gap + 2 * pad, f["normal"].size(g.name)[0] + 2 * 34 + 4 * pad)
     picker = len(ms.gauntlets) > 1
     # Progress is the bests in `localStorage` (`webstore`), so on the web say
@@ -871,7 +874,7 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         pw = max(pw, f["small"].size(run_row[0])[0] + 2 * pad,
                  len(run_row[1]) * rbw + (len(run_row[1]) - 1) * gap + 2 * pad)
     ph = (pad + f["normal"].get_height() + gap + (_CH + gap if picker else 0)
-          + len(g.stages) * _STAGE_ROW_H + gap + (_NOTE_H + gap if note else 0)
+          + len(listed) * _STAGE_ROW_H + gap + (_NOTE_H + gap if note else 0)
           + (_NOTE_H + 2 * gap + bh if run_row is not None else 0)
           + (_NOTE_H + gap if said is not None else 0) + bh + pad)
     panel = pygame.Rect((w - pw) // 2, (h - ph) // 2, pw, ph)
@@ -893,7 +896,9 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
                  panel.right - pad, y)
         y += _CH + gap
 
-    for i, stage in enumerate(g.stages):
+    for key in [k for k in ms.rects if k.startswith("stage_")]:
+        ms.rects.pop(key)     # a stage hidden again (another gauntlet picked) is no target
+    for i, stage in enumerate(listed):
         row = pygame.Rect(panel.x + pad // 2, y, pw - pad, _STAGE_ROW_H - 4)
         open_ = stage.id in opened
         key = f"stage_{stage.id}"
@@ -916,6 +921,9 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         elif open_:
             status, scol = ("next" if bests else "start here") + aim, _HL_BORDER
         else:
+            gate = gauntlet.way_in(g, stage.id)
+            if gate is not None:
+                aim = f" · {gate[0]}: {gate[1].short()}"
             status, scol = "locked" + aim, _DISABLED_TEXT
         if stage.id == run_on:
             status, scol = "run · " + status, _START_BORDER
@@ -993,7 +1001,7 @@ def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
     elif hit is not None and hit.startswith("stage_") and g is not None:
         sid = int(hit[len("stage_"):])
         found = ms.stage_bests.get(g.id, {})
-        if (sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found))
+        if (sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found), found)
                 and _load_stage(ms, settings, g, sid) is not None):
             ms.tutorial_open = False
             return _start(ms, settings)

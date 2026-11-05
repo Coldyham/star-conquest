@@ -1132,6 +1132,39 @@ def test_a_win_short_of_the_stage_target_offers_retry_not_next_stage():
         pygame.quit()
 
 
+def test_a_win_that_unlocks_a_bonus_stage_says_so_and_leads_there():
+    """The last stage on the path offers no Next stage, until a win meets a
+    gated lane out of it: then the overlay names the stage it unlocked and Next
+    stage goes there. A win short of the gate says nothing of it."""
+    from starconquest.gauntlet import Target
+
+    pygame.init()
+    try:
+        _desktop_scale()
+        screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.stage_label, ui.stage_title, ui.has_next_stage = "Tutorial 10/10 · The hunt", "The hunt", False
+        ui.stage_gates = (("Bonus", "Long odds", Target(turns=86, lost=72), False),)
+        state.winner, ui.hand_turns, state.turn = 1, 90, 90
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect == (0, 0, 0, 0)
+        assert render._result_lines(state, ui)[-1][1] == "Final stage cleared"
+
+        state.turn = ui.hand_turns = 57
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect[2] > 0
+        assert render._result_lines(state, ui)[-1][1] == "Final stage cleared  ·  Bonus unlocked: Long odds"
+
+        ui.hinted = True             # a hinted win is never filed, so it opens nothing
+        assert not ui.offers_next_stage(state) and ui.unlocked(state) == []
+
+        ui.hinted, ui.has_next_stage = False, True   # beside an ungated way on: a fork
+        assert not ui.offers_next_stage(state)
+    finally:
+        pygame.quit()
+
+
 def test_the_briefing_card_stays_inside_the_map():
     """Measured and centred on the play area (the whole screen on a compact
     one), never a fixed pixel size: the card's border is drawn wholly inside it
