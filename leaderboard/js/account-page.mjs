@@ -13,6 +13,8 @@ const credentialsForm = document.getElementById("credentials");
 const loginField = document.getElementById("login");
 const passwordField = document.getElementById("password");
 const signUpButton = document.getElementById("sign-up");
+const signedInRow = document.getElementById("signed-in");
+const changePasswordButton = document.getElementById("change-password");
 const signOutButton = document.getElementById("sign-out");
 const claimForm = document.getElementById("claim");
 const nameField = document.getElementById("name");
@@ -26,15 +28,23 @@ function say(message, kind = "") {
   status.className = `status ${kind}`;
 }
 
+/** Show or fold away the new-password field under its row button. */
+function showPasswordForm(open) {
+  passwordForm.hidden = !open;
+  changePasswordButton.setAttribute("aria-expanded", String(open));
+  if (open) newPasswordField.focus();
+}
+
 async function refresh() {
-  for (const part of [credentialsForm, signOutButton, claimForm, releaseButton, passwordForm]) part.hidden = true;
+  for (const part of [credentialsForm, signedInRow, claimForm, releaseButton]) part.hidden = true;
+  showPasswordForm(false);
   const live = await session();
   if (!live) {
     who.textContent = "Not signed in.";
     credentialsForm.hidden = false;
     return;
   }
-  signOutButton.hidden = passwordForm.hidden = false;
+  signedInRow.hidden = false;
   const as = live.login ? `Signed in as ${live.login}` : "Signed in";
   let owned = "";
   try {
@@ -79,6 +89,8 @@ credentialsForm.addEventListener("submit", (event) => {
 
 signUpButton.addEventListener("click", () => enter(signUp));
 
+changePasswordButton.addEventListener("click", () => showPasswordForm(passwordForm.hidden));
+
 signOutButton.addEventListener("click", async () => {
   signOut();
   say("");
@@ -122,6 +134,7 @@ passwordForm.addEventListener("submit", async (event) => {
     return;
   }
   newPasswordField.value = "";
+  showPasswordForm(false);
   say("Password changed.");
 });
 
