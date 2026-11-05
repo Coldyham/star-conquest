@@ -416,7 +416,10 @@ ships, never 6.
 floor is a table, boards share their lane tables and layers expand in parallel
 (`--workers`). Layer counts match the plain version exactly, and the first three
 save about a third of the time. Four workers were *slower* on every map tried,
-since nearly every child survives and the boards cost more to send than to make.
+since nearly every child survives and the boards cost more to send than to make. On the passes
+for plans of at most K launches, which keep only 10 to 25 percent of their children, eight workers
+on a laptop (11-01, K = 6) expanded about 34,000 order sets a second against about 31,000 for
+one worker on K = 5 there: a few percent, not a speed-up, so `par_best` stays single-process.
 The floor stays weak (7 against a true 10), so a turn-9 bound prunes no more
 than a turn-10 one: both expand the same 8.2M order sets in layer 7.
 
@@ -499,7 +502,7 @@ least 2). The commands keep `--results-dir`, so a rerun resumes. It never says
 
 | Day | Systems | Beam | Best | Rests on |
 | --- | --- | --- | --- | --- |
-| 11-01 | 6 | 12/9 | **10/10** | exact for plans of at most 5 launch orders: K = 3 95 s (nothing), K = 4 699 s (11/11), K = 5 1765 s (10/10); the full search did not finish in 300 s |
+| 11-01 | 6 | 12/9 (sandbox), 10/9 (laptop) | **10/9** | exact for plans of at most 6 launch orders. Laptop: K = 3 12 s, K = 4 70 s, K = 5 237 s, K = 6 241 s (8 workers); nothing beat 10/9. Sandbox, from the beam's 12/9: K = 3 95 s (nothing), K = 4 699 s (11/11), K = 5 1765 s (10/10); the full search did not finish in 300 s |
 | 11-02 | 8 | 6/7 | **6/7** | proved, with two-lane sends (6.5 s, 102 s) |
 | 11-03 | 6 | 12/7 | **10/10** | exact for plans of at most 5 launch orders (K = 4 found it) |
 | 11-04 | 5 | 11/3 | **10/3** | exact for plans of at most 5 launch orders (K = 3 found it) |
@@ -512,15 +515,18 @@ The boards with a gap of four turns or more do not finish in any budget tried. T
 one more launch order was 7 times (K = 3 to 4) and 2.5 times (K = 4 to 5) on 11-01, and 6 and
 5.5 times on 11-04, so the estimate in the verdict is rough.
 
-On 11-01 the first K = 3 pass found nothing, K = 4 found 11/11 and K = 5 found 10/10: the best
-line needs five launches, which a beam does not propose and a pass over fewer cannot reach.
-The line a person posted for that day (11/9) was a turn slower. **The 10/10 line was then played
+On 11-01 the answer depended on the machine: the beam is time-limited (90 s), so the sandbox's
+slower clock left it at 12/9 and the passes then climbed (K = 3 found nothing, K = 4 found 11/11,
+K = 5 found 10/10: a line that needs five launches, which a beam does not propose and a pass over
+fewer cannot reach), while a laptop about seven times faster had the beam land on 10/9 itself, and
+passes up to K = 6 then found nothing better. 10/9 is the best known and is exact only for plans of
+at most six launch orders. The line a person posted for that day (11/9) was a turn slower. **The 10/10 line was then played
 on the real map and reproduced it** (2026-11-05, by the author): five launches (11 ships
 Antinous to Zhang on turn 2, 3 more on turn 4, 11 on to Bajamar Star on turn 6, 5 on to Peacock on
 turn 7, 3 more on turn 8), against actuary, which sent 13 ships from Peacock on turn 3 and 3 more
 on turn 6 exactly as the search had it. So for that day the map dealt locally was the posted map,
 and a live actuary, which is time-budgeted, played as the search's unlimited-budget one did on
-the moves that mattered. It is one board; the other days' maps have not been checked.
+the moves that mattered. It is one board; the other days' maps have not been checked. (The 10/9 line has not been played.)
 
 Still open: a bound that counts the ships a fight needs (the floor counts only
 travel), and whether K = 5 or more finds anything.
