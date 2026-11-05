@@ -480,6 +480,13 @@ Not covered: three or more lanes from one system in a turn. On the 11-04 puzzle,
 beam is 4 turns over the floor, the same attempt does not finish (it ran out of its budget
 and the passes carried on).
 
+**Playing a line (`tools/par_show.py`).** `par_show.py results/par/best/<name>.best.json` replays a
+saved line through `replay.reconstruct` and prints the map, your orders by system name with the
+exact counts (and the turns to press End Turn with nothing sent), the rivals' orders in that line,
+and the board at the start of every turn, so the first turn a real game departs from the line is
+visible. A line only works while the rivals play the same; 2026-11-01's was played on the real
+map and they did (see the table below).
+
 **What `par_best` prints (2026-11-05).** After its table it gives each setup a verdict: whether
 the result is exact, the model it is exact in (the setup file as dealt, every launch size,
 one lane per system per turn, plans of at most K launch orders or every order set, no
