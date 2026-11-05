@@ -14,8 +14,7 @@ import {
   addDays, bestOnTheDay, dayParam, opponents, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
-import { clear, el, leaderCredit, setupSummary, showError, userHref } from "./format.mjs";
-import { mountMyScores } from "./me.mjs";
+import { clear, el, leaderLink, setupSummary, showError, userHref } from "./format.mjs";
 import { mountNav } from "./nav.mjs";
 
 // How far back streaks are read. A streak reaching back that far shows as
@@ -98,7 +97,7 @@ function drawLeader(summaries) {
     + "whoever is ahead then is the day's winner.";
   clear(standingsBox).append(ranked.length
     ? el("p", { class: "lede" }, [
-      "Currently ahead: ", el("strong", { text: leaderCredit(ranked[0]) }),
+      "Currently ahead: ", el("strong", {}, leaderLink(ranked[0])),
       ` — ${ranked[0].best_turns} turns, ${ranked[0].best_lost} lost, of ${posted} ${posted === 1 ? "score" : "scores"} posted`
         + ` by ${players} ${players === 1 ? "player" : "players"}. ${hidden}`,
     ])
@@ -162,7 +161,6 @@ function drawStreaks(list) {
 
 async function load() {
   mountNav();
-  mountMyScores();
   keepDayInTabs();
   drawDays();
   if (!configured()) {

@@ -33,6 +33,15 @@ WEB_GAUNTLETS_KEY = "sc_gauntlets"
 # (`daily.remember`), so a game started on one is known as the daily. A
 # fortnight at most. Never progress: that is `WEB_BESTS_KEY`, as for any game.
 WEB_DAILIES_KEY = "sc_dailies"
+# Runs of gauntlets (`run.runs`): the one active run and the last few finished,
+# each a record of the stages it played and how each went. Unlike a stage clear
+# this is stored, not derived: a run is a sequence of games, and bests keep only
+# the best of each stage.
+WEB_RUNS_KEY = "sc_runs"
+# The active run's game, as its log, rewritten every turn (`run.keep_log`): on
+# the web build `games/` is MEMFS, so without it a reload would lose the game a
+# run is waiting on.
+WEB_RUN_LOG_KEY = "sc_run_log"
 
 # Storage key for your best result per challenge setup (see `webstore.best`),
 # so replaying a shared link can show what you already managed.
@@ -98,6 +107,13 @@ WEB_PBP_RULES_KEY = "sc_pbp_rules"
 # again next time. Display text only: it goes to the endpoint just when a match
 # is created with it filled in.
 WEB_PBP_NAME_KEY = "sc_pbp_name"
+
+# The board's sign-in session (`leaderboard/js/auth.mjs`'s SESSION_KEY),
+# JSON with an `access_token`. Read only by the web game's ``?action=create``
+# call, so a match may be opened under the player's own claimed name. The game
+# never refreshes or writes it: an expired one is refused like none at all, and
+# the board's player card (its account panel) is where a session is renewed.
+WEB_AUTH_KEY = "sc_auth"
 
 # ---------------------------------------------------------------------------
 # The public leaderboard, and how the game finds it.

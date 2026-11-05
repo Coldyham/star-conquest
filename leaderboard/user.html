@@ -9,6 +9,63 @@
     Every map this player has posted a score on, and where each one places.
   </p>
 
+  <!-- Shown on this browser's own card, or with nobody chosen (user.mjs).
+       Optional, and said so first: every unclaimed name still works without
+       an account. js/account.mjs drives it. -->
+  <section id="account" class="account-panel" hidden>
+    <h2 class="section-title">Your account</h2>
+    <p class="lede">
+      You never need an account to play or post. An account lets you claim one
+      name, so nobody else can post scores, make campaign moves or take a
+      shared-match seat under it. Only a name nobody has used on the board yet
+      can be claimed here. If you have already been posting under a name, ask
+      the board's owner to assign it to you once you have an account.
+    </p>
+
+    <div class="form">
+      <p class="hint" id="acct-who">Checking…</p>
+
+      <form id="acct-credentials" class="form" hidden>
+        <label for="acct-login">Login</label>
+        <input id="acct-login" name="username" type="text" autocomplete="username" maxlength="200"
+               autocapitalize="none" spellcheck="false" placeholder="Login">
+        <label for="acct-password">Password</label>
+        <input id="acct-password" name="password" type="password" autocomplete="current-password"
+               placeholder="Password">
+        <button id="acct-sign-in" type="submit">Sign in</button>
+        <button id="acct-sign-up" type="button" class="btn ghost">Create account</button>
+        <p class="hint">
+          Your login is private: it is never shown on the board, and it can be an
+          email address or anything else. Nothing is ever emailed, so there is no
+          reset by email. If you forget your password, ask the board's owner.
+          <a href="privacy.html">What is stored, and why</a>.
+        </p>
+      </form>
+
+      <form id="acct-claim" class="form" autocomplete="off" hidden>
+        <label for="acct-name">Name to claim (public)</label>
+        <input id="acct-name" name="name" type="text" maxlength="60" placeholder="Name">
+        <button type="submit">Claim</button>
+      </form>
+
+      <div id="acct-signed-in" class="map-actions" hidden>
+        <button id="acct-release" type="button" class="btn ghost" hidden>Release this name</button>
+        <button id="acct-change-password" type="button" class="btn ghost"
+                aria-controls="acct-new-password" aria-expanded="false">Change password</button>
+        <button id="acct-sign-out" type="button" class="btn ghost">Sign out</button>
+      </div>
+
+      <form id="acct-new-password" class="form" hidden>
+        <label for="acct-password-new">New password</label>
+        <input id="acct-password-new" name="new-password" type="password" autocomplete="new-password"
+               placeholder="New password">
+        <button type="submit">Submit</button>
+      </form>
+
+      <p class="status" id="acct-status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
   <div id="tally"></div>
 
   <form id="compare" class="compare" autocomplete="off">

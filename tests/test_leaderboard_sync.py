@@ -9,6 +9,7 @@ them drifting apart is a test that reads both sides as text, the same trick
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import cast
@@ -85,6 +86,20 @@ def test_the_board_reads_the_same_storage_keys_the_game_writes():
     js = ROOT / "leaderboard" / "js"
     assert _js_string_constant(js / "pbp.mjs", "SEATS_KEY") == paths.WEB_PBP_SEATS_KEY
     assert _js_string_constant(js / "me.mjs", "NAME_KEY") == paths.WEB_PBP_NAME_KEY
+    assert _js_string_constant(js / "auth.mjs", "SESSION_KEY") == paths.WEB_AUTH_KEY
+
+
+def test_admin_finds_an_account_the_way_the_board_made_it():
+    """An account's email is a hash of its login at ACCOUNT_DOMAIN, made by the
+    board on sign-up and again by `admin.py` to find the account. A drift on
+    either side and assign-name and set-password find nobody."""
+    from tools import admin
+
+    js = ROOT / "leaderboard" / "js"
+    assert _js_string_constant(js / "auth.mjs", "ACCOUNT_DOMAIN") == admin.ACCOUNT_DOMAIN
+    # The hash itself: the vector auth.test.mjs pins on the JS side.
+    expected = hashlib.sha256(b"rival42").hexdigest()[:40]
+    assert admin.account_email("  Rival42 ") == f"{expected}@{admin.ACCOUNT_DOMAIN}"
 
 
 def test_the_board_paces_setups_with_the_games_defaults():
@@ -198,11 +213,16 @@ def test_the_graduate_badge_knows_the_tutorials_last_stage():
     """The player card's Graduate badge is a posted win on the tutorial's last
     stage, which the board can only recognise by key: it can't compute
     `challenge_key()`. Every key the game reads that stage's best under must be
-    in `badges.mjs`'s `TUTORIAL_FINAL_KEYS` (old ones stay, for older scores)."""
+    in `badges.mjs`'s `TUTORIAL_FINAL_KEYS` (old ones stay, for older scores).
+    The last stage is the tutorial's one goal (`gauntlet.goals`): its path ends
+    there, and the hidden bonus stage past it is not the end."""
     from starconquest import gauntlet
 
     tutorial = next(g for g in gauntlet.builtin() if g.id == gauntlet.TUTORIAL_ID)
-    keys = gauntlet.stage_settings(tutorial.stages[-1]).challenge_keys()
+    (final,) = gauntlet.goals(tutorial)
+    stage = tutorial.stage(final)
+    assert stage is not None
+    keys = gauntlet.stage_settings(stage).challenge_keys()
     listed = _js_string_list(ROOT / "leaderboard" / "js" / "badges.mjs", "TUTORIAL_FINAL_KEYS")
     assert set(keys) <= set(listed), f"add {sorted(set(keys) - set(listed))} to TUTORIAL_FINAL_KEYS"
 

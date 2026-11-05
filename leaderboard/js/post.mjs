@@ -6,7 +6,9 @@
 // (share.quick_post). One implementation, so the two can never file a score
 // differently.
 
-import { configured, eq, insert, rpc, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { configured, eq, insert, rpc, RLS_VIOLATION, select, UNIQUE_VIOLATION } from "./api.mjs";
+import { storedSession } from "./auth.mjs";
+import { CLAIMED_MESSAGE, nameBlocked } from "./claims.mjs";
 import { inflate } from "./inflate-browser.mjs";
 import { normalizeTags } from "./tags.mjs";
 import { decodeToken, setupIdentity } from "./token-decode.mjs";
@@ -104,17 +106,36 @@ export async function ensureGame(decoded, embargoUntil) {
   return { gameKey: decoded.gameKey, embargoed: Boolean(embargoUntil) };
 }
 
-/** Find or create the user, keyed by name alone — same race handling as above. */
-async function ensureUser(name) {
-  const query = `users?select=id&name_key=${eq(name.trim().toLowerCase())}&limit=1`;
-  const found = await select(query);
-  if (found.length) return found[0].id;
+/** The name the signed-in caller owns, or "" — signed out, or owning none. */
+export async function ownName() {
+  if (!storedSession()) return "";
   try {
-    const [created] = await insert("users", { name: name.trim() }, { returning: true });
+    return (await rpc("my_name", {})) || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Find or create the user, keyed by name — same race handling as above. A name
+ * someone else has claimed is refused here, before the score insert that the
+ * database would refuse anyway (schema.sql's `sc_may_use_user`), so the player
+ * is told why.
+ */
+async function ensureUser(name) {
+  const query = `users?select=id,name,claimed&name_key=${eq(name.trim().toLowerCase())}&limit=1`;
+  const found = await select(query);
+  if (found.length) {
+    if (nameBlocked(found[0], await ownName())) throw new Error(CLAIMED_MESSAGE);
+    return found[0].id;
+  }
+  try {
+    const [created] = await insert("users", { name: name.trim() }, { returning: true, columns: "id" });
     return created.id;
   } catch (err) {
     if (err.code !== UNIQUE_VIOLATION) throw err;
     const [existing] = await select(query);
+    if (nameBlocked(existing, await ownName())) throw new Error(CLAIMED_MESSAGE);
     return existing.id;
   }
 }
@@ -173,7 +194,10 @@ export async function postScore(decoded, name, { embargoUntil = null, tags = "" 
     // The campaign's answer when this game was started, for its grace.
     campaign_start: decoded.challenge.campaign,
     raw_token: decoded.token,
-  }, { returning: true });
+  }, { returning: true }).catch((err) => {
+    // Claimed between ensureUser's check and this insert: sc_may_use_user refuses it.
+    throw err.code === RLS_VIOLATION ? new Error(CLAIMED_MESSAGE) : err;
+  });
   // Best-effort and never blocking: see submitTags's own doc comment.
   await submitTags(decoded.setup, score.id, userId, tags);
   return { gameKey, embargoed };

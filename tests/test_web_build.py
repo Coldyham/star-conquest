@@ -73,6 +73,7 @@ def test_every_board_page_renders_with_the_shared_chrome(tmp_path):
         found = header.findall(html)
         assert len(found) == 1, f"{page} has {len(found)} headers"
         headers |= set(found)
+        assert html.count('href="privacy.html">Privacy</a>') == 1, f"{page}'s footer"
     assert len(headers) == 1
     for name in render_board.STATIC_FILES + render_board.STATIC_DIRS:
         assert (tmp_path / name).exists()
@@ -106,13 +107,13 @@ def test_the_build_skips_the_tap_to_start_gate_but_keeps_the_leave_warning():
     assert "--can_close" not in call
 
 
-
 def test_the_game_page_gets_our_favicon_not_pygbags():
     """Without `--icon`, pygbag downloads its own default into /game/favicon.png,
     and the game page links that one rather than the site root's."""
     call = BUILD[BUILD.index("pygbag --build"):].split(")", 1)[0]
     assert '--icon "$ROOT/tools/pwa/favicon.png"' in call
     assert (ROOT / "tools" / "pwa" / "favicon.png").exists()
+
 
 def test_the_functions_answer_where_the_game_calls_them():
     functions = ROOT / "leaderboard" / "netlify" / "functions"
@@ -194,6 +195,22 @@ def test_the_manifest_keeps_its_id_and_launches_the_router():
     # The router, not /game/, so a launch can reopen the board.
     assert manifest["start_url"] == "./index.html"
     assert manifest["scope"] == "./"
+
+
+def test_the_manifest_shortcuts_open_the_dailies_and_the_campaign():
+    """A long press on the installed icon offers today's two dailies, puzzle first, (in the
+    game, by the fragment `daily.link` reads) and the campaign (on the board)."""
+    import json
+    from starconquest import daily
+    manifest = json.loads((ROOT / "tools" / "pwa" / "manifest.webmanifest").read_text())
+    urls = [s["url"] for s in manifest["shortcuts"]]
+    assert urls == ["/game/#puzzle", "/game/#daily", "/board/campaign.html"]
+    assert daily.link("daily") == (daily.BOARD, "")
+    assert daily.link("puzzle") == (daily.PUZZLE, "")
+    assert "campaign.html" in render_board.PAGES
+    for shortcut in manifest["shortcuts"]:
+        for icon in shortcut.get("icons", []):
+            assert (ROOT / "tools" / "pwa" / icon["src"]).is_file()
 
 
 def test_the_board_links_to_the_game_under_game():

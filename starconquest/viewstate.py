@@ -498,8 +498,22 @@ class Ui:
     has_next_stage: bool = False
     stage_target: Target | None = None
     stage_met_before: bool = False
+    # The stage's gated ways out, as (label, far stage's title, target, met by
+    # a best filed before this match): what a win here may unlock.
+    stage_gates: tuple[tuple[str, str, Target, bool], ...] = ()
     next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # The run this match is the undecided game of (`run.Run.id`), or blank. Set
+    # by `main.run_ui` only on the run's own game: a Retry or fork of it is free
+    # play. A run game plays ironman and offers no Hint, and its Next stage
+    # follows this game's score alone. `run_note` is the overlay's line once
+    # `main.record_run_step` has judged the game (blank before), `run_ok` its
+    # colour. `run_at`/`run_total` are the stage's place in the run ("3/8").
+    run_id: str = ""
+    run_at: int = 0
+    run_total: int = 0
+    run_note: str = ""
+    run_ok: bool = True
     # The system whose star info card (`starlore`) is up over the board, or None.
     # The i button beside a selected system's name in the side panel
     # (`lore_button_rect`) and the I key open it; any press closes it.
@@ -519,8 +533,11 @@ class Ui:
     # Quick post (`share.quick_post`): the name the leaderboard button posts under
     # without the entry form ("" for the form), and how far the post has got:
     # "", "posting", "posted" (the button then opens the map's page, `posted_key`)
-    # or "failed" (the button falls back to the form).
+    # or "failed" (the button falls back to the form). `post_as` starts as the
+    # remembered name; `post_name_due` asks main to replace it with the signed-in
+    # player's claimed name, if they own one (`share.signed_in_name`).
     post_as: str = ""
+    post_name_due: bool = False
     post_state: str = ""
     posted_key: str = ""
     # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
@@ -856,8 +873,9 @@ class Ui:
     def can_hint(self, state: GameState) -> bool:
         """Is the Hint control offered? Only on our own live turn: not in a shared
         match (a bot's advice against friends), not while reviewing, under
-        autoplay or spectating, and not once the game is decided or we are out."""
-        return (not self.in_pbp and not self.history and not self.autoplay
+        autoplay or spectating, and not once the game is decided or we are out.
+        Not in a run's game either: a run is a test of the player's own play."""
+        return (not self.in_pbp and not self.run_id and not self.history and not self.autoplay
                 and not self.watched and state.winner is None
                 and self.human_id in state.players and self.human_id != 0
                 and not state.is_defeated(self.human_id))
@@ -939,11 +957,30 @@ class Ui:
         meets its target (`gauntlet.cleared`): this game's, or an earlier one."""
         return self.can_post(state) and (self.stage_met_before or self.met_target(state))
 
+    def unlocked(self, state: GameState) -> list[tuple[str, str]]:
+        """The gated ways out this stage has open once this win is filed, as
+        (label, title): ones a best already met, and ones this win meets, filed
+        on the same `can_post` gate as the best. A way still shut says nothing,
+        so a hidden stage stays hidden."""
+        score = (state.turn, state.players[self.human_id].ships_lost)
+        return [(label, title) for label, title, target, before in self.stage_gates
+                if before or (self.can_post(state) and target.met(score))]
+
     def offers_next_stage(self, state: GameState) -> bool:
-        """Is Next stage on the win overlay? Only for a win that leaves the stage
-        cleared (`stage_cleared`), so the button never leads to a stage the list
-        would still show locked."""
-        return self.in_stage and self.has_next_stage and self.stage_cleared(state)
+        """Is Next stage on the win overlay? Only where it leads to a stage the
+        list would show open: on along the one ungated lane once the stage is
+        cleared (`stage_cleared`), or, with no ungated way on, to the one stage a
+        gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it. A
+        gate open beside an ungated way is a fork: choose on the list. In a run
+        only this game's score counts, and gated lanes are off its path."""
+        if not self.in_stage:
+            return False
+        if self.run_id:
+            return self.has_next_stage and self.can_post(state) and self.met_target(state)
+        gates = self.unlocked(state)
+        if self.has_next_stage:
+            return not gates and self.stage_cleared(state)
+        return len(gates) == 1
 
     # -- ship accounting ---------------------------------------------------- #
     def committed(self, sid: int) -> int:

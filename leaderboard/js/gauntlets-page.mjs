@@ -7,7 +7,6 @@ import { configured, selectPage } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { clear, el, relativeTime, showError } from "./format.mjs";
 import { gameLink, listingOf } from "./gauntlet-build.mjs";
-import { mountMyScores } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 
 const target = document.getElementById("gauntlets");
@@ -60,7 +59,6 @@ function showMore(offset) {
 
 async function load() {
   mountNav();
-  mountMyScores();
   if (!configured()) {
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");
     return;

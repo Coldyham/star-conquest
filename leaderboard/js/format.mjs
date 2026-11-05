@@ -276,6 +276,18 @@ export function leaderCredit(game) {
   return others ? `${name} & ${others} other${others === 1 ? "" : "s"}` : name;
 }
 
+/**
+ * leaderCredit as nodes for an element's children: the leading name a link to
+ * that player's card (an anonymous record names nobody to look up), then any
+ * "& 2 others" as text.
+ */
+export function leaderLink(game) {
+  const name = (game.best_user_name || "").trim();
+  const text = leaderCredit(game);
+  if (!name) return [text];
+  return [el("a", { href: userHref([name]), text: name }), text.slice(name.length)];
+}
+
 // The share of bots that lose a map (game_summary.difficulty) at or below which
 // each word applies, easiest first. Cut along the roster's classes, so on the
 // 7-bot roster, one per family at its top stop: Hard is a map only the top two

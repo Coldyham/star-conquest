@@ -56,10 +56,6 @@ design file each one reports into.
 
 Match the surrounding style, and keep `uvx ruff check .` clean (rules in
 `pyproject.toml`; don't `ruff format` a file you aren't otherwise changing).
-Pylance basic type-checking is real signal: code you touch adds no
-`uvx pyright <files>` errors (`[tool.pyright]`). Narrow with
-`assert x is not None`; where pyright can't follow, a line-level
-`# pyright: ignore[rule]`, never a bare or file-wide ignore.
 
 Run the tests a change can reach, not the whole suite each time. A docs-only
 change needs none unless a test reads the file (`tests/test_bot_brief.py` reads
@@ -93,7 +89,7 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach` (`test_no_core_module_imports_pygame`). `fog`
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run` (`test_no_core_module_imports_pygame`). `fog`
   and `turnfilm` are presentation-only: the engine and AI never consult them.
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
@@ -260,6 +256,12 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   sensitive-variable policy stays on "Require approval". Board pages are
   Jinja2 templates on `leaderboard/templates/base.html` (`tools/render_board.py`,
   whose `PAGES` is the servable allow-list); shared chrome goes in the base.
+- **A claimed name is its owner's alone.** An account (a private login and
+  password, held only as a hash, `leaderboard/js/auth.mjs`) is optional; only
+  the owner posts, tags or names a pbp seat under it (`sc_may_use_user`,
+  `pbp.mjs` `nameAllowed`). `claim_name` takes only
+  an unused name; a used one goes through `admin.py assign-name`. `users.owner`
+  is never public: `users` is granted by column.
 
 **The AI** (rules in full: `docs/design/bots.md`, "Per-seat AI and pricing a
 fight: the rules in full")
@@ -373,6 +375,9 @@ stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup
 matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
 `from_dict` never raises. Render never sees a `Gauntlet` (`main.stage_ui`).
+**A run (`run.py`) is the one stored progress**: a single-path gauntlet with a
+target, in order, one life. It judges only its own game (`run.finish`), so a
+Retry is free play; Continue resumes that game's log, never a fresh copy.
 **A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
 `/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
 page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but

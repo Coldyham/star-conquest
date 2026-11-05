@@ -212,12 +212,9 @@ export function checkBody(body) {
       if (!Array.isArray(pair) || (pair.length !== 2 && pair.length !== 3)) return "a lane is not a pair of stage ids";
       const [a, b, how] = pair;
       if (!ids.has(a) || !ids.has(b) || a === b) return "a lane joins a stage that is not there";
-      if (pair.length === 3) {
-        if (!isObject(how) || Object.keys(how).some((k) => k !== "two_way") || typeof how.two_way !== "boolean") {
-          return "a lane's third element can only say two_way";
-        }
-      }
-      lanes.push(how?.two_way ? [a, b, { two_way: true }] : [a, b]);
+      const kept = pair.length === 3 ? checkLane(how) : {};
+      if (typeof kept === "string") return kept;
+      lanes.push(Object.keys(kept).length ? [a, b, kept] : [a, b]);
     }
     out.lanes = lanes;
   }
@@ -231,6 +228,51 @@ export function checkBody(body) {
     return `the gauntlet is over ${LIMITS.bodyBytes / 1024} KiB`;
   }
   return out;
+}
+
+const LANE_KEYS = new Set([...TARGET_KEYS, "two_way", "hidden"]);
+
+/**
+ * A lane's third element as stored, or a string saying what is wrong with it:
+ * an optional target (a stage target's keys), `hidden` (only on a lane with a
+ * target: there is nothing else to reveal it), and `two_way`. Written in the
+ * order the game's `gauntlet.to_dict` writes them.
+ */
+function checkLane(how) {
+  if (!isObject(how) || Object.keys(how).some((k) => !LANE_KEYS.has(k))) {
+    return "a lane's third element can only say two_way, hidden and a target (turns, lost, bot, beat)";
+  }
+  if (how.two_way !== undefined && typeof how.two_way !== "boolean") return "a lane's two_way is not true or false";
+  if (how.hidden !== undefined && typeof how.hidden !== "boolean") return "a lane's hidden is not true or false";
+  const gate = Object.fromEntries(Object.entries(how).filter(([k]) => TARGET_KEYS.has(k)));
+  let out = {};
+  if (Object.keys(gate).length) {
+    const target = checkTarget(gate);
+    if (typeof target === "string") return `a lane ${target}`;
+    out = { ...target };
+  }
+  if (how.hidden) {
+    if (!out.turns) return "a hidden lane needs a target to reveal it";
+    out.hidden = true;
+  }
+  if (how.two_way) out.two_way = true;
+  return out;
+}
+
+/**
+ * Does a stored body branch: lanes or a start other than what the game assumes
+ * without them (each stage joined to the next in list order, the first open),
+ * or a lane with a target or two-way? The page edits order only until it draws
+ * lanes, so saving one of these would make it linear.
+ */
+export function branches(body) {
+  const stages = Array.isArray(body?.stages) ? body.stages : [];
+  const ids = stages.map((s) => s?.id);
+  if (Array.isArray(body?.start) && (body.start.length !== 1 || body.start[0] !== ids[0])) return true;
+  if (!Array.isArray(body?.lanes)) return false;
+  if (body.lanes.length !== Math.max(0, ids.length - 1)) return true;
+  return body.lanes.some((pair, i) => !Array.isArray(pair) || pair[0] !== ids[i] || pair[1] !== ids[i + 1]
+                                       || (pair.length > 2 && isObject(pair[2]) && Object.values(pair[2]).some((v) => v !== false)));
 }
 
 /**

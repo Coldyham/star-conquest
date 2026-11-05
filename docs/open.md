@@ -10,13 +10,15 @@ ships or is dropped, delete its line here (and add it to
 - campaign.md · Whether to swap `playerHue`'s hashed hues for something that keeps one week's players apart (two names can land on near-identical colours on the campaign map); any change recolours every past week. *The week's replay.*
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
+- campaign.md · Whether to bring back campaign fleets once claimed names are taken up widely: opt-in identity, whether arrival needs a notification, and whether wait timers make it a chore. *Revisit if claimed names take hold.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
+- leaderboard.md · Watch links on an owner's own scores while their map is embargoed: `replay.mjs` asking Auth who calls, as `pbp.mjs` does, and serving that owner's logs past `public_replays`. *Claimed names.*
 - training.md · Drill stages and a tutorial stage each for rusherplus, evolved and knower; choosing the hint's advisor. *Proposed, not built.*
-- gauntlet.md · The roguelite run: a seeded run graph, stages dealt like the campaign's, difficulty by depth. *The gauntlet: proposed, not built.*
+- gauntlet.md · The roguelite run beyond the linear run built in *Runs*: branching, lane gates, lives and boons (`graphical-gauntlet-maker.md`), and a seeded run graph with stages dealt like the campaign's. *The gauntlet: proposed, not built.*
 - shell.md · The phone's setup menu at device resolution, if the panel's height can be had without a pixel scan; the idle side panel's how-to cut off on a landscape phone; the same send-finishes-its-source rule on desktop. *Phones: the compact layout.*
-- gauntlet.md · Targets on lanes, including hidden ones that reveal a bonus stage only once met (a Mario Kart staff ghost); the generated-gauntlet web build is untimed on a phone. *Later: targets on lanes*, *In the game.*
+- gauntlet.md · Lanes are built (*Targets on lanes*) but authored by hand only: the board page edits order and warns on a branching gauntlet, and the menu lists stages rather than drawing the graph (Phases 2-3 of `graphical-gauntlet-maker.md`); the generated-gauntlet web build is untimed on a phone. *Targets on lanes*, *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
 - daily.md · First tries: the game counts local attempts at a day's key and stamps the count on the score, and the board marks first-try wins. Also: offering `lane_turns` on the board's gauntlet form. *On the board*, *Ship speed follows the map*.

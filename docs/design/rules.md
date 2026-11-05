@@ -378,6 +378,17 @@ already resolve simultaneously. The rationale for each rule is in
   `tools/render_board.py` (whose `PAGES` is the servable allow-list); put shared
   chrome in the base, never back into a page. Detail:
   `docs/design/leaderboard.md`.
+- **A claimed name is its owner's alone.** One name per account
+  (Supabase Auth, `leaderboard/js/auth.mjs`: a private login and a password,
+  over plain fetch; the login is held only as a hash, `accountEmail`). Only the
+  owner may post a score or tag (`schema.sql`'s `sc_may_use_user` on the
+  insert policies) or name a pbp seat (`pbp.mjs` `nameAllowed`) under it.
+  `claim_name` is the only self-service writer, and only for an unused name. A
+  name already in use goes through `tools/admin.py assign-name` (`--fold`
+  merges a person's other names into it and frees them). `users.owner`
+  is never publicly readable: `users` is granted by column, and pages read
+  `claimed`. Signing in stays optional. Detail: `docs/design/leaderboard.md`,
+  "Claimed names".
 
 **The AI** (reasons: `docs/design/bots.md` and the per-bot files)
 
@@ -589,6 +600,16 @@ Reasons: `docs/design/gauntlet.md`.
   pinned); Next stage appears only for a win that leaves it cleared, this
   game's or an earlier best meeting the target (`Ui.stage_cleared`,
   `Ui.offers_next_stage`).
+- **A run** (`run.py`) plays a single-path gauntlet with at least one target
+  (`run.offered`, `gauntlet.chain`) in order, each stage within its target,
+  with one life. It is the one piece of gauntlet progress that is stored
+  (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
+  decided. Only the step's own game moves it, once (`run.finish`), so a Retry
+  or fork is free play. That game plays ironman with no Hint, and its Next
+  stage reads this game's score alone. Continue resumes the step's log (kept
+  in `webstore` too, `run.keep_log`), never a fresh copy, and a log that can't
+  be loaded ends the run. A run adds nothing to `Settings` or the log, and run
+  games post as ordinary games (`tests/test_run.py`).
 - **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
   the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in

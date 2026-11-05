@@ -32,6 +32,14 @@ Unlike the campaign's, a lane runs one way, from its first stage to its second,
 unless the file marks it two-way. The campaign's own rule stays in JS behind
 ``/api/campaign`` and is not reimplemented here.
 
+**A lane may carry a target of its own** (``[a, b, {"turns": 12}]``): it opens
+its far stage only when the near one's best meets it, so a tighter score opens a
+shortcut or a bonus stage that a plain win does not. Such a gated lane may be
+``hidden``, and a stage reached only by hidden lanes is not shown until one
+opens. Depth (``depths``, so Next stage and the column a stage is drawn in) is
+measured over ungated lanes only; a run's ends (``goals``) and a lane's label
+(``lane_label``) are derived from the graph, never stored.
+
 ``from_dict`` is total and never raises, like ``CustomMap.from_dict``: it drops
 a malformed stage or lane and clamps text to what the screen can show.
 """
@@ -91,6 +99,17 @@ class Target:
         """"14 turns", or "14 turns / 30 lost"."""
         return f"{self.turns} turns" + (f" / {self.lost} lost" if self.lost is not None else "")
 
+    def to_dict(self) -> dict:
+        """The target as the file writes it, read back by ``_target``."""
+        out: dict = {"turns": self.turns}
+        if self.lost is not None:
+            out["lost"] = self.lost
+        if self.bot:
+            out["bot"] = self.bot
+        if self.beat:
+            out["beat"] = True
+        return out
+
     def text(self) -> str:
         """The whole condition, for the briefing card and the win overlay:
         "Win in 14 turns or fewer", "Beat thinker: 31 turns / 12 lost"."""
@@ -129,6 +148,11 @@ class Gauntlet:
     start: tuple[int, ...]
     # The lanes that also run from their second stage back to their first.
     two_way: frozenset[tuple[int, int]] = frozenset()
+    # A gated lane opens its far stage only on a best that meets its target
+    # (either way, if two-way); every other lane opens on a clear.
+    lane_targets: dict[tuple[int, int], Target] = field(default_factory=dict, hash=False)
+    # Gated lanes not shown until met. Never an ungated one: nothing would reveal it.
+    hidden: frozenset[tuple[int, int]] = frozenset()
 
     @classmethod
     def from_dict(cls, data) -> Gauntlet | None:
@@ -139,9 +163,11 @@ class Gauntlet:
         is dropped, and a lane to a missing stage with it. With no ``lanes`` the
         stages are joined in list order, so a hand-written linear gauntlet can
         leave them out; with no usable ``start`` the first stage is the start.
-        A lane's optional third element is read only for ``two_way``; anything
-        else there leaves it one-way. A malformed ``target`` is dropped, and the
-        stage then has none.
+        A lane's optional third element is read for ``two_way``, a target
+        (``turns``/``lost``/``bot``/``beat``, as a stage's) and ``hidden``;
+        anything else there leaves it a plain one-way lane. A malformed
+        ``target`` is dropped, and the stage (or lane) then has none; ``hidden``
+        on a lane with no target is dropped too.
         """
         try:
             return _from_dict(data)
@@ -158,28 +184,54 @@ class Gauntlet:
                 return i + 1
         return 0
 
-    def onward(self, sid: int) -> set[int]:
-        """The stages a lane leads to from ``sid``, the way each lane runs."""
-        out = set()
+    def ways(self) -> list[tuple[int, int, tuple[int, int]]]:
+        """Every way a lane runs, as ``(from, to, lane)``: one per lane, and a
+        second, back, for a two-way one. ``lane`` is the key the lane is stored
+        under, for ``lane_targets`` and ``hidden``."""
+        out = []
         for a, b in self.lanes:
-            if a == sid:
-                out.add(b)
-            elif b == sid and (a, b) in self.two_way:
-                out.add(a)
+            out.append((a, b, (a, b)))
+            if (a, b) in self.two_way:
+                out.append((b, a, (a, b)))
         return out
 
-    def depths(self) -> dict[int, int]:
-        """Lanes from the nearest start, per stage, the way lanes run. A stage
-        no start reaches is absent (``problems`` names it)."""
+    def onward(self, sid: int, gated: bool = True) -> set[int]:
+        """The stages a lane leads to from ``sid``, the way each lane runs;
+        with ``gated=False`` only over the lanes that open on a plain clear."""
+        return {b for a, b, lane in self.ways()
+                if a == sid and (gated or lane not in self.lane_targets)}
+
+    def _walk(self, gated: bool) -> dict[int, int]:
         depth = {s: 0 for s in self.start}
         queue = deque(self.start)
         while queue:
             at = queue.popleft()
-            for n in sorted(self.onward(at)):
+            for n in sorted(self.onward(at, gated)):
                 if n not in depth:
                     depth[n] = depth[at] + 1
                     queue.append(n)
         return depth
+
+    def depths(self) -> dict[int, int]:
+        """Lanes from the nearest start, per stage, the way lanes run, over
+        ungated lanes only: a shortcut must not make the stage it reaches as
+        shallow as the one before it and take Next stage away. A stage reached
+        only through a gated lane (a bonus stage), or not at all, is absent."""
+        return self._walk(gated=False)
+
+    def reachable(self) -> set[int]:
+        """Every stage some start reaches over any lane, gated or not: what
+        ``problems`` checks, since whether a target can be met is the author's
+        to show, by playing it."""
+        return set(self._walk(gated=True))
+
+    def hidden_stages(self) -> set[int]:
+        """The stages every way in to is a hidden lane, a start never being one:
+        kept off the list until one of those lanes opens (``shown``)."""
+        ins: dict[int, list[bool]] = {}
+        for _, b, lane in self.ways():
+            ins.setdefault(b, []).append(lane in self.hidden)
+        return {sid for sid, way in ins.items() if all(way) and sid not in self.start}
 
 
 def _text(value, limit: int) -> str:
@@ -233,15 +285,25 @@ def _from_dict(data) -> Gauntlet | None:
     raw_lanes = data.get("lanes")
     lanes: list[tuple[int, int]] = []
     two_way: set[tuple[int, int]] = set()
+    gates: dict[tuple[int, int], Target] = {}
+    hidden: set[tuple[int, int]] = set()
     if isinstance(raw_lanes, list):
         for pair in raw_lanes:
             if not isinstance(pair, list | tuple) or len(pair) not in (2, 3):
                 continue
             a, b = _int(pair[0]), _int(pair[1])
+            if a is None or b is None:
+                continue
             if a in ids and b in ids and a != b and (a, b) not in lanes and (b, a) not in lanes:
-                lanes.append((a, b))     # type: ignore[arg-type]
-                if len(pair) == 3 and isinstance(pair[2], dict) and pair[2].get("two_way") is True:
-                    two_way.add((a, b))     # type: ignore[arg-type]
+                lanes.append((a, b))
+                how = pair[2] if len(pair) == 3 and isinstance(pair[2], dict) else {}
+                if how.get("two_way") is True:
+                    two_way.add((a, b))
+                gate = _target(how)
+                if gate is not None:
+                    gates[(a, b)] = gate
+                    if how.get("hidden") is True:
+                        hidden.add((a, b))
     else:
         lanes = [(x.id, y.id) for x, y in itertools.pairwise(stages)]
 
@@ -252,7 +314,30 @@ def _from_dict(data) -> Gauntlet | None:
     gid = _text(data.get("id"), NAME_MAX) or "gauntlet"
     return Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
                     stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
-                    two_way=frozenset(two_way))
+                    two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden))
+
+
+def to_dict(g: Gauntlet) -> dict:
+    """``g`` as the canonical file: what ``from_dict`` reads back to an equal
+    gauntlet. Every lane and the start are written out, so the file means the
+    same whatever ``from_dict``'s defaults become; a stage's ``settings`` go as
+    they were read."""
+    stages = []
+    for s in g.stages:
+        row: dict = {"id": s.id, "title": s.title, "briefing": list(s.briefing),
+                     "hint": s.hint, "settings": s.settings}
+        if s.target is not None:
+            row["target"] = s.target.to_dict()
+        stages.append(row)
+    lanes: list[list] = []
+    for lane in g.lanes:
+        how = g.lane_targets[lane].to_dict() if lane in g.lane_targets else {}
+        if lane in g.hidden:
+            how["hidden"] = True
+        if lane in g.two_way:
+            how["two_way"] = True
+        lanes.append([*lane, how] if how else [*lane])
+    return {"id": g.id, "name": g.name, "start": list(g.start), "stages": stages, "lanes": lanes}
 
 
 def problems(g: Gauntlet) -> list[str]:
@@ -260,10 +345,75 @@ def problems(g: Gauntlet) -> list[str]:
     following the lanes the way they run. Empty when every stage can be played.
     ``from_dict`` keeps such a gauntlet (the stage just never opens); this is the
     check to run before one is shipped or stored, mirrored by the board's
-    ``checkBody``."""
-    depth = g.depths()
+    ``checkBody``. Every lane counts, gated or not: a bonus stage behind a
+    tight target can still be reached."""
+    reached = g.reachable()
     return [f"stage {g.position(s.id)} ({s.title}) can't be reached from a start"
-            for s in g.stages if s.id not in depth]
+            for s in g.stages if s.id not in reached]
+
+
+def goals(g: Gauntlet) -> set[int]:
+    """The stages a run ends on, derived, never stored: each reachable stage
+    with no ungated lane out that is a start or has an ungated lane in. A bonus
+    dead end behind a gate is therefore never a goal."""
+    reached = g.reachable()
+    plain_in = {b for _, b, lane in g.ways() if lane not in g.lane_targets}
+    return {s.id for s in g.stages
+            if s.id in reached and not g.onward(s.id, gated=False)
+            and (s.id in g.start or s.id in plain_in)}
+
+
+# The three words a gated lane is called, by the game and the board alike.
+BONUS, SHORTCUT, GATED = "Bonus", "Shortcut", "Gated"
+
+
+def lane_label(g: Gauntlet, a: int, b: int) -> str | None:
+    """What the way from ``a`` to ``b`` is called, or None for an ungated lane
+    (or no lane): "Bonus" when ``b`` reaches no goal, else "Shortcut" when it
+    skips a column (``depths``), else "Gated"."""
+    lane = next((key for x, y, key in g.ways() if (x, y) == (a, b)), None)
+    if lane is None or lane not in g.lane_targets:
+        return None
+    ends = goals(g)
+    seen, queue = {b}, deque([b])
+    while queue:
+        at = queue.popleft()
+        if at in ends:
+            break
+        for n in g.onward(at) - seen:
+            seen.add(n)
+            queue.append(n)
+    else:
+        return BONUS
+    depth = g.depths()
+    if a in depth and b in depth and depth[b] > depth[a] + 1:
+        return SHORTCUT
+    return GATED
+
+
+def place(g: Gauntlet, sid: int) -> str:
+    """Where stage ``sid`` sits, for a banner: "3/10", counting only the stages
+    a player can know are there, so a hidden one is neither counted nor
+    numbered (it reads "bonus")."""
+    unseen = g.hidden_stages()
+    if sid in unseen:
+        return "bonus"
+    listed = [s.id for s in g.stages if s.id not in unseen]
+    return f"{listed.index(sid) + 1}/{len(listed)}" if sid in listed else ""
+
+
+def way_in(g: Gauntlet, sid: int) -> tuple[str, Target] | None:
+    """For a stage reached only through gated lanes, the label and target of the
+    first such lane into it ("Bonus", 86 turns / 72 lost): what its locked row
+    says it needs. None for a stage an ungated lane or a start reaches."""
+    if sid in g.depths():
+        return None
+    for a, b, lane in g.ways():
+        if b == sid and lane in g.lane_targets:
+            label = lane_label(g, a, b)
+            if label is not None:
+                return label, g.lane_targets[lane]
+    return None
 
 
 def stage_settings(stage: Stage) -> Settings:
@@ -309,33 +459,96 @@ def cleared(g: Gauntlet, found: dict[int, tuple[int, int]] | None = None) -> set
 
 
 def open_stages(g: Gauntlet, done: set[int] | None = None,
-                won: set[int] | None = None) -> set[int]:
+                won: set[int] | None = None,
+                found: dict[int, tuple[int, int]] | None = None) -> set[int]:
     """The starts, every cleared stage (cleared stays replayable), every ``won``
-    one short of its target (to try again) and every stage a lane leads to from
-    a cleared one. Everything else is locked. On a path this is "the next one",
-    and never the one before: clearing a later stage first (from a challenge
-    link of the same setup, say) does not open the earlier ones."""
+    one short of its target (to try again) and every stage a lane leads to whose
+    condition the near end meets: for a plain lane, that it is cleared; for a
+    gated one, that its best (from ``found``) meets the lane's target.
+    Everything else is locked. On a path this is "the next one", and never the
+    one before: clearing a later stage first (from a challenge link of the same
+    setup, say) does not open the earlier ones. With ``done`` given and no
+    ``found``, every gated lane stays shut."""
     if done is None:
         found = bests(g)
         done, won = cleared(g, found), set(found)
+    found = found or {}
     out = set(g.start) | done | (won or set())
-    for sid in done:
-        out |= g.onward(sid)
+    for a, b, lane in g.ways():
+        gate = g.lane_targets.get(lane)
+        mine = found.get(a)
+        if gate is None and a in done or gate is not None and mine is not None and gate.met(mine):
+            out.add(b)
     return out
 
 
-def next_stage(g: Gauntlet, sid: int) -> int | None:
+def shown(g: Gauntlet, opened: set[int]) -> list[Stage]:
+    """The stages to list, in order: all but a hidden one (``hidden_stages``)
+    that ``opened`` (``open_stages``) does not hold yet."""
+    unseen = g.hidden_stages() - opened
+    return [s for s in g.stages if s.id not in unseen]
+
+
+def next_stage(g: Gauntlet, sid: int,
+               found: dict[int, tuple[int, int]] | None = None) -> int | None:
     """Where a win on ``sid`` leads: its one neighbour further from the start.
 
     None at the end, and None at a fork — more than one way on sends the player
     to the list to choose. Judged by depth rather than by what is still uncleared,
     so replaying a stage you have already cleared still offers the next one.
+    Ungated lanes lead on. With ``found`` (``bests``) in hand, so do gated lanes
+    out of ``sid`` whose target its best meets: one such lane with no ungated way
+    on leads to its stage (a bonus stage just unlocked), and one beside an
+    ungated way on makes a fork.
     """
     depth = g.depths()
-    if sid not in depth:
+    mine = found.get(sid) if found is not None else None
+    opened = [] if mine is None else [
+        b for a, b, lane in g.ways()
+        if a == sid and lane in g.lane_targets and g.lane_targets[lane].met(mine)]
+    deeper = ([n for n in g.onward(sid, gated=False) if depth.get(n, -1) > depth[sid]]
+              if sid in depth else [])
+    if opened and deeper:
         return None
-    deeper = [n for n in g.onward(sid) if depth.get(n, -1) > depth[sid]]
-    return deeper[0] if len(deeper) == 1 else None
+    ways = deeper or opened
+    return ways[0] if len(ways) == 1 else None
+
+
+def gates_out(g: Gauntlet, sid: int) -> list[tuple[str, str, Target]]:
+    """Each gated way out of ``sid`` as plain values for the win overlay:
+    (label, far stage's title, target), e.g. ("Bonus", "Long odds", 86/72)."""
+    out = []
+    for a, b, lane in g.ways():
+        far = g.stage(b)
+        if a == sid and lane in g.lane_targets and far is not None:
+            out.append((lane_label(g, a, b) or GATED, far.title, g.lane_targets[lane]))
+    return out
+
+
+def chain(g: Gauntlet) -> list[int] | None:
+    """The stage ids in playing order when ``g``'s ungated lanes make a single
+    path, else None.
+
+    A path has one start, one ungated lane fewer than it has stages on it, and
+    from each stage exactly one ungated way on to a stage not yet visited, so
+    every stage on it is on it once. A fork or a stranded stage is not a path. A
+    two-way lane's way back leads to a visited stage, so it doesn't count as a
+    second way on. Gated lanes are off the path: a shortcut is not taken, and a
+    stage reached only through one (a bonus stage) is not on it."""
+    main = g.depths()
+    if len(g.start) != 1 or g.reachable() != {s.id for s in g.stages}:
+        return None
+    plain = [(a, b) for a, b in g.lanes
+             if (a, b) not in g.lane_targets and a in main and b in main]
+    if len(plain) != len(main) - 1:
+        return None
+    order = [g.start[0]]
+    while len(order) < len(main):
+        ways = g.onward(order[-1], gated=False) - set(order)
+        if len(ways) != 1:
+            return None
+        order.append(ways.pop())
+    return order
 
 
 def stage_of(g: Gauntlet, settings: Settings) -> int | None:

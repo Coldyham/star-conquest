@@ -1,0 +1,33 @@
+{
+  "about": "A branching gauntlet's lanes: `body` is what an author might send, `stored` what checkBody keeps (leaderboard/tests/gauntlet-build.test.mjs), and `game` what the game's Gauntlet.from_dict reads from `stored` (tests/test_gauntlet.py). Main path 0-1-2-3; a shortcut 1-3; a hidden bonus 2-4; a gated way 0-5 onto 3.",
+  "body": {
+    "name": "Lanes",
+    "stages": [
+      {"id": 0, "title": "A", "settings": {"mode": "random", "players": 2, "nodes": 13, "seed": 700}},
+      {"id": 1, "title": "B", "settings": {"mode": "random", "players": 2, "nodes": 13, "seed": 701}},
+      {"id": 2, "title": "C", "settings": {"mode": "random", "players": 2, "nodes": 13, "seed": 702}},
+      {"id": 3, "title": "D", "settings": {"mode": "random", "players": 2, "nodes": 13, "seed": 703}},
+      {"id": 4, "title": "E", "settings": {"mode": "random", "players": 2, "nodes": 13, "seed": 704}},
+      {"id": 5, "title": "F", "settings": {"mode": "random", "players": 2, "nodes": 13, "seed": 705}}
+    ],
+    "lanes": [[0, 1], [1, 2, {"two_way": false}], [2, 3],
+              [1, 3, {"beat": false, "turns": 20}],
+              [2, 4, {"hidden": true, "lost": 10, "turns": 15}],
+              [0, 5, {"turns": 30, "lost": 40, "bot": "marshal", "beat": true}], [5, 3]],
+    "start": [0]
+  },
+  "stored_lanes": [[0, 1], [1, 2], [2, 3],
+                   [1, 3, {"turns": 20}],
+                   [2, 4, {"turns": 15, "lost": 10, "hidden": true}],
+                   [0, 5, {"turns": 30, "lost": 40, "bot": "marshal", "beat": true}], [5, 3]],
+  "game": {
+    "lane_targets": [[1, 3, {"turns": 20}], [2, 4, {"turns": 15, "lost": 10}],
+                     [0, 5, {"turns": 30, "lost": 40, "bot": "marshal", "beat": true}]],
+    "hidden": [[2, 4]],
+    "depths": {"0": 0, "1": 1, "2": 2, "3": 3},
+    "goals": [3],
+    "labels": [[1, 3, "Shortcut"], [2, 4, "Bonus"], [0, 5, "Gated"], [0, 1, null]],
+    "hidden_stages": [4],
+    "chain": [0, 1, 2, 3]
+  }
+}

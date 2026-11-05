@@ -194,7 +194,7 @@ def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
     map's page; without a name, or after a failure, it is the entry form."""
     monkeypatch.setattr(config, "touch_ui", False)
     ui = _make_ui(mapgen.generate_random(1, num_nodes=18, num_players=3))
-    assert render._board_label(ui).startswith("Enter on leaderboard")
+    assert render._board_label(ui).startswith("Post on leaderboard")
     ui.post_as = "Ada"
     assert render._board_label(ui).startswith("Post as Ada")
     ui.post_as = "A" * 40
@@ -204,7 +204,7 @@ def test_the_leaderboard_button_says_what_it_will_do(monkeypatch):
     ui.post_state = "posted"
     assert render._board_label(ui).startswith("View on board")
     ui.post_state = "failed"
-    assert render._board_label(ui).startswith("Enter on leaderboard")
+    assert render._board_label(ui).startswith("Post on leaderboard")
 
 
 def test_a_long_quick_post_summary_wraps_and_fits():
@@ -1128,6 +1128,39 @@ def test_a_win_short_of_the_stage_target_offers_retry_not_next_stage():
         render.draw(screen, state, ui)
         assert ui.next_stage_rect[2] > 0
         assert render._result_lines(state, ui)[-1][1].endswith(": met  ·  Stage cleared")
+    finally:
+        pygame.quit()
+
+
+def test_a_win_that_unlocks_a_bonus_stage_says_so_and_leads_there():
+    """The last stage on the path offers no Next stage, until a win meets a
+    gated lane out of it: then the overlay names the stage it unlocked and Next
+    stage goes there. A win short of the gate says nothing of it."""
+    from starconquest.gauntlet import Target
+
+    pygame.init()
+    try:
+        _desktop_scale()
+        screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        ui.stage_label, ui.stage_title, ui.has_next_stage = "Tutorial 10/10 · The hunt", "The hunt", False
+        ui.stage_gates = (("Bonus", "Long odds", Target(turns=86, lost=72), False),)
+        state.winner, ui.hand_turns, state.turn = 1, 90, 90
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect == (0, 0, 0, 0)
+        assert render._result_lines(state, ui)[-1][1] == "Final stage cleared"
+
+        state.turn = ui.hand_turns = 57
+        render.draw(screen, state, ui)
+        assert ui.next_stage_rect[2] > 0
+        assert render._result_lines(state, ui)[-1][1] == "Final stage cleared  ·  Bonus unlocked: Long odds"
+
+        ui.hinted = True             # a hinted win is never filed, so it opens nothing
+        assert not ui.offers_next_stage(state) and ui.unlocked(state) == []
+
+        ui.hinted, ui.has_next_stage = False, True   # beside an ungated way on: a fork
+        assert not ui.offers_next_stage(state)
     finally:
         pygame.quit()
 

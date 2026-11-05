@@ -3443,7 +3443,7 @@ def _board_label(ui: Ui) -> str:
         if len(name) > _POST_NAME_SHOWN:
             name = name[:_POST_NAME_SHOWN - 1].rstrip() + "…"
         return _key_hint(f"Post as {name}", "L")
-    return _key_hint("Enter on leaderboard", "L")
+    return _key_hint("Post on leaderboard", "L")
 
 
 _COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is
@@ -3559,19 +3559,25 @@ def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, i
     """
     note = ([("small", "Someone else's game, replayed", config.COLOR_TEXT_DIM)]
             if ui.watched else [])
+    # A run's game says what it did to the run, win or lose, in place of the
+    # stage's own verdict (`main.record_run_step`).
+    run_line = ([("small", ui.run_note, _BTN_TEAL[1] if ui.run_ok else _VERDICT_MISS)]
+                if ui.run_note else [])
     # A spectator sits at neutral's id, which is also a mutual annihilation's
     # winner: no result here is theirs.
     if ui.spectating or state.winner != ui.human_id:
         if ui.challenge_target is not None:
-            return note + [("normal", "Challenge failed", (214, 130, 110))]
-        return note
+            return note + [("normal", "Challenge failed", (214, 130, 110))] + run_line
+        return note + run_line
 
     lost = state.players[ui.human_id].ships_lost
     line = f"Conquered in {state.turn} turns  ·  {lost} ships lost"
     if ui.hand_turns < state.turn:
         line += f"  ·  {ui.hand_turns} played by hand"
     lines = [("normal", line, config.COLOR_TEXT)]
-    if ui.in_stage and ui.can_post(state):
+    if run_line:
+        lines += run_line
+    elif ui.in_stage and ui.can_post(state):
         lines.append(_stage_verdict(state, ui))
 
     if ui.challenge_target is None:
@@ -3597,6 +3603,8 @@ def _stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, tuple[int, int, 
     win short of it says so, and says too when an earlier best already cleared
     the stage, since Next stage is then still offered."""
     cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
+    if not ui.run_id:
+        cleared += "".join(f"  ·  {label} unlocked: {title}" for label, title in ui.unlocked(state))
     target = ui.stage_target
     if target is None:
         return ("small", cleared, _BTN_TEAL[1])

@@ -3,10 +3,10 @@ import { mapSummary, scoreSummary } from "./format.mjs";
 import { inflate } from "./inflate-browser.mjs";
 // Posting again from the same browser shouldn't mean retyping your name — the
 // whole point of arriving here from the game's win screen is one click. The same
-// remembered name is what puts "My scores" in the marquee.
-import { mountMyScores, myName, rememberName } from "./me.mjs";
+// remembered name is where the menu's "You" leads (me.mjs).
+import { myName, rememberName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
-import { ensureGame, lookupGame, postScore } from "./post.mjs";
+import { ensureGame, lookupGame, ownName, postScore } from "./post.mjs";
 import { decodeToken, fragmentOf } from "./token-decode.mjs";
 
 const form = document.getElementById("form");
@@ -108,6 +108,22 @@ async function alreadyOnBoard(decoded) {
   }
 }
 
+// The link last decoded, or null: what readiness is judged on.
+let lastDecoded = null;
+
+/**
+ * Enter pulses only once a click would post: a link that decodes to one fixed
+ * map, and a name when it carries a score. It stays clickable otherwise, so a
+ * click can still say what is missing.
+ */
+function updateReady() {
+  const d = lastDecoded;
+  const ready = Boolean(d && d.seed !== null && (!d.challenge || nameField.value.trim()));
+  button.classList.toggle("ready", ready);
+}
+
+nameField.addEventListener("input", updateReady);
+
 // Each keystroke starts a fresh pass and both halves of one are async, so a slow
 // reply for a half-pasted link could otherwise land after the finished link's and
 // leave the form describing the wrong one.
@@ -116,6 +132,8 @@ let previewPass = 0;
 async function refreshPreview() {
   const pass = ++previewPass;
   preview.hidden = true;
+  lastDecoded = null;
+  updateReady();
   if (!linkField.value.trim()) {
     setSharing(false);
     setEmbargoOffered(true);
@@ -124,6 +142,8 @@ async function refreshPreview() {
   try {
     const decoded = await decodePasted();
     if (pass !== previewPass) return;
+    lastDecoded = decoded;
+    updateReady();
     setSharing(!decoded.challenge);
     preview.textContent = decoded.challenge
       ? `${mapSummary(decoded)} — ${scoreSummary(decoded.challenge)}`
@@ -155,7 +175,8 @@ linkField.addEventListener("input", refreshPreview);
  * everything after the '#', so a whole pasted URL works here too.
  */
 async function prefill() {
-  const name = myName();
+  // A claimed name is the one to post under, whatever was typed last.
+  const name = (await ownName()) || myName();
   if (name) nameField.value = name;
 
   const token = fragmentOf(location.hash);
@@ -172,7 +193,6 @@ async function prefill() {
 }
 
 mountNav();
-mountMyScores();
 prefill();
 
 form.addEventListener("submit", async (event) => {

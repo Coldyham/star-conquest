@@ -45,6 +45,7 @@ from starconquest import (
     webstore,
 )
 from starconquest import input as game_input
+from starconquest import run as gauntlet_run
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.model import AiParams, GameState, Order
@@ -243,7 +244,7 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     if stage is None:
         return
     g, s = stage
-    ui.stage_label = f"{g.name} {g.position(s.id)}/{len(g.stages)} · {s.title}"
+    ui.stage_label = f"{g.name} {gauntlet.place(g, s.id)} · {s.title}"
     ui.stage_target = s.target
     ui.stage_met_before = gauntlet.met(s, gauntlet.best(s))
     ui.stage_title = s.title
@@ -254,6 +255,81 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     # its briefing.
     ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
     ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
+    # Gated ways out (a hidden bonus stage, say), and whether a best already
+    # meets each, so the win overlay can say what this win unlocks.
+    mine = gauntlet.best(s)
+    ui.stage_gates = tuple((label, title, target, mine is not None and target.met(mine))
+                           for label, title, target in gauntlet.gates_out(g, s.id))
+
+
+def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
+    """Mark ``ui`` as the run's own game, after `stage_ui`. It plays ironman, as
+    the daily does, so History (and a rewind with it) waits until the game is
+    decided; the Hint is not offered (`Ui.can_hint`); and the top bar says it is
+    a run."""
+    ui.run_at, ui.run_total = gauntlet_run.position(r, g)
+    ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
+    ui.ironman = True
+    if ui.stage_label is not None:
+        ui.stage_label += " · run"
+
+
+def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
+    """Judge the run's game the turn it is decided for the human (won, lost, or
+    knocked out while the bots play on) and write the step (`gauntlet_run.finish`).
+    Once: `run_note` is set by it. If the run has already ended some other way,
+    this game is free play from here."""
+    me = ui.human_id
+    if log.path is None or (state.winner is None and not state.is_defeated(me)):
+        return
+    outcome = gauntlet_run.judge(state.winner == me, ui.can_post(state), ui.met_target(state))
+    done = gauntlet_run.finish(ui.run_id, log.path.name, outcome, state.turn,
+                      state.players[me].ships_lost, ui.run_total)
+    if done is None:
+        ui.run_id = ""
+        return
+    ui.run_note, ui.run_ok = gauntlet_run.note(outcome, ui.run_at, ui.run_total, ui.stage_target)
+
+
+def open_run(ms: MenuState, settings: Settings, fresh: bool
+             ) -> tuple[GameState, Ui, GameLog, int] | None:
+    """Start a run of the gauntlet picked in the list (``fresh``), or carry on
+    the active run: resume its undecided game if it has one, never a fresh copy,
+    else begin its next stage. None, with a word in the list, when there is
+    nothing to play."""
+    if fresh:
+        g = menu.picked_gauntlet(ms)
+        if g is None or not gauntlet_run.offered(g):
+            return None
+        r: gauntlet_run.Run | None = gauntlet_run.start(g)
+    else:
+        r = gauntlet_run.active()
+        g = gauntlet.find(ms.gauntlets, r.gauntlet_id) if r is not None else None
+        if g is None:
+            return None
+        r = gauntlet_run.active_for(g)
+        if r is None:
+            menu.say_gauntlet(ms, g.id, "The gauntlet has changed since the run began, so the run is over", False)
+            return None
+    assert r is not None
+    sid = gauntlet_run.stage_to_play(r, g)
+    found = menu.enter_stage(ms, settings, g, sid) if sid is not None else None
+    if found is None:
+        return None
+    if r.playing is not None:
+        log = gauntlet_run.restore_log(r.playing.log)
+        if log is None:
+            gauntlet_run.lose_game(r)
+            menu.say_gauntlet(ms, g.id, "The run's game couldn't be loaded, so the run is over", False)
+            return None
+        ai.load_models()   # a resumed game may name a drop-in strategy
+        state, ui = resume_game(log, settings)
+        stage_ui(ui, found, briefing=log.turn_count == 0)
+        run_ui(ui, r, g)
+        return state, ui, log, log.seed
+    state, ui, log, seed = _begin_game(settings, found)
+    run_ui(ui, gauntlet_run.begin(r, found[1].id, log), g)
+    return state, ui, log, seed
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
@@ -506,6 +582,15 @@ def land_quick_post(ui: Ui, figures: tuple[int, int], status: str, body: str) ->
         return
     ui.post_state = "posted"
     ui.posted_key, ui.share_msg = summary
+
+
+def land_post_name(ui: Ui, status: str, body: str) -> None:
+    """Put the signed-in player's claimed name on the quick post button, if the
+    board answered one. Too late once a post has started: the answer it lands on
+    names who it was posted as."""
+    name = body.strip() if status == pbp.OK else ""
+    if name and not ui.post_state:
+        ui.post_as = name
 
 
 def open_map_page(key: str) -> str:
@@ -857,6 +942,11 @@ PBP_FOGGED_MSG = "That match has fog of war on, so it can't be spectated"
 # exact `error` string `pbp.mjs` sends; anything not here is relayed with a
 # prefix saying it was a refusal, so it still reads as an answer rather than as
 # a connection problem.
+# `pbp.mjs`'s CLAIMED_NAME: the "Your name" typed for seat 1 is somebody's
+# claimed name. A 403 like a bad token, so it is matched before that one.
+PBP_CLAIMED_ERROR = "name is claimed: sign in on the board as its owner, or pick another"
+PBP_CLAIMED_MSG = ("That name is claimed — sign in on the leaderboard (Menu > You)"
+                   " as its owner, or pick another")
 PBP_ENDPOINT_MSGS = {
     "stale turn": "The match has moved past this turn — catching up",
     "already submitted": "Your orders for this turn are already in",
@@ -1012,11 +1102,13 @@ def pbp_trouble(status: str, body: str) -> str:
     refusal, and only a call that came back with nothing at all falls through to
     a line about the connection.
     """
+    error = (pbp.parse_body(body) or {}).get("error") if body else None
+    if error == PBP_CLAIMED_ERROR:
+        return PBP_CLAIMED_MSG
     if status == pbp.MISSING:
         return PBP_MISSING_MSG
     if status == pbp.REFUSED:
         return PBP_REFUSED_MSG
-    error = (pbp.parse_body(body) or {}).get("error") if body else None
     if not isinstance(error, str) or not error:
         return PBP_UNREACHABLE_MSG
     return PBP_ENDPOINT_MSGS.get(error) or PBP_REFUSAL_MSG.format(error)
@@ -1471,10 +1563,14 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         if share.due(log, state.winner is not None,
                      ours=not ui.watched and not ui.in_pbp):
             share.post_log(log, log.setup_key())
+        if ui.run_id and not ui.run_note:
+            gauntlet_run.keep_log(log)   # the copy that outlasts a reload on the web build
+            record_run_step(state, ui, log)
     if ui.can_post(state) and settings is not None:
         record_best(settings, state, ui)
         # Read here, once the result is ours, never in `render`.
         ui.post_as = share.quick_post_name()
+        ui.post_name_due = True
     ui.clear_pending()
     ui.prune_forward(state)   # a rule dies with the system it forwarded out of
     if ui.in_pbp and not ui.spectating:
@@ -1987,6 +2083,8 @@ async def main() -> None:
     # A quick post in flight: the Ui it reports to, the request, and the posted
     # (turns, lost). Landed on that Ui even if the player has moved on.
     pending_post: tuple[Ui, pbp.Request, tuple[int, int]] | None = None
+    # The signed-in name a decided game's quick post asked for, and its Ui.
+    pending_name: tuple[Ui, pbp.Request] | None = None
     if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
         asked = daily.link(webstore.url_token())
         if asked is not None:
@@ -2048,6 +2146,15 @@ async def main() -> None:
             if dstate != pbp.PENDING:
                 pending_daily = None
                 land_daily(menu_state, settings, dstate, dbody, pending_daily_kind)
+        if ui is not None and ui.post_name_due:
+            ui.post_name_due = False
+            asked = share.signed_in_name()
+            pending_name = None if asked is None else (ui, asked)
+        if pending_name is not None:
+            nstate, nbody = pending_name[1].poll()
+            if nstate != pbp.PENDING:
+                land_post_name(pending_name[0], nstate, nbody)
+                pending_name = None
         if pending_post is not None:
             pstate, pbody = pending_post[1].poll()
             if pstate != pbp.PENDING:
@@ -2448,12 +2555,18 @@ async def main() -> None:
                         resume_prompt = None
                 if accept:
                     assert resume_prompt is not None
-                    ai.load_models()   # a resumed game may name a drop-in strategy
-                    state, ui = resume_game(resume_prompt, settings)
-                    current_seed = resume_prompt.seed
-                    log = resume_prompt
-                    scene = "game"
-                    auto_accum = 0
+                    # A run's own game comes back as the run's, so it keeps the
+                    # run's rules and its result reaches the run.
+                    if gauntlet_run.is_playing(resume_prompt):
+                        resumed_game = open_run(menu_state, settings, fresh=False)
+                    else:
+                        ai.load_models()   # a resumed game may name a drop-in strategy
+                        resumed = resume_game(resume_prompt, settings)
+                        resumed_game = (*resumed, resume_prompt, resume_prompt.seed)
+                    if resumed_game is not None:
+                        state, ui, log, current_seed = resumed_game
+                        scene = "game"
+                        auto_accum = 0
                     resume_prompt = None
                 continue
 
@@ -2487,6 +2600,15 @@ async def main() -> None:
                     stamp_campaign(ui, menu_state.campaign_watch)
                     scene = "game"
                     auto_accum = 0
+                elif action in ("run", "run_continue"):
+                    run_game = open_run(menu_state, settings, fresh=action == "run")
+                    if run_game is not None:
+                        state, ui, log, current_seed = run_game
+                        stamp_campaign(ui, menu_state.campaign_watch)
+                        scene = "game"
+                        auto_accum = 0
+                    else:
+                        menu.reopen_gauntlets(menu_state, settings)
                 elif action in ("daily", "puzzle"):
                     if pending_daily is None:
                         pending_daily_kind = daily.PUZZLE if action == "puzzle" else daily.BOARD
@@ -2603,9 +2725,14 @@ async def main() -> None:
             elif action == "next_stage" and ui.offers_next_stage(state):
                 # The stage after this one, briefing and all. The menu's setup
                 # becomes that stage's, so going back to the menu lands on it.
-                found = menu.next_stage(menu_state, settings)
-                if found is not None:
-                    state, ui, log, current_seed = _begin_game(settings, found)
+                # In a run it is the run's next stage, begun as its next step.
+                if ui.run_id:
+                    next_game = open_run(menu_state, settings, fresh=False)
+                else:
+                    found = menu.next_stage(menu_state, settings)
+                    next_game = _begin_game(settings, found) if found is not None else None
+                if next_game is not None:
+                    state, ui, log, current_seed = next_game
                     stamp_campaign(ui, menu_state.campaign_watch)
                     history_states, history_fog, history_events, live_fog = [], [], [], None
                     auto_accum = 0
