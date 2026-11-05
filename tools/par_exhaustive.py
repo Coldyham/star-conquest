@@ -625,7 +625,8 @@ def main(argv: list[str] | None = None) -> int:
         if pool:
             pool.terminate()
 
-    ckpt_path.unlink(missing_ok=True)
+    if finished:   # a pass cut off by its budget keeps its checkpoint, so a longer run can go on from it
+        ckpt_path.unlink(missing_ok=True)
     exact &= finished
     model = f"plans of at most {args.max_launches} launch orders" if args.max_launches else "the order model"
     if args.turn_only:
