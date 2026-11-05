@@ -17,6 +17,12 @@ For each setup, in order:
    nothing, when K reaches ``--max-k``, or when a pass ends unfinished (a time budget or the
    frontier cap), since nothing after that could be called exact.
 
+3. **A proof attempt**, once the first passes have set a tight bound: the plain search over every
+   order set (no launch limit), then again with sends down two lanes at once, each under
+   ``--proof-budget``. If one finishes, the answer is optimal *within that model*, and the K passes
+   stop. On a board with a wide gap between the floor and the best line it will not finish, which
+   costs only its budget (``--proof-budget 0`` skips it).
+
 It reports the best (turns, ships lost) and what that rests on: ``exact up to K`` means no plan
 of at most K launch orders is better, and says nothing about plans with more. The plain
 exhaustive search is the only thing that does, and it does not finish on a board like these.
@@ -63,12 +69,13 @@ def dealt(day: dt.date, kind: str) -> dict | None:
     return daily.make(day, out=lambda line: None, kind=kind)
 
 
-def targets(args: argparse.Namespace) -> list[tuple[str, dict]]:
-    """``(name, daily-style file contents)`` for every setup asked for."""
-    out: list[tuple[str, dict]] = []
+def targets(args: argparse.Namespace) -> list[tuple[str, dict, Path | None]]:
+    """``(name, daily-style file contents, the file it came from)`` for every setup asked for;
+    a day dealt here has no file."""
+    out: list[tuple[str, dict, Path | None]] = []
     for path in args.daily or []:
         data = json.loads(Path(path).read_text())
-        out.append((f"{data['day']}_{data['kind']}", data))
+        out.append((f"{data['day']}_{data['kind']}", data, Path(path)))
     days: list[dt.date] = [dt.date.fromisoformat(d) for d in args.days or []]
     if args.last:
         yesterday = dt.datetime.now(dt.UTC).date() - dt.timedelta(days=1)
@@ -79,7 +86,7 @@ def targets(args: argparse.Namespace) -> list[tuple[str, dict]]:
             print(f"{day} {args.kind}: no candidate was won, skipped", file=sys.stderr)
             continue
         out.append((f"{day.isoformat()}_{args.kind}", {"day": row["day"], "kind": row["kind"],
-                                                       "settings": row["settings"]}))
+                                                       "settings": row["settings"]}, None))
     return out
 
 
@@ -134,7 +141,123 @@ def pass_args(day_file: Path, k: int, first: int, bound: tuple[float, float], ar
     return argv
 
 
-def solve(name: str, data: dict, args: argparse.Namespace) -> dict:
+def _minutes(seconds: float) -> str:
+    return f"{seconds:.0f} s" if seconds < 90 else f"{seconds / 60:.0f} min" if seconds < 5400 else f"{seconds / 3600:.1f} h"
+
+
+def verdict(summary: dict, k_rows: list[dict], proof_rows: list[dict], args: argparse.Namespace,
+            setup: Path) -> dict:
+    """What the answer rests on, what it does not cover, and what to run next to be surer.
+
+    ``headline`` says whether it is exact; ``constraints`` is the model it is exact in;
+    ``not_covered`` is what that model leaves out; ``next`` is a list of {why, command, est}."""
+    best = f"{summary['turn']:.0f}/{summary['lost']:.0f}" if summary["turn"] < math.inf else "no win"
+    proof = summary["proved"]
+    k_to = summary["exact_up_to"]
+    constraints = [f"the setup in {setup}, as dealt (not compared with the posted map: no network here)",
+                   "rivals decide as their bots do; dice are the game's keyed dice (a rewind offers none)"]
+    not_covered: list[str] = []
+    nxt: list[dict] = []
+    shown = setup.relative_to(ROOT) if setup.is_relative_to(ROOT) else setup
+    cmd = f"uv run python tools/par_best.py --daily {shown}"
+    if args.results_dir != RESULTS:
+        cmd += f" --results-dir {args.results_dir}"   # the same ledger, so a rerun resumes
+
+    if args.levels != "all":
+        constraints.append(f"launch sizes limited to --levels {args.levels} (not every count)")
+        nxt.append({"why": "try every launch size, not only the coarse ones", "est": "far slower",
+                    "command": f"{cmd} --levels all"})
+    else:
+        constraints.append("every launch size, one launch down one lane per system per turn")
+
+    if proof:
+        headline = f"EXACT: {best} is optimal within the model below"
+        constraints.append("every order set of that kind, no launch limit, no frontier cap hit"
+                           + (", plus two lanes at once from one system" if proof == "two-lane splits" else ""))
+        if proof == "single-lane":
+            not_covered.append("a system sending down two lanes in the same turn")
+            nxt.append({"why": "also allow two lanes at once from one system",
+                        "est": "took 16x the single-lane search on the one board measured",
+                        "command": f"{cmd} --proof-budget {max(int(args.proof_budget) * 4, 1200)}"})
+        not_covered.append("three or more lanes at once from one system (only matters where a system has three lanes)")
+        not_covered.append("anything about the posted map, if it differs from the dealt one")
+    else:
+        if k_to:
+            headline = (f"EXACT only for plans of at most {k_to} launch orders: nothing there beats {best}. "
+                        "Not proved optimal overall")
+            constraints.append(f"plans of at most {k_to} launch orders (the passes each started from the best so far)")
+            not_covered.append(f"plans with {k_to + 1} or more launch orders, which may be better")
+        else:
+            headline = f"NOT exact: {best} is the best line found, nothing is proved about it"
+            not_covered.append("everything: no pass finished")
+        if proof_rows and not any(r["exact"] for r in proof_rows):
+            not_covered.append("the full search over every order set did not finish in its budget")
+        unfinished = [r for r in k_rows if not r["exact"]]
+        if unfinished:
+            not_covered.append(f"the pass for K = {unfinished[0]['k']} stopped before it finished (time or frontier cap)")
+            nxt.append({"why": "give the unfinished pass more time and a larger frontier",
+                        "est": f"at least {_minutes(args.k_budget * 2)}",
+                        "command": f"{cmd} --k-budget {int(args.k_budget * 3)} --max-frontier {args.max_frontier * 2}"})
+        elif k_to:
+            seconds = [r["seconds"] for r in k_rows if r["first"] == r["k"]]
+            ratio = max(seconds[-1] / seconds[-2], 2.0) if len(seconds) >= 2 and seconds[-2] > 0.5 else 6.0
+            last = seconds[-1] if seconds else sum(r["seconds"] for r in k_rows)
+            nxt.append({"why": f"cover plans of {k_to + 1} launch orders too",
+                        "est": f"about {_minutes(last * ratio)} (each launch added has cost x{ratio:.0f})",
+                        "command": f"{cmd} --max-k {k_to + 1} --patience 5"})
+        if args.proof_budget <= 0:
+            nxt.append({"why": "try the full search for a proof (it only costs its budget if it cannot finish)",
+                        "est": "5 min", "command": f"{cmd} --proof-budget 300"})
+        elif proof_rows and not any(r["exact"] for r in proof_rows):
+            nxt.append({"why": "let the full search run longer (needs memory; it may still not finish)",
+                        "est": f"up to {_minutes(args.proof_budget * 6)}",
+                        "command": f"{cmd} --proof-budget {int(args.proof_budget * 6)} --max-frontier 2000000"})
+    gap = summary["beam"][0] - summary["turn"] if summary["beam"][0] < math.inf else None
+    if not proof and (gap is None or gap > 0):
+        nxt.append({"why": "a wider beam, in case a better line has a start no pass reaches",
+                    "est": "5 to 15 min",
+                    "command": f"{cmd} --width 1500 --beam-budget 600"})
+    if not summary.get("replays", True):
+        headline += "  (THE SAVED BEST LINE DOES NOT REPLAY: do not trust this result)"
+    return {"headline": headline, "constraints": constraints, "not_covered": not_covered, "next": nxt}
+
+
+def proof_args(day_file: Path, splits: bool, bound: tuple[float, float], args: argparse.Namespace,
+               out_dir: Path) -> list[str]:
+    """The ``par_exhaustive`` command line for the plain search over every order set (no launch
+    limit), with or without sends down two lanes at once."""
+    argv = ["--daily", str(day_file), "--levels", args.levels, "--workers", "1", "--seed-budget", "1",
+            "--budget", str(args.proof_budget), "--max-frontier", str(args.max_frontier),
+            "--max-turns", str(args.max_turns), "--results-dir", str(out_dir)]
+    if splits:
+        argv += ["--splits", "--max-branch", "100000000"]
+    if bound[0] < math.inf:
+        argv += ["--assume-turn", str(int(bound[0]))]
+        if bound[1] < math.inf:
+            argv += ["--assume-lost", str(int(bound[1]))]
+    return argv
+
+
+def run_pass(name: str, argv: list[str], pass_dir: Path, best: tuple[float, float], out_dir: Path,
+             header: str) -> dict:
+    """Run one ``par_exhaustive`` pass (its output to the setup's log) and fold what it found
+    into the best so far: {turn, lost, exact, improved, seconds}."""
+    started = time.perf_counter()
+    shutil.rmtree(pass_dir, ignore_errors=True)
+    with (out_dir / f"{name}.log").open("a") as log, contextlib.redirect_stdout(log):
+        print(f"=== {header}", flush=True)
+        pe.main(argv)
+    done = next((r for r in reversed(read_rows(pass_dir / f"{name}.jsonl")) if r["event"] == "done"),
+                {"turn": best[0], "lost": best[1], "exact": False})
+    result = (done["turn"], done["lost"])
+    now = min(best, result)
+    if result < best and (pass_dir / f"{name}.best.json").exists():
+        shutil.copyfile(pass_dir / f"{name}.best.json", out_dir / f"{name}.best.json")
+    return {"turn": now[0], "lost": now[1], "exact": bool(done["exact"]), "improved": result < best,
+            "seconds": round(time.perf_counter() - started, 1)}
+
+
+def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None = None) -> dict:
     """Run the stages for one setup (resuming from its ledger) and return its summary."""
     out_dir = args.results_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -163,28 +286,44 @@ def solve(name: str, data: dict, args: argparse.Namespace) -> dict:
         best = min(best, (turn, lost))
         print(f"{name}: beam (width {args.width}, strikes) {turn}/{lost} in {secs:.0f}s", flush=True)
 
+    proofs = {r["splits"]: r for r in rows if r["stage"] == "proof"}
+    for r in proofs.values():
+        best = min(best, (r["turn"], r["lost"]))
+    proved = ""
+
+    def prove() -> str:
+        """The plain search, then with two-lane sends: what the first stage that finished proves."""
+        nonlocal best
+        got = ""
+        for splits in ([False, True] if args.proof_splits else [False]):
+            row = proofs.get(splits)
+            if row is None:
+                kind = "with two-lane splits" if splits else "one lane per system per turn"
+                row = {"stage": "proof", "splits": splits,
+                       **run_pass(name, proof_args(day_file, splits, best, args, work / f"proof{int(splits)}"),
+                                  work / f"proof{int(splits)}", best, out_dir,
+                                  f"every order set, {kind}")}
+                append(ledger, row)
+                print(f"{name}: all orders{', two-lane splits' if splits else ''}: {row['turn']}/{row['lost']}"
+                      f"{' (better)' if row['improved'] else ''}"
+                      f"{', EXACT' if row['exact'] else ', not finished'} in {row['seconds']:.0f}s", flush=True)
+            best = min(best, (row["turn"], row["lost"]))
+            if not row["exact"]:
+                break
+            got = "two-lane splits" if splits else "single-lane"
+        return got
+
     ks = [(1, args.start_k)] + [(k, k) for k in range(args.start_k + 1, args.max_k + 1)]
     quiet = 0
     stopped = ""
-    for first, k in ks:
+    for index, (first, k) in enumerate(ks):
         if (first, k) in spent:
             row = next(r for r in rows if r["stage"] == "k" and (r["first"], r["k"]) == (first, k))
         else:
-            started = time.perf_counter()
             pass_dir = work / f"k{k}"
-            shutil.rmtree(pass_dir, ignore_errors=True)
-            with (out_dir / f"{name}.log").open("a") as log, contextlib.redirect_stdout(log):
-                print(f"=== plans of at most {k} launch orders (from {first})", flush=True)
-                pe.main(pass_args(day_file, k, first, best, args, pass_dir))
-            done = next((r for r in reversed(read_rows(pass_dir / f"{name}.jsonl")) if r["event"] == "done"),
-                        {"turn": best[0], "lost": best[1], "exact": False})
-            result = (done["turn"], done["lost"])
-            now = min(best, result)
-            row = {"stage": "k", "k": k, "first": first, "turn": now[0], "lost": now[1],
-                   "exact": bool(done["exact"]), "improved": result < best,
-                   "seconds": round(time.perf_counter() - started, 1)}
-            if row["improved"] and (pass_dir / f"{name}.best.json").exists():
-                shutil.copyfile(pass_dir / f"{name}.best.json", best_path)
+            row = {"stage": "k", "k": k, "first": first,
+                   **run_pass(name, pass_args(day_file, k, first, best, args, pass_dir), pass_dir, best,
+                              out_dir, f"plans of at most {k} launch orders (from {first})")}
             append(ledger, row)
             print(f"{name}: K = {k}: {row['turn']}/{row['lost']}"
                   f"{' (better)' if row['improved'] else ''}"
@@ -196,17 +335,25 @@ def solve(name: str, data: dict, args: argparse.Namespace) -> dict:
             stopped = f"the pass for K = {k} did not finish"
             break
         quiet = 0 if row["improved"] else quiet + 1
+        if index == 0 and args.proof_budget > 0:   # the bound is tight by now: try for a full proof
+            proved = prove()
+            if proved:
+                stopped = f"proved optimal ({proved})"
+                break
         if quiet >= args.patience:
             stopped = f"{args.patience} passes in a row improved nothing"
             break
     summary = {"stage": "done", "name": name, "turn": best[0], "lost": best[1],
                "beam": [beam_row["turn"], beam_row["lost"]], "exact_up_to": exact_up_to,
-               "stopped": stopped or f"reached K = {args.max_k}"}
+               "proved": proved, "stopped": stopped or f"reached K = {args.max_k}"}
     if best_path.exists():
         human = build_state(cfg, cfg.seed).human()
         assert human is not None
         won, turn, lost = ps.check_line(replay.load(best_path), human.id)
         summary["replays"] = bool(won and (turn, lost) == (best[0], best[1]))
+    now = read_rows(ledger)
+    summary["verdict"] = verdict(summary, [r for r in now if r["stage"] == "k"],
+                                 [r for r in now if r["stage"] == "proof"], args, source or day_file)
     last = next((r for r in reversed(rows) if r["stage"] == "done"), None)
     if last != summary:   # a rerun that changed nothing leaves the ledger alone
         append(ledger, summary)
@@ -227,6 +374,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-k", type=int, default=5, help="the largest number of launch orders tried")
     ap.add_argument("--patience", type=int, default=2, help="stop after this many passes without improvement")
     ap.add_argument("--k-budget", type=float, default=3600.0, help="seconds for one pass")
+    ap.add_argument("--proof-budget", type=float, default=300.0,
+                    help="seconds for each full-search proof attempt after the first passes (0: skip it)")
+    ap.add_argument("--no-proof-splits", dest="proof_splits", action="store_false",
+                    help="do not follow a finished proof with one that also allows two-lane sends")
     ap.add_argument("--max-frontier", type=int, default=1_000_000, help="boards kept per layer in a pass")
     ap.add_argument("--max-turns", type=int, default=120)
     ap.add_argument("--results-dir", type=Path, default=RESULTS)
@@ -237,13 +388,27 @@ def main(argv: list[str] | None = None) -> int:
     ai.load_models()
     ai.set_budget_scale(math.inf)
     found = targets(args)
-    summaries = [solve(name, data, args) for name, data in found]
-    print("\nname                  beam      best      exact up to   stopped")
+    summaries = [solve(name, data, args, source) for name, data, source in found]
+    print("\nname                  beam      best      exact up to   proved           stopped")
     for s in summaries:
         beam = f"{s['beam'][0]:.0f}/{s['beam'][1]:.0f}" if s["beam"][0] < math.inf else "-"
         best = f"{s['turn']:.0f}/{s['lost']:.0f}" if s["turn"] < math.inf else "none"
-        print(f"{s['name']:<21} {beam:<9} {best:<9} K = {s['exact_up_to']:<8} {s['stopped']}"
+        print(f"{s['name']:<21} {beam:<9} {best:<9} K = {s['exact_up_to']:<8} {s['proved'] or '-':<16} {s['stopped']}"
               f"{'' if s.get('replays', True) else '  (BEST LINE DOES NOT REPLAY)'}")
+    for s in summaries:
+        v = s["verdict"]
+        print(f"\n{s['name']}: {v['headline']}")
+        print("  rests on:")
+        for line in v["constraints"]:
+            print(f"    - {line}")
+        if v["not_covered"]:
+            print("  not covered:")
+            for line in v["not_covered"]:
+                print(f"    - {line}")
+        if v["next"]:
+            print("  to be surer, run next:")
+            for i, option in enumerate(v["next"], 1):
+                print(f"    ({i}) {option['why']}  [{option['est']}]\n        {option['command']}")
     return 0
 
 

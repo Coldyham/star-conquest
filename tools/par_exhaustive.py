@@ -492,6 +492,8 @@ def main(argv: list[str] | None = None) -> int:
             expanded = 0
             best_win: tuple | None = None
             for chunk, (children, wins, ok, n) in zip(chunks, results, strict=True):
+                if time.perf_counter() - started > args.budget:
+                    return False   # out of time inside a layer: unfinished, not exact
                 exact &= ok
                 expanded += n
                 for turn, lost, pos, packed in wins:

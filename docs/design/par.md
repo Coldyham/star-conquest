@@ -468,6 +468,48 @@ stage is appended to `results/par/best/<name>.jsonl` and a rerun repeats nothing
 which is not guaranteed to be the posted map. Launch sizes default to every count
 (`--levels all`); on a 3-system map that was over 60 s a pass where `coarse` took 5.
 
+**Proving it (`par_best`'s proof stage, and 2026-11-02).** Once the first passes have set a
+tight bound, `par_best` tries the plain search over every order set (no launch limit),
+then again with two-lane sends, each under `--proof-budget` (a pass stops inside a layer
+when its time is spent, so it cannot overrun by a layer). If one finishes, the answer is
+optimal *within that model* and the K passes stop. 2026-11-02's puzzle (8 systems, heuristic,
+floor 6): the beam's 6/7 sits on the floor, so every later search only has to look for a turn-6
+win with fewer than 7 lost. The plain search finishes in 6.5 s and the two-lane one in 102 s,
+no cap reached: **6 turns, 7 lost is optimal** for one or two launches per system per turn.
+Not covered: three or more lanes from one system in a turn. On the 11-04 puzzle, where the
+beam is 4 turns over the floor, the same attempt does not finish (it ran out of its budget
+and the passes carried on).
+
+**What `par_best` prints (2026-11-05).** After its table it gives each setup a verdict: whether
+the result is exact, the model it is exact in (the setup file as dealt, every launch size,
+one lane per system per turn, plans of at most K launch orders or every order set, no
+cap trimmed), what that leaves out, and the commands to run next to be surer, each with an
+estimate of its cost taken from the passes already run (the ratio between the last two, at
+least 2). The commands keep `--results-dir`, so a rerun resumes. It never says
+"optimal" on a pass that did not finish.
+
+**The puzzles so far** (all dealt locally, none compared with the posted map):
+
+| Day | Systems | Beam | Best | Rests on |
+| --- | --- | --- | --- | --- |
+| 11-01 | 6 | 12/9 | **10/10** | exact for plans of at most 5 launch orders: K = 3 95 s (nothing), K = 4 699 s (11/11), K = 5 1765 s (10/10); the full search did not finish in 300 s |
+| 11-02 | 8 | 6/7 | **6/7** | proved, with two-lane sends (6.5 s, 102 s) |
+| 11-03 | 6 | 12/7 | **10/10** | exact for plans of at most 5 launch orders (K = 4 found it) |
+| 11-04 | 5 | 11/3 | **10/3** | exact for plans of at most 5 launch orders (K = 3 found it) |
+| 11-05 | 6 | 5/3 | **5/3** | proved, with two-lane sends (1 s, 19 s) |
+
+What separates a board that proves from one that does not is the gap between the floor and
+the beam's line: on 11-02 and 11-05 the beam already sits on (or one turn off) the floor, so
+the search only looks for a win that is no later with fewer lost, and it finishes in seconds.
+The boards with a gap of four turns or more do not finish in any budget tried. The cost of
+one more launch order was 7 times (K = 3 to 4) and 2.5 times (K = 4 to 5) on 11-01, and 6 and
+5.5 times on 11-04, so the estimate in the verdict is rough.
+
+On 11-01 the first K = 3 pass found nothing, K = 4 found 11/11 and K = 5 found 10/10: the best
+line needs five launches, which a beam does not propose and a pass over fewer cannot reach.
+The line a person posted for that day (11/9) is a turn slower; if the map posted is this one,
+there is a faster line than the board's best, and if not the maps differ.
+
 Still open: a bound that counts the ships a fight needs (the floor counts only
 travel), and whether K = 5 or more finds anything.
 

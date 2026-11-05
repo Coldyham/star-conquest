@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
 from starconquest import ai
 from starconquest.settings import Settings
 from tools import par_best
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -28,7 +31,7 @@ def _setup_file(tmp_path):
 
 def _run(tmp_path, setup):
     return par_best.main(["--daily", str(setup), "--width", "6", "--beam-budget", "1", "--start-k", "2",
-                          "--max-k", "2", "--levels", "coarse", "--k-budget", "60", "--max-turns", "40",
+                          "--max-k", "2", "--levels", "coarse", "--proof-budget", "0", "--k-budget", "60", "--max-turns", "40",
                           "--results-dir", str(tmp_path / "out")])
 
 
@@ -52,3 +55,57 @@ def test_a_pass_looks_only_for_something_better_than_the_best_so_far(tmp_path):
     assert argv[argv.index("--max-launches") + 1] == "4" and argv[argv.index("--from-launches") + 1] == "4"
     nothing = par_best.pass_args(tmp_path / "s.json", 1, 1, (math.inf, math.inf), args, tmp_path / "k1")
     assert "--assume-turn" not in nothing   # no line yet: nothing to beat
+
+
+def test_a_board_the_search_can_finish_is_proved_and_the_passes_stop(tmp_path):
+    """2026-11-02's puzzle: the beam already sits on the floor, so the plain search is narrow
+    enough to finish (about 7 s), and `par_best` stops there instead of running more passes."""
+    setup = ROOT / "tools" / "par_inputs" / "2026-11-02_puzzle.json"
+    par_best.main(["--daily", str(setup), "--width", "50", "--beam-budget", "10", "--start-k", "3",
+                   "--max-k", "5", "--proof-budget", "120", "--no-proof-splits",
+                   "--results-dir", str(tmp_path)])
+    rows = [json.loads(line) for line in (tmp_path / "2026-11-02_puzzle.jsonl").read_text().splitlines()]
+    assert [r["stage"] for r in rows] == ["beam", "k", "proof", "done"]
+    assert rows[2]["splits"] is False and rows[2]["exact"] is True
+    done = rows[3]
+    assert (done["turn"], done["lost"]) == (6, 7)   # the floor is 6, so no win is sooner
+    assert done["proved"] == "single-lane" and "proved" in done["stopped"] and done["replays"] is True
+
+
+def _args(**over):
+    base = {"levels": "all", "k_budget": 600.0, "max_frontier": 1_000_000, "proof_budget": 300.0,
+            "results_dir": par_best.RESULTS}
+    base.update(over)
+    return par_best.argparse.Namespace(**base)
+
+
+def _summary(**over):
+    base = {"name": "x", "turn": 10, "lost": 3, "beam": [11, 3], "exact_up_to": 4, "proved": "",
+            "stopped": "", "replays": True}
+    base.update(over)
+    return base
+
+
+def test_the_verdict_says_what_is_exact_and_what_to_run_next(tmp_path):
+    setup = tmp_path / "s.json"
+    passes = [{"stage": "k", "k": 3, "first": 1, "exact": True, "seconds": 20.0},
+              {"stage": "k", "k": 4, "first": 4, "exact": True, "seconds": 130.0}]
+    tried = [{"stage": "proof", "splits": False, "exact": False}]
+    v = par_best.verdict(_summary(), passes, tried, _args(), setup)
+    assert v["headline"].startswith("EXACT only for plans of at most 4 launch orders")
+    assert any("5 or more launch orders" in line for line in v["not_covered"])
+    plus_one = next(n for n in v["next"] if "5 launch orders" in n["why"])
+    assert "--max-k 5" in plus_one["command"] and "x6" in plus_one["est"]   # 130 s / 20 s, floored by the real ratio
+    assert any("--proof-budget" in n["command"] for n in v["next"])
+    proved = par_best.verdict(_summary(proved="two-lane splits"), passes, tried, _args(), setup)
+    assert proved["headline"].startswith("EXACT: 10/3 is optimal") and not proved["next"]
+    unfinished = [{"stage": "k", "k": 4, "first": 4, "exact": False, "seconds": 600.0}]
+    v = par_best.verdict(_summary(exact_up_to=3), unfinished, [], _args(), setup)
+    assert any("--k-budget" in n["command"] for n in v["next"])
+    assert any("did not finish" in line or "stopped before" in line for line in v["not_covered"])
+
+
+def test_the_suggested_commands_keep_the_results_dir_so_a_rerun_resumes(tmp_path):
+    v = par_best.verdict(_summary(), [{"stage": "k", "k": 4, "first": 4, "exact": True, "seconds": 9.0}], [],
+                         _args(results_dir=tmp_path / "out"), tmp_path / "s.json")
+    assert all(f"--results-dir {tmp_path / 'out'}" in n["command"] for n in v["next"])
