@@ -421,7 +421,7 @@ def test_beating_actuary_on_long_odds_reveals_one_more_stage():
     assert gauntlet.place(g, after.id) == "bonus"
     cfg = gauntlet.stage_settings(after)
     assert cfg.seed == 1705 and cfg.ai_strategy[:cfg.players] == ["heuristic", "marshal", "knower", "actuary"]
-    assert [cfg.ai[i].aux for i in (2, 3)] == [3.0, 3.0]
+    assert [cfg.ai[i].aux for i in (2, 3)] == [2.0, 1.0]     # Search, Field: no slow-setup warning
     shown = lambda: {s.id for s in gauntlet.shown(g, gauntlet.open_stages(g))}
     _score(bonus, 211, 195)
     assert after.id not in shown()
