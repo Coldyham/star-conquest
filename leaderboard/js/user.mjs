@@ -128,12 +128,17 @@ function drawTally(sums, comparing) {
 
 // -- the map list ----------------------------------------------------------
 
+/** A line's name: while comparing, a link to that player's own card. */
+const nameOf = (entry, comparing) => (comparing
+  ? el("a", { class: "nm", href: userHref([entry.name]), text: entry.name })
+  : el("span", { class: "nm", text: entry.name }));
+
 function playerLine(entry, comparing) {
   if (!entry.score) {
     return el("li", { class: "score absent" }, [
       el("span", { class: "rank", text: "—" }),
       el("span", { class: "who" }, [
-        el("span", { class: "nm", text: entry.name }),
+        nameOf(entry, comparing),
         el("span", { class: "dots", "aria-hidden": "true" }),
       ]),
       el("span", { class: "result", text: "not played" }),
@@ -147,7 +152,7 @@ function playerLine(entry, comparing) {
   return el("li", { class: classes.join(" ") }, [
     el("span", { class: "rank", text: entry.rank ? ordinal(entry.rank) : "" }),
     el("span", { class: "who" }, [
-      el("span", { class: "nm", text: entry.name }),
+      nameOf(entry, comparing),
       // Only the best attempt is placed, so say when it was picked out of several.
       entry.tries > 1 ? el("span", { class: "tries", text: `×${entry.tries}` }) : null,
       el("span", { class: "dots", "aria-hidden": "true" }),
@@ -223,7 +228,9 @@ function drawPlaystyle(rows, roster, readings) {
         el("thead", {}, [
           el("tr", {}, [
             el("th", { scope: "col" }),
-            ...shown.map((column) => el("th", { scope: "col", class: column.bots ? "bots" : null, text: column.name })),
+            ...shown.map((column) => el("th", { scope: "col", class: column.bots ? "bots" : null },
+              // While comparing, each player's column heads to their own card.
+              column.bots || roster.length < 2 ? column.name : el("a", { href: userHref([column.name]), text: column.name }))),
           ]),
         ]),
         el(
