@@ -881,7 +881,7 @@ label {
   text-transform: uppercase;
 }
 
-textarea, input[type="text"], input[type="number"], select {
+textarea, input[type="text"], input[type="number"], input[type="password"], select {
   width: 100%;
   padding: 0.75rem;
   border: 1px solid var(--line);
