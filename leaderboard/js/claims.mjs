@@ -4,7 +4,7 @@
 
 /** Shown wherever a typed name turns out to belong to someone else. */
 export const CLAIMED_MESSAGE =
-  "That name is claimed. Sign in as its owner (Account page), or pick another name.";
+  "That name is claimed. Sign in as its owner (Menu ▸ You), or pick another name.";
 
 const key = (name) => String(name || "").trim().toLowerCase();
 

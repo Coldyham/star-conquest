@@ -9,7 +9,7 @@ import {
   difficultyBadge, el, embargoNote, fogBadge, leaderLink, mapSummary, ordinal, relativeTime, scoreSummary, shortTime,
   showError, userHref,
 } from "./format.mjs";
-import { mountMyScores, myName } from "./me.mjs";
+import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { ownName } from "./post.mjs";
 import { aliasFor } from "./token-decode.mjs";
@@ -465,7 +465,6 @@ async function renderEmbargoed(game, embargoText, bots, campaign, note, daily) {
 
 async function load() {
   mountNav();
-  mountMyScores();
   if (!configured()) {
     heading.textContent = "Not connected";
     showError(target, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");

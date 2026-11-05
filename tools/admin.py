@@ -25,7 +25,7 @@ undoable by hand from that row, and no moderation happens without a trace.
 
 A claimed name (`users.owner`, see `leaderboard/schema.sql`) belongs to one
 account, and only that account may post under it. An account is a private
-login and a password, made on the board's account page. A person claims an
+login and a password, made on the board's player card (Menu > You). A person claims an
 *unused* name for themselves there; a name that is already in use is handed
 over here, since nothing on the site can prove who posted under it:
 
@@ -427,7 +427,7 @@ def _account(api: AdminApi, login: str) -> dict:
     account = api.auth_user(account_email(login))
     if not account:
         raise Refused(f"no account has the login {login.strip()!r}; they make one on the "
-                      "board's account page first")
+                      "board first (Menu > You)")
     return account
 
 
@@ -530,7 +530,7 @@ def plan_set_password(api: AdminApi, login: str) -> Plan:
     def reset() -> str:
         api.set_password(uid, password)
         return (f"new password: {password}\n"
-                "give it to them privately; they can change it on the account page")
+                "give it to them privately; they can change it on the board (Menu > You)")
 
     return Plan("set-password", f"account {uid}",
                 ["give that account a new random password, printed here once; "

@@ -670,6 +670,20 @@ page, and a page with no `footer` block has no footer.
   `STATIC_FILES` and `STATIC_DIRS`, and `tests/test_web_build.py` checks that
   every page renders with exactly one, identical header and one privacy link.
 
+### The header (2026-11-05)
+
+- **Play opens what the page has picked.** `nav.mjs` copies the href of the
+  one `a.btn.play` in `<main>` (a map's *Play this map*, the selected campaign
+  node, the day on a daily page) and follows it as the page redraws; with none
+  or several, Play opens the game's menu. No page sets it by hand.
+- **Daily sits beside Play**, out of the menu: it is the most visited page, and
+  most scores are posted from inside the game, so *Enter score* stays in it.
+- **One "You" entry**, the same colour as the rest of the menu, replaces "My
+  scores" and "Your name". It opens this browser's own player card, which
+  carries the account panel (`account.mjs`) on your own card or with no name
+  chosen. Signing in to a name, or claiming one, opens that card.
+  `account.html` only forwards old links.
+
 The weekly campaign (crowns, embargoes, the grace period, campaign fleets) is
 in [`campaign.md`](campaign.md).
 
@@ -801,7 +815,7 @@ this section gives the reasons.
 - `auth.mjs` talks to it over plain fetch, on the same reasoning as `api.mjs`
   loading no client library.
 - Every sign-in method gives the same kind of account, so changing the method
-  touched only `auth.mjs`, the account page and `admin.py`, never the database.
+  touched only `auth.mjs`, the account panel and `admin.py`, never the database.
 
 **Why a login and password, not Google (2026-11-05).**
 - It holds the least about a person: no email, no real name, no Google account
@@ -902,7 +916,8 @@ the same sentence as a backstop.
 - The web game shares the board's origin, so it reads `sc_auth` in JS at fetch
   time for `?action=create`, and the token never passes through Python.
 - It never refreshes the session. An expired one is refused like none, and the
-  player is pointed at the account page, which refreshes on load.
+  player is pointed at the board's Menu > You, whose account panel refreshes on
+  load.
 - Desktop and Android have no session at all. A claimed name is refused there,
   which is the honest answer for a build that cannot sign in.
 

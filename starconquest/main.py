@@ -945,8 +945,8 @@ PBP_FOGGED_MSG = "That match has fog of war on, so it can't be spectated"
 # `pbp.mjs`'s CLAIMED_NAME: the "Your name" typed for seat 1 is somebody's
 # claimed name. A 403 like a bad token, so it is matched before that one.
 PBP_CLAIMED_ERROR = "name is claimed: sign in on the board as its owner, or pick another"
-PBP_CLAIMED_MSG = ("That name is claimed — sign in on the leaderboard's Your name"
-                   " page as its owner, or pick another")
+PBP_CLAIMED_MSG = ("That name is claimed — sign in on the leaderboard (Menu > You)"
+                   " as its owner, or pick another")
 PBP_ENDPOINT_MSGS = {
     "stale turn": "The match has moved past this turn — catching up",
     "already submitted": "Your orders for this turn are already in",

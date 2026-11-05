@@ -129,20 +129,21 @@ a { color: var(--cyan); }
 .btn:hover { background: #10283f; }
 .btn:active { transform: translateY(3px); box-shadow: 0 0 0 #0a3345, 0 0 14px rgba(53, 230, 255, 0.4); }
 
-/* The marquee's right-hand side, tucked inside the `.menu` dropdown below. "My
- * scores" is added there at runtime for a browser that has posted before
- * (js/me.mjs), so it holds anywhere from three items to four. */
+/* The marquee's right-hand side, tucked inside the `.menu` dropdown below. Its
+ * last item, "You", is pointed at this browser's own player card at runtime
+ * (js/me.mjs). */
 .actions { display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem; }
 .actions .btn { text-align: center; }
 
 /* Play stays out of the menu, beside it: the site root opens the board, so a
  * first visit lands here, and the game (and its Tutorial button) must be one
  * tap away rather than behind a dropdown or a challenge link. It wears `.play`,
- * the board's gold door back into the game. */
+ * the board's gold door back into the game, and opens whatever the page has
+ * picked (js/nav.mjs). Daily, the most visited page, sits beside it. */
 .bar-end { display: flex; align-items: center; gap: 0.75rem; }
 
-/* Every page's other links (All maps, Shared matches, Enter score, plus a
- * runtime "My scores") collapse into one `<details>` menu rather than a row of
+/* Every page's other links (All maps, Shared matches, Enter score, You...)
+ * collapse into one `<details>` menu rather than a row of
  * buttons — a row grows with every feature that earns its own page, and on a
  * phone it wrapped onto a second line under the brand. Native <details> needs
  * no JS to open; js/nav.mjs only adds closing it on an outside click, since

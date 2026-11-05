@@ -21,13 +21,13 @@ root `netlify.toml` bundles
 |---|---|
 | [`index.html`](index.html) | every map with a posted score, newest first — toggle by game or by config; search, sort and filter (see below), or click a config badge or bot chip |
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
-| [`user.html?u=…`](user.html) | one player's card, with their running daily streaks and badges — see below and "Badges" |
+| [`user.html?u=…`](user.html) | one player's card, with their running daily streaks and badges — see below and "Badges". On your own card (the menu's *You*), or with no name chosen, it also holds your account: make one (a private login and password) and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
 | [`puzzle.html?day=…`](puzzle.html), [`daily.html?day=…`](daily.html) | the daily puzzle (the menu's default) and board: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
 | [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/game/#puzzle`), standings and its own streaks — see "Daily" |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
-| [`account.html`](account.html) | make an account (a private login and password) and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
+| [`account.html`](account.html) | forwards old links to the player card's account panel |
 | [`privacy.html`](privacy.html) | the privacy notice: what the site and Supabase Auth store, why, and how to have it removed. Update it with any change to what is collected, sign-in included |
 | [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
 | [`gauntlet.html`](gauntlet.html) | make a gauntlet: the name, author and "Ask for it to be listed publicly" first, shared by the two ways below it. Build from game links: one link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Gauntlets list. `gauntlet.html#<id>` opens a saved one to remix. Generate: builds a `/game/#gauntlet-spec=` link instead; the game deals the maps, plays test bots on them and orders them by difficulty, and saves the result here under the author's name only when the listing box was ticked; each Advanced and Combat slider is a min/max pair (`js/gauntlet-spec.mjs`) |
@@ -600,9 +600,9 @@ A name is free text until somebody claims it. Then only the account that
 owns it can post a score (and so make a campaign move) or name a play-by-post
 seat with it.
 
-- **Claiming yourself** ([`account.html`](account.html)): make an account with
-  a private login and a password, type a name, and claim it. Only a name nobody
-  has used can be claimed this way, meaning one with no `users` row, or a row
+- **Claiming yourself** (the menu's *You*, the player card's account panel):
+  make an account with a private login and a password, type a name, and claim
+  it. Only a name nobody has used can be claimed this way, meaning one with no `users` row, or a row
   with no score and no tag behind it. Nothing on the site can prove who posted
   under a name that has scores already. One name per account; *Release* gives
   it back.
@@ -621,7 +621,7 @@ seat with it.
   keeps the session in `localStorage` (`sc_auth`), which the web game reads to
   open a match under a claimed name. The desktop and
   Android builds have no session, so a claimed name is refused there, and an
-  expired session counts as none until the account page renews it.
+  expired session counts as none until the player card's account panel renews it.
 
 ## Finding each other
 

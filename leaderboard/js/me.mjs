@@ -5,7 +5,7 @@
 // It is only ever a convenience — one less thing to retype, and a way into your
 // own player page from the marquee.
 
-import { el, userHref } from "./format.mjs";
+import { userHref } from "./format.mjs";
 
 // One name for everything on this origin: the name a score is posted under, the
 // name a play-by-post seat is claimed under, and the game's own pbp prompt
@@ -30,14 +30,12 @@ export function rememberName(name) {
 }
 
 /**
- * Put a "My scores" button in the marquee, for a browser that has posted before.
- *
- * The four pages all ship the same static header; this is the one part of it that
- * depends on who is looking, so it is added at runtime rather than hardcoded.
+ * Point the menu's "You" at this browser's own player card, which holds the
+ * account panel too (user.html). With no name remembered it opens the card's
+ * search, where the panel is also shown. Called by nav.mjs's mountNav.
  */
-export function mountMyScores() {
+export function mountYou() {
   const name = myName();
-  const actions = document.querySelector(".bar .actions");
-  if (!name || !actions) return;
-  actions.prepend(el("a", { class: "btn ghost", href: userHref([name]), text: "My scores" }));
+  const you = document.getElementById("nav-you");
+  if (name && you) you.setAttribute("href", userHref([name]));
 }

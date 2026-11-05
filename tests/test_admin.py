@@ -228,7 +228,7 @@ def test_assigning_a_name_nobody_has_used_creates_it_owned():
 
 def test_assigning_to_a_login_with_no_account_is_refused():
     api = AuthFakeApi([("users", "name_key=eq.ann", [_named()])])
-    with pytest.raises(admin.Refused, match="account page"):
+    with pytest.raises(admin.Refused, match="Menu > You"):
         admin.plan_assign_name(api, "Ann", "ann@example.com")
 
 
@@ -256,7 +256,7 @@ def test_set_password_prints_it_once_and_audits_only_the_account(capsys):
 
 
 def test_set_password_for_an_unknown_login_is_refused():
-    with pytest.raises(admin.Refused, match="account page"):
+    with pytest.raises(admin.Refused, match="Menu > You"):
         admin.plan_set_password(AuthFakeApi([]), "nobody")
 
 

@@ -6,7 +6,7 @@ import {
 } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
-import { mountMyScores, myName } from "./me.mjs";
+import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { encodeToken } from "./token-encode.mjs";
 
@@ -492,7 +492,6 @@ async function fetchWeek() {
 
 async function load() {
   mountNav();
-  mountMyScores();
   drawWeeks();
   if (!configured()) {
     showError(mapBox, "This leaderboard isn't connected to its database yet — see leaderboard/README.md.");

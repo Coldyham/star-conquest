@@ -3,8 +3,8 @@ import { mapSummary, scoreSummary } from "./format.mjs";
 import { inflate } from "./inflate-browser.mjs";
 // Posting again from the same browser shouldn't mean retyping your name — the
 // whole point of arriving here from the game's win screen is one click. The same
-// remembered name is what puts "My scores" in the marquee.
-import { mountMyScores, myName, rememberName } from "./me.mjs";
+// remembered name is where the menu's "You" leads (me.mjs).
+import { myName, rememberName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { ensureGame, lookupGame, ownName, postScore } from "./post.mjs";
 import { decodeToken, fragmentOf } from "./token-decode.mjs";
@@ -193,7 +193,6 @@ async function prefill() {
 }
 
 mountNav();
-mountMyScores();
 prefill();
 
 form.addEventListener("submit", async (event) => {
