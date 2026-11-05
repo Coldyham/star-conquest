@@ -104,8 +104,8 @@ so the card can always be brought back.
 | 8 | Thinker | a bot that prices its fights | thinker |
 | 9 | Marshal | one of the strongest bots | marshal |
 | 10 | The hunt | actuary at its strongest stop, Hunt | actuary · Hunt |
-| 11 | Long odds (hidden bonus) | an unfair start, opened by a hidden lane from The hunt | marshal, knower · Search, actuary · Hunt |
-| 12 | No way out (hidden bonus) | a worse start, opened by beating the best bot on Long odds | marshal, knower · Council, actuary · Hunt |
+| 11 | Long odds (hidden bonus) | an unfair start, opened by a hidden lane from The hunt | marshal, knower · Search, actuary · Field |
+| 12 | No way out (hidden bonus) | a worse start, opened by beating the best bot on Long odds | marshal, knower · Search, actuary · Field |
 
 **The bonus stage** (added 2026-11-05) is reached only by a hidden lane from
 The hunt, gated at the best human score on The hunt's setup on the board that
@@ -115,6 +115,16 @@ at Hunt. You start 7 turns from actuary and 10 from marshal, while knower sits
 17 or more from everyone. It isn't listed, numbered or counted until the lane
 opens (`gauntlet.shown`, `gauntlet.place`), and it isn't on the tutorial's
 path, so it never joins a run (`gauntlet.chain`).
+
+**Both bonus stages play knower at Search and actuary at Field** (changed
+2026-11-05). As first shipped, Long odds had actuary at Hunt and No way out
+had knower at Council. Both set off the menu's "may play slowly" warning
+(`setup_warnings`), because knower replays actuary at every turn it looks
+ahead, and Hunt costs ~461 ms a call. In the browser knower stops thinking at
+150 ms, so it would have looked about one turn ahead, far weaker than measured
+and dependent on the device's speed. Search with Field clears the warning on
+both maps. The measurements below were taken on the first setups, with budgets
+lifted, and are being re-taken.
 
 **No way out** (added the same day) is behind a hidden lane from Long odds,
 gated at the best bot's win there, to beat: **actuary, 211 turns / 195 lost**.
