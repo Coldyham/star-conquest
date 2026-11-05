@@ -127,7 +127,10 @@ wins and actuary at Hunt loses (turn 243). Played the board's way
 there would set no target. The map is Long odds' knobs on seed 1705, picked from
 5,000 seeds for a worse start: actuary 7 turns from you, marshal 8, knower (at
 Council) 18, the rivals at least 15 apart, and one system nearer you than any
-rival. Black-box actuary at Hunt was out by turn 72 there.
+rival. Played black box from the human seat, every roster bot loses it and the
+rival knower wins every game (2026-11-05): knower at Council lasted longest
+(turn 89), then marshal (81), actuary at Hunt (72), thinker (70), actuary at
+Field (65), evolved (57), rusherplus (48) and heuristic (47).
 
 **How the seeds were chosen.** Each stage's setup was played on 24 candidate
 seeds by marshal, evolved, thinker, heuristic and rusherplus in the human's seat
