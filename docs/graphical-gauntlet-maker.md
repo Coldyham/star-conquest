@@ -619,8 +619,7 @@ needs its notes and its async bot lookup) and the main wiring for runs.
 
 ## Verification
 
-- **Per phase:** the tests named above, `uvx ruff check .`, and `uvx pyright`
-  on touched files. Run `node --test leaderboard/tests/*.test.mjs` in phase 1.
+- **Per phase:** the tests named above and `uvx ruff check .`. Run `node --test leaderboard/tests/*.test.mjs` in phase 1.
   Run it again in phases 2 and 3 (the layout fixture).
   Run the full `uv run pytest` after phases 4 and 5 (they touch `replay`,
   `main` and `viewstate`).
