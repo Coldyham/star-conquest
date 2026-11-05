@@ -50,6 +50,7 @@ import json
 import math
 import multiprocessing
 import os
+import pickle
 import random
 import sys
 import time
@@ -63,7 +64,7 @@ from starconquest.model import GameState, Order
 from starconquest.settings import Settings, build_state
 from tools import par_search as ps
 
-LEVELS = ("coarse", "quarters", "all")
+LEVELS = ("coarse", "quarters", "all", "strike")
 CHUNK_BOARDS = 256   # boards per task, so a wave in flight stays small
 
 
@@ -94,6 +95,19 @@ def _limited(per_source: list[list[list[Order]]], limit: int):
                     yield orders
 
 
+STRIKE_WIDTH = 3   # ships either side of the projected garrison the "strike" level tries
+
+
+def strike_counts(board: GameState, me: int) -> dict[tuple[int, int], set[int]]:
+    """Per lane, the send sizes around what the target will hold when a fleet launched now lands."""
+    out: dict[tuple[int, int], set[int]] = {}
+    for orders in ps.strike_sends(board, me, STRIKE_WIDTH):
+        if len(orders) == 1:
+            o = orders[0]
+            out.setdefault((o.source_id, o.dest_id), set()).add(o.ships)
+    return out
+
+
 def order_sets(board: GameState, me: int, levels: str, max_branch: int, splits: bool = False,
                limit: int | None = None):
     """Every order set for ``me`` this turn under ``levels``, and whether it had
@@ -108,7 +122,9 @@ def order_sets(board: GameState, me: int, levels: str, max_branch: int, splits: 
                 continue
             opts: list[list[Order]] = [[]]
             for nbr in s.neighbors:
-                for n in launch_counts(s.ships, levels_):
+                counts = (sorted({s.ships, *range(max(1, s.ships - 2), s.ships)} | set(strikes.get((s.id, nbr), ())))
+                          if levels_ == "strike" else launch_counts(s.ships, levels_))
+                for n in counts:
                     opts.append([Order(me, s.id, nbr, n)])
             if splits_:
                 for n1, n2 in itertools.combinations(s.neighbors, 2):
@@ -120,6 +136,8 @@ def order_sets(board: GameState, me: int, levels: str, max_branch: int, splits: 
 
     def size_of(per_source: list[list[list[Order]]]) -> int:
         return math.prod(len(o) for o in per_source) if per_source else 1
+
+    strikes = strike_counts(board, me) if levels == "strike" else {}
 
     exact = True
     per_source = options(levels, splits)
@@ -388,6 +406,42 @@ def line_log(root: GameState, cfg: Settings, seed: int, strategies: dict[int, st
     return log
 
 
+def checkpoint_signature(args: argparse.Namespace, seed: int) -> dict:
+    """What must match for a saved frontier to be the same search."""
+    return {"seed": seed, "levels": args.levels, "splits": args.splits, "max_branch": args.max_branch,
+            "max_frontier": args.max_frontier, "rank": args.rank, "ratio": args.ratio,
+            "max_turns": args.max_turns, "max_launches": args.max_launches, "turn_only": args.turn_only,
+            "from_launches": args.from_launches}
+
+
+def save_checkpoint(path: Path, state: dict) -> None:
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("wb") as f:
+        pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+
+
+_OFF = (None, False, 0, (None, 0))
+
+
+def load_checkpoint(path: Path, signature: dict) -> dict | None:
+    """The saved search, or None when there is none, it is unreadable, or it is another search."""
+    if not path.exists():
+        return None
+    try:
+        with path.open("rb") as f:
+            state = pickle.load(f)
+    except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):   # torn or foreign: start over
+        return None
+    if not isinstance(state, dict) or not isinstance(state.get("signature"), dict):
+        return None
+    saved = state["signature"]
+    # an option since removed matches only while it was left at its default
+    retired_at_default = all(saved[k] in _OFF for k in saved.keys() - signature.keys())
+    same = all(saved.get(k) == v for k, v in signature.items())
+    return state if same and retired_at_default else None
+
+
 def waves(pool, tasks: list, workers: int):
     """``pool.map`` over ``tasks`` a few chunks per worker at a time, in order, so
     finished chunks are merged (and freed) instead of piling up in the queue."""
@@ -418,6 +472,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-launches", type=int, default=0,
                     help="search plans of at most K launch orders, K = 1, 2, ... in turn: waiting is free, "
                          "so a line with few launches is found in seconds. Exact per K, no cap needed")
+    ap.add_argument("--turn-only", action="store_true",
+                    help="look only for a win on an earlier turn than the incumbent, whatever it loses: "
+                         "cheaper, and exact for the turn (ships lost at that turn are not minimised)")
     ap.add_argument("--from-launches", type=int, default=1,
                     help="with --max-launches: start at this K, not 1 (a pass for K covers every plan of "
                          "at most K, so the lower passes only warm the bound up)")
@@ -429,6 +486,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-turns", type=int, default=120)
     ap.add_argument("--results-dir", default=str(ROOT / "results" / "par"))
     ap.add_argument("--out", help="also save the best line here")
+    ap.add_argument("--checkpoint-secs", type=float, default=120.0,
+                    help="save the frontier after a layer when this long has passed since the last save, "
+                         "and resume from it on a rerun (0 = never)")
     args = ap.parse_args(argv)
 
     ai.load_models()
@@ -444,6 +504,12 @@ def main(argv: list[str] | None = None) -> int:
             f.flush()
 
     started = time.perf_counter()
+    ckpt_path = out_dir / f"{name}.ckpt.pkl"
+    signature = checkpoint_signature(args, seed)
+    saved = load_checkpoint(ckpt_path, signature) if args.checkpoint_secs > 0 else None
+    if saved:
+        started -= saved["elapsed"]
+    last_save = time.perf_counter()
     search = ps.Search(cfg, seed, dice="honest", width=6, budget=args.seed_budget,
                        max_turns=args.max_turns)
     me = search.me
@@ -473,20 +539,32 @@ def main(argv: list[str] | None = None) -> int:
 
     exact = True
     incumbent = {"turn": bound[0], "lost": bound[1]}
+    if saved:
+        exact = saved["exact"]
+        turn, lost = min(bound, tuple(saved["incumbent"]))
+        incumbent = {"turn": turn, "lost": lost}
+        print(f"resuming at {saved['limit']} launches, layer {saved['depth']}, "
+              f"{len(saved['layer'])} boards, {saved['elapsed']:.0f}s already spent", flush=True)
     limits: list[int | None] = (list(range(max(1, args.from_launches), args.max_launches + 1))
                                     if args.max_launches else [None])
 
-    def run_layers(limit: int | None) -> bool:
+    def run_layers(limit: int | None, resume: dict | None = None) -> bool:
         """One pass over every board; True when it ran out of boards (not of time)."""
-        nonlocal exact
+        nonlocal exact, last_save
         layer: list[tuple[GameState, tuple]] = [(ps.clone(root), ())]   # (board, path)
         depth = 0
+        if resume:
+            layer, depth = resume["layer"], resume["depth"]
+            for board, _ in layer:
+                board.lanes = root.lanes
         while layer and time.perf_counter() - started < args.budget:
             depth += 1
             n_chunks = max(1, min(len(layer), args.workers * 4))
             size = min(math.ceil(len(layer) / n_chunks), CHUNK_BOARDS)
             chunks = [layer[i:i + size] for i in range(0, len(layer), size)]
-            tasks = [([b for b, _ in chunk], incumbent["turn"], incumbent["lost"], limit) for chunk in chunks]
+            # turn-only: a lost of 0 to beat drops every board that could at best tie the turn
+            lost_to_beat = 0 if args.turn_only else incumbent["lost"]
+            tasks = [([b for b, _ in chunk], incumbent["turn"], lost_to_beat, limit) for chunk in chunks]
             results = waves(pool, tasks, args.workers) if pool else map(expand_chunk, tasks)
             nxt: dict[tuple, tuple[int, GameState, tuple]] = {}
             expanded = 0
@@ -525,30 +603,46 @@ def main(argv: list[str] | None = None) -> int:
                     "best": [incumbent["turn"], incumbent["lost"]], "exact": exact, "launches": limit})
             print(f"layer {depth}: {expanded} expanded, {len(layer)} kept, best "
                   f"{incumbent['turn']}/{incumbent['lost']}, {time.perf_counter() - started:.0f}s", flush=True)
+            if layer and args.checkpoint_secs > 0 and time.perf_counter() - last_save >= args.checkpoint_secs:
+                save_checkpoint(ckpt_path, {
+                    "signature": signature, "limit": limit, "depth": depth, "layer": layer,
+                    "incumbent": (incumbent["turn"], incumbent["lost"]), "exact": exact,
+                    "elapsed": time.perf_counter() - started})
+                last_save = time.perf_counter()
+                print(f"  checkpoint: {len(layer)} boards", flush=True)
         return not layer
 
     finished = True
     try:
         for limit in limits:
+            if saved and limit != saved["limit"] and not (
+                    saved["limit"] is not None and limit is not None and limit > saved["limit"]):
+                continue   # a limit already finished before the checkpoint
             if limit is not None:
                 print(f"plans of at most {limit} launch order(s):", flush=True)
-            finished &= run_layers(limit)
+            finished &= run_layers(limit, saved if saved and limit == saved["limit"] else None)
     finally:
         if pool:
             pool.terminate()
 
+    ckpt_path.unlink(missing_ok=True)
     exact &= finished
     model = f"plans of at most {args.max_launches} launch orders" if args.max_launches else "the order model"
-    verdict = f"optimal within {model}" if exact else "best found (search not exact)"
+    if args.turn_only:
+        verdict = (f"no win before turn {incumbent['turn']} within {model}" if exact
+                   else "best found (search not exact)")
+    else:
+        verdict = f"optimal within {model}" if exact else "best found (search not exact)"
     print(f"result: turn {incumbent['turn']}, lost {incumbent['lost']}; floor {root_floor:.0f}; {verdict}")
-    record({"event": "done", "turn": incumbent["turn"], "lost": incumbent["lost"], "exact": exact})
+    record({"event": "done", "turn": incumbent["turn"], "lost": incumbent["lost"], "exact": exact,
+            "turn_only": args.turn_only})
     if best_path.exists():
-        saved = replay.load(best_path)
-        won, turn, lost = ps.check_line(saved, me)
+        final = replay.load(best_path)
+        won, turn, lost = ps.check_line(final, me)
         print(f"best line {best_path}: won={won} turn {turn} lost {lost} (replays through reconstruct)")
         if args.out:
-            saved.path = Path(args.out)
-            saved.save()
+            final.path = Path(args.out)
+            final.save()
     return 0
 
 

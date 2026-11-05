@@ -239,7 +239,7 @@ STRIKE_BAND = 2    # ships either side of the projected garrison that are tried
 PAIR_CAP = 60      # two-system order sets added per board
 
 
-def strike_sends(state: GameState, me: int) -> list[list[Order]]:
+def strike_sends(state: GameState, me: int, band: int = STRIKE_BAND) -> list[list[Order]]:
     """Sends sized to the garrison their target will hold when they land.
 
     The rivals' moves are not a guess: hold ``state`` forward (``step`` with no
@@ -281,7 +281,7 @@ def strike_sends(state: GameState, me: int) -> list[list[Order]]:
         # A band, not a point: the hold-forward cannot see how a rival answers the
         # send itself (rusherplus goes for the weakest neighbour, and a send
         # leaves the source weaker), so the garrison it finds is a few ships out.
-        for n in range(max(1, held - STRIKE_BAND), math.ceil(held * edge) + STRIKE_BAND + 1):
+        for n in range(max(1, held - band), math.ceil(held * edge) + band + 1):
             if 1 <= n < have:
                 out.append([Order(me, src, dst, n)])
                 smallest.setdefault((src, dst), n)

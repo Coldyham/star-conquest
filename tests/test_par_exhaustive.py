@@ -176,3 +176,38 @@ def test_three_launches_reach_ten_turns_on_the_daily_puzzle(tmp_path):
     rows = [json.loads(line) for line in (out / "2026-11-04_puzzle.jsonl").read_text().splitlines()]
     done = next(r for r in rows if r["event"] == "done")
     assert (done["turn"], done["lost"], done["exact"]) == (10, 3, True)
+
+
+def test_a_search_killed_after_a_checkpoint_resumes_to_the_same_answer(tmp_path, monkeypatch):
+    day = tmp_path / "day.json"
+    day.write_text(json.dumps({"day": "t", "kind": "k", "settings": _setup(4, 3).to_dict()}))
+    argv = ["--daily", str(day), "--levels", "coarse", "--seed-budget", "1", "--budget", "60",
+            "--max-turns", "11", "--workers", "1", "--checkpoint-secs", "0.001"]
+    straight = tmp_path / "straight"
+    pe.main([*argv, "--results-dir", str(straight)])
+
+    real, saves = pe.save_checkpoint, []
+
+    def die_after_two(path, state):
+        real(path, state)
+        saves.append(state["depth"])
+        if len(saves) == 2:
+            raise KeyboardInterrupt
+
+    out = tmp_path / "killed"
+    monkeypatch.setattr(pe, "save_checkpoint", die_after_two)
+    with pytest.raises(KeyboardInterrupt):
+        pe.main([*argv, "--results-dir", str(out)])
+    assert (out / "t_k.ckpt.pkl").exists()
+    monkeypatch.setattr(pe, "save_checkpoint", real)
+    pe.main([*argv, "--results-dir", str(out)])
+    assert not (out / "t_k.ckpt.pkl").exists()
+
+    def final(path):
+        rows = [json.loads(line) for line in (path / "t_k.jsonl").read_text().splitlines()]
+        return next(r for r in rows if r["event"] == "done")
+
+    assert final(out) == final(straight)
+    layers = [r["depth"] for r in map(json.loads, (out / "t_k.jsonl").read_text().splitlines())
+              if r["event"] == "layer"]
+    assert layers.count(saves[-1] + 1) >= 1   # it went on from the saved layer
