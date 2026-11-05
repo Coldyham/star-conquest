@@ -36,6 +36,23 @@ def board():
       insert into dailies (day, kind, settings, spec, probes, rules_version)
         select {_TODAY} + d, 'puzzle', jsonb_build_object('seed', d + 10), '{{}}'::jsonb, '[]'::jsonb, 5
         from generate_series(-1, 1) d;
+      -- Today's puzzle map, posted on by alice (11/0, then 10/3, owned), bob
+      -- (12/1, owned, short of the par), carol (9/9 with turns autoplayed) and
+      -- an unclaimed dave (10/3).
+      insert into auth.users (id) values
+        ('00000000-0000-0000-0000-00000000000a'), ('00000000-0000-0000-0000-00000000000b'),
+        ('00000000-0000-0000-0000-00000000000c');
+      insert into users (name, owner) values
+        ('alice', '00000000-0000-0000-0000-00000000000a'), ('bob', '00000000-0000-0000-0000-00000000000b'),
+        ('carol', '00000000-0000-0000-0000-00000000000c'), ('dave', null);
+      insert into games (game_key, mode, players, nodes, seed, settings_json)
+        values ('p0', 'random', 2, 6, 10, jsonb_build_object('seed', 10));
+      insert into scores (game_key, user_id, turns, lost, hand, raw_token, match_id)
+        select 'p0', u.id, t, l, h, '', m from (values
+          ('alice', 11, 0, 11, 'a1'), ('alice', 10, 3, 10, 'a2'), ('bob', 12, 1, 12, 'b1'),
+          ('carol', 9, 9, 4, 'c1'), ('dave', 10, 3, 10, 'd1')) v(n, t, l, h, m)
+        join users u on u.name = v.n;
+      insert into score_checks (score_id, verdict) select id, 'verified' from scores;
       insert into puzzle_pars (day, turns, lost, status, line, rules_version) values
         ({_TODAY}, 10, 3, 'proved', '{{}}'::jsonb, 5),
         ({_TODAY} + 1, 6, 2, 'likely', '{{}}'::jsonb, 5),
@@ -69,5 +86,26 @@ def test_no_par_before_its_day_or_under_other_rules(board):
 def test_the_public_cannot_read_the_table(board):
     out = subprocess.run(["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
                           "set role anon; select line from puzzle_pars"],
+                         capture_output=True, text=True, check=False)
+    assert out.returncode != 0 and "permission denied" in out.stderr
+
+
+def _mine(board: str, who: str) -> str:
+    uid = f"00000000-0000-0000-0000-00000000000{who}" if who else ""
+    return _psql(f"set role authenticated; set request.jwt.claim.sub = '{uid}';"
+                 f" select sc_my_puzzle_par({_TODAY})", board)
+
+
+def test_a_signed_in_player_whose_score_met_the_par_is_told(board):
+    got = _mine(board, "a")
+    assert '"my_turns": 10' in got and '"my_lost": 3' in got and '"turns": 10' in got
+
+
+def test_nobody_else_is_told(board):
+    assert _mine(board, "b") == ""        # short of it
+    assert _mine(board, "c") == ""        # turns not played by hand
+    assert _mine(board, "") == ""         # signed out (dave's 10/3 is nobody's)
+    out = subprocess.run(["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
+                          f"set role anon; select sc_my_puzzle_par({_TODAY})"],
                          capture_output=True, text=True, check=False)
     assert out.returncode != 0 and "permission denied" in out.stderr

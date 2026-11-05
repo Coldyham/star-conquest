@@ -378,7 +378,10 @@ already resolve simultaneously. The rationale for each rule is in
   under the puzzle's rules. The game asks only at a puzzle win played wholly by
   hand (`main.wants_par`) and shows the gold line only for that answer
   (`Ui.par_note`); nothing is stored or posted. A forged claim can read the par:
-  a convenience, not a secret. Detail: `docs/design/daily.md`, "The puzzle's
+  a convenience, not a secret. The board's `puzzle.html` and map page show the
+  same line (`parNote`) to a signed-in player whose own counted, all-by-hand
+  score there met it (`sc_my_puzzle_par`, from `auth.uid()` alone), and to
+  nobody else. Detail: `docs/design/daily.md`, "The puzzle's
   par".
 - **The game and the board are one site.** The root `netlify.toml` builds both;
   the game is at `/game/`, the board at `/board/`, functions at `/api/`, and

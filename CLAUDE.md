@@ -253,8 +253,9 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   (mended, and true) are derived. `docs/design/daily.md`.
 - **A puzzle's par is computed offline and told only to a player who meets it**
   (`tools/puzzle_par.py` into `puzzle_pars`, no public read; `sc_puzzle_par`
-  answers a claimed result only when it matches or beats the par). A stored par
-  is only ever improved (`puzzle_par.better`). `docs/design/daily.md`, "The
+  answers a claimed result only when it matches or beats the par; on the board,
+  `sc_my_puzzle_par` answers a signed-in player whose own posted score does).
+  A stored par is only ever improved (`puzzle_par.better`). `docs/design/daily.md`, "The
   puzzle's par".
 - **The game and board are one site** (`/game/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables

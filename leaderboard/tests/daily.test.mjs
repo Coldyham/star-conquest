@@ -6,8 +6,8 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
-  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, playerDays, playerStreaks, postedOn,
-  shortDate, standings, streaks, validDay, weekDays, weekdayOf,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, parNote, playerDays, playerStreaks,
+  postedOn, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -224,4 +224,18 @@ test("a streak that reaches back to the first day read is only a lower bound", (
   ]);
   assert.deepEqual(streaks([on("cy", "2026-10-31"), on("cy", "2026-11-01")], "2026-11-01", "2026-10-31"),
     [{ name: "cy", days: 2, onTheDay: 2, daysAtLeast: true, onTheDayAtLeast: true }]);
+});
+
+test("the par's congratulation is only for a score that met it, in the game's words", () => {
+  const proved = { turns: 10, lost: 3, status: "proved", turns_only: false };
+  const likely = { turns: 10, lost: 3, status: "likely", turns_only: false };
+  assert.equal(parNote(proved, 10, 3), "Perfect puzzle! You matched the proven best: 10 turns / 3 lost");
+  assert.equal(parNote({ ...proved, turns_only: true }, 10, 3),
+    "Perfect puzzle! You matched the par of 10 turns / 3 lost, proven the fastest win");
+  assert.equal(parNote(likely, 10, 3), "Par! You matched the best line our search found: 10 turns / 3 lost");
+  assert.equal(parNote(likely, 9, 8), "Beyond par! You won faster than the par of 10 turns / 3 lost");
+  assert.equal(parNote(proved, 10, 2), "Beyond par! The par's 10 turns with fewer ships lost than its 3");
+  assert.equal(parNote(likely, 10, 4), "");
+  assert.equal(parNote(likely, 11, 0), "");
+  assert.equal(parNote(null, 10, 3), "");
 });

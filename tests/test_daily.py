@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 
 import pytest
 
@@ -283,3 +284,17 @@ def test_the_congratulation_is_only_for_a_result_that_met_the_par():
     assert game_daily.par_note(proved, 10, 2).startswith("Beyond par! The par's 10 turns")
     assert game_daily.par_note(likely, 10, 4) == ""
     assert game_daily.par_note(likely, 11, 0) == ""
+
+
+def test_the_board_says_it_in_the_games_words():
+    """`leaderboard/js/daily.mjs`'s `parNote` mirrors `par_note`: every sentence
+    the game can say is in the board's file, and the JS test pins the same cases."""
+    js = (Path(__file__).resolve().parent.parent / "leaderboard" / "js" / "daily.mjs").read_text()
+    cases = [(game_daily.Par(10, 3, True, False), 10, 3), (game_daily.Par(10, 3, True, True), 10, 3),
+             (game_daily.Par(10, 3, False, False), 10, 3), (game_daily.Par(10, 3, False, False), 9, 8),
+             (game_daily.Par(10, 3, True, False), 10, 2)]
+    tests = (Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "daily.test.mjs").read_text()
+    for par, turns, lost in cases:
+        text = game_daily.par_note(par, turns, lost)
+        assert f'"{text}"' in tests, text
+        assert text.split("!")[0] + "!" in js

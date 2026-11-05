@@ -485,8 +485,9 @@ join public.games g
 -- winning GameLog, the solution, and never leaves the table.
 --
 -- No policy and no public grant: nobody reads a par. sc_puzzle_par answers a
--- claimed result with the par only when the result matches or beats it, so
--- the congratulation reaches only the players who earned it. A forged claim
+-- claimed result with the par only when the result matches or beats it, and
+-- sc_my_puzzle_par a signed-in player whose posted score does, so the
+-- congratulation reaches only the players who earned it. A forged claim
 -- can read it: like fog, a convenience, not a secret.
 -- ---------------------------------------------------------------------------
 create table if not exists public.puzzle_pars (
@@ -931,6 +932,31 @@ alter table public.dailies enable row level security;
 alter table public.playstyle_readings enable row level security;
 alter table public.puzzle_pars enable row level security;
 
+-- The par of p_day's puzzle for the signed-in caller, when the best score
+-- they have posted on it under their own claimed name, counted and played
+-- wholly by hand, matches or beats it; else null. The board's puzzle and map
+-- pages show it to that player alone (js/post.mjs's ownPar). my_turns and
+-- my_lost are their best score, which they posted themselves, so even an
+-- embargoed day gives away nothing. Defined here, after counted_scores, which
+-- it reads.
+create or replace function public.sc_my_puzzle_par(p_day date)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('turns', p.turns, 'lost', p.lost, 'status', p.status,
+                            'turns_only', p.turns_only, 'my_turns', b.turns, 'my_lost', b.lost)
+  from public.users u
+  join public.daily_games g on g.day = p_day and g.kind = 'puzzle'
+  join lateral (
+    select s.turns, s.lost from public.counted_scores s
+    where s.game_key = g.game_key and s.user_id = u.id and s.hand >= s.turns
+    order by s.turns, s.lost limit 1) b on true
+  join public.puzzle_pars p on p.day = p_day
+  join public.dailies d on d.day = p_day and d.kind = 'puzzle' and d.rules_version = p.rules_version
+  where auth.uid() is not null and u.owner = auth.uid()
+    and (b.turns, b.lost) <= (p.turns, p.lost)
+  order by b.turns, b.lost
+  limit 1
+$$;
+
 -- Whether the caller may post as this user row: it is unclaimed, or theirs.
 -- Security definer because the public cannot read users.owner (see the grants).
 create or replace function public.sc_may_use_user(p_user_id bigint)
@@ -1085,6 +1111,9 @@ grant execute on function public.sc_may_use_user(bigint) to anon, authenticated;
 -- puzzle_pars is in neither list: a par is read only through sc_puzzle_par.
 revoke execute on function public.sc_puzzle_par(date, integer, integer) from public;
 grant execute on function public.sc_puzzle_par(date, integer, integer) to anon, authenticated;
+-- ...and to a signed-in player about their own posted score only.
+revoke execute on function public.sc_my_puzzle_par(date) from public, anon;
+grant execute on function public.sc_my_puzzle_par(date) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Grants to service_role, the secret key the workers and functions hold. It

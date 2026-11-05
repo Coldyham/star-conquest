@@ -223,3 +223,22 @@ export function dailyMark(entry, today) {
     href: entry.day === today ? page : `${page}?day=${entry.day}`,
   };
 }
+
+/**
+ * The congratulation for a puzzle score that met its par, in the game's words
+ * (`starconquest/daily.py`'s `par_note`; the two are kept alike by
+ * tests/test_daily.py). `par` is `{turns, lost, status, turns_only}`; "" for a
+ * score short of it.
+ */
+export function parNote(par, turns, lost) {
+  if (!par) return "";
+  const worse = turns > par.turns || (turns === par.turns && lost > par.lost);
+  if (worse) return "";
+  const score = `${par.turns} turns / ${par.lost} lost`;
+  if (turns < par.turns) return `Beyond par! You won faster than the par of ${score}`;
+  if (lost < par.lost) return `Beyond par! The par's ${par.turns} turns with fewer ships lost than its ${par.lost}`;
+  const proved = par.status === "proved";
+  if (proved && !par.turns_only) return `Perfect puzzle! You matched the proven best: ${score}`;
+  if (proved) return `Perfect puzzle! You matched the par of ${score}, proven the fastest win`;
+  return `Par! You matched the best line our search found: ${score}`;
+}

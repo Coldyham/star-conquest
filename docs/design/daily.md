@@ -609,6 +609,18 @@ score on the win overlay (`Ui.par_note`, `daily.par_note`): *Perfect puzzle!* fo
 proved par, *Par!* for a likely one, *Beyond par!* for a result better than it.
 Nothing is stored or posted, and *Copy daily result* does not mention it.
 
+**On the board too, for a signed-in player who posted it** (the author,
+2026-11-05). `puzzle.html` for that day and the map's `game.html` show the same
+gold line (`.par-note`, `daily.mjs`'s `parNote`, worded as the game's and pinned
+alike by `tests/test_daily.py`) when the player is signed in and the best score
+they posted there under their own claimed name, counted and played wholly by
+hand, matches or beats the par. `sc_my_puzzle_par(day)` answers that from
+`auth.uid()` alone and takes no claimed result, so here the par cannot be forged
+out: a signed-out visitor, another player, or a score short of it gets nothing.
+It shows under an embargo as well, beside *Your scores*: the figures are the
+player's own. A remembered name that is not claimed is not enough, as for *Your
+scores*.
+
 **A convenience, not a secret.** `puzzle_pars` has no policy and no public grant,
 and its `line` (the winning `GameLog`, the solution) never leaves the table. But
 the check takes a claimed result, so a forged claim of 1 turn reads the par. A
