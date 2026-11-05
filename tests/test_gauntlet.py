@@ -370,6 +370,22 @@ def test_next_stage_follows_plain_lanes_and_forks_at_a_met_gate():
     assert gauntlet.next_stage(g, 1, gauntlet.bests(g)) is None
 
 
+def test_next_stage_leads_into_a_bonus_stage_a_win_unlocks():
+    """With no ungated way on, a gated lane the best meets is where Next stage
+    goes: the end of the tutorial leads into Long odds once it is unlocked."""
+    g = _tutorial()
+    hunt = next(s for s in g.stages if s.title == "The hunt")
+    bonus = next(s for s in g.stages if s.title == "Long odds")
+    assert gauntlet.next_stage(g, hunt.id) is None
+    assert gauntlet.next_stage(g, hunt.id, gauntlet.bests(g)) is None
+    _score(hunt, 90, 0)
+    assert gauntlet.next_stage(g, hunt.id, gauntlet.bests(g)) is None
+    _score(hunt, 57, 34)
+    assert gauntlet.next_stage(g, hunt.id, gauntlet.bests(g)) == bonus.id
+    assert gauntlet.gates_out(g, hunt.id) == [("Bonus", "Long odds", gauntlet.Target(turns=86, lost=72))]
+    assert gauntlet.gates_out(g, g.stages[0].id) == []
+
+
 def test_the_tutorial_hides_a_bonus_stage_behind_the_hunt():
     """Won within the best human score on The Hunt when it was added (86 turns /
     72 lost, met, not beaten), the tutorial's last stage reveals a bonus one."""

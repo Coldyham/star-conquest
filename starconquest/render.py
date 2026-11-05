@@ -3603,6 +3603,8 @@ def _stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, tuple[int, int, 
     win short of it says so, and says too when an earlier best already cleared
     the stage, since Next stage is then still offered."""
     cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
+    if not ui.run_id:
+        cleared += "".join(f"  ·  {label} unlocked: {title}" for label, title in ui.unlocked(state))
     target = ui.stage_target
     if target is None:
         return ("small", cleared, _BTN_TEAL[1])

@@ -254,7 +254,12 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     # with the hint left blank) still needs a line in the panel to tap back to
     # its briefing.
     ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
-    ui.has_next_stage = gauntlet.next_stage(g, s.id, gauntlet.bests(g)) is not None
+    ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
+    # Gated ways out (a hidden bonus stage, say), and whether a best already
+    # meets each, so the win overlay can say what this win unlocks.
+    mine = gauntlet.best(s)
+    ui.stage_gates = tuple((label, title, target, mine is not None and target.met(mine))
+                           for label, title, target in gauntlet.gates_out(g, s.id))
 
 
 def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:

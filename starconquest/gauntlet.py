@@ -496,18 +496,33 @@ def next_stage(g: Gauntlet, sid: int,
     None at the end, and None at a fork — more than one way on sends the player
     to the list to choose. Judged by depth rather than by what is still uncleared,
     so replaying a stage you have already cleared still offers the next one.
-    Only ungated lanes lead on; but with ``found`` (``bests``) in hand, a gated
-    lane out of ``sid`` whose target the best meets makes it a fork too.
+    Ungated lanes lead on. With ``found`` (``bests``) in hand, so do gated lanes
+    out of ``sid`` whose target its best meets: one such lane with no ungated way
+    on leads to its stage (a bonus stage just unlocked), and one beside an
+    ungated way on makes a fork.
     """
     depth = g.depths()
-    if sid not in depth:
+    mine = found.get(sid) if found is not None else None
+    opened = [] if mine is None else [
+        b for a, b, lane in g.ways()
+        if a == sid and lane in g.lane_targets and g.lane_targets[lane].met(mine)]
+    deeper = ([n for n in g.onward(sid, gated=False) if depth.get(n, -1) > depth[sid]]
+              if sid in depth else [])
+    if opened and deeper:
         return None
-    if found is not None and sid in found and any(
-            a == sid and lane in g.lane_targets and g.lane_targets[lane].met(found[sid])
-            for a, _, lane in g.ways()):
-        return None
-    deeper = [n for n in g.onward(sid, gated=False) if depth.get(n, -1) > depth[sid]]
-    return deeper[0] if len(deeper) == 1 else None
+    ways = deeper or opened
+    return ways[0] if len(ways) == 1 else None
+
+
+def gates_out(g: Gauntlet, sid: int) -> list[tuple[str, str, Target]]:
+    """Each gated way out of ``sid`` as plain values for the win overlay:
+    (label, far stage's title, target), e.g. ("Bonus", "Long odds", 86/72)."""
+    out = []
+    for a, b, lane in g.ways():
+        far = g.stage(b)
+        if a == sid and lane in g.lane_targets and far is not None:
+            out.append((lane_label(g, a, b) or GATED, far.title, g.lane_targets[lane]))
+    return out
 
 
 def chain(g: Gauntlet) -> list[int] | None:
