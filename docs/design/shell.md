@@ -669,6 +669,22 @@ under the same version reaches a player one visit late, as a redeploy of the
 game already does. Checked in Chromium with a stand-in CDN: the runtime loads
 from the cache with the CDN down.
 
+**The runtime is served from our own origin** (`tools/mirror_runtime.py`,
+`tools/record_runtime.mjs`, `tools/pwa/runtime_files.txt`). A school's Smoothwall
+filter blocked `pygame-web.github.io`: the board (our domain) loaded, the game sat
+on "Loading, please wait" forever. The build now mirrors the 12 runtime files into
+`web/cdn/` and rewrites the page's script URL, but that alone was not enough:
+checked in Chromium with that host blocked, the game still hung on a request for
+the package index, which the runtime's `pep0723` module reads from `$PYGPI`
+(pygbag's own tools use `$PYGPY`; it is not documented) and whose own `-CDN-` key
+also names the old host. The mirror patches `cpythonrc.py` to default `PYGPI` to
+`<origin>/cdn/` and the index's `-CDN-` to `/cdn/`. With both, the game reaches
+its menu with the host blocked (zero requests to it). If the list is missing, a
+download fails or an anchor moves with a pygbag upgrade, nothing is rewritten and
+the game keeps the remote CDN. After a pygbag upgrade rerun
+`node tools/record_runtime.mjs` and repeat the blocked-host check. The game is also
+served at `/play/`, not `/game/` (some filters match the word); `/game/*` redirects.
+
 **Not done.** The runtime's own size is pygbag's, not ours. Shipping `.pyc` to
 skip compiling: pygbag's packer drops `.pyc` (`filtering.SKIP_EXT`). Importing
 modules lazily to start sooner: the whole game imports and loads its bots in

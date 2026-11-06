@@ -4,14 +4,11 @@
 Some networks (a school filter, say) block pygame-web.github.io, and the game
 then sits on "Loading" forever while the board, on our own domain, loads fine.
 
-Two steps, both here:
+The build step:
 
-  record  Run once, on a machine with open internet, after ./tools/build_web.sh:
-            uv run python tools/mirror_runtime.py record
-          It plays the built game in headless Chromium, forwards every request
-          for the runtime to the real CDN, and writes the paths it saw to
-          tools/pwa/runtime_files.txt (commit that file). Rerun it when pygbag
-          is upgraded.
+  The list of files, tools/pwa/runtime_files.txt, is made by
+  `node tools/record_runtime.mjs` (after ./tools/build_web.sh, on a machine with
+  open internet); rerun it when pygbag is upgraded.
 
   fetch   Run by tools/build_web.sh on every build:
             python tools/mirror_runtime.py fetch web
@@ -25,16 +22,34 @@ from __future__ import annotations
 
 import argparse
 import sys
-import threading
 import urllib.request
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LIST = ROOT / "tools" / "pwa" / "runtime_files.txt"
 REMOTE = "https://pygame-web.github.io/cdn/"
 LOCAL = "/cdn/"
+
+
+# The runtime also names the CDN in two places the page's script URL doesn't
+# reach: Python reads the package index from $PYGPI (default pygame-web.github.io;
+# the runtime's pep0723 module, found by reading it, not documented), and the index lists wheels under
+# its "-CDN-" key. Both go to this origin, or the game still waits on the CDN.
+RC_ANCHOR = "    home = f\"/home/{os.environ.get('USER','web_user')}\"\n"
+RC_LINE = ('    import platform as _p; os.environ.setdefault("PYGPI", str(_p.window.location.origin) + "/cdn/")'
+           "  # tools/mirror_runtime.py\n")
+
+
+def _point_runtime_at_us(web: Path) -> bool:
+    rc = next((web / "cdn").glob("*/cpythonrc.py"), None)
+    idx = next((web / "cdn").glob("index-*.json"), None)
+    if rc is None or idx is None or RC_ANCHOR not in rc.read_text(encoding="utf-8"):
+        print("mirror_runtime: WARNING cpythonrc.py or the package index not as expected; keeping the remote CDN.",
+              file=sys.stderr)
+        return False
+    rc.write_text(rc.read_text(encoding="utf-8").replace(RC_ANCHOR, RC_LINE + RC_ANCHOR, 1), encoding="utf-8")
+    idx.write_text(idx.read_text(encoding="utf-8").replace(REMOTE, LOCAL), encoding="utf-8")
+    return True
 
 
 def fetch(web: Path) -> int:
@@ -51,7 +66,9 @@ def fetch(web: Path) -> int:
         except OSError as e:  # any network failure: leave the page on the remote CDN
             print(f"mirror_runtime: WARNING could not mirror {rel} ({e}); keeping the remote CDN.", file=sys.stderr)
             return 0
-    page = web / "game" / "index.html"
+    if not _point_runtime_at_us(web):
+        return 0
+    page = web / "play" / "index.html"
     html = page.read_text(encoding="utf-8")
     if REMOTE not in html:
         print("mirror_runtime: WARNING index.html does not name the remote CDN; nothing rewritten.", file=sys.stderr)
@@ -61,58 +78,11 @@ def fetch(web: Path) -> int:
     return 0
 
 
-def record(web: Path, wait: int) -> int:
-    from playwright.sync_api import sync_playwright
-
-    seen: set[str] = set()
-
-    def route(r):
-        url = r.request.url
-        rel = None
-        for prefix in (REMOTE, "http://localhost:8000" + LOCAL):
-            if url.startswith(prefix):
-                rel = url[len(prefix):].split("?")[0].split("#")[0]
-        if not rel:
-            return r.continue_()
-        resp = r.fetch(url=REMOTE + rel)
-        if resp.ok:
-            seen.add(rel)
-        r.fulfill(response=resp)
-
-    handler = partial(SimpleHTTPRequestHandler, directory=str(web))
-    srv = ThreadingHTTPServer(("127.0.0.1", 8000), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            ctx = b.new_context(service_workers="block")
-            ctx.route("**/*", route)
-            page = ctx.new_page()
-            page.goto("http://localhost:8000/play/")
-            print(f"recording for {wait}s (let the game reach its menu)...")
-            page.wait_for_timeout(wait * 1000)
-            b.close()
-    finally:
-        srv.shutdown()
-    if not seen:
-        print("recorded nothing: is web/ built, and is the CDN reachable?", file=sys.stderr)
-        return 1
-    LIST.write_text("# Written by tools/mirror_runtime.py record; one path under the pygbag CDN per line.\n"
-                    + "\n".join(sorted(seen)) + "\n")
-    print(f"wrote {len(seen)} paths to {LIST}")
-    return 0
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    f = sub.add_parser("fetch")
-    f.add_argument("web", type=Path)
-    r = sub.add_parser("record")
-    r.add_argument("web", type=Path, nargs="?", default=ROOT / "web")
-    r.add_argument("--wait", type=int, default=90, help="seconds to let the game load (default 90)")
-    a = ap.parse_args()
-    return fetch(a.web) if a.cmd == "fetch" else record(a.web, a.wait)
+    sub.add_parser("fetch").add_argument("web", type=Path)
+    return fetch(ap.parse_args().web)
 
 
 if __name__ == "__main__":
