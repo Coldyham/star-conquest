@@ -267,6 +267,21 @@ def proof_args(day_file: Path, splits: bool, bound: tuple[float, float], args: a
     return argv
 
 
+def settled(row: dict | None, budget: float, max_frontier: int) -> bool:
+    """A recorded pass stands unless it was cut off and this run allows it more time or a larger
+    frontier. Rows from before the limits were recorded count their seconds as the budget."""
+    if row is None:
+        return False
+    if row["exact"]:
+        return True
+    return row.get("budget", row["seconds"]) >= budget and row.get("max_frontier", 1_000_000) >= max_frontier
+
+
+def latest(rows: list[dict], stage: str, key) -> list[dict]:
+    """The last row of each pass of ``stage``: a pass run again supersedes its cut-off row."""
+    return list({key(r): r for r in rows if r["stage"] == stage}.values())
+
+
 def run_pass(name: str, argv: list[str], pass_dir: Path, best: tuple[float, float], out_dir: Path,
              header: str) -> dict:
     """Run one ``par_exhaustive`` pass (its output to the setup's log) and fold what it found
@@ -357,7 +372,7 @@ def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None =
     best: tuple[float, float] = (math.inf, math.inf)
     exact_up_to = 0
     beam_row = next((r for r in rows if r["stage"] == "beam"), None)
-    spent = {(r["first"], r["k"]) for r in rows if r["stage"] == "k"}
+    spent = {(r["first"], r["k"]): r for r in rows if r["stage"] == "k"}
     for r in rows:
         if r["stage"] in ("beam", "k", "open", "local"):
             best = min(best, (r["turn"], r["lost"]))
@@ -392,9 +407,10 @@ def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None =
         got = ""
         for splits in ([False, True] if args.proof_splits else [False]):
             row = proofs.get((when, splits))
-            if row is None:
+            if not settled(row, args.proof_budget, args.max_frontier):
                 kind = "with two-lane splits" if splits else "one lane per system per turn"
                 row = {"stage": "proof", "splits": splits, "when": when, "turn_only": args.turn_first,
+                       "budget": args.proof_budget, "max_frontier": args.max_frontier,
                        **run_pass(name, proof_args(day_file, splits, best, args, work / f"proof{int(splits)}"),
                                   work / f"proof{int(splits)}", best, out_dir,
                                   f"every order set, {kind}")}
@@ -402,6 +418,7 @@ def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None =
                 print(f"{name}: all orders{', two-lane splits' if splits else ''}: {row['turn']}/{row['lost']}"
                       f"{' (better)' if row['improved'] else ''}"
                       f"{', EXACT' if row['exact'] else ', not finished'} in {row['seconds']:.0f}s", flush=True)
+            assert row is not None
             best = min(best, (row["turn"], row["lost"]))
             if not row["exact"]:
                 break
@@ -413,17 +430,18 @@ def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None =
     stopped = ""
     improved_by: list[str] = [r["stage"] for r in rows if r["stage"] in ("open", "local") and r.get("improved")]
     for index, (first, k) in enumerate(ks):
-        if (first, k) in spent:
-            row = next(r for r in rows if r["stage"] == "k" and (r["first"], r["k"]) == (first, k))
-        else:
+        row = spent.get((first, k))
+        if not settled(row, args.k_budget, args.max_frontier):
             pass_dir = work / f"k{k}"
             row = {"stage": "k", "k": k, "first": first, "turn_only": args.turn_first,
+                   "budget": args.k_budget, "max_frontier": args.max_frontier,
                    **run_pass(name, pass_args(day_file, k, first, best, args, pass_dir), pass_dir, best,
                               out_dir, f"plans of at most {k} launch orders (from {first})")}
             append(ledger, row)
             print(f"{name}: K = {k}: {row['turn']}/{row['lost']}"
                   f"{' (better)' if row['improved'] else ''}"
                   f"{', exact' if row['exact'] else ', NOT exact'} in {row['seconds']:.0f}s", flush=True)
+        assert row is not None
         best = min(best, (row["turn"], row["lost"]))
         if row["exact"]:
             exact_up_to = max(exact_up_to, k)
@@ -480,8 +498,9 @@ def solve(name: str, data: dict, args: argparse.Namespace, source: Path | None =
         won, turn, lost = ps.check_line(replay.load(best_path), human.id)
         summary["replays"] = bool(won and (turn, lost) == (best[0], best[1]))
     now = read_rows(ledger)
-    summary["verdict"] = verdict(summary, [r for r in now if r["stage"] == "k"],
-                                 [r for r in now if r["stage"] == "proof"], args, source or day_file)
+    summary["verdict"] = verdict(summary, latest(now, "k", lambda r: (r["first"], r["k"])),
+                                 latest(now, "proof", lambda r: (r.get("when", "early"), r["splits"])),
+                                 args, source or day_file)
     last = next((r for r in reversed(rows) if r["stage"] == "done"), None)
     if last != summary:   # a rerun that changed nothing leaves the ledger alone
         append(ledger, summary)
