@@ -330,6 +330,10 @@ proved or likely, to `puzzle_pars`. The game tells only a player whose result ma
 beats it ([`daily.md`](daily.md), "The puzzle's par"). Every other map stays as decided
 here.
 
+Stars on the puzzle (proposed 2026-11-06, [`daily.md`](daily.md), "Stars after the day")
+would make a day's par public once the day has ended: its turns, ships lost and status,
+never its line.
+
 ## evolved as a candidate (2026-11-02)
 
 **What prompted it.** On the puzzle daily of 2026-11-01 (`e60a6d946d4a010b`: 6

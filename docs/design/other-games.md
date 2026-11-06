@@ -130,6 +130,10 @@ a newcomer would likely spread across the tiers, but there is no one to show
 it. Set aside until the board has more players, when the same check is worth
 repeating.
 
+The daily puzzle avoids both problems (its opponent is never knower, and its
+par is found every day). Stars on it, shown once the day ends, are proposed in
+`daily.md`, "Stars after the day" (2026-11-06).
+
 ### A rating against the bot ladder
 
 Warzone and Galcon rank players, but here two people never meet in a scored

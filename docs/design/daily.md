@@ -648,6 +648,107 @@ time-budgeted. On 11-01 a live actuary played as the search's had it on the
 moves that mattered (`par.md`, "The puzzles so far"), but a par found on a
 Sunday is only as good as that match.
 
+### Stars after the day (proposed 2026-11-06, not built)
+
+One to three stars on each counted win on a puzzle, graded against that day's
+par, **shown only once the day's embargo has ended** (the author, 2026-11-06).
+Stars on every map were set aside (`other-games.md`, "Star tiers on every
+map"): par times out on maps with knower as a rival, and bot-only tiers do not
+separate the board's one regular player. A puzzle has neither problem. Its
+opponent is never knower, and its par is already found every day.
+
+**The tiers.** Graded on turns only. Ships lost still break ties on the
+standings, but no star depends on them.
+
+| Stars | For | Par 5 | Par 7 | Par 10 | Par 11 |
+| --- | --- | --- | --- | --- | --- |
+| ★ | a win | any | any | any | any |
+| ★★ | at most 2 × par | 10 | 14 | 20 | 22 |
+| ★★★ | at most ⌊1.25 × par⌋ | 6 | 8 | 12 | 13 |
+
+The gold line stays above three stars as it is (*Par!*, *Perfect puzzle!*,
+*Beyond par!*). Matching the search is a mark of its own, not a fourth star.
+
+- **Tiers from par, not fixed bands.** The author's first sketch was 10 turns
+  or fewer for three stars and 11-20 for two. The nine puzzles in `par.md`
+  ("Every human-played puzzle, against the best human") have pars from 5 to
+  11. On 11-05 (par 5), twice par would earn three stars. On 10-31 (par 11,
+  nothing sooner up to K = 5), three stars could not be had at all. The
+  opponent changes with the weekday, so a fair turn count changes with it, and
+  par already measures that.
+- **Against the best human on those nine days** (pars dealt locally, not the
+  stored ones): three stars on eight days, and two on 10-31 (17 against 11).
+  The gold line goes to five of them. So the stars spread one strong player out
+  less than the gold line does, which is what a three-star grade is for: a good
+  game earns all three, and par stays the thing to chase.
+
+**Only after the day ends.** While the day runs, nothing about stars shows:
+not in the game, not on `puzzle.html`, not on the map page. *Copy daily result*
+is unchanged. This keeps the par's rule for the day itself (told only to a
+player who meets it), because a star or a target would say roughly where par
+is. Once the day ends, its replays are public (see "The day's winner"), and the
+best of them is the solution, so hiding the par no longer protects anything:
+
+- **A past day shows its targets** in one line, "★★★ ≤ 12 turns · ★★ ≤ 20 ·
+  par 10/9, proved". As with star tiers in `other-games.md`, a target is never
+  a mystery.
+- **So a day's par is public once the day ends**: its turns, ships lost and
+  status. Its `line` stays in `puzzle_pars` and is never published. This
+  narrows "told only to a player who meets it" to the day while it runs
+  (`par.md`, "Not on the board").
+
+**Frozen when the day ends.** A star can never be lost. A stored par can still
+improve after its day (a `--refresh`, a back-fill, a better search), so the
+stars rest on a copy of the par taken once:
+
+- **`puzzle_stars`** (`day` primary key, `par_turns`, `par_lost`,
+  `par_status`, `three_turns`, `two_turns`, `rules_version`, `set_at`).
+  `tools/puzzle_par.py` writes a row for each ended day that has a par and no
+  row yet. There is no update path: the insert does nothing on a conflict, and
+  the service role has insert but not update. The thresholds are stored as
+  well as the par, so a later change to the formula moves only new days.
+- **The copy is taken at the end of the day**, not when the par is first
+  found. A likely par can improve while the day runs (the job is hourly), and
+  the stars should rest on the best par found by the time anyone sees them.
+- **Anyone can read it for an ended day**: a policy of
+  `day < (now() at time zone 'utc')::date` and a column grant, as `dailies`
+  has. `puzzle_pars` stays unreadable.
+- **A day that ends without a par** shows no stars until the worker finds one,
+  and that par is the one frozen. The days before stars existed (10-28 onward)
+  are frozen from their current pars the first time the job runs.
+- **The gold line and the stars can disagree later.** The gold line reads the
+  live par and the stars read the frozen copy, so a better par found later can
+  take a *Par!* away from a three-star score. This is accepted: the gold line
+  is a congratulation and the stars are a record.
+
+**Who gets stars.** Every row of a past day's standings (each name's best
+counted win with a turn played by hand). The stars are derived from that row
+and the frozen targets, never stored, as crowns are. A score posted after the
+day is graded too and keeps its *later* mark: it was played with the replays
+public, and the mark says so. A score played under different rules from the
+target's `rules_version` gets no stars. A win autoplayed through gets none.
+
+**Showing it.** A star column on a past day's standings on `puzzle.html` and on
+the map page's standings for a puzzle map, with the targets line above it.
+`daily.mjs` grades the standings it already has against the day's row. The game
+needs nothing.
+
+Not proposed yet: a profile total, star badges (a three-star week, say), and
+stars in *Copy daily result*. That line is copied while the day runs, so stars
+in it would hint at the par.
+
+**Not the daily board, yet.** Showing stars only after the day removes one
+objection: once the embargo lifts, the bot column exists, and a board's targets
+could be frozen from it as a puzzle's are from its par. Two objections remain:
+
+- **Bot tiers did not separate the board's player.** In the 2026-10-28 check
+  (`other-games.md`, "Set aside: the board's scores"), 66% of posted bests
+  beat every bot. That check covered all maps. Repeating it on daily boards
+  alone is the next step.
+- **Par on a board is untested.** No board has a knower rival, so the search
+  should finish. But boards run to 24 systems and 5 players, and par has been
+  run only up to 18 systems (`par.md`).
+
 ## Interactions
 
 - **No `Settings` field, no key moves.** A daily is an ordinary dealt setup
