@@ -384,7 +384,7 @@ already resolve simultaneously. The rationale for each rule is in
   nobody else. Detail: `docs/design/daily.md`, "The puzzle's
   par".
 - **The game and the board are one site.** The root `netlify.toml` builds both;
-  the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
+  the game is at `/play/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's
   `start_url`, reopening the half last open (`sc_app_last`). Endpoints are built at call time from
   `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables

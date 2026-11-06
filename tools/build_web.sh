@@ -42,14 +42,14 @@ uv run --project "$ROOT" python "$ROOT/tools/slim_web.py" "$STAGE"
 ( cd "$STAGE" && uv run --project "$ROOT" pygbag --build --ume_block 0 --width 2560 --height 1440 \
     --icon "$ROOT/tools/pwa/favicon.png" main.py )
 
-# The game is served at /game/; the site root is a small router page
+# The game is served at /play/; the site root is a small router page
 # (tools/pwa/root.html) that sends visitors to the leaderboard at /board/ and
 # forwards the links the game has always shared — a fragment on the root URL —
-# on to /game/. pygbag loads its bundle relative to the page, so it runs from a
+# on to /play/. pygbag loads its bundle relative to the page, so it runs from a
 # subdirectory unchanged.
 rm -rf "$ROOT/web"
-mkdir -p "$ROOT/web/game"
-cp -r "$STAGE/build/web/." "$ROOT/web/game/"
+mkdir -p "$ROOT/web/play"
+cp -r "$STAGE/build/web/." "$ROOT/web/play/"
 rm -rf "$TMP"
 cp "$ROOT/tools/pwa/root.html" "$ROOT/web/index.html"
 
@@ -67,7 +67,7 @@ cp "$ROOT/tools/pwa/favicon.png" "$ROOT/web/"
 cp "$ROOT/tools/pwa/icon-192.png" "$ROOT/tools/pwa/icon-512.png" \
    "$ROOT/tools/pwa/icon-maskable-512.png" "$ROOT/tools/pwa/apple-touch-icon.png" "$ROOT/web/"
 cp "$ROOT/tools/pwa/screenshot-wide.png" "$ROOT/tools/pwa/screenshot-mobile.png" "$ROOT/web/"
-uv run --project "$ROOT" python "$ROOT/tools/pwa/inject.py" "$ROOT/web/game/index.html"
+uv run --project "$ROOT" python "$ROOT/tools/pwa/inject.py" "$ROOT/web/play/index.html"
 
 # The leaderboard's pages, served at /board/ on this same origin (its functions
 # are bundled separately, from netlify.toml's [functions] directory). The pages
@@ -95,5 +95,5 @@ fi
 python3 "$ROOT/tools/mirror_runtime.py" fetch "$ROOT/web"
 echo
 echo "Web build ready in: $ROOT/web"
-echo "Test it:   cd '$ROOT/web' && python3 -m http.server 8000   # then open http://localhost:8000 (game: /game/, board: /board/)"
+echo "Test it:   cd '$ROOT/web' && python3 -m http.server 8000   # then open http://localhost:8000 (game: /play/, board: /board/)"
 echo "Deploy it: copy the contents of $ROOT/web to any static host."

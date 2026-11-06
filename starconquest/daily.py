@@ -169,7 +169,7 @@ def result_line(day: str, settings: Settings, turns: int, lost: int, kind: str =
     """The spoiler-free lines a win copies: the day, the board's size (and a
     puzzle's opponent), the result and a link that opens today's daily of the
     kind (never this setup)."""
-    link = webstore.leaderboard_url("/game/#" + LINK_FRAGMENTS.get(kind, LINK_FRAGMENT))
+    link = webstore.leaderboard_url("/play/#" + LINK_FRAGMENTS.get(kind, LINK_FRAGMENT))
     head = (f"Star Conquest daily puzzle · {short_date(day)} · {settings.system_count()} systems"
             f" vs {opponent(settings)}" if kind == PUZZLE
             else f"Star Conquest daily · {short_date(day)} · {settings.system_count()} systems")

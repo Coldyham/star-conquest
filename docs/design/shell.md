@@ -636,7 +636,7 @@ a bare "Alcyone").
 
 Before the first frame a visitor downloads pygbag's runtime (CPython and
 pygame-ce compiled to WebAssembly, from the pygame-web CDN under a versioned
-path) and the game's own archive (`/game/starconquest.tar.gz`), then the
+path) and the game's own archive (`/play/starconquest.tar.gz`), then the
 "Loading, please wait" box stays up while Python compiles the game from source.
 
 **The archive was mostly things the game never reads.** Measured on the deployed

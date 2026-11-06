@@ -23,7 +23,7 @@
 // with the CDN before the game can start, and nothing loads offline. It is the
 // same stale-while-revalidate, keeping only CORS responses the page can read.
 //
-// It is served from the site root, not /game/ beside the game, so its scope stays
+// It is served from the site root, not /play/ beside the game, so its scope stays
 // "/" — the scope every install from before the game moved to /game/ registered —
 // and it keeps covering the board. v3 drops the v2 cache, whose "/" was the game.
 

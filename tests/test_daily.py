@@ -236,7 +236,7 @@ def test_the_result_line_gives_nothing_away():
     text = game_daily.result_line("2026-10-28", s, 23, 7)
     assert text.splitlines()[:2] == [f"Star Conquest daily · Wed 28 Oct · {s.system_count()} systems",
                                      "Won in 23 turns, 7 ships lost"]
-    assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#daily")
+    assert str(s.seed) not in text and text.splitlines()[-1].endswith("/play/#daily")
 
 
 def test_a_puzzle_result_names_its_opponent():
@@ -245,7 +245,7 @@ def test_a_puzzle_result_names_its_opponent():
         text = game_daily.result_line("2026-10-28", s, 9, 2, "puzzle")
         assert text.splitlines()[0] == (f"Star Conquest daily puzzle · Wed 28 Oct · {s.system_count()} systems"
                                         f" vs {name}")
-        assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#puzzle")
+        assert str(s.seed) not in text and text.splitlines()[-1].endswith("/play/#puzzle")
         assert game_daily.label("2026-10-28", s, "puzzle").endswith(f"vs {name}")
 
 

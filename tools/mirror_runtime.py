@@ -16,7 +16,7 @@ Two steps, both here:
   fetch   Run by tools/build_web.sh on every build:
             python tools/mirror_runtime.py fetch web
           It downloads each listed file into web/cdn/ and, only if every one
-          arrived, points web/game/index.html at /cdn/ in place of the remote
+          arrived, points web/play/index.html at /cdn/ in place of the remote
           CDN. If the list is missing or a download fails it changes nothing,
           so the game keeps loading from the remote CDN as before.
 """
@@ -88,7 +88,7 @@ def record(web: Path, wait: int) -> int:
             ctx = b.new_context(service_workers="block")
             ctx.route("**/*", route)
             page = ctx.new_page()
-            page.goto("http://localhost:8000/game/")
+            page.goto("http://localhost:8000/play/")
             print(f"recording for {wait}s (let the game reach its menu)...")
             page.wait_for_timeout(wait * 1000)
             b.close()

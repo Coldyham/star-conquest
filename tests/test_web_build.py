@@ -1,7 +1,7 @@
 """The merged site's deploy wiring, checked as text — no build is run.
 
 The game's site also serves the leaderboard (pages at /board/, functions at
-/api/; the game itself at /game/, behind a router page at the root), and each of these rules is one a broken deploy would only reveal in
+/api/; the game itself at /play/, behind a router page at the root), and each of these rules is one a broken deploy would only reveal in
 production: a service worker answering a play-by-post poll from cache, function
 source published as static files, a functions directory that isn't there.
 """
@@ -108,7 +108,7 @@ def test_the_build_skips_the_tap_to_start_gate_but_keeps_the_leave_warning():
 
 
 def test_the_game_page_gets_our_favicon_not_pygbags():
-    """Without `--icon`, pygbag downloads its own default into /game/favicon.png,
+    """Without `--icon`, pygbag downloads its own default into /play/favicon.png,
     and the game page links that one rather than the site root's."""
     call = BUILD[BUILD.index("pygbag --build"):].split(")", 1)[0]
     assert '--icon "$ROOT/tools/pwa/favicon.png"' in call
@@ -168,9 +168,9 @@ def test_the_board_header_paints_over_the_page_so_its_menu_can_drop_down():
 
 
 def test_the_root_is_the_router_and_the_game_is_under_game():
-    assert 'cp -r "$STAGE/build/web/." "$ROOT/web/game/"' in BUILD
+    assert 'cp -r "$STAGE/build/web/." "$ROOT/web/play/"' in BUILD
     assert 'cp "$ROOT/tools/pwa/root.html" "$ROOT/web/index.html"' in BUILD
-    assert 'inject.py" "$ROOT/web/game/index.html"' in BUILD
+    assert 'inject.py" "$ROOT/web/play/index.html"' in BUILD
     # The service worker stays at the root, keeping the scope old installs hold.
     assert 'cp "$ROOT/tools/pwa/sw.js" "$ROOT/web/"' in BUILD
     inject = (ROOT / "tools" / "pwa" / "inject.py").read_text()
@@ -181,7 +181,7 @@ def test_the_router_sends_shared_links_to_the_game_and_visitors_to_the_board():
     """Every link the game ever shared is the root URL plus a fragment, which the
     server never sees; the router is what keeps them opening the game."""
     assert "location.hash.length > 1" in ROUTER
-    assert '"/game/"' in ROUTER and '"/board/"' in ROUTER
+    assert '"/play/"' in ROUTER and '"/board/"' in ROUTER
     assert "location.hash)" in ROUTER, "the fragment must be forwarded intact"
     assert "display-mode: standalone" in ROUTER, "an old install launches /index.html"
 
@@ -192,7 +192,7 @@ def test_the_manifest_keeps_its_id_and_launches_the_router():
     # `id` resolves against start_url, so it must be absolute to stay the
     # pre-move default (the old start_url) and let existing installs update.
     assert manifest["id"] == "/index.html"
-    # The router, not /game/, so a launch can reopen the board.
+    # The router, not /play/, so a launch can reopen the board.
     assert manifest["start_url"] == "./index.html"
     assert manifest["scope"] == "./"
 
@@ -204,7 +204,7 @@ def test_the_manifest_shortcuts_open_the_dailies_and_the_campaign():
     from starconquest import daily
     manifest = json.loads((ROOT / "tools" / "pwa" / "manifest.webmanifest").read_text())
     urls = [s["url"] for s in manifest["shortcuts"]]
-    assert urls == ["/game/#puzzle", "/game/#daily", "/board/campaign.html"]
+    assert urls == ["/play/#puzzle", "/play/#daily", "/board/campaign.html"]
     assert daily.link("daily") == (daily.BOARD, "")
     assert daily.link("puzzle") == (daily.PUZZLE, "")
     assert "campaign.html" in render_board.PAGES
@@ -215,14 +215,14 @@ def test_the_manifest_shortcuts_open_the_dailies_and_the_campaign():
 
 def test_the_board_links_to_the_game_under_game():
     config = (ROOT / "leaderboard" / "js" / "config.mjs").read_text()
-    assert 'GAME_URL_FALLBACK = "https://star-conquest.netlify.app/game/"' in config
-    assert "`https://${host}/game/`" in config
+    assert 'GAME_URL_FALLBACK = "https://star-conquest.netlify.app/play/"' in config
+    assert "`https://${host}/play/`" in config
     for page in render_board.PAGES:
         html = render_board.render(page)
-        assert 'href="../game/">' in html, f"{page}'s Play button"
+        assert 'href="../play/">' in html, f"{page}'s Play button"
         assert 'href="../">' not in html
     from tools import admin
-    assert admin.GAME_URL == "https://star-conquest.netlify.app/game/"
+    assert admin.GAME_URL == "https://star-conquest.netlify.app/play/"
 
 
 def test_the_launcher_imports_pygame_for_pygbag():
@@ -234,7 +234,7 @@ def test_the_launcher_imports_pygame_for_pygbag():
 
 def test_every_board_page_is_installable():
     """A browser offers the install only on a page that links the manifest and
-    is controlled by the worker, so the board needs both, not just /game/."""
+    is controlled by the worker, so the board needs both, not just /play/."""
     for page in render_board.PAGES:
         assert '<link rel="manifest" href="/manifest.webmanifest">' in render_board.render(page), page
     nav = (ROOT / "leaderboard" / "js" / "nav.mjs").read_text()
