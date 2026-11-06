@@ -211,3 +211,15 @@ def test_a_search_killed_after_a_checkpoint_resumes_to_the_same_answer(tmp_path,
     layers = [r["depth"] for r in map(json.loads, (out / "t_k.jsonl").read_text().splitlines())
               if r["event"] == "layer"]
     assert layers.count(saves[-1] + 1) >= 1   # it went on from the saved layer
+
+
+def test_a_checkpoint_round_trips_in_chunks_and_reads_the_single_pickle_form(tmp_path, monkeypatch):
+    signature = {"seed": 1}
+    state = {"signature": signature, "limit": None, "depth": 3, "layer": [(i, ()) for i in range(7)],
+             "incumbent": (10, 3), "exact": True, "elapsed": 5.0}
+    monkeypatch.setattr(pe, "CHECKPOINT_CHUNK", 3)
+    pe.save_checkpoint(tmp_path / "c.pkl", state)
+    assert pe.load_checkpoint(tmp_path / "c.pkl", signature) == state
+    with (tmp_path / "old.pkl").open("wb") as f:
+        pe.pickle.dump(state, f)
+    assert pe.load_checkpoint(tmp_path / "old.pkl", signature) == state
