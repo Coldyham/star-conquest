@@ -17,6 +17,7 @@ than silently shipping a non-installable page.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -120,6 +121,13 @@ def main() -> int:
         html = html.replace(bad_meta, "", 1)
     else:
         print("inject.py: WARNING — second viewport meta not found; leaving it")
+
+    # pygbag's template still loads browserfs.min.js, a file its CDN removed (404
+    # on pygame-web.github.io too; the runtime says it "must be fully provided
+    # from template"). The tag only costs a failed request, so drop it (best-effort).
+    html, dropped = re.subn(r'[ \t]*<script src="[^"]*browserfs\.min\.js"></script>\n?', "", html, count=1)
+    if not dropped:
+        print("inject.py: WARNING — browserfs script tag not found; leaving it")
 
     path.write_text(html, encoding="utf-8")
     print(f"inject.py: patched {path} for PWA + dark loading screen")
