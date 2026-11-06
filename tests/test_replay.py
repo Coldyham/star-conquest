@@ -144,7 +144,8 @@ def test_record_turn_stores_every_seat_not_just_the_human():
 
 
 def test_record_turn_stores_standing_rules():
-    rules = {3: ForwardRule({7: 100}, 2), 4: ForwardRule({9: 34, 1: 33, 5: 33}, 0)}
+    rules = {3: ForwardRule({7: 100}, 2), 4: ForwardRule({9: 34, 1: 33, 5: 33}, 0),
+             6: ForwardRule({2: 100}, 1, smart=True)}
     log = replay.new_log(Settings(seed=1), 1)
     log.record_turn(_record([]), rules=rules)
     assert log.rules_for(0) == rules

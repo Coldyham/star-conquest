@@ -206,6 +206,12 @@ def test_forward_steppers_adjust_the_share_and_the_hold():
             _click_pos(state, ui, (210, 170))
         assert ui.auto_forward[home].hold == 0
 
+        ui.hold_smart_rect = (300, 160, 40, 20)   # the "smart" chip toggles
+        _click_pos(state, ui, (310, 170))
+        assert ui.auto_forward[home].smart
+        _click_pos(state, ui, (310, 170))
+        assert not ui.auto_forward[home].smart
+
         # sending nothing is no rule at all: down to 0% deletes it
         for _ in range(100 // step):
             _click_pos(state, ui, (210, 140))

@@ -560,6 +560,24 @@ between "keep N" and "send N%" was mocked up and rejected: "keep N" really means
 to be a percent, and the switch had to explain that. Splitting the two quantities
 by what they are about removes the switch altogether.
 
+**A smart hold sizes itself against the heaviest wave.** In practice a hold was
+set to beat the largest turn's worth of enemy ships flying in (a retaliatory 2 held
+by 3, or several 1s landing together) and taken off once they were dealt with. The
+hold row's "smart" chip (`ForwardRule.smart`) does that every turn:
+`combat.heaviest_wave` sums the rival ships landing on the system per turn, every
+lane and rival together, and `combat.hold_count` keeps the fewest ships that beat
+the largest of them on every roll, read off `preview_fight`'s corner most in the
+attacker's favour (the defending edge, `edge_defending`, exactly, so a near tie
+that would wipe both sides out counts as lost). Production and our own inbound
+fleets are not counted, so it errs safe. Every fleet bound for a system we hold is
+drawn (`render._fleet_shown`), so it reads nothing the player cannot count.
+`Ui.hold_of` is the one figure, used by `forward_this_turn`, the popup, the badge
+("smart N", shown even at 0 so it reads as armed) and the panel. −/+ on a smart
+hold take it back by hand from the figure it had reached. Where the row is too
+narrow for "holds" and the chip, the chip alone reads "hold", or a lit "smart".
+The log stores `"smart": true` only on a smart rule, so other rules are stored
+as before.
+
 **Adding a lane splits evenly; removing one undoes it.** `model.shares_with` gives
 the new lane an even cut of what is being sent and shrinks the others in
 proportion, so 100 becomes 50/50 becomes 34/33/33, a lone 50% becomes 25/25 (the

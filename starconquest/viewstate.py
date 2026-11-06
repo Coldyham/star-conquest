@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from . import coach, config, model, stats, turnfilm
+from . import coach, combat, config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
@@ -339,6 +339,7 @@ class Ui:
     # the Even split / Delete all pair. Same handoff as the rects above.
     hold_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     hold_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    hold_smart_rect: tuple[int, int, int, int] = (0, 0, 0, 0)  # the hold row's "smart" toggle
     share_rows: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
     even_split_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     delete_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -1145,11 +1146,32 @@ class Ui:
     def step_share(self, steps: int) -> None:
         self.set_share(self.edited_share() + steps * config.FORWARD_STEP_PCT)
 
-    def step_hold(self, delta: int) -> None:
-        """Nudge how many ships the edited system holds back, across all its lanes."""
+    def step_hold(self, delta: int, state: GameState | None = None) -> None:
+        """Nudge how many ships the edited system holds back, across all its lanes.
+        On a smart hold it takes the hold back by hand, stepping from the figure the
+        smart hold had reached, so the number moves the way the button says."""
         rule = self.edited_rule()
         if rule is not None:
-            rule.hold = max(0, min(config.FORWARD_HOLD_MAX, rule.hold + delta))
+            smart = rule.smart and state is not None and self.selected is not None
+            start = self.hold_of(state, self.selected) if smart else rule.hold
+            rule.smart = False
+            rule.hold = max(0, min(config.FORWARD_HOLD_MAX, start + delta))
+
+    def toggle_smart_hold(self) -> None:
+        """Switch the edited system between a hold by hand and a smart one."""
+        rule = self.edited_rule()
+        if rule is not None:
+            rule.smart = not rule.smart
+
+    def hold_of(self, state: GameState, sid: int) -> int:
+        """Ships ``sid``'s rule keeps back this turn: its hold, or for a smart hold
+        enough to keep the system against the heaviest wave flying in."""
+        rule = self.auto_forward.get(sid)
+        if rule is None:
+            return 0
+        if rule.smart and sid in state.systems:
+            return combat.smart_hold(state, sid, self.human_id)
+        return rule.hold
 
     def focus_lane(self, dest: int) -> None:
         """Point the Forward tab at another lane of the same system."""
@@ -1196,7 +1218,7 @@ class Ui:
         rule = self.auto_forward.get(sid)
         if rule is None or sid not in state.systems:
             return {}
-        surplus = self.available(state, sid) - rule.hold
+        surplus = self.available(state, sid) - self.hold_of(state, sid)
         return model.forward_split(surplus, rule.shares, state.turn)
 
     def send_all(self, state: GameState) -> None:
@@ -1564,10 +1586,10 @@ class Ui:
         resetting tuning. An existing rule is reported replaced only when its lanes
         change."""
         old = self.auto_forward.get(node)
-        hold = old.hold if old is not None else 0
         if old is not None and old.shares != shares:
             self.route_replaces.add(node)
-        self.route_plan[node] = ForwardRule(shares, hold)
+        self.route_plan[node] = (ForwardRule(shares, old.hold, old.smart) if old is not None
+                                 else ForwardRule(shares))
 
     def _plan_chain(self, state: GameState) -> None:
         """Chain routing: walk each selected system's path to the destination.
@@ -1682,7 +1704,7 @@ class Ui:
             if sid not in plan:
                 self.clear_forward(sid)
         for src, rule in plan.items():
-            self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold)
+            self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold, rule.smart)
             self.forward_set_on[src] = state.turn
         self.reset_route()
 

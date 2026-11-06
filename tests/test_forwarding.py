@@ -6,9 +6,9 @@ pygame-free; `main.auto_forward_orders` is where the two become this turn's orde
 
 from __future__ import annotations
 
-from starconquest import config, main, model
+from starconquest import combat, config, main, model, replay
 from starconquest.geometry import WorldView
-from starconquest.model import ForwardRule, GameState, Player, System
+from starconquest.model import Fleet, ForwardRule, GameState, Player, System
 from starconquest.viewstate import CHOOSING, Ui
 
 
@@ -233,6 +233,65 @@ def test_hold_is_the_systems_and_stays_in_range():
     assert ui.auto_forward[0].hold == 0
     ui.step_hold(config.FORWARD_HOLD_MAX + 5)
     assert ui.auto_forward[0].hold == config.FORWARD_HOLD_MAX
+
+
+def _incoming(state, ships: int, turns: int, owner: int = 2, src: int = 4) -> None:
+    """An enemy fleet of ``ships`` landing on system 0 in ``turns`` turns."""
+    state.fleets.append(Fleet(owner_id=owner, source_id=src, dest_id=0,
+                              ships=ships, turns_total=turns, turns_remaining=turns))
+
+
+def test_smart_hold_is_the_edge_against_the_heaviest_wave(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 100}, 0, smart=True)
+    assert ui.hold_of(state, 0) == 0                    # nothing coming: hold nothing
+    _incoming(state, 2, 3)
+    assert ui.hold_of(state, 0) == 3                    # a retaliatory 2 is held by 3
+    # several 1s: those landing on the same turn are one wave, whatever their lane
+    _incoming(state, 1, 1)
+    _incoming(state, 1, 2)
+    _incoming(state, 1, 2, owner=3)
+    _incoming(state, 1, 2, src=1)
+    assert combat.heaviest_wave(state, 0, 1) == 3
+    assert ui.hold_of(state, 0) == combat.hold_count(3, 0.10, 1.0) == 4
+    assert ui.forward_this_turn(state, 0) == {1: 12 - 4}
+    # our own fleets flying in are no threat
+    _incoming(state, 9, 2, owner=1, src=1)
+    assert ui.hold_of(state, 0) == 4
+
+
+def test_hold_count_clears_every_roll_including_a_mutual_wipe():
+    for jitter, adv in ((0.1, 1.0), (0.2, 1.3), (0.0, 1.0)):
+        for e in range(1, 30):
+            d = combat.hold_count(e, jitter, adv)
+            assert combat.preview_fight(e, d, jitter, adv).best.winner == combat.DEFENDER
+            assert combat.preview_fight(e, d - 1, jitter, adv).best.winner != combat.DEFENDER or d - 1 <= e
+    assert combat.hold_count(0, 0.1, 1.0) == 0
+
+
+def test_stepping_a_smart_hold_takes_it_back_by_hand_from_its_figure(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 100}, 5)
+    ui.edit_forward(state, 0, 1)
+    _incoming(state, 2, 1)
+    ui.toggle_smart_hold()
+    assert ui.auto_forward[0].smart and ui.hold_of(state, 0) == 3
+    ui.step_hold(1, state)
+    assert ui.auto_forward[0] == ForwardRule({1: 100}, 4, smart=False)
+    ui.toggle_smart_hold()
+    ui.toggle_smart_hold()
+    assert ui.auto_forward[0] == ForwardRule({1: 100}, 4, smart=False)
+
+
+def test_a_smart_hold_survives_the_log_and_old_rules_read_as_by_hand():
+    rules = {0: ForwardRule({1: 100}, 2, smart=True), 3: ForwardRule({1: 100}, 2)}
+    raw = replay.rules_to_dict(rules)
+    assert "smart" not in raw["3"]
+    assert replay.rules_from_dict(raw) == rules
 
 
 def test_clearing_dangerous_lanes_leaves_the_safe_ones():
