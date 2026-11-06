@@ -87,6 +87,12 @@ mkdir -p "$ROOT/web/cdn/cp312"
 if ! curl -fsSL -o "$ROOT/web/cdn/cp312/$WHEEL" "https://pygame-web.github.io/cdn/cp312/$WHEEL"; then
     echo "WARNING: could not mirror $WHEEL — the app will try the remote CDN at runtime." >&2
 fi
+# Mirror pygbag's whole runtime (CPython and pygame in WebAssembly) and point the
+# game page at it, so a network that blocks pygame-web.github.io (a school
+# filter) still loads the game from our own domain. Reads
+# tools/pwa/runtime_files.txt (made by `tools/mirror_runtime.py record`); with no
+# list, or if any download fails, the page keeps the remote CDN.
+python3 "$ROOT/tools/mirror_runtime.py" fetch "$ROOT/web"
 echo
 echo "Web build ready in: $ROOT/web"
 echo "Test it:   cd '$ROOT/web' && python3 -m http.server 8000   # then open http://localhost:8000 (game: /game/, board: /board/)"
