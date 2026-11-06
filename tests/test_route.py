@@ -253,6 +253,27 @@ def test_a_split_rule_is_replaced_even_when_one_lane_agrees():
     assert ui.auto_forward[1] == ForwardRule({2: 100}, 0)
 
 
+def test_a_routed_rule_does_not_make_the_next_tap_a_forward():
+    """The "set up this turn" helper is for a rule being built from the popup. A
+    route is a finished plan: a tap from one of its systems opens on Send, even
+    one whose popup-made rule the route replaced, and a lane added there replaces
+    the route's rule (Cancel puts it back) rather than splitting it."""
+    s = _graph([(0, 1), (1, 2), (1, 3)], {sid: 1 for sid in range(4)})
+    ui = _ui(s)
+    ui.auto_forward[1] = ForwardRule({3: 100}, 0)
+    ui.forward_set_on[1] = s.turn
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 2)
+    ui.confirm_route(s)
+    assert not ui.opens_on_forward(s, 0) and not ui.opens_on_forward(s, 1)
+    ui.selected = 1
+    ui.begin_send(s, 3)
+    ui.set_forward_mode(s, True)
+    assert ui.auto_forward[1] == ForwardRule({3: 100}, 0)
+    ui.cancel_send()
+    assert ui.auto_forward[1] == ForwardRule({2: 100}, 0)
+
+
 def test_a_split_lane_back_into_the_plan_is_a_cycle():
     """A loop down one lane of a split traps that share, so it counts."""
     s = _line(4, owned={0, 1, 2, 3})

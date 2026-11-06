@@ -589,7 +589,9 @@ lane joins, or the new lane would be born idle.
 
 **Splitting is for this turn's rule; an older one is replaced.** Adding a lane
 splits only a rule set up this turn (`Ui.forward_set_on`, stamped when the popup
-arms a lane or a route is confirmed). A rule from an earlier turn is what the
+arms a lane). A route's rules are not stamped, and a route clears the stamp from
+any rule it replaces: a route is a finished plan, so a tap from one of its
+systems afterwards is almost always a one-shot send, not another lane of it. A rule from an earlier turn is what the
 player set up *then*; a new lane on a later turn almost always means "send here
 now", so it replaces the whole rule with that lane at 100% and hold 0. The old
 rule is kept aside (`Ui.forward_replaced`) so Cancel or the Send tab puts it back.

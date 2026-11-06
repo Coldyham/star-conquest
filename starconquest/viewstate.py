@@ -164,10 +164,10 @@ class Ui:
     # (`forward_this_turn`, expanded by `forward_orders`).
     auto_forward: dict[int, ForwardRule] = field(default_factory=dict)
     sel_forward: int | None = None  # source id of the rule being edited, if any
-    # source_id -> the turn a lane was last added to its rule from the popup (or
-    # a route confirmed through it). A rule set up this turn opens the popup on its
-    # Forward tab and a further lane splits it; one from an earlier turn is
-    # replaced outright by the next lane added (see `toggle_forward`).
+    # source_id -> the turn a lane was last added to its rule from the popup (never
+    # by a route, which clears it). A rule set up this turn opens the popup on its
+    # Forward tab and a further lane splits it; one from an earlier turn, or laid
+    # by a route, is replaced outright by the next lane added (see `toggle_forward`).
     forward_set_on: dict[int, int] = field(default_factory=dict)
     # The rule a fresh compose replaced, kept so Cancel or the Send tab can put
     # it back as it was: (source, rule). None when nothing was replaced.
@@ -1705,7 +1705,10 @@ class Ui:
                 self.clear_forward(sid)
         for src, rule in plan.items():
             self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold, rule.smart)
-            self.forward_set_on[src] = state.turn
+            # A route is a finished plan, not a rule being built up from the popup:
+            # the next tap from one of its systems opens on Send, and a lane added
+            # there replaces the route's rule rather than splitting it.
+            self.forward_set_on.pop(src, None)
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #
