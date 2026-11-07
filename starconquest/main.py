@@ -138,10 +138,9 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
     ui = Ui(view=build_view(state), human_id=seat, autoplay=autoplay,
             ironman=webstore.ironman())
     if settings is not None and seat == 1:
-        # The daily is played once by everyone, so it hides History until it is
-        # decided whatever the local preference says (docs/design/daily.md).
+        # The daily follows the local ironman preference like any game: a puzzle
+        # is exactly where a player wants to take a move back (Undo, U).
         ui.daily_day, ui.daily_kind = daily.daily_of(settings)
-        ui.ironman = ui.ironman or bool(ui.daily_day)
     ui.seat_bots = seat_bot_labels(state)
     if settings is not None:
         ui.random_seats = frozenset(pid for pid in state.players if not state.players[pid].is_neutral
@@ -263,9 +262,8 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
 
 
 def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
-    """Mark ``ui`` as the run's own game, after `stage_ui`. It plays ironman, as
-    the daily does, so History (and a rewind with it) waits until the game is
-    decided; the Hint is not offered (`Ui.can_hint`); and the top bar says it is
+    """Mark ``ui`` as the run's own game, after `stage_ui`. It plays ironman, so
+    History and Undo (both rewinds) wait until the game is decided; the Hint is not offered (`Ui.can_hint`); and the top bar says it is
     a run."""
     ui.run_at, ui.run_total = gauntlet_run.position(r, g)
     ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
@@ -509,7 +507,7 @@ def copy_daily_result(settings: Settings, state: GameState, ui: Ui) -> str:
     """Copy a daily win's spoiler-free result line. Returns a line for the
     overlay. The clipboard only, as a challenge link: the line names no setup,
     and its link opens today's daily, not this one."""
-    text = daily.result_line(ui.daily_day, settings, state.turn,
+    text = daily.result_line(ui.daily_day, state.turn,
                              state.players[ui.human_id].ships_lost, ui.daily_kind or daily.BOARD)
     if webstore.copy_to_clipboard(text):
         return "Result copied — paste it anywhere"
@@ -2781,6 +2779,16 @@ async def main() -> None:
                 if not was_watched:
                     stamp_campaign(ui, menu_state.campaign_watch)
                     stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
+                history_states, history_fog, history_events, live_fog = [], [], [], None
+                auto_accum = 0
+            elif action == "undo" and ui.can_undo(state):
+                # Rewind the live game one turn, as History's "Rewind to here" on
+                # the turn before does, without the scrubbing or the confirm.
+                assert log is not None
+                stamped = ui.campaign_start   # the same match, so the same start
+                state, ui = apply_rewind(log, settings, max(log.turn_count - 1, 0))
+                ui.campaign_start = stamped
+                stage_ui(ui, menu.active_stage(menu_state, settings), briefing=False)
                 history_states, history_fog, history_events, live_fog = [], [], [], None
                 auto_accum = 0
             elif action == "toggle_route":

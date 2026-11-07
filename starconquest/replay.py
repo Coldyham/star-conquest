@@ -151,13 +151,17 @@ def _order_from_dict(d: dict) -> Order | None:
 
 def rules_to_dict(rules: dict[int, ForwardRule] | None) -> dict:
     """Standing auto-forward rules (``Ui.auto_forward``) as JSON: ``{"src": {"hold":
-    n, "to": {"dest": pct}}}``, lanes in the order they were added. The one form
-    they are stored in, by a log turn and by play-by-post's local copy
-    (``pbp.remember_rules``) alike."""
-    return {
-        str(src): {"hold": rule.hold, "to": {str(dest): pct for dest, pct in rule.shares.items()}}
-        for src, rule in (rules or {}).items()
-    }
+    n, "to": {"dest": pct}}}``, lanes in the order they were added, plus ``"smart":
+    true`` on a smart hold (absent otherwise, so a rule without one is stored as it
+    always was). The one form they are stored in, by a log turn and by
+    play-by-post's local copy (``pbp.remember_rules``) alike."""
+    out = {}
+    for src, rule in (rules or {}).items():
+        entry = {"hold": rule.hold, "to": {str(dest): pct for dest, pct in rule.shares.items()}}
+        if rule.smart:
+            entry["smart"] = True
+        out[str(src)] = entry
+    return out
 
 
 def rules_from_dict(raw) -> dict[int, ForwardRule]:
@@ -173,7 +177,8 @@ def rules_from_dict(raw) -> dict[int, ForwardRule]:
             sid = int(src)
             if isinstance(rule, dict):
                 shares = {int(d): max(0, min(100, int(p))) for d, p in dict(rule["to"]).items()}
-                parsed = ForwardRule(shares, max(0, int(rule.get("hold", 0))))
+                parsed = ForwardRule(shares, max(0, int(rule.get("hold", 0))),
+                                     rule.get("smart") is True)
             else:
                 dest, keep = rule
                 parsed = ForwardRule({int(dest): 100}, max(0, int(keep)))

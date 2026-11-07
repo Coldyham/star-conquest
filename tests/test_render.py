@@ -573,7 +573,8 @@ def _popup_rects(ui):
     A split lane's own −/+ are included; its row rect is not, since it holds them."""
     names = ("send_tab_rect", "forward_tab_rect", "minus_rect", "plus_rect",
              "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect",
-             "hold_minus_rect", "hold_plus_rect", "even_split_rect", "delete_all_rect")
+             "hold_minus_rect", "hold_plus_rect", "hold_smart_rect", "even_split_rect",
+             "delete_all_rect")
     rects = {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
     for dest, _row, minus, plus in ui.share_rows:
         rects[f"lane {dest} -"] = pygame.Rect(*minus)
@@ -887,6 +888,38 @@ def test_ironman_hides_history_until_the_game_is_decided():
 
         state.winner = 2
         assert ui.can_review(state)
+    finally:
+        pygame.quit()
+
+
+def test_undo_button_follows_can_undo():
+    """Undo is on the footer exactly when ``Ui.can_undo`` says: a recorded turn,
+    no ironman, an undecided game of our own (held open so a folded one counts)."""
+    pygame.init()
+    render._FONTS.clear()
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+
+    def draw():
+        ui.more_open = True
+        render.draw(screen, state, ui)
+
+    try:
+        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+        ui = _make_ui(state)
+        draw()
+        assert ui.undo_button_rect[2] == 0, "nothing to undo on turn 0"
+        state.turn = 3
+        draw()
+        assert ui.undo_button_rect[2] > 0
+        ui.ironman = True
+        draw()
+        assert ui.undo_button_rect[2] == 0
+        ui.ironman = False
+        ui.pbp_match = "m1"
+        assert not ui.can_undo(state), "a shared match is never ours to rewind"
+        ui.pbp_match = ""
+        state.winner = 2
+        assert not ui.can_undo(state), "a decided game rewinds from History"
     finally:
         pygame.quit()
 
