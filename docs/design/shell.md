@@ -262,6 +262,13 @@ footer button and main's `toggle_history` both ask. A spectator who has been
 knocked out still can't open History, or they could rewind and play on; once
 the game has a winner, *History & coach* on the win overlay is offered as usual.
 
+*Undo* (U, the footer) is History's *Rewind to here* on the turn before, in one
+press and with no confirm (`main.apply_rewind` on `turn_count - 1`). It is a
+rewind, so `Ui.can_undo` asks `can_review` first (ironman hides it with
+History), and adds live play of an undecided game of our own: a decided game
+rewinds from History, which forks it, and a play-by-post match is never ours to
+rewind. A run game plays ironman, so it has none.
+
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and
 someone chasing a posted result would otherwise only learn it at the end.
@@ -560,6 +567,24 @@ between "keep N" and "send N%" was mocked up and rejected: "keep N" really means
 to be a percent, and the switch had to explain that. Splitting the two quantities
 by what they are about removes the switch altogether.
 
+**A smart hold sizes itself against the heaviest wave.** In practice a hold was
+set to beat the largest turn's worth of enemy ships flying in (a retaliatory 2 held
+by 3, or several 1s landing together) and taken off once they were dealt with. The
+hold row's "smart" chip (`ForwardRule.smart`) does that every turn:
+`combat.heaviest_wave` sums the rival ships landing on the system per turn, every
+lane and rival together, and `combat.hold_count` keeps the fewest ships that beat
+the largest of them on every roll, read off `preview_fight`'s corner most in the
+attacker's favour (the defending edge, `edge_defending`, exactly, so a near tie
+that would wipe both sides out counts as lost). Production and our own inbound
+fleets are not counted, so it errs safe. Every fleet bound for a system we hold is
+drawn (`render._fleet_shown`), so it reads nothing the player cannot count.
+`Ui.hold_of` is the one figure, used by `forward_this_turn`, the popup, the badge
+("smart N", shown even at 0 so it reads as armed) and the panel. −/+ on a smart
+hold take it back by hand from the figure it had reached. Where the row is too
+narrow for "holds" and the chip, the chip alone reads "hold", or a lit "smart".
+The log stores `"smart": true` only on a smart rule, so other rules are stored
+as before.
+
 **Adding a lane splits evenly; removing one undoes it.** `model.shares_with` gives
 the new lane an even cut of what is being sent and shrinks the others in
 proportion, so 100 becomes 50/50 becomes 34/33/33, a lone 50% becomes 25/25 (the
@@ -571,7 +596,9 @@ lane joins, or the new lane would be born idle.
 
 **Splitting is for this turn's rule; an older one is replaced.** Adding a lane
 splits only a rule set up this turn (`Ui.forward_set_on`, stamped when the popup
-arms a lane or a route is confirmed). A rule from an earlier turn is what the
+arms a lane). A route's rules are not stamped, and a route clears the stamp from
+any rule it replaces: a route is a finished plan, so a tap from one of its
+systems afterwards is almost always a one-shot send, not another lane of it. A rule from an earlier turn is what the
 player set up *then*; a new lane on a later turn almost always means "send here
 now", so it replaces the whole rule with that lane at 100% and hold 0. The old
 rule is kept aside (`Ui.forward_replaced`) so Cancel or the Send tab puts it back.

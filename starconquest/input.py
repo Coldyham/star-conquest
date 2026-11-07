@@ -3,7 +3,7 @@ high-level actions. Mutates only the Ui (and queues human Orders); it never
 touches the simulation directly — resolving a turn is main.py's job via the
 engine. Returns an action string ('end_turn', 'restart', 'retry',
 'toggle_autoplay', 'toggle_play', 'toggle_fast_forward', 'toggle_history',
-'toggle_route', 'hint', 'rewind', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
+'toggle_route', 'hint', 'rewind', 'undo', 'menu', 'share', 'pbp_copy_seat', 'next_stage') or
 None.
 """
 
@@ -692,6 +692,8 @@ def _handle_key(event, state: GameState, ui: Ui) -> str | None:
         return "menu"
     if event.key == pygame.K_t:
         return "retry" if ui.can_retry else None
+    if event.key == pygame.K_u:
+        return "undo" if ui.can_undo(state) else None
     if event.key == pygame.K_h:
         return "toggle_history"
     if event.key == pygame.K_g:
@@ -867,6 +869,8 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
         return True, "menu"
     if ui.retry_live_button_rect[2] and _point_in_rect(pos, ui.retry_live_button_rect):
         return True, "retry"
+    if ui.undo_button_rect[2] and _point_in_rect(pos, ui.undo_button_rect):
+        return True, "undo"
     if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
         _clear_selected(ui)
         return True, None
@@ -944,10 +948,13 @@ def _popup_press(state: GameState, ui: Ui, pos) -> bool:
             ui.set_share(100) if ui.forward_armed else ui.send_all(state)
             return True
         if ui.hold_minus_rect[2] and _point_in_rect(pos, ui.hold_minus_rect):
-            ui.step_hold(-1)
+            ui.step_hold(-1, state)
             return True
         if ui.hold_plus_rect[2] and _point_in_rect(pos, ui.hold_plus_rect):
-            ui.step_hold(1)
+            ui.step_hold(1, state)
+            return True
+        if ui.hold_smart_rect[2] and _point_in_rect(pos, ui.hold_smart_rect):
+            ui.toggle_smart_hold()
             return True
         # a split system's lanes: −/+ retune that lane; anywhere else on its row
         # makes it the lane the popup (and the map highlight) is about

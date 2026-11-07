@@ -355,7 +355,7 @@ already resolve simultaneously. The rationale for each rule is in
   so a `RULES_VERSION` bump needs nothing from it. The public reads a day once
   it starts (the policy on `dailies`); `/api/daily` answers the game
   (`starconquest/daily.py`), which applies the setup to the menu as a link
-  does, remembers it by challenge key (`daily.remember`), plays it ironman and
+  does, remembers it by challenge key (`daily.remember`), follows the ironman preference (Undo, U, takes a turn back) and
   copies a result line instead of a challenge link. `daily_games` matches a day
   to its maps by jsonb equality. **A day's map is embargoed until the day ends**
   (`game_embargoes`, as a live campaign week is), so the best score posted on
@@ -514,7 +514,8 @@ already resolve simultaneously. The rationale for each rule is in
 - **A forwarding rule is a system's hold plus a share per lane**
   (`model.ForwardRule`); the share arithmetic lives in `model` only, and
   `Ui.forward_this_turn` is the one formula behind both the orders and every
-  number shown. Detail: `docs/design/shell.md`, "Forwarding rules".
+  number shown. A smart hold is sized each turn by `combat.smart_hold`, read
+  only through `Ui.hold_of`. Detail: `docs/design/shell.md`, "Forwarding rules".
 - **Losing makes the human a spectator**: the whole board is revealed once
   `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
 - **The Combat tab teaches the square law from the real code**:

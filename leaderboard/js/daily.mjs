@@ -12,6 +12,19 @@ export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 // A day's two dailies (`dailies.kind`): the board, and the puzzle, a small duel
 // won in the fewest turns.
 export const KINDS = ["board", "puzzle"];
+// Day 1 of both kinds' numbering ("puzzle #11"); the game's daily.FIRST_DAY.
+export const FIRST_DAY = "2026-10-28";
+
+/** `day`'s number, 1 on FIRST_DAY; below 1 before it. */
+export function dayNumber(day) {
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${FIRST_DAY}T00:00:00Z`)) / DAY_MS) + 1;
+}
+
+/** "#11 · " for a numbered day, "" before the first. */
+export function numberPrefix(day) {
+  const n = dayNumber(day);
+  return n >= 1 ? `#${n} · ` : "";
+}
 
 /**
  * Who a day's setup is played against, each bot once, as the board names a

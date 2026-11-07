@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from . import coach, config, model, stats, turnfilm
+from . import coach, combat, config, model, stats, turnfilm
 from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
@@ -36,6 +36,7 @@ SPECTATE_ROW = -1
 # drawing whichever survive — a stale rect would otherwise still answer clicks.
 FOOTER_RECTS = (
     "retry_live_button_rect",
+    "undo_button_rect",
     "clear_button_rect",
     "menu_button_rect",
     "restart_live_button_rect",
@@ -164,10 +165,10 @@ class Ui:
     # (`forward_this_turn`, expanded by `forward_orders`).
     auto_forward: dict[int, ForwardRule] = field(default_factory=dict)
     sel_forward: int | None = None  # source id of the rule being edited, if any
-    # source_id -> the turn a lane was last added to its rule from the popup (or
-    # a route confirmed through it). A rule set up this turn opens the popup on its
-    # Forward tab and a further lane splits it; one from an earlier turn is
-    # replaced outright by the next lane added (see `toggle_forward`).
+    # source_id -> the turn a lane was last added to its rule from the popup (never
+    # by a route, which clears it). A rule set up this turn opens the popup on its
+    # Forward tab and a further lane splits it; one from an earlier turn, or laid
+    # by a route, is replaced outright by the next lane added (see `toggle_forward`).
     forward_set_on: dict[int, int] = field(default_factory=dict)
     # The rule a fresh compose replaced, kept so Cancel or the Send tab can put
     # it back as it was: (source, rule). None when nothing was replaced.
@@ -339,6 +340,7 @@ class Ui:
     # the Even split / Delete all pair. Same handoff as the rects above.
     hold_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     hold_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    hold_smart_rect: tuple[int, int, int, int] = (0, 0, 0, 0)  # the hold row's "smart" toggle
     share_rows: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
     even_split_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     delete_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
@@ -560,6 +562,9 @@ class Ui:
     # the one way back to the start of a game with no history to rewind through,
     # a daily's. Never in a shared match (`can_retry`).
     retry_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Undo (U): take back the last turn, as History's rewind to the turn before
+    # does, in one press and with no confirm (`can_undo`).
+    undo_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The footer's overflow: a strip too narrow for every button folds the least
     # essential behind one "more" button (and a compact screen always folds the
@@ -788,6 +793,18 @@ class Ui:
         key and the button can never disagree.
         """
         return state.turn > 0 and not (self.ironman and state.winner is None)
+
+    def can_undo(self, state: GameState) -> bool:
+        """Is Undo (U) available: rewinding the live game one turn?
+
+        It is History's rewind to the turn before, so it asks what History does
+        (`can_review`: a recorded turn, and not under ironman while undecided),
+        and only in live play of an undecided game of our own: a decided game is
+        rewound from History, which forks it, and a shared match is never ours
+        to rewind.
+        """
+        return (self.can_review(state) and state.winner is None
+                and not self.in_pbp and not self.history)
 
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?
@@ -1145,11 +1162,32 @@ class Ui:
     def step_share(self, steps: int) -> None:
         self.set_share(self.edited_share() + steps * config.FORWARD_STEP_PCT)
 
-    def step_hold(self, delta: int) -> None:
-        """Nudge how many ships the edited system holds back, across all its lanes."""
+    def step_hold(self, delta: int, state: GameState | None = None) -> None:
+        """Nudge how many ships the edited system holds back, across all its lanes.
+        On a smart hold it takes the hold back by hand, stepping from the figure the
+        smart hold had reached, so the number moves the way the button says."""
         rule = self.edited_rule()
         if rule is not None:
-            rule.hold = max(0, min(config.FORWARD_HOLD_MAX, rule.hold + delta))
+            smart = rule.smart and state is not None and self.selected is not None
+            start = self.hold_of(state, self.selected) if smart else rule.hold
+            rule.smart = False
+            rule.hold = max(0, min(config.FORWARD_HOLD_MAX, start + delta))
+
+    def toggle_smart_hold(self) -> None:
+        """Switch the edited system between a hold by hand and a smart one."""
+        rule = self.edited_rule()
+        if rule is not None:
+            rule.smart = not rule.smart
+
+    def hold_of(self, state: GameState, sid: int) -> int:
+        """Ships ``sid``'s rule keeps back this turn: its hold, or for a smart hold
+        enough to keep the system against the heaviest wave flying in."""
+        rule = self.auto_forward.get(sid)
+        if rule is None:
+            return 0
+        if rule.smart and sid in state.systems:
+            return combat.smart_hold(state, sid, self.human_id)
+        return rule.hold
 
     def focus_lane(self, dest: int) -> None:
         """Point the Forward tab at another lane of the same system."""
@@ -1196,7 +1234,7 @@ class Ui:
         rule = self.auto_forward.get(sid)
         if rule is None or sid not in state.systems:
             return {}
-        surplus = self.available(state, sid) - rule.hold
+        surplus = self.available(state, sid) - self.hold_of(state, sid)
         return model.forward_split(surplus, rule.shares, state.turn)
 
     def send_all(self, state: GameState) -> None:
@@ -1564,10 +1602,10 @@ class Ui:
         resetting tuning. An existing rule is reported replaced only when its lanes
         change."""
         old = self.auto_forward.get(node)
-        hold = old.hold if old is not None else 0
         if old is not None and old.shares != shares:
             self.route_replaces.add(node)
-        self.route_plan[node] = ForwardRule(shares, hold)
+        self.route_plan[node] = (ForwardRule(shares, old.hold, old.smart) if old is not None
+                                 else ForwardRule(shares))
 
     def _plan_chain(self, state: GameState) -> None:
         """Chain routing: walk each selected system's path to the destination.
@@ -1682,8 +1720,11 @@ class Ui:
             if sid not in plan:
                 self.clear_forward(sid)
         for src, rule in plan.items():
-            self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold)
-            self.forward_set_on[src] = state.turn
+            self.auto_forward[src] = ForwardRule(dict(rule.shares), rule.hold, rule.smart)
+            # A route is a finished plan, not a rule being built up from the popup:
+            # the next tap from one of its systems opens on Send, and a lane added
+            # there replaces the route's rule rather than splitting it.
+            self.forward_set_on.pop(src, None)
         self.reset_route()
 
     # -- selection helpers -------------------------------------------------- #

@@ -206,6 +206,12 @@ def test_forward_steppers_adjust_the_share_and_the_hold():
             _click_pos(state, ui, (210, 170))
         assert ui.auto_forward[home].hold == 0
 
+        ui.hold_smart_rect = (300, 160, 40, 20)   # the "smart" chip toggles
+        _click_pos(state, ui, (310, 170))
+        assert ui.auto_forward[home].smart
+        _click_pos(state, ui, (310, 170))
+        assert not ui.auto_forward[home].smart
+
         # sending nothing is no rule at all: down to 0% deletes it
         for _ in range(100 // step):
             _click_pos(state, ui, (210, 140))
@@ -2219,6 +2225,28 @@ def test_resuming_a_match_always_lands_paused(tmp_path, monkeypatch):
         pygame.quit()
 
 
+def test_undo_takes_back_exactly_the_last_turn(tmp_path, monkeypatch):
+    """Undo (U) is History's rewind to the turn before: the log loses its last
+    turn and the board is the one that turn started from."""
+    try:
+        log = _watchable_log(tmp_path, monkeypatch)
+        settings = Settings(seed=1, nodes=18, players=3)
+        state, ui = main.resume_game(log, settings)
+        turns = log.turn_count
+        assert turns > 1 and ui.can_undo(state)
+        press = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_u, mod=0, unicode="u")
+        assert game_input.handle_event(press, state, ui) == "undo"
+
+        state, ui = main.apply_rewind(log, settings, log.turn_count - 1)
+        assert log.turn_count == turns - 1 and state.turn == turns - 1
+        assert state.winner is None and ui.can_undo(state)
+
+        ui.ironman = True   # ironman hides it, as it hides History
+        assert not ui.can_undo(state) and game_input.handle_event(press, state, ui) is None
+    finally:
+        pygame.quit()
+
+
 def test_junk_off_the_wire_is_not_a_game(tmp_path, monkeypatch):
     """A 404 body, a truncated download or an empty match all have to land as
     "no replay" rather than as an exception on the first frame."""
@@ -3162,14 +3190,16 @@ def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_stor
     settings = Settings()
     reply = json.dumps({"day": "2026-10-28", "now": 0, "settings": DAILY_SETUP, "rules_version": 2})
     main.land_daily(ms, settings, main.pbp.OK, reply)
-    assert ms.status_ok and ms.status.startswith("Daily · Wed 28 Oct: Random · 3 players")
+    assert ms.status_ok and ms.status.startswith("Daily #1 · Wed 28 Oct: Random · 3 players")
     assert settings.seed == 4242 and settings.challenge is None
     assert main.daily.daily_of(settings) == ("2026-10-28", "board")
 
-    # A game started on it is the daily: ironman whatever the preference.
+    # A game started on it is the daily, and follows the ironman preference
+    # like any other game (so Undo and History are there by default).
     state = build_state(settings, settings.seed)
     ui = main.new_ui(state, False, settings)
-    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "board" and ui.ironman
+    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "board"
+    assert ui.ironman == main.webstore.ironman()
     other = Settings.from_dict(dict(DAILY_SETUP, seed=7))
     plain = main.new_ui(build_state(other, 7), False, other)
     assert plain.daily_day == "" and plain.ironman == main.webstore.ironman()
@@ -3179,7 +3209,7 @@ def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_stor
     monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
     state.winner = ui.human_id
     assert main.copy_daily_result(settings, state, ui).startswith("Result copied")
-    assert copied[0].startswith("Star Conquest daily · Wed 28 Oct")
+    assert copied[0].startswith("Star Conquest daily #1 - ")
 
 
 PUZZLE_SETUP = {"mode": "random", "players": 2, "nodes": 6, "seed": 77,
@@ -3195,18 +3225,19 @@ def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeyp
     settings = Settings()
     reply = json.dumps({"day": "2026-10-28", "kind": "puzzle", "now": 0, "settings": PUZZLE_SETUP})
     main.land_daily(ms, settings, main.pbp.OK, reply, "puzzle")
-    assert ms.status_ok and ms.status == f"Puzzle · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
+    assert ms.status_ok and ms.status == f"Puzzle #1 · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
     assert main.daily.daily_of(settings) == ("2026-10-28", "puzzle")
     assert settings.seed is not None
 
     state = build_state(settings, settings.seed)
     ui = main.new_ui(state, False, settings)
-    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "puzzle" and ui.ironman
+    assert ui.daily_day == "2026-10-28" and ui.daily_kind == "puzzle"
+    assert ui.ironman == main.webstore.ironman()
     copied = []
     monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
     state.winner = ui.human_id
     main.copy_daily_result(settings, state, ui)
-    assert copied[0].startswith("Star Conquest daily puzzle · Wed 28 Oct") and "vs Marshal" in copied[0]
+    assert copied[0].startswith("Star Conquest puzzle #1 - ") and "Marshal" not in copied[0]
 
     main.land_daily(ms, Settings(), "missing", "{}", "puzzle")
     assert ms.status == "There's no daily puzzle for that day"
