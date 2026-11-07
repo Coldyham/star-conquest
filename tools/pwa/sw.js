@@ -25,9 +25,15 @@
 //
 // It is served from the site root, not /play/ beside the game, so its scope stays
 // "/" — the scope every install from before the game moved to /game/ registered —
-// and it keeps covering the board. v3 drops the v2 cache, whose "/" was the game.
+// and it keeps covering the board. v3 dropped the v2 cache, whose "/" was the game;
+// v4 drops v3's, whose /game/ page loaded the runtime from the remote CDN (a
+// filtered network that blocks that host would otherwise keep getting it).
+//
+// A page that now redirects (/game/ to /play/) comes back from the network as an
+// opaque redirect, never "ok", so it would never refresh its cache entry and the
+// stale copy would win forever: a redirect deletes the entry instead.
 
-const CACHE = "starconquest-v3";
+const CACHE = "starconquest-v4";
 const RUNTIME = "https://pygame-web.github.io/cdn/";
 
 self.addEventListener("install", (event) => {
@@ -79,7 +85,9 @@ self.addEventListener("fetch", (event) => {
 
       const network = fetch(req)
         .then((res) => {
-          if (res && res.ok && (res.type === "basic" || res.type === "cors")) {
+          if (res && (res.type === "opaqueredirect" || res.redirected)) {
+            cache.delete(req);
+          } else if (res && res.ok && (res.type === "basic" || res.type === "cors")) {
             cache.put(req, res.clone());
           }
           return res;

@@ -56,7 +56,22 @@ await page.waitForTimeout(wait * 1000);
 await page.screenshot({ path: join(ROOT, "results", "record_runtime.png") });
 await browser.close();
 srv.close();
-if (!seen.size) { console.error("recorded nothing"); process.exit(1); }
+// A run cut short (a slow load, the game never reaching its menu) must not
+// replace a good list: the build points every runtime URL at our own copies, so a
+// file missing from the list is a 404 for every visitor. Check the screenshot too.
+const paths = [...seen];
+const needed = [
+  ["pythons.js", (p) => p.endsWith("/pythons.js")],
+  ["cpythonrc.py", (p) => p.endsWith("/cpythonrc.py")],
+  ["main.wasm", (p) => p.endsWith("/main.wasm")],
+  ["the package index", (p) => /^index-.*\.json$/.test(p)],
+  ["the pygame-ce wheel", (p) => p.endsWith(".whl")],
+];
+const missing = needed.filter(([, ok]) => !paths.some(ok)).map(([name]) => name);
+if (missing.length) {
+  console.error(`recording incomplete (no ${missing.join(", ")}); list left unchanged. Try a longer --wait.`);
+  process.exit(1);
+}
 await writeFile(join(ROOT, "tools/pwa/runtime_files.txt"),
   "# Written by tools/record_runtime.mjs; one path under the pygbag CDN per line.\n" + [...seen].sort().join("\n") + "\n");
-console.log(`wrote ${seen.size} paths`);
+console.log(`wrote ${paths.length} paths; check results/record_runtime.png shows the menu`);

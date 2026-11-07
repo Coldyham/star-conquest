@@ -167,7 +167,7 @@ def test_the_board_header_paints_over_the_page_so_its_menu_can_drop_down():
         assert header > _z_index(css, later), f".bar must stack above {later}"
 
 
-def test_the_root_is_the_router_and_the_game_is_under_game():
+def test_the_root_is_the_router_and_the_game_is_under_play():
     assert 'cp -r "$STAGE/build/web/." "$ROOT/web/play/"' in BUILD
     assert 'cp "$ROOT/tools/pwa/root.html" "$ROOT/web/index.html"' in BUILD
     assert 'inject.py" "$ROOT/web/play/index.html"' in BUILD
@@ -213,7 +213,7 @@ def test_the_manifest_shortcuts_open_the_dailies_and_the_campaign():
             assert (ROOT / "tools" / "pwa" / icon["src"]).is_file()
 
 
-def test_the_board_links_to_the_game_under_game():
+def test_the_board_links_to_the_game_under_play():
     config = (ROOT / "leaderboard" / "js" / "config.mjs").read_text()
     assert 'GAME_URL_FALLBACK = "https://star-conquest.netlify.app/play/"' in config
     assert "`https://${host}/play/`" in config
@@ -260,3 +260,20 @@ def test_the_web_build_ships_the_gauntlets():
     assert 'cp -r "$ROOT/starconquest" "$STAGE/"' in BUILD
     assert gauntlet._ASSETS.is_relative_to(ROOT / "starconquest")
     assert (gauntlet._ASSETS / "tutorial.json").exists()
+
+
+def test_the_runtime_is_mirrored_after_the_page_is_patched():
+    """The mirror rewrites the page inject.py has finished with, under the build's
+    own Python, and after the wheel it reuses has been fetched."""
+    mirror = BUILD.index('uv run --project "$ROOT" python "$ROOT/tools/mirror_runtime.py" fetch "$ROOT/web"')
+    assert BUILD.index('inject.py" "$ROOT/web/play/index.html"') < mirror
+    assert BUILD.index('curl -fsSL -o "$ROOT/web/cdn/cp312/$WHEEL"') < mirror
+
+
+def test_a_page_that_now_redirects_leaves_the_cache():
+    """/game/ redirects to /play/: a navigation's opaque redirect is never ok, so
+    without this the cached old page (loading the blocked CDN) would win forever."""
+    swr = SW.rindex("event.respondWith(")
+    assert 'res.type === "opaqueredirect" || res.redirected' in SW[swr:]
+    assert SW.index("cache.delete(req)", swr) < SW.index("cache.put(req", swr)
+    assert 'const CACHE = "starconquest-v4";' in SW

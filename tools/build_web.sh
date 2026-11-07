@@ -90,9 +90,10 @@ fi
 # Mirror pygbag's whole runtime (CPython and pygame in WebAssembly) and point the
 # game page at it, so a network that blocks pygame-web.github.io (a school
 # filter) still loads the game from our own domain. Reads
-# tools/pwa/runtime_files.txt (made by `tools/mirror_runtime.py record`); with no
-# list, or if any download fails, the page keeps the remote CDN.
-python3 "$ROOT/tools/mirror_runtime.py" fetch "$ROOT/web"
+# tools/pwa/runtime_files.txt (made by `node tools/record_runtime.mjs`), reusing
+# the wheel mirrored above. With no list, a list for another pygbag version, or
+# any download failing, it writes nothing and the page keeps the remote CDN.
+uv run --project "$ROOT" python "$ROOT/tools/mirror_runtime.py" fetch "$ROOT/web"
 echo
 echo "Web build ready in: $ROOT/web"
 echo "Test it:   cd '$ROOT/web' && python3 -m http.server 8000   # then open http://localhost:8000 (game: /play/, board: /board/)"
