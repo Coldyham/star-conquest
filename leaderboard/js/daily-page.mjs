@@ -11,7 +11,7 @@
 
 import { configured, inList, select } from "./api.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, opponents, parNote, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, numberPrefix, opponents, parNote, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
 import { clear, el, leaderLink, setupSummary, showError, userHref } from "./format.mjs";
@@ -53,7 +53,7 @@ function keepDayInTabs() {
 function drawDays() {
   clear(daysNav).append(
     el("a", { class: "btn", href: dayHref(addDays(day, -1)), "aria-label": "Previous day", text: "‹" }),
-    el("span", { class: "week-label", text: isToday ? `Today · ${shortDate(day)}` : shortDate(day) }),
+    el("span", { class: "week-label", text: `${isToday ? "Today · " : ""}${numberPrefix(day)}${shortDate(day)}` }),
     isToday
       ? el("span", { class: "btn ghost", "aria-hidden": "true", text: "›" })
       : el("a", { class: "btn", href: dayHref(addDays(day, 1)), "aria-label": "Next day", text: "›" }),
@@ -75,7 +75,7 @@ function drawToday(row, keys) {
   clear(todayBox).append(el("div", { class: "card" }, [
     el("div", { class: "card-body" }, [
       el("div", { class: "card-main" }, [
-        el("strong", { text: `${WEEKDAYS[weekdayOf(day)]}'s ${kind === "puzzle" ? "puzzle" : "map"}` }),
+        el("strong", { text: `${numberPrefix(day)}${WEEKDAYS[weekdayOf(day)]}'s ${kind === "puzzle" ? "puzzle" : "map"}` }),
         el("div", { class: "card-meta", text: setupSummary(asGame(row)) + (bots.length ? ` · vs ${bots.join(", ")}` : "") }),
         keys.length
           ? el("div", { class: "card-meta" }, [el("a", { href: `game.html?key=${encodeURIComponent(keys[0])}`, text: "Map page" })])
@@ -121,7 +121,7 @@ function drawLeader(summaries) {
  * winner, and scores posted after the day (with its replays out) marked as
  * later. */
 function drawStandings(rows) {
-  standingsTitle.textContent = `Standings, ${shortDate(day)}`;
+  standingsTitle.textContent = `Standings, ${numberPrefix(day)}${shortDate(day)}`;
   const table = standings(rows);
   const winner = bestOnTheDay(rows, day);
   clear(standingsBox).append(table.length
