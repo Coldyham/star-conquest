@@ -368,9 +368,12 @@ create table if not exists public.dailies (
   remembered daily.
 - **A fetch is not a send.** The game sends only on *Post to leaderboard* or
   *Share replays* (and a generated gauntlet asked to be listed); the daily is a GET of public rows, as the campaign lookup is.
-- **Ironman on the daily.** A daily plays ironman whatever the local
-  preference (`webstore.ironman`), so History stays hidden until the game is
-  decided. It is a courtesy, not a check: like every local best, it is trusted.
+- **No forced ironman on the daily.** A daily once played ironman whatever
+  the local preference; since 2026-11-07 it follows `webstore.ironman` like any
+  game, because a puzzle is exactly where a player wants to take a move back.
+  Ironman was a courtesy, never a check (every local best is trusted), so
+  nothing on the board changes. The footer's *Undo* (U, `Ui.can_undo`) is
+  History's rewind to the turn before in one press, with no confirm.
 - **Copy daily result** takes *Challenge a friend*'s place on a daily's win
   overlay (same button, same C key), since everyone already has the map. It
   puts a spoiler-free line on the clipboard (`main.copy_daily_result`,
@@ -561,7 +564,7 @@ weakest first as the worker plays them:
   game still gets its board), a Daily puzzle item under the menu's Daily button, and
   `#puzzle` (`#puzzle=<day>`). `daily.remember` keeps each key's day and kind
   (a day alone, from before the puzzle, is a board), a fortnight of both.
-  Ironman and *Copy daily result* as for the board, with the line naming the
+  The ironman preference and *Copy daily result* as for the board, with the line naming the
   puzzle and its opponent:
 
   ```

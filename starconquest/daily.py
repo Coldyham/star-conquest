@@ -11,7 +11,7 @@ The game never makes a daily: which candidate survives depends on how the
 probes play, so only the stored row is the same for everyone.
 
 What is kept is only which setups were dailies, and of which day and kind
-(``remember``, by challenge key), so a game started on one is known as the daily: it plays ironman and its win
+(``remember``, by challenge key), so a game started on one is known as the daily: its win
 overlay copies a result line instead of a challenge link. Progress is a best
 on the key like any map's, derived and never stored here.
 

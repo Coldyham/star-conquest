@@ -355,7 +355,7 @@ already resolve simultaneously. The rationale for each rule is in
   so a `RULES_VERSION` bump needs nothing from it. The public reads a day once
   it starts (the policy on `dailies`); `/api/daily` answers the game
   (`starconquest/daily.py`), which applies the setup to the menu as a link
-  does, remembers it by challenge key (`daily.remember`), plays it ironman and
+  does, remembers it by challenge key (`daily.remember`), follows the ironman preference (Undo, U, takes a turn back) and
   copies a result line instead of a challenge link. `daily_games` matches a day
   to its maps by jsonb equality. **A day's map is embargoed until the day ends**
   (`game_embargoes`, as a live campaign week is), so the best score posted on

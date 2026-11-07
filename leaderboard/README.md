@@ -834,7 +834,8 @@ test bot within a turn cap that grows from 80 to 110.
   starts, so tomorrow's map can't be practised.
 - **The game fetches it** (`/api/daily`, read-only with the publishable key):
   the menu's Daily ▸ Daily board or a `#daily` / `#daily=<day>` link puts the setup on
-  the menu. A daily plays ironman, and its win offers *Copy daily result*, a
+  the menu. A daily follows the player's ironman preference (so Undo can take a
+  turn back), and its win offers *Copy daily result*, a
   spoiler-free line, where other maps offer *Challenge a friend*.
 - **Embargoed until the day ends** (`game_embargoes`, as a campaign node is
   for its week): replays and every score but the leader stay hidden, so the

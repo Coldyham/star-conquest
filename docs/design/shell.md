@@ -262,6 +262,13 @@ footer button and main's `toggle_history` both ask. A spectator who has been
 knocked out still can't open History, or they could rewind and play on; once
 the game has a winner, *History & coach* on the win overlay is offered as usual.
 
+*Undo* (U, the footer) is History's *Rewind to here* on the turn before, in one
+press and with no confirm (`main.apply_rewind` on `turn_count - 1`). It is a
+rewind, so `Ui.can_undo` asks `can_review` first (ironman hides it with
+History), and adds live play of an undecided game of our own: a decided game
+rewinds from History, which forks it, and a play-by-post match is never ours to
+rewind. A run game plays ironman, so it has none.
+
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and
 someone chasing a posted result would otherwise only learn it at the end.
