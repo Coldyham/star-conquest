@@ -47,8 +47,9 @@ _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # How many dailies are remembered as such: a fortnight of both kinds, so last
 # week's is still known as a daily when it is replayed from the archive.
 REMEMBER_MAX = 28
-# The first day of both kinds: day 1 of the numbering a result line carries
-# ("puzzle #11"), as Wordle numbers its days.
+# The first day of both kinds: day 1 of the numbering a result line, the menu
+# and the board's daily pages carry ("puzzle #11"), as Wordle numbers its days.
+# Mirrored as daily.mjs's FIRST_DAY (test_leaderboard_sync).
 FIRST_DAY = "2026-10-28"
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -169,8 +170,9 @@ def short_date(day: str) -> str:
 def label(day: str, settings: Settings, kind: str = BOARD) -> str:
     """The menu's line for a daily just opened."""
     if kind == PUZZLE:
-        return f"Puzzle · {short_date(day)}: {settings.system_count()} systems · vs {opponent(settings)}"
-    return f"Daily · {short_date(day)}: {dealer.describe(settings)}"
+        return (f"Puzzle #{number(day)} · {short_date(day)}: {settings.system_count()} systems"
+                f" · vs {opponent(settings)}")
+    return f"Daily #{number(day)} · {short_date(day)}: {dealer.describe(settings)}"
 
 
 def result_line(day: str, turns: int, lost: int, kind: str = BOARD) -> str:

@@ -232,3 +232,10 @@ def test_the_lobbys_watch_link_is_the_games_spectate_fragment():
     reads."""
     lobby = (ROOT / "leaderboard" / "js" / "pbp.mjs").read_text()
     assert f"#{pbp.SPECTATE_FRAGMENT}${{matchId}}" in lobby
+
+
+def test_the_board_numbers_the_dailies_from_the_games_first_day():
+    """A copied "puzzle #11" must be #11 on the board's daily page too."""
+    from starconquest import daily
+    js = ROOT / "leaderboard" / "js" / "daily.mjs"
+    assert _js_string_constant(js, "FIRST_DAY") == daily.FIRST_DAY

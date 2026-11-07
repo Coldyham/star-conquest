@@ -3190,7 +3190,7 @@ def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_stor
     settings = Settings()
     reply = json.dumps({"day": "2026-10-28", "now": 0, "settings": DAILY_SETUP, "rules_version": 2})
     main.land_daily(ms, settings, main.pbp.OK, reply)
-    assert ms.status_ok and ms.status.startswith("Daily · Wed 28 Oct: Random · 3 players")
+    assert ms.status_ok and ms.status.startswith("Daily #1 · Wed 28 Oct: Random · 3 players")
     assert settings.seed == 4242 and settings.challenge is None
     assert main.daily.daily_of(settings) == ("2026-10-28", "board")
 
@@ -3225,7 +3225,7 @@ def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeyp
     settings = Settings()
     reply = json.dumps({"day": "2026-10-28", "kind": "puzzle", "now": 0, "settings": PUZZLE_SETUP})
     main.land_daily(ms, settings, main.pbp.OK, reply, "puzzle")
-    assert ms.status_ok and ms.status == f"Puzzle · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
+    assert ms.status_ok and ms.status == f"Puzzle #1 · Wed 28 Oct: {settings.system_count()} systems · vs Marshal"
     assert main.daily.daily_of(settings) == ("2026-10-28", "puzzle")
     assert settings.seed is not None
 

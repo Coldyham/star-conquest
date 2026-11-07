@@ -6,7 +6,7 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
-  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, parNote, playerDays, playerStreaks,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parNote, playerDays, playerStreaks,
   postedOn, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
@@ -17,6 +17,11 @@ test("days are UTC dates, Monday first", () => {
   assert.equal(addDays("2026-10-31", 1), "2026-11-01");
   assert.equal(addDays("2026-03-01", -1), "2026-02-28");
   assert.equal(shortDate("2026-10-28"), "Wed 28 Oct");
+  assert.equal(dayNumber("2026-10-28"), 1);
+  assert.equal(dayNumber("2026-11-07"), 11);
+  assert.equal(dayNumber("2027-03-29"), 153);  // across the clocks changing: UTC days
+  assert.equal(numberPrefix("2026-11-07"), "#11 · ");
+  assert.equal(numberPrefix("2026-10-27"), "");
   assert.ok(validDay("2026-10-28"));
   for (const bad of ["2026-02-30", "2026-1-01", "today", "", null, "2026-10-28x"]) {
     assert.ok(!validDay(bad), String(bad));

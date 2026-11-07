@@ -388,7 +388,10 @@ create table if not exists public.dailies (
   Wordle-short since 2026-11-07: the day's number (`daily.number`, 1 on
   `FIRST_DAY`, 2026-10-28, for both kinds) and the result, nothing about the
   map. It named the date, the board's size and a puzzle's opponent before;
-  less said makes a reader curious.
+  less said makes a reader curious. The same number heads the menu's line for
+  a daily just opened ("Puzzle #11 · Sat 7 Nov: …") and the board's daily
+  pages (day picker, card and standings; `daily.mjs`'s `FIRST_DAY`, kept equal
+  by `test_leaderboard_sync`). Days before the first carry none.
 
   The line carries no setup and no moves. The link opens today's daily, not
   the poster's game.

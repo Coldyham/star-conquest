@@ -248,6 +248,7 @@ def test_a_puzzle_label_names_its_opponent():
     for w, name in ((1, "heuristic+lean"), (3, "Thinker · Claudebot"), (6, "Actuary · Field")):
         s = daily.candidates(MONDAY + dt.timedelta(days=w), limit=1, kind="puzzle")[0]
         assert game_daily.label("2026-10-28", s, "puzzle").endswith(f"vs {name}")
+        assert game_daily.label("2026-11-07", s, "puzzle").startswith("Puzzle #11 · Sat 7 Nov: ")
 
 
 # --------------------------------------------------------------------------- #
