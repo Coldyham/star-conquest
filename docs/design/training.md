@@ -46,9 +46,10 @@ A row in the send popup's Send tab, under "send N · M home":
   target. It opens a card over the board: your send, anything landing with it,
   what you land with; the garrison now, what it builds before you land, the
   holder's fleets landing by then, what it will hold; the verdict in words; who
-  else is flying in; then how a fight is rolled, from the Combat tab, with this
-  game's jitter and defender advantage ("6 holding it fight like 9"). Any press
-  closes it, as the info card. A phone held sideways puts the dice in a second
+  else is flying in; then three lines on how a fight is rolled: this game's
+  defender advantage ("the 5 holding it fight like 5.5", unrounded, since it
+  multiplies strength rather than adding ships), its jitter, and what the
+  Combat tab adds. Any press closes it, as the info card. A phone held sideways puts the dice in a second
   column. The row was asked for as "your send: a, currently at target: b +
   produced over the next n turns: c + enemy reinforcements already en route: d
   = a vs e"; counting d is what moved the forecast to read fleets in flight.

@@ -1105,22 +1105,20 @@ def _odds_card(state: GameState, ui: Ui) -> tuple[str, str, tuple, list[tuple]] 
     if fc.odds is not None:
         jitter, adv = config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE
         pct = round(jitter * 100)
-        items += [("gap",), ("head", "How a fight is rolled"),
-                  ("note", "Battles use Lanchester's square law: the stronger side wins and keeps "
-                           "√(W² − L²) ships, so 12 attacking 10 leaves 7.")]
-        if jitter > 0:
-            items.append(("note", f"Jitter ±{pct}%: each side's strength is its ship count rolled up "
-                                  f"to {pct}% up or down, so a close fight can go either way. The odds "
-                                  f"are the share of those rolls you win."))
-        else:
-            items.append(("note", "Jitter is off: every fight goes exactly by the numbers."))
+        items += [("gap",), ("head", "How a fight is rolled")]
         if adv != 1:
-            items.append(("note", f"Defender advantage ×{adv:g}: the holder's rolled strength is "
-                                  f"multiplied by {adv:g}, so {fc.garrison} holding it fight like "
-                                  f"{round(fc.garrison * adv)}."))
+            # unrounded: the bonus is a multiplier on strength, not extra ships
+            items.append(("note", f"Defender advantage ×{adv:g}: the {fc.garrison} holding it fight "
+                                  f"like {round(fc.garrison * adv, 2):g}."))
         else:
             items.append(("note", "No defender advantage: the holder fights at its ship count."))
-        items.append(("note", "The setup menu's Combat tab plays out any fight."))
+        if jitter > 0:
+            items.append(("note", f"Jitter ±{pct}%: each side's strength is rolled up to {pct}% "
+                                  f"up or down, so a close fight can go either way."))
+        else:
+            items.append(("note", "Jitter is off: every fight goes exactly by the numbers."))
+        items.append(("note", "The setup menu's Combat tab plays out any fight: how many each "
+                              "side loses (Lanchester's square law), and the best and worst rolls."))
     title = f"{'Reinforcing' if fc.reinforce else 'Attacking'} {node.short}"
     return title, label, accent, items
 
