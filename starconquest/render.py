@@ -70,7 +70,7 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     ui.popup_rect = (0, 0, 0, 0)
     ui.send_tab_rect = ui.forward_tab_rect = (0, 0, 0, 0)
     ui.send_all_rect = ui.send_half_rect = ui.cancel_rect = ui.done_rect = (0, 0, 0, 0)
-    ui.hold_minus_rect = ui.hold_plus_rect = (0, 0, 0, 0)
+    ui.hold_minus_rect = ui.hold_plus_rect = ui.hold_smart_rect = (0, 0, 0, 0)
     ui.even_split_rect = ui.delete_all_rect = (0, 0, 0, 0)
     ui.share_rows = []
     ui.clear_forward_rect = (0, 0, 0, 0)
@@ -546,12 +546,13 @@ def _draw_forward_rules(surface, state: GameState, ui: Ui) -> None:
 def _hold_badge(font, state: GameState, ui: Ui, sid: int) -> tuple[str, tuple[int, int]] | None:
     """Text and centre of a holding system's "hold N" badge, just under its disc —
     where its star name would go, so `_draw_node_names` moves the name down a slot.
-    None for a system holding nothing (or not ours)."""
+    A smart hold reads "smart N" even at nothing, so it is seen to be armed. None
+    for a system holding nothing (or not ours)."""
     rule = ui.auto_forward.get(sid)
     sys = state.systems.get(sid)
-    if rule is None or not rule.hold or sys is None or sys.owner_id != ui.human_id:
+    if rule is None or not (rule.hold or rule.smart) or sys is None or sys.owner_id != ui.human_id:
         return None
-    text = f"hold {rule.hold}"
+    text = f"{'smart' if rule.smart else 'hold'} {ui.hold_of(state, sid)}"
     pos = ui.view.to_screen(sys.pos)
     half = _pill_rect(font, text, (0, 0)).h // 2
     return text, (pos[0], pos[1] + config.node_radius(sys.production) + config.NODE_LABEL_GAP + half)
@@ -901,12 +902,15 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     if rule is not None:
         # hold row: ships the system keeps back before any lane takes its share. It
         # belongs to the system, so on a split it covers every row below it.
-        label = "holds"
+        # A "smart" chip after the label sizes the hold each turn against the
+        # heaviest wave flying in; −/+ take it back by hand from that figure.
         row = pygame.Rect(inner, cy, iw, bh)
         pygame.draw.rect(surface, (12, 14, 22), row, border_radius=config.s(5))
+        hold = ui.hold_of(state, ui.selected)
         ui.hold_minus_rect, ui.hold_plus_rect = _draw_mini_stepper(
-            surface, font, row, s, label, str(rule.hold), config.COLOR_TEXT_DIM,
-            config.COLOR_TEXT if rule.hold else config.COLOR_TEXT_DIM, accent)
+            surface, font, row, s, "", str(hold), config.COLOR_TEXT_DIM,
+            config.COLOR_TEXT if hold or rule.smart else config.COLOR_TEXT_DIM, accent)
+        ui.hold_smart_rect = _draw_smart_chip(surface, font, row, ui.hold_minus_rect, rule.smart, accent)
         cy += bh + gap
 
     this_turn = ui.forward_this_turn(state, ui.selected) if rule is not None else {}
@@ -1248,6 +1252,25 @@ def _draw_mini_stepper(surface, font, row: pygame.Rect, s: int, label: str, valu
     _draw_step_button(surface, plus, "+", accent)
     _text(surface, font, value, value_col, center=((minus.right + plus.left) // 2, row.centery))
     return (minus.x, minus.y, minus.w, minus.h), (plus.x, plus.y, plus.w, plus.h)
+
+
+def _draw_smart_chip(surface, font, row: pygame.Rect, minus, on: bool, accent) -> tuple[int, int, int, int]:
+    """The hold row's left end, between the row's edge and its −: "holds" and a
+    "smart" toggle chip, lit while the hold sizes itself. Where both don't fit, the
+    chip alone says what the row is: "hold" by hand, a lit "smart" when it sizes
+    itself. Returns the chip's hit-rect."""
+    left, right = row.x + config.s(6), minus[0] - config.s(6)
+    cw = min(right - left, font.size("smart")[0] + config.s(12))
+    ch = max(font.get_height() + config.s(2), min(row.h - config.s(4), _tap_size(config.STEPPER_SIZE)))
+    label = "smart"
+    if left + font.size("holds ")[0] + cw <= right:
+        _text(surface, font, "holds", config.COLOR_TEXT_DIM, midleft=(left, row.centery))
+        left += font.size("holds ")[0]
+    elif not on:
+        label = "hold"
+    chip = pygame.Rect(left, row.centery - ch // 2, cw, ch)
+    _draw_popup_button(surface, chip, label, active=on, accent=accent)
+    return chip.x, chip.y, chip.w, chip.h
 
 
 class _SplitLayout(NamedTuple):
@@ -2700,7 +2723,9 @@ def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
     editing = src == ui.sel_forward or (ui.mode == CHOOSING and ui.forward_armed and src == ui.selected)
     color = config.COLOR_SELECT if editing else config.player_color(ui.human_id)
     y = _head(surface, x, y, "Auto-forward", color)
-    if rule.hold:
+    if rule.smart:
+        y = _row(surface, x, y, f"holds {ui.hold_of(state, src)} (smart)", _forward_accent())
+    elif rule.hold:
         y = _row(surface, x, y, f"holds {rule.hold}", _forward_accent())
     this_turn = ui.forward_this_turn(state, src)
     for dest, pct in rule.shares.items():

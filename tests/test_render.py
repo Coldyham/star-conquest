@@ -573,7 +573,8 @@ def _popup_rects(ui):
     A split lane's own −/+ are included; its row rect is not, since it holds them."""
     names = ("send_tab_rect", "forward_tab_rect", "minus_rect", "plus_rect",
              "slider_rect", "send_half_rect", "send_all_rect", "cancel_rect",
-             "hold_minus_rect", "hold_plus_rect", "even_split_rect", "delete_all_rect")
+             "hold_minus_rect", "hold_plus_rect", "hold_smart_rect", "even_split_rect",
+             "delete_all_rect")
     rects = {n: pygame.Rect(*getattr(ui, n)) for n in names if getattr(ui, n)[2] > 0}
     for dest, _row, minus, plus in ui.share_rows:
         rects[f"lane {dest} -"] = pygame.Rect(*minus)

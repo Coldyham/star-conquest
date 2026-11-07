@@ -335,10 +335,15 @@ class ForwardRule:
 
     Dict order is the order lanes were added; the share helpers below break ties
     by it, so it is part of the rule rather than an accident of storage.
+
+    ``smart`` sizes the hold afresh every turn instead: enough to keep the system
+    against the heaviest wave of enemy ships flying in (`combat.smart_hold`).
+    ``hold`` is kept while it is on, but unused.
     """
 
     shares: dict[int, int] = field(default_factory=dict)
     hold: int = 0
+    smart: bool = False
 
     def total(self) -> int:
         return sum(self.shares.values())

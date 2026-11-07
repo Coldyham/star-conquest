@@ -948,10 +948,13 @@ def _popup_press(state: GameState, ui: Ui, pos) -> bool:
             ui.set_share(100) if ui.forward_armed else ui.send_all(state)
             return True
         if ui.hold_minus_rect[2] and _point_in_rect(pos, ui.hold_minus_rect):
-            ui.step_hold(-1)
+            ui.step_hold(-1, state)
             return True
         if ui.hold_plus_rect[2] and _point_in_rect(pos, ui.hold_plus_rect):
-            ui.step_hold(1)
+            ui.step_hold(1, state)
+            return True
+        if ui.hold_smart_rect[2] and _point_in_rect(pos, ui.hold_smart_rect):
+            ui.toggle_smart_hold()
             return True
         # a split system's lanes: −/+ retune that lane; anywhere else on its row
         # makes it the lane the popup (and the map highlight) is about

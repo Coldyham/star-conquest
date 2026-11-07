@@ -514,7 +514,8 @@ already resolve simultaneously. The rationale for each rule is in
 - **A forwarding rule is a system's hold plus a share per lane**
   (`model.ForwardRule`); the share arithmetic lives in `model` only, and
   `Ui.forward_this_turn` is the one formula behind both the orders and every
-  number shown. Detail: `docs/design/shell.md`, "Forwarding rules".
+  number shown. A smart hold is sized each turn by `combat.smart_hold`, read
+  only through `Ui.hold_of`. Detail: `docs/design/shell.md`, "Forwarding rules".
 - **Losing makes the human a spectator**: the whole board is revealed once
   `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
 - **The Combat tab teaches the square law from the real code**:
