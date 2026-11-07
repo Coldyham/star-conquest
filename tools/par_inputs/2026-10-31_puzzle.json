@@ -1,0 +1,173 @@
+{
+ "day": "2026-10-31",
+ "kind": "puzzle",
+ "settings": {
+  "mode": "random",
+  "players": 2,
+  "nodes": 7,
+  "seed": 20828199,
+  "node_jitter": 0.7,
+  "relax_min_sep_frac": 0.75,
+  "lloyd_passes": 2,
+  "extra_edge_fraction": 0.75,
+  "max_edge_length_frac": 0.95,
+  "ship_ly_per_turn": 18.0,
+  "home_start_ships": 10,
+  "garrison_k": 13,
+  "garrison_jitter": 2,
+  "combat_jitter": 0.04,
+  "defender_advantage": 1.05,
+  "ai_strategy": [
+   "heuristic",
+   "marshal"
+  ]
+ },
+ "spec": {
+  "stages": 1,
+  "roll": false,
+  "rules": {
+   "mode": {
+    "fix": "random"
+   },
+   "fog": {
+    "fix": false
+   },
+   "players": {
+    "fix": 2
+   },
+   "systems": {
+    "range": [
+     5,
+     8
+    ]
+   },
+   "node_jitter": {
+    "range": [
+     0.3,
+     1.0
+    ]
+   },
+   "relax_min_sep_frac": {
+    "range": [
+     0.3,
+     1.2
+    ]
+   },
+   "lloyd_passes": {
+    "range": [
+     0,
+     2
+    ]
+   },
+   "extra_edge_fraction": {
+    "range": [
+     0.4,
+     1.0
+    ]
+   },
+   "max_edge_length_frac": {
+    "range": [
+     0.5,
+     1.0
+    ]
+   },
+   "ship_ly_per_turn": {
+    "range": [
+     15.0,
+     20.0
+    ]
+   },
+   "ship_speed_growth_pct": {
+    "fix": 0.0
+   },
+   "home_start_ships": {
+    "range": [
+     10,
+     14
+    ]
+   },
+   "home_production": {
+    "range": [
+     1,
+     4
+    ]
+   },
+   "garrison_base": {
+    "range": [
+     2,
+     4
+    ]
+   },
+   "garrison_k": {
+    "range": [
+     9,
+     14
+    ]
+   },
+   "garrison_jitter": {
+    "range": [
+     2,
+     4
+    ]
+   },
+   "combat_jitter": {
+    "range": [
+     0.04,
+     0.1
+    ]
+   },
+   "defender_advantage": {
+    "range": [
+     1.0,
+     1.1
+    ]
+   }
+  },
+  "opponents": {
+   "in": [
+    "marshal"
+   ]
+  },
+  "candidate": 0,
+  "turn_cap": 60,
+  "opponent": "marshal"
+ },
+ "probes": [
+  {
+   "bot": "heuristic+lean",
+   "won": false,
+   "turns": 21,
+   "lost": 20,
+   "timed_out": false
+  },
+  {
+   "bot": "thinker",
+   "won": false,
+   "turns": 60,
+   "lost": 8,
+   "timed_out": true
+  },
+  {
+   "bot": "knower:0",
+   "won": false,
+   "turns": 60,
+   "lost": 8,
+   "timed_out": true
+  },
+  {
+   "bot": "evolved:0",
+   "won": false,
+   "turns": 17,
+   "lost": 16,
+   "timed_out": false
+  },
+  {
+   "bot": "marshal",
+   "won": true,
+   "turns": 47,
+   "lost": 16,
+   "timed_out": false
+  }
+ ],
+ "rules_version": 2
+}
