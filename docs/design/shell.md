@@ -679,9 +679,15 @@ the package index, which the runtime's `pep0723` module reads from `$PYGPI`
 (pygbag's own tools use `$PYGPY`; it is not documented) and whose own `-CDN-` key
 also names the old host. The mirror patches `cpythonrc.py` to default `PYGPI` to
 `<origin>/cdn/` and the index's `-CDN-` to `/cdn/`. With both, the game reaches
-its menu with the host blocked (zero requests to it). If the list is missing, a
-download fails or an anchor moves with a pygbag upgrade, nothing is rewritten and
-the game keeps the remote CDN. After a pygbag upgrade rerun
+its menu with the host blocked (zero requests to it). Every file is downloaded
+and checked before anything is written: if the list is missing, lacks a core file
+(a recording cut short), names another pygbag version than the built page, a
+download fails, or an anchor moves with a pygbag upgrade, nothing is written and
+the game keeps the remote CDN; the step never fails the build. A pointed page with
+a file missing would be worse than no mirror: a 404 from our own origin for every
+visitor. The service worker went to `starconquest-v4` with the move, and drops a
+cached page whose network answer is now a redirect, or a returning player's cached
+`/game/` page (loading the blocked CDN) would win forever. After a pygbag upgrade rerun
 `node tools/record_runtime.mjs` and repeat the blocked-host check. The game is also
 served at `/play/`, not `/game/` (some filters match the word); `/game/*` redirects.
 
