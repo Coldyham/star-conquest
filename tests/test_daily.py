@@ -232,20 +232,21 @@ def test_a_daily_remembered_before_the_puzzle_is_a_board(store):
 
 
 def test_the_result_line_gives_nothing_away():
+    """Wordle-short: the day's number and the result, then the link. No date,
+    map size, opponent or seed."""
     s = daily.candidates(MONDAY, limit=1)[0]
-    text = game_daily.result_line("2026-10-28", s, 23, 7)
-    assert text.splitlines()[:2] == [f"Star Conquest daily · Wed 28 Oct · {s.system_count()} systems",
-                                     "Won in 23 turns, 7 ships lost"]
+    text = game_daily.result_line("2026-10-28", 23, 7)
+    assert text.splitlines()[0] == "Star Conquest daily #1 - 23 turns, 7 ships"
     assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#daily")
+    puzzle = game_daily.result_line("2026-11-07", 8, 9, "puzzle")
+    assert puzzle.splitlines()[0] == "Star Conquest puzzle #11 - 8 turns, 9 ships"
+    assert puzzle.splitlines()[-1].endswith("/game/#puzzle")
+    assert game_daily.number(game_daily.FIRST_DAY) == 1
 
 
-def test_a_puzzle_result_names_its_opponent():
+def test_a_puzzle_label_names_its_opponent():
     for w, name in ((1, "heuristic+lean"), (3, "Thinker · Claudebot"), (6, "Actuary · Field")):
         s = daily.candidates(MONDAY + dt.timedelta(days=w), limit=1, kind="puzzle")[0]
-        text = game_daily.result_line("2026-10-28", s, 9, 2, "puzzle")
-        assert text.splitlines()[0] == (f"Star Conquest daily puzzle · Wed 28 Oct · {s.system_count()} systems"
-                                        f" vs {name}")
-        assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#puzzle")
         assert game_daily.label("2026-10-28", s, "puzzle").endswith(f"vs {name}")
 
 
@@ -298,3 +299,4 @@ def test_the_board_says_it_in_the_games_words():
         text = game_daily.par_note(par, turns, lost)
         assert f'"{text}"' in tests, text
         assert text.split("!")[0] + "!" in js
+

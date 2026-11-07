@@ -507,7 +507,7 @@ def copy_daily_result(settings: Settings, state: GameState, ui: Ui) -> str:
     """Copy a daily win's spoiler-free result line. Returns a line for the
     overlay. The clipboard only, as a challenge link: the line names no setup,
     and its link opens today's daily, not this one."""
-    text = daily.result_line(ui.daily_day, settings, state.turn,
+    text = daily.result_line(ui.daily_day, state.turn,
                              state.players[ui.human_id].ships_lost, ui.daily_kind or daily.BOARD)
     if webstore.copy_to_clipboard(text):
         return "Result copied — paste it anywhere"

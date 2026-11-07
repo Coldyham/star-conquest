@@ -47,6 +47,9 @@ _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # How many dailies are remembered as such: a fortnight of both kinds, so last
 # week's is still known as a daily when it is replayed from the archive.
 REMEMBER_MAX = 28
+# The first day of both kinds: day 1 of the numbering a result line carries
+# ("puzzle #11"), as Wordle numbers its days.
+FIRST_DAY = "2026-10-28"
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
@@ -152,6 +155,11 @@ def opponent(settings: Settings) -> str:
     return f"{name} · {stop}" if stop and stop.lower() != family.lower() else name
 
 
+def number(day: str) -> int:
+    """``day``'s number: 1 on ``FIRST_DAY``, the same for both kinds."""
+    return (dt.date.fromisoformat(day) - dt.date.fromisoformat(FIRST_DAY)).days + 1
+
+
 def short_date(day: str) -> str:
     """'Wed 28 Oct'."""
     d = dt.date.fromisoformat(day)
@@ -165,16 +173,14 @@ def label(day: str, settings: Settings, kind: str = BOARD) -> str:
     return f"Daily · {short_date(day)}: {dealer.describe(settings)}"
 
 
-def result_line(day: str, settings: Settings, turns: int, lost: int, kind: str = BOARD) -> str:
-    """The spoiler-free lines a win copies: the day, the board's size (and a
-    puzzle's opponent), the result and a link that opens today's daily of the
-    kind (never this setup)."""
+def result_line(day: str, turns: int, lost: int, kind: str = BOARD) -> str:
+    """The spoiler-free lines a win copies, Wordle-short: the day's number and
+    the result, then a link that opens today's daily of the kind (never this
+    setup). Nothing about the map: a reader who wants to know plays it."""
     link = webstore.leaderboard_url("/game/#" + LINK_FRAGMENTS.get(kind, LINK_FRAGMENT))
-    head = (f"Star Conquest daily puzzle · {short_date(day)} · {settings.system_count()} systems"
-            f" vs {opponent(settings)}" if kind == PUZZLE
-            else f"Star Conquest daily · {short_date(day)} · {settings.system_count()} systems")
-    lines = [head, f"Won in {turns} turns, {lost} ships lost"]
-    return "\n".join(lines + ([link] if link else []))
+    name = "puzzle" if kind == PUZZLE else "daily"
+    head = f"Star Conquest {name} #{number(day)} - {turns} turns, {lost} ships"
+    return "\n".join([head] + ([link] if link else []))
 
 
 @dataclass(frozen=True)

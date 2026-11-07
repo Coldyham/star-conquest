@@ -381,10 +381,14 @@ create table if not exists public.dailies (
   address bar:
 
   ```
-  Star Conquest daily · Wed 28 Oct · 16 systems
-  Won in 64 turns, 21 ships lost
-  https://star-conquest.netlify.app/game/#daily
+  Star Conquest puzzle #11 - 8 turns, 9 ships
+  https://star-conquest.netlify.app/game/#puzzle
   ```
+
+  Wordle-short since 2026-11-07: the day's number (`daily.number`, 1 on
+  `FIRST_DAY`, 2026-10-28, for both kinds) and the result, nothing about the
+  map. It named the date, the board's size and a puzzle's opponent before;
+  less said makes a reader curious.
 
   The line carries no setup and no moves. The link opens today's daily, not
   the poster's game.

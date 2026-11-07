@@ -3209,7 +3209,7 @@ def test_a_fetched_daily_lands_on_the_menu_and_plays_as_the_daily(_gauntlet_stor
     monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
     state.winner = ui.human_id
     assert main.copy_daily_result(settings, state, ui).startswith("Result copied")
-    assert copied[0].startswith("Star Conquest daily · Wed 28 Oct")
+    assert copied[0].startswith("Star Conquest daily #1 - ")
 
 
 PUZZLE_SETUP = {"mode": "random", "players": 2, "nodes": 6, "seed": 77,
@@ -3237,7 +3237,7 @@ def test_a_fetched_puzzle_lands_and_plays_as_the_puzzle(_gauntlet_store, monkeyp
     monkeypatch.setattr(main.webstore, "copy_to_clipboard", lambda text: copied.append(text) or True)
     state.winner = ui.human_id
     main.copy_daily_result(settings, state, ui)
-    assert copied[0].startswith("Star Conquest daily puzzle · Wed 28 Oct") and "vs Marshal" in copied[0]
+    assert copied[0].startswith("Star Conquest puzzle #1 - ") and "Marshal" not in copied[0]
 
     main.land_daily(ms, Settings(), "missing", "{}", "puzzle")
     assert ms.status == "There's no daily puzzle for that day"
