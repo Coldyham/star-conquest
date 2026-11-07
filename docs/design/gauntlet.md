@@ -147,6 +147,16 @@ No way out moved to seed 2350. Of the alternatives measured there, Search with
 Field let one bot win (knower at Council, 128 / 93) and Search with Learning
 none; 1705 with knower at Predict and actuary at Hunt was also unbeaten.
 
+**Defender's edge runs at 1.1** (2026-11-07; it was 1.05). At 1.05 the odds
+card's "5 holding it fight like 5.25" was too small a difference to notice. The
+worry was rusherplus, which sends at `target.ships + 2` and never prices the
+advantage, throwing ships at neutrals. Measured on the stage's map, seeds
+4016-4023, with heuristic, thinker, marshal and actuary in the human's seat (32
+games a setting): rusherplus's attacks on neutrals failed 12.3% of the time at
+1.0, 12.7% at 1.05, 14.4% at 1.1 and 16.4% at 1.15 (69, 92, 116 and 179 ships
+thrown away). The human seat won 29, 28, 32 and 31 of 32. Changing the setup
+made the stage a new, uncleared one, as above.
+
 **How the seeds were chosen.** Each stage's setup was played on 24 candidate
 seeds by marshal, evolved, thinker, heuristic and rusherplus in the human's seat
 (`tests.sim.play_settings`), and a seed picked per stage for a rising loss count:
