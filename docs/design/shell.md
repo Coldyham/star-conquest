@@ -663,7 +663,7 @@ a bare "Alcyone").
 
 Before the first frame a visitor downloads pygbag's runtime (CPython and
 pygame-ce compiled to WebAssembly, from the pygame-web CDN under a versioned
-path) and the game's own archive (`/game/starconquest.tar.gz`), then the
+path) and the game's own archive (`/play/starconquest.tar.gz`), then the
 "Loading, please wait" box stays up while Python compiles the game from source.
 
 **The archive was mostly things the game never reads.** Measured on the deployed
@@ -695,6 +695,28 @@ and the game could not start offline. A pygame-web fix published in place
 under the same version reaches a player one visit late, as a redeploy of the
 game already does. Checked in Chromium with a stand-in CDN: the runtime loads
 from the cache with the CDN down.
+
+**The runtime is served from our own origin** (`tools/mirror_runtime.py`,
+`tools/record_runtime.mjs`, `tools/pwa/runtime_files.txt`). A school's Smoothwall
+filter blocked `pygame-web.github.io`: the board (our domain) loaded, the game sat
+on "Loading, please wait" forever. The build now mirrors the 12 runtime files into
+`web/cdn/` and rewrites the page's script URL, but that alone was not enough:
+checked in Chromium with that host blocked, the game still hung on a request for
+the package index, which the runtime's `pep0723` module reads from `$PYGPI`
+(pygbag's own tools use `$PYGPY`; it is not documented) and whose own `-CDN-` key
+also names the old host. The mirror patches `cpythonrc.py` to default `PYGPI` to
+`<origin>/cdn/` and the index's `-CDN-` to `/cdn/`. With both, the game reaches
+its menu with the host blocked (zero requests to it). Every file is downloaded
+and checked before anything is written: if the list is missing, lacks a core file
+(a recording cut short), names another pygbag version than the built page, a
+download fails, or an anchor moves with a pygbag upgrade, nothing is written and
+the game keeps the remote CDN; the step never fails the build. A pointed page with
+a file missing would be worse than no mirror: a 404 from our own origin for every
+visitor. The service worker went to `starconquest-v4` with the move, and drops a
+cached page whose network answer is now a redirect, or a returning player's cached
+`/game/` page (loading the blocked CDN) would win forever. After a pygbag upgrade rerun
+`node tools/record_runtime.mjs` and repeat the blocked-host check. The game is also
+served at `/play/`, not `/game/` (some filters match the word); `/game/*` redirects.
 
 **Not done.** The runtime's own size is pygbag's, not ours. Shipping `.pyc` to
 skip compiling: pygbag's packer drops `.pyc` (`filtering.SKIP_EXT`). Importing

@@ -43,7 +43,7 @@ function mountPlayLink() {
 
 // The board is half of the installable app (the manifest and service worker at
 // the site root, `tools/pwa/`). Registering the worker here is what lets a
-// browser offer the install from a board page, not only from /game/. Inside
+// browser offer the install from a board page, not only from /play/. Inside
 // the installed app, the page also records that the board was the last half
 // open, so the root router (`tools/pwa/root.html`) reopens it at the next
 // launch. Silent everywhere it can't apply, such as a dev server with no root.

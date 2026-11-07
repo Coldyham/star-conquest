@@ -8,7 +8,7 @@ place: it adds the manifest/apple-touch/theme-color head tags, registers the
 service worker, and restyles pygbag's default (green-on-blue) loading screen to
 match the game's dark palette.
 
-    uv run python tools/pwa/inject.py web/game/index.html
+    uv run python tools/pwa/inject.py web/play/index.html
 
 Anchors it relies on (the <head>/<title> boilerplate pygbag stamps out) are
 asserted so the build fails loudly if a future pygbag version changes them, rather
@@ -17,6 +17,7 @@ than silently shipping a non-installable page.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from pathlib import Path
 # installability bar (and enables offline play). Inside the installed app the
 # page also notes that the game was the last half open (sc_app_last), which the
 # root router reads at the next launch.
-# The page is served at /game/, but the manifest, icons and service worker sit at
+# The page is served at /play/, but the manifest, icons and service worker sit at
 # the site root (see tools/build_web.sh), hence the absolute paths.
 HEAD_BLOCK = """
     <!-- PWA wiring — injected by tools/pwa/inject.py -->
@@ -91,7 +92,7 @@ HEAD_BLOCK = """
 
 
 def main() -> int:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "web/game/index.html")
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "web/play/index.html")
     html = path.read_text(encoding="utf-8")
 
     if "</head>" not in html:
@@ -120,6 +121,13 @@ def main() -> int:
         html = html.replace(bad_meta, "", 1)
     else:
         print("inject.py: WARNING — second viewport meta not found; leaving it")
+
+    # pygbag's template still loads browserfs.min.js, a file its CDN removed (404
+    # on pygame-web.github.io too; the runtime says it "must be fully provided
+    # from template"). The tag only costs a failed request, so drop it (best-effort).
+    html, dropped = re.subn(r'[ \t]*<script src="[^"]*browserfs\.min\.js"></script>\n?', "", html, count=1)
+    if not dropped:
+        print("inject.py: WARNING — browserfs script tag not found; leaving it")
 
     path.write_text(html, encoding="utf-8")
     print(f"inject.py: patched {path} for PWA + dark loading screen")

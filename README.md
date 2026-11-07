@@ -22,7 +22,7 @@ edges**. One ship type. Take every system to win.
   hand in the built-in editor.
 - **Fog of war** is optional, with adjustable sight ranges.
 
-**Play it in the browser:** <https://star-conquest.netlify.app/game/>. The
+**Play it in the browser:** <https://star-conquest.netlify.app/play/>. The
 leaderboard is at <https://star-conquest.netlify.app/board/>.
 
 ## Run it
@@ -170,7 +170,7 @@ starconquest/
   menu.py        # pre-game setup screen
   mapmaker.py    # the hand-drawn map editor
   widgets.py     # measured-layout UI kit
-  main.py        # the pygame loop: menu/game/editor scene wiring
+  main.py        # the pygame loop: menu/play/editor scene wiring
   # pure helpers for the shell
   viewstate.py   # transient in-game UI state
   share.py       # uploads/downloads replays to and from the leaderboard
@@ -200,7 +200,7 @@ bundled font, tap/drag input and an async main loop (see
 [`paths.py`](starconquest/paths.py) `is_web()`).
 
 ```sh
-./tools/build_web.sh                       # -> ./web/ (game at /game/, board at /board/)
+./tools/build_web.sh                       # -> ./web/ (game at /play/, board at /board/)
 cd web && python3 -m http.server 8000 --bind 0.0.0.0   # test at http://localhost:8000
 ```
 

@@ -382,7 +382,7 @@ create table if not exists public.dailies (
 
   ```
   Star Conquest puzzle #11 - 8 turns, 9 ships
-  https://star-conquest.netlify.app/game/#puzzle
+  https://star-conquest.netlify.app/play/#puzzle
   ```
 
   Wordle-short since 2026-11-07: the day's number (`daily.number`, 1 on
@@ -400,7 +400,7 @@ create table if not exists public.dailies (
 
 `daily.html` (joins `render_board.PAGES`), on `base.html` like every page:
 
-- **Today**: the setup in a line, the opponents, a Play link (`../game/#daily`)
+- **Today**: the setup in a line, the opponents, a Play link (`../play/#daily`)
   and a link to its map page once somebody has posted. While the day runs the
   map is embargoed (see "The day's winner"), so the page shows what game.html
   shows of an embargoed map: who is ahead, by how many turns, and how many
@@ -577,7 +577,7 @@ weakest first as the worker plays them:
   ```
   Star Conquest daily puzzle · Wed 28 Oct · 6 systems vs Rusherplus
   Won in 11 turns, 3 ships lost
-  https://star-conquest.netlify.app/game/#puzzle
+  https://star-conquest.netlify.app/play/#puzzle
   ```
 
 - **The board**: `puzzle.html`, a tab beside `daily.html` (the two share one

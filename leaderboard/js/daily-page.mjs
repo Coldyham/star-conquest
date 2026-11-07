@@ -39,7 +39,7 @@ const day = validDay(asked) && asked < today ? asked : today;
 const isToday = day === today;
 
 const dayHref = (d) => (d === today ? page : `${page}?day=${d}`);
-const playHref = (d) => (d === today ? `../game/#${fragment}` : `../game/#${fragment}=${d}`);
+const playHref = (d) => (d === today ? `../play/#${fragment}` : `../play/#${fragment}=${d}`);
 
 /** The Board/Puzzle tabs keep the day being looked at. */
 function keepDayInTabs() {

@@ -270,7 +270,7 @@ function renderStage(stage, i, dupes) {
     changed();
   });
 
-  const [link] = textField(id("link"), stage.link, "https://…/game/#eNo…", 0, (v) => { stage.link = v; }, true);
+  const [link] = textField(id("link"), stage.link, "https://…/play/#eNo…", 0, (v) => { stage.link = v; }, true);
   link.addEventListener("input", async () => {
     await readLink(stage);
     renderSummary(summary, stage, duplicates().has(draft.stages.indexOf(stage)));

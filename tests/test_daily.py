@@ -237,10 +237,10 @@ def test_the_result_line_gives_nothing_away():
     s = daily.candidates(MONDAY, limit=1)[0]
     text = game_daily.result_line("2026-10-28", 23, 7)
     assert text.splitlines()[0] == "Star Conquest daily #1 - 23 turns, 7 ships"
-    assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#daily")
+    assert str(s.seed) not in text and text.splitlines()[-1].endswith("/play/#daily")
     puzzle = game_daily.result_line("2026-11-07", 8, 9, "puzzle")
     assert puzzle.splitlines()[0] == "Star Conquest puzzle #11 - 8 turns, 9 ships"
-    assert puzzle.splitlines()[-1].endswith("/game/#puzzle")
+    assert puzzle.splitlines()[-1].endswith("/play/#puzzle")
     assert game_daily.number(game_daily.FIRST_DAY) == 1
 
 

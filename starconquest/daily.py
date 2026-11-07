@@ -179,7 +179,7 @@ def result_line(day: str, turns: int, lost: int, kind: str = BOARD) -> str:
     """The spoiler-free lines a win copies, Wordle-short: the day's number and
     the result, then a link that opens today's daily of the kind (never this
     setup). Nothing about the map: a reader who wants to know plays it."""
-    link = webstore.leaderboard_url("/game/#" + LINK_FRAGMENTS.get(kind, LINK_FRAGMENT))
+    link = webstore.leaderboard_url("/play/#" + LINK_FRAGMENTS.get(kind, LINK_FRAGMENT))
     name = "puzzle" if kind == PUZZLE else "daily"
     head = f"Star Conquest {name} #{number(day)} - {turns} turns, {lost} ships"
     return "\n".join([head] + ([link] if link else []))

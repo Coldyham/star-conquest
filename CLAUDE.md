@@ -257,7 +257,7 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   `sc_my_puzzle_par` answers a signed-in player whose own posted score does).
   A stored par is only ever improved (`puzzle_par.better`). `docs/design/daily.md`, "The
   puzzle's par".
-- **The game and board are one site** (`/game/`, `/board/`, `/api/`).
+- **The game and board are one site** (`/play/`, `/board/`, `/api/`).
   Endpoints are built at call time; `paths.LEADERBOARD_ORIGIN` blank disables
   every leaderboard feature. `tools/pwa/sw.js` never touches `/api/`. The
   sensitive-variable policy stays on "Require approval". Board pages are

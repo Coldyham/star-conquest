@@ -35,14 +35,14 @@
       "name": "Daily puzzle",
       "short_name": "Puzzle",
       "description": "Play today's daily puzzle",
-      "url": "/game/#puzzle",
+      "url": "/play/#puzzle",
       "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Daily challenge",
       "short_name": "Daily",
       "description": "Play today's daily board",
-      "url": "/game/#daily",
+      "url": "/play/#daily",
       "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {

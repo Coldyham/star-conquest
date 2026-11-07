@@ -224,7 +224,7 @@ difficulty.
 The board's gauntlet page builds a gauntlet from game links: one pasted link
 per stage (the menu's Get Link, or a challenge link with its score dropped),
 each with a title, briefing paragraphs and a hint. Saving stores it and gives
-the link `/game/#g=<id>`. A `.json` download of the same file is for desktop.
+the link `/play/#g=<id>`. A `.json` download of the same file is for desktop.
 
 - **Stored, not carried in the link.** A whole gauntlet fits in a fragment (the
   ten-stage tutorial is about 3 KB deflated), but storing it keeps the link short,
@@ -351,7 +351,7 @@ preview is that measurement ("In the game", below).
   probes the web can afford, and is step 3's first job.
 - **The form belongs on the board.** Checkboxes and ranges are cheap in HTML
   and costly on the menu's fixed pygame canvas. The page builds a spec link
-  (`/game/#gauntlet-spec=<token>`) and the game deals and measures.
+  (`/play/#gauntlet-spec=<token>`) and the game deals and measures.
 
 ### The spec
 

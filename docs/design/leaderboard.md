@@ -541,10 +541,10 @@ built.
 
 - **The game and the board are one site.** The root `netlify.toml` builds the
   game, and `tools/build_web.sh` stages the board's pages into `web/board/`
-  from an explicit allow-list. The game itself is at `/game/`; the root is
+  from an explicit allow-list. The game itself is at `/play/`; the root is
   `tools/pwa/root.html`, a router that opens the board for a visitor and
   forwards a fragment (every challenge, replay and seat link the game ever
-  shared is the root plus one) to `/game/`. The manifest, icons and service
+  shared is the root plus one) to `/play/`. The manifest, icons and service
   worker stay at the root, so old installs keep their scope and manifest `id`.
   The app is installable from either half: every board page links the
   manifest, and `js/nav.mjs` registers the worker. Its `start_url` is the
@@ -553,8 +553,8 @@ built.
   and by the game page's `tools/pwa/inject.py` head), and the game if nothing
   is recorded. So an install from before this keeps opening the game until it
   visits the board. A long press on the installed icon offers three
-  manifest `shortcuts`: today's daily puzzle and board (`/game/#puzzle`,
-  `/game/#daily`, the fragments `daily.link` reads) and the campaign
+  manifest `shortcuts`: today's daily puzzle and board (`/play/#puzzle`,
+  `/play/#daily`, the fragments `daily.link` reads) and the campaign
   (`/board/campaign.html`). They go straight to their half, past the router. A fixed launch target either way would be wrong for
   someone: the board is a fine front page, but a player who installed to play
   wants the game. A per-device toggle would be one more control to find, for a
