@@ -36,6 +36,7 @@ SPECTATE_ROW = -1
 # drawing whichever survive — a stale rect would otherwise still answer clicks.
 FOOTER_RECTS = (
     "retry_live_button_rect",
+    "undo_button_rect",
     "clear_button_rect",
     "menu_button_rect",
     "restart_live_button_rect",
@@ -560,6 +561,9 @@ class Ui:
     # the one way back to the start of a game with no history to rewind through,
     # a daily's. Never in a shared match (`can_retry`).
     retry_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Undo (U): take back the last turn, as History's rewind to the turn before
+    # does, in one press and with no confirm (`can_undo`).
+    undo_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The footer's overflow: a strip too narrow for every button folds the least
     # essential behind one "more" button (and a compact screen always folds the
@@ -788,6 +792,18 @@ class Ui:
         key and the button can never disagree.
         """
         return state.turn > 0 and not (self.ironman and state.winner is None)
+
+    def can_undo(self, state: GameState) -> bool:
+        """Is Undo (U) available: rewinding the live game one turn?
+
+        It is History's rewind to the turn before, so it asks what History does
+        (`can_review`: a recorded turn, and not under ironman while undecided),
+        and only in live play of an undecided game of our own: a decided game is
+        rewound from History, which forks it, and a shared match is never ours
+        to rewind.
+        """
+        return (self.can_review(state) and state.winner is None
+                and not self.in_pbp and not self.history)
 
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?

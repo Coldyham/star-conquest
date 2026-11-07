@@ -701,7 +701,7 @@ the best bot". The working plan for the rest is
   or a fork after the game is decided is free play: `main.run_ui` marks only
   the run's own game, and the run has already recorded the result. So none of
   them is blocked. They just aren't the run. While the game is undecided it
-  plays ironman, as the daily does (no History, so no rewind), and the Hint is
+  plays ironman (no History or Undo, so no rewind), and the Hint is
   not offered (`Ui.can_hint`).
 - **Quitting doesn't escape a bad game.** Continue run resumes the step's own
   log, never a fresh copy of the stage (`main.open_run`), and so does the boot

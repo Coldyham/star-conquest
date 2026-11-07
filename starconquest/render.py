@@ -2001,6 +2001,10 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # Not in a gauntlet stage: its seed is pinned, so a new map would leave it.
     if not ui.in_stage:
         specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_GREEN, 2, "left"))
+    # Undo takes back the last turn: History's rewind to the turn before, in one
+    # press, with no confirm (a daily puzzle is where it earns its place).
+    if ui.can_undo(state):
+        specs.append(("undo_button_rect", _key_hint("Undo", "U"), *_BTN_AMBER, 9, "right"))
     if ui.can_review(state):
         specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 7, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being

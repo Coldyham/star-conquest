@@ -15,8 +15,8 @@ starts and again the moment it is decided, never only at the end.
 **A run judges only its own game.** Each step names its game's log. Only that
 game's result moves the run, and only once. A Retry, a rewind or a fork after
 it is decided is free play and leaves the run alone, so nothing needs blocking
-there. While the game is undecided it plays ironman (no History, so no rewind),
-the way the daily does, and the Hint is not offered.
+there. While the game is undecided it plays ironman (no History or Undo, so no rewind),
+and the Hint is not offered.
 
 **Quitting doesn't escape it.** The active step's log is kept in ``webstore``
 as well as on disk, rewritten every turn (``keep_log``), because ``games/`` is
