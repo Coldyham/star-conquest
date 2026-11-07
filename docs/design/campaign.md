@@ -301,6 +301,124 @@ The game and the board are one site, so the game can ask before it plays.
   `weekQueries` is the one copy of the two reads a week is folded from, for the
   two pages and the endpoint.
 
+## A daily allowance of moves (proposed)
+
+**Proposed 2026-11-05, not built.** A brake on the Monday sweep that is a
+count, not a clock, and needs no notification: each UTC day of the week adds
+moves to a player's allowance, unused moves carry forward within the week, and
+a win posted with nothing left is not a move. Like everything else in the
+campaign it is derived in `fold`, never stored. The constraint it is built
+around: **a player must always be able to take the whole board in a week**,
+and **nobody should play a game that can't gain them anything without being
+told first**.
+
+### What the real weeks say
+
+All six weeks to date (2026-09-28 to 2026-11-02) were the minimum field, 12
+field nodes and 4 homes, with one or two names, replayed through `fold`:
+
+| Week | Names | Field moves (steals) | Moves per active day |
+|---|---|---|---|
+| 28 Sep | 2 | 15 (3) | 7, 4, 1; the other name 3 |
+| 5 Oct | 1 | 12 (0) | 5, 3, 4 |
+| 12 Oct | 1 | 12 (0) | 2, 4, 6 |
+| 19 Oct | 1 | 10 (0) | 1, 5, 1, 3 |
+| 26 Oct | 2 | 12 (0) | 7, 5 |
+| 2 Nov | 2 | 15 (6) | 6, 2, 3; the other name 4 |
+
+The board is cleared in bursts: two to four active days a week at five to
+seven moves each, never a little every day. Counting the real moves against a
+cap (first-order, ignoring knock-on): a cap reset each midnight refuses 39 of
+76 moves at 2 a day, 24 at 3, 13 at 4, and at 3 the 26 Oct week (7 then 5)
+ends on 6 nodes. **A per-day cap that resets is the wrong shape**: any number
+low enough to brake a Monday sweep stops a twice-a-week player clearing the
+board. A banked allowance at 3 a day refuses 17, every one in an early-week
+burst, and every week stays clearable by Sunday.
+
+Six weeks of essentially one player on the smallest field say what is
+comfortable for a solo clear, not how a contested week feels.
+
+### The rule
+
+- **The allowance is banked.** After day *d* of the week (Monday is day 1,
+  UTC), a player has `rate × d` moves less those already made. A latecomer
+  joining on Thursday has Monday's to Thursday's waiting.
+- **The rate scales with the field**: `ceil(field / 4)` a day, field nodes
+  only, so 3 on a 12-node field and 10 on a 40-node one (`FIELD_PER_PLAYER`
+  is 4). The whole board is in reach by Thursday, leaving Friday to Sunday for
+  retakes; the 2 Nov week needed six.
+- **What spends one: a field win that changes the holder**, of an empty node or
+  a held one. **What spends none**: a home claim (it is how you join);
+  bettering your own score on a node you hold (defence is always free); a loss;
+  a win that doesn't beat the holder (attempts are never punished).
+- **A move that counts only through the grace spends nothing.** The grace
+  exists for a game already under way when its access went. That game can't
+  be warned at Start, so spending an allowance it may not have would bring
+  back the wasted game the grace was built to stop.
+- **Judged at posting, like access.** A stamp at Start that kept the
+  allowance would be a standing permit, so it is never granted. Several games
+  started on one remaining move can't all count. Only the first win posted
+  spends it, and the game says so (below).
+- **The rate is written into the week's graph** by `tools/campaign.py`
+  (`allowance: {per_day}` beside `nodes`, `GRAPH_VERSION` 2). A week without
+  it folds uncapped, so past weeks never change, and a change of rate never
+  moves a week already dealt.
+
+### Signposting
+
+The allowance is only fair if nobody finds out about it from a win that didn't
+move. Every place that already says whether a win would be a move says this
+too, through `attemptStatus` (a new `why: "spent"`, plus `left`, and `nextAt`
+when it is 0) and `attemptLines`, so the page, the map page and the game word
+it once:
+
+- **The campaign page header**, for a player with a name: "2 moves left · +3
+  at 00:00 UTC (in 5 h 12 min)". At 0, "No moves left today; 3 more at
+  00:00 UTC". Shown all week, not only near the limit, so the count is known
+  before it matters.
+- **The node panel and game.html's note** on a field node that would be a
+  move: "You can make this move (1 of 2 left today)". With none left:
+  "You've used this week's moves so far. A win here won't count until
+  00:00 UTC (in 5 h 12 min)." A node you hold says that bettering it is
+  free.
+- **The game's Start confirm** (`campaign.confirm`, the one modal) asks when a
+  win would spend nothing because there is nothing to spend, as it does for
+  `late-start`, and says when the next move arrives. With one move left it
+  doesn't ask, but the modal-free path still shows the count in the side
+  panel.
+- **The side panel reminder** (`main.campaign_tick`) carries the count, and
+  the refresh every `REFRESH_S` catches a move spent elsewhere mid-game:
+  "Your last move was used on node 6. This win won't count until 00:00 UTC."
+- **Never a countdown to the minute beside the grace's.** That was the
+  cooldown's failure ("post within 12 min" next to "plays in 40"). The grace
+  line stays the one timer, and the allowance always reads as a count with a
+  time of day ("at 00:00 UTC"), not a second clock. When the grace applies,
+  only the grace line shows, since a grace move spends nothing.
+
+### Left to decide
+
+- **The rate.** `ceil(field / 4)` is fitted to one solo player on 12 nodes.
+  On a contested field the slack for retakes matters more. Playtest a
+  contested week before tuning.
+- **Whether a home claim should start the bank.** As written, a latecomer has
+  the whole week's allowance at once, so a Thursday joiner can sweep. The
+  brake was aimed at the Monday sweep before anyone else had arrived, and a
+  latecomer is playing against people who have had days, so this is probably
+  fine.
+- **Ping-pong.** A steal and its retake each spend one, so two players trading
+  a node pay equally. Whether a retake of your own lost node (outside the
+  grace) should be cheaper is open.
+
+### What building it would touch
+
+`fold` (count spent moves per player against the graph's `allowance`; a skipped
+move changes nothing, like a win without access), `attemptStatus` and
+`attemptLines` (the `spent` reason, `left`, `nextAt`), the campaign page's
+header, `NOT_A_MOVE`, `starconquest/campaign.py` (`Status` and `confirm` read
+the new fields; the reminder text), `tools/campaign.py` (write `allowance`,
+`GRAPH_VERSION` 2), and tests in `leaderboard/tests/campaign.test.mjs` and
+`tests/test_campaign.py`, including a version-1 week folding as before.
+
 ## Campaign fleets (decided against)
 
 **Decided against (2026-10-26):** the grace period, as built, is the answer.

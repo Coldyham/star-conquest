@@ -89,6 +89,7 @@ line gives only the verdict. Ideas that lost are in
 - campaign.md · **The week's replay.** `weekHistory` (a frame per move via `fold`'s `onMove`), the scrubber, live only at "now", `fieldCounts` and the territory chart (Time / Moves axis); 3D height-for-score not built; `playerHue` collisions.
 - campaign.md · **The grace period.** Half an hour after losing a node or its neighbour, derived in `fold`, for a game started with access (`scores.campaign_start`). *In the game*: confirm before Start, a top-bar countdown.
 - campaign.md · *Decided against:* an "able to capture" flag on its own; a cooldown between moves.
+- campaign.md · **A daily allowance of moves (proposed).** A banked per-UTC-day allowance, `ceil(field / 4)` a day, derived in `fold`, rate stored in the week's graph; the six real weeks' capture rates; what spends a move (not homes, defence or grace moves); signposting on the page, map page, Start confirm and side panel.
 - campaign.md · **Campaign fleets (decided against).** Real-time lanes on the meta-map: a launch locks a claim; holders see inbound fleets; collisions go to the better score; lane length; identity (now covered by claimed names). The grace period answers it. *Revisit if claimed names take hold*: opt-in identity, arrival notifications, and the wait-timer risk (night-time windows).
 
 ## daily.md (built 2026-10-28)
