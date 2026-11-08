@@ -11,7 +11,7 @@ differs, keep it in code, never on screen. Grep this page; don't read it whole.
 | --- | --- | --- | --- |
 | **system** | a star on the map: owned, produces ships | `state.systems`, `Settings.nodes` (the count), `--nodes` | node (except in the campaign), star, planet |
 | **lane** | the link between two systems | `Lane`, `model.lane_key` | edge, spacelane, route |
-| **homeworld** | a seat's starting system ("your home" in the tutorial's prose) | `HOME_PRODUCTION`, mapgen's sector index 0 | capital. The campaign's **home** is something else (below) |
+| **home system**, **home** | a seat's starting system: "Make home system" and "Auto home systems" in the map maker, "your home" in the tutorial | `HOME_PRODUCTION`, `_make_homeworld`, mapgen's sector index 0; "homeworld" in code and docs | homeworld, capital. The campaign's **home** is a node (below), so in campaign text say home system |
 | **ships**, `12sh` | the one unit, counted | `ships` | troops, units |
 | **fleet** | ships in flight down a lane | `Fleet` | |
 | **garrison** | the ships sitting at a system | `system.ships` | |

@@ -913,7 +913,7 @@ def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: i
 
 
 def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
-    """Make homeworld and the seat-gap fix, then the map-wide auto-placement block.
+    """Make home system and the seat-gap fix, then the map-wide auto-placement block.
 
     Laid out the way the Lanes sidebar is: what the selection can do first, the
     knob-plus-Auto block that rewrites the whole map last.
@@ -924,7 +924,7 @@ def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
         # numbers you set, but "give this one a real garrison" shouldn't be a trip
         # back to the Systems tool either.
         ed.rects["make_home"] = _btn_rect(
-            surface, pygame.Rect(x, y, w, bh), "Make homeworld", widgets.BTN_BLUE, f["small"])
+            surface, pygame.Rect(x, y, w, bh), "Make home system", widgets.BTN_BLUE, f["small"])
         y += bh + config.ROW_GAP
 
     if any(p.code == "seat_gap" for p in ed.problems()):
@@ -935,7 +935,7 @@ def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     # The seat count lives here rather than staying on the menu's Basic tab: with
     # a recipe set, `commit` derives `settings.players` from the map, so the
     # number that decides how many seats play *is* how many homeworlds get placed.
-    widgets.text(surface, f["small"], "Auto homeworlds", config.COLOR_TEXT_DIM, topleft=(x, y))
+    widgets.text(surface, f["small"], "Auto home systems", config.COLOR_TEXT_DIM, topleft=(x, y))
     y += widgets.row_h("small") + config.ROW_GAP
     y = _stepper_row(surface, ed, f, x, y, w, "seats", "Seats", str(ed.seat_target()))
     ed.rects["auto_owners"] = _btn_rect(
@@ -1214,7 +1214,7 @@ _CONFIRMS = {
                     "drew by hand goes with it.")),
     "clear_lanes": ("Remove every lane?",
                     "The systems stay where they are; only the network goes."),
-    "auto_owners": ("Replace every homeworld?",
+    "auto_owners": ("Replace every home system?",
                     ("Auto-placing spreads the starts around the rim, so any seat "
                      "you painted by hand goes with it.")),
     "new": ("Start from a blank canvas?", "The map you have drawn will be discarded."),
@@ -1943,7 +1943,7 @@ def _auto_owners(ed: Editor, settings: Settings) -> None:
     # above that would paint a gap straight back in — the blocker `_renumber_seats`
     # exists to clear.
     ed.owner_pick = min(ed.owner_pick, want) if ed.owner_pick > 0 else 0
-    _set_status(ed, f"{want} homeworlds placed around the rim", True)
+    _set_status(ed, f"{want} home systems placed around the rim", True)
 
 
 def _renumber_seats(ed: Editor) -> None:
