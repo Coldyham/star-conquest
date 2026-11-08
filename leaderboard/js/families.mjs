@@ -1,5 +1,5 @@
-// Pace and setup families: the third level of the main list, above "By game"
-// and "By config" (docs/design/setup-families.md).
+// Pace and setup families: the third level of the main list, above "By map"
+// and "By setup" (docs/design/setup-families.md).
 //
 // No DOM and no fetch, so tests/families.test.mjs can drive it directly — the
 // same split as setup.mjs and listing.mjs. Every comparison is by value with a

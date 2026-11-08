@@ -17,6 +17,10 @@ rather than reading design files**; every line names its file and section:
 - `docs/decided-against.md`: every idea built or proposed and then dropped.
 - `docs/open.md`: work left open, and decisions left to the author.
 
+For the words players see (system, setup, map, game, stage…) against the
+code's names for them (`nodes`, `config_key`, `game_key`…), grep
+`docs/glossary.md`; use the player's word in anything on screen.
+
 **Grep `decided-against.md` and `open.md` before proposing a mechanism, a bot
 tactic or a re-tune.** Then read only the section you need. Keep each design
 file under ~1000 lines (split by topic; update `docs/README.md` and

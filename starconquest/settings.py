@@ -512,16 +512,17 @@ class Settings:
         return plain
 
     def challenge_key(self) -> str:
-        """A stable id for "this exact setup", ignoring any attached score.
+        """A stable id for "this exact map" (setup plus seed), ignoring any
+        attached score: the board's ``game_key`` (`docs/glossary.md`).
 
         Hashes the *full* dict, never the pruned token form, so two people whose
         links happened to omit different defaults still agree. ``challenge`` and
-        ``autoplay`` are excluded: a config and the same config carrying a target
-        are the same match, and whether you let the AI drive is disclosed by
+        ``autoplay`` are excluded: a map and the same map carrying a target are
+        the same map, and whether you let the AI drive is disclosed by
         ``Challenge.hand`` instead. A seat beyond ``players`` is blanked first —
         see ``challenge_keys``.
 
-        This is the one to *write* — the canonical id for a setup as this version
+        This is the one to *write* — the canonical id for a map as this version
         describes it. To *test* a key that arrived from elsewhere, use
         ``challenge_keys``.
         """

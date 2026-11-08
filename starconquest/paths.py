@@ -152,7 +152,7 @@ LEADERBOARD_GAUNTLET_PATH = "/api/gauntlet"  # a gauntlet built on the board, by
 LEADERBOARD_DAILY_PATH = "/api/daily"  # a day's daily challenge setup (`daily`)
 # The board's main list (`leaderboard/js/home.mjs`): every map somebody has
 # posted a score on, newest activity first — what the menu's "Recently played"
-# button says it opens. Its "By config" toggle is one press away from there.
+# button says it opens. Its "By setup" toggle is one press away from there.
 # Not specific to the setup on the menu right now — there is no way to name an
 # arbitrary, possibly never-played setup's own config page without either
 # shipping the Supabase project straight into the game or reimplementing

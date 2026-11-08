@@ -2700,7 +2700,7 @@ def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
     turns = state.travel_turns(src, dest) or lane.travel_turns
     y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {turns} turns", config.COLOR_TEXT)
     if config.SHIP_SPEED_GROWTH_PCT > 0:
-        y = _row(surface, x, y, f"Fleet speed: {config.ship_speed(state.turn):.1f} ly/turn", config.COLOR_TEXT_DIM)
+        y = _row(surface, x, y, f"Ship speed: {config.ship_speed(state.turn):.1f} ly/turn", config.COLOR_TEXT_DIM)
     if dest in ui.visible:
         y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh", config.player_color(d.owner_id))
     else:
@@ -4147,7 +4147,7 @@ def draw_confirm_hint(surface, ui: Ui, advisor: str) -> None:
     _draw_modal(
         surface,
         "Show a hint?",
-        (f"Shows on the board the moves the {advisor} bot would make in your "
+        (f"Shows on the map the moves the {advisor} bot would make in your "
          f"position this turn, leaving out any your orders already make."
          f"\n\nUsing a hint makes this game ineligible for {stake}."),
         (

@@ -577,10 +577,10 @@ def _challenge_lines(settings: Settings) -> list[tuple[str, tuple[int, int, int]
     first = (head, _START_BORDER if valid else _WARN)
 
     if not valid:
-        return [first, ("settings changed — your score won't compare", _WARN)]
+        return [first, ("setup changed — your score won't compare", _WARN)]
 
     bots = [settings.seat_strategy(s) for s in range(2, settings.players + 1)]
-    bits = [f"seed {settings.seed}", f"{settings.system_count()} nodes", settings.mode]
+    bits = [f"seed {settings.seed}", f"{settings.system_count()} systems", settings.mode]
     if bots:
         bits.append("vs " + ", ".join(bots))
     mine = webstore.best(*settings.challenge_keys())
@@ -686,7 +686,7 @@ def _stage_lines(ms: MenuState, settings: Settings) -> list[tuple[str, tuple[int
     if g is None:
         return []
     if found is None:
-        return [(f"{g.name.upper()} — settings changed", _WARN),
+        return [(f"{g.name.upper()} — setup changed", _WARN),
                 (f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave", _WARN)]
     _g, stage = found
     head = f"{g.name.upper()} {gauntlet.place(g, stage.id)} — {stage.title}"
@@ -2102,7 +2102,7 @@ def _file_control(surface, ms: MenuState, w: int, y: int) -> None:
     address bar plus ``localStorage``) is the persistence path that actually
     works there; Recently played opens the board's main list (``home.mjs``),
     every map somebody has posted a score on, newest first — a setup worth
-    returning to is a card (or one "By config" press) away there.
+    returning to is a card (or one "By setup" press) away there.
 
     The field takes whatever width the buttons leave (no "File" label: the name
     field had less room than the default name needs, and Save/Load say plainly

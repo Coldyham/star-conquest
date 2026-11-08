@@ -7,6 +7,7 @@ ships or is dropped, delete its line here (and add it to
 [`decided-against.md`](decided-against.md) if it lost).
 
 ## Decisions left to the author
+- daily.md · A player-facing name for the daily's non-puzzle kind, now "Daily board" (clashes with the board meaning the leaderboard), and the "Daily challenge" heading with it; code keeps `daily.BOARD` (see `glossary.md`). *The spec.*
 - campaign.md · Whether to swap `playerHue`'s hashed hues for something that keeps one week's players apart (two names can land on near-identical colours on the campaign map); any change recolours every past week. *The week's replay.*
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*

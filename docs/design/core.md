@@ -192,7 +192,7 @@ knob moved.
 
 The checksum is over the *full* setup dict, so adding a field to `Settings`
 moves the digest of every setup that ever existed. A link shared before the
-change then reads as "settings changed" against the identical map, and on the
+change then reads as "setup changed" against the identical map, and on the
 leaderboard its scores group into a bucket of their own. The first real
 instance: the defender-advantage slider, which split seed 879758 (3 players, 18
 nodes) into `3e7b44384effd7b2` and `665714b9291851c6`.
