@@ -118,6 +118,11 @@ export class Hud {
     this.colors = new Map(map.players.map((p) => [p.id, p.neutral ? NEUTRAL : p.color]));
     this.$ = (id) => document.getElementById(id);
     this.tipFor = null;
+    // A tap pins a scoreboard entry's tip (`input._track_score_hover`): a
+    // finger's lift is a pointerleave, so only a press elsewhere lets it go.
+    document.addEventListener("pointerdown", (e) => {
+      if (this.tipFor !== null && !e.target.closest?.("#scores li")) this.tip(null);
+    }, true);
   }
 
   /** A `hud` colour role as a CSS colour. */
@@ -160,17 +165,22 @@ export class Hud {
       const color = s.vis === "out" ? "rgb(70,74,90)" : this.color(s.id);
       const li = h("li", { class: s.vis, style: `color:${s.vis === "frozen" ? "var(--dim)" : color}` },
         h("span", { class: "swatch", style: `background-color:${color}` }), s.forms[level]);
-      li.addEventListener("pointerenter", () => this.tip(s, li));
-      li.addEventListener("pointerleave", () => this.tip(null));
+      li.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") this.tip(s, li); });
+      li.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") this.tip(null); });
+      li.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "mouse") this.tip(this.tipFor === s.id ? null : s, li);
+      });
       return li;
     }));
     if (this.tipFor !== null) {
-      const s = view.scores.find((x) => x.id === this.tipFor);
-      if (!s) this.tip(null);
+      // the entries were rebuilt: keep the tip, refreshed, on the new one
+      const i = view.scores.findIndex((x) => x.id === this.tipFor);
+      this.tip(i < 0 ? null : view.scores[i], ul.children[i]);
     }
   }
 
-  /** The scoreboard entry spelled out under the top bar. */
+  /** The scoreboard entry spelled out under the top bar, left edge on the
+   * entry's but kept inside the map (`render._draw_score_tooltip`). */
   tip(score, li = null) {
     const tip = this.$("tip");
     this.tipFor = score ? score.id : null;
@@ -180,8 +190,12 @@ export class Hud {
     }
     tip.replaceChildren(...score.tip.map((line) => h("p", {}, line)));
     tip.style.borderColor = this.color(score.id);
-    tip.style.left = `${li.offsetLeft}px`;
+    const room = this.$("mapbox").clientWidth;
+    const pad = 8;
+    tip.style.maxWidth = `${room - 2 * pad}px`;
+    tip.style.left = "0px"; // measured unsqueezed by its old place
     tip.hidden = false;
+    tip.style.left = `${Math.max(pad, Math.min(li.offsetLeft, room - pad - tip.offsetWidth))}px`;
   }
 
   /** The side panel: the system in focus and its lane, or the legend. */
