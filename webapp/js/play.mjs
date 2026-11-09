@@ -11,6 +11,7 @@ import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
 import { Core, pageInfo } from "./core.mjs";
 import { Hud } from "./hud.mjs";
+import { Marks } from "./marks.mjs";
 import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -22,7 +23,7 @@ const params = new URLSearchParams(location.search);
 
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
-  hover: null, drag: null, pan: null, film: null, busy: false, crawling: false,
+  hover: null, drag: null, pan: null, film: null, busy: false, looping: false, marks: new Marks(),
 };
 
 function status(text, error = false) {
@@ -46,7 +47,7 @@ function look(view, before = null) {
   if (before) for (const id of before.visible) visible.add(id);
   const seen = new Set(view.seen);
   if (before) for (const id of before.seen) seen.add(id);
-  return { view, sees: (id) => visible.has(id), seen, hover: game.hover, drag: game.drag };
+  return { view, sees: (id) => visible.has(id), seen, hover: game.hover, drag: game.drag, marks: game.marks };
 }
 
 function redraw() {
@@ -54,24 +55,31 @@ function redraw() {
   game.board_view.draw(game.board, 1, look(game.view), performance.now());
   const box = game.hud.popup(game.view);
   if (box) place(box);
-  crawl();
+  wake();
 }
 
-/** Keep redrawing while a rule being edited crawls (`render._flow_phase`). */
-function crawl() {
+/** Whether the map moves with nothing playing: a rule being edited crawls
+ * (`render._flow_phase`), and a film's marks keep dissolving after it. */
+function moving() {
   const v = game.view;
-  const moving = v && (v.editing_rule !== null || (v.mode === "choosing" && v.popup?.forward));
-  if (!moving || game.crawling) return;
-  game.crawling = true;
+  return game.marks.any || Boolean(v && (v.editing_rule !== null || (v.mode === "choosing" && v.popup?.forward)));
+}
+
+/** Redraw every frame while the map is moving; a film runs its own loop. */
+function wake() {
+  if (game.looping || !moving()) return;
+  game.looping = true;
+  let last = null;
   const frame = (now) => {
-    const still = game.view && (game.view.editing_rule !== null
-      || (game.view.mode === "choosing" && game.view.popup?.forward));
-    if (!still || game.film || !game.board_view) {
-      game.crawling = false;
+    if (game.film || !game.board_view) {
+      game.looping = false;
       return;
     }
+    game.marks.age(last === null ? 0 : now - last);
+    last = now;
     game.board_view.draw(game.board, 1, look(game.view), now);
-    requestAnimationFrame(frame);
+    if (moving()) requestAnimationFrame(frame);
+    else game.looping = false;
   };
   requestAnimationFrame(frame);
 }
@@ -139,6 +147,7 @@ async function newGame(seed = null) {
  * the map when it changed, and draw. */
 function adopt(res) {
   game.seed = res.seed;
+  game.marks.clear();   // they belong to a playback this jumps away from
   const sameMap = game.map && JSON.stringify(game.map) === JSON.stringify(res.static);
   game.map = res.static;
   game.board = fromBoard(res.board);
@@ -201,19 +210,24 @@ function clock(ms) {
 function playFilm(film, view, before) {
   return new Promise((resolve) => {
     const reel = new Reel(game.board, film);
-    let start = null;
+    const seeing = look(view, before);
+    let start = null, last = null;
     game.film = { skip: false };
     game.hud.popup(view);
+    game.marks.archive(reel.board, reel.runTo(0), seeing.sees);   // `app._primed`
     const frame = (now) => {
       start ??= now;
+      game.marks.age(last === null ? 0 : now - last);
+      last = now;
       const ms = game.film?.skip ? film.total : now - start;
-      reel.runTo(ms);
-      game.board_view.draw(reel.board, travelAt(film, ms), look(view, before));
+      game.marks.archive(reel.board, reel.runTo(ms), seeing.sees);
+      game.board_view.draw(reel.board, travelAt(film, ms), seeing, now);
       $("caption").textContent = label(film, ms);
       if (ms >= film.total) {
         $("caption").textContent = "";
         game.film = null;
         resolve();
+        wake();
       } else {
         requestAnimationFrame(frame);
       }

@@ -9,6 +9,7 @@
 // except the SVG nodes it reuses.
 
 import { Camera } from "./camera.mjs";
+import { markFade, markPhase } from "./marks.mjs";
 import { progressAt } from "./reel.mjs";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -39,6 +40,8 @@ const ARROW = 13, ARROW_GAP = 6, ARROW_WING = 0.6;
 // config.RULE_*: a rule's conveyor, its crawl, and where its share label sits.
 const CHEVRON = 8, CHEVRON_GAP = 16, FLOW_MS = 700, RULE_LABEL_GAP = 16, RULE_LABEL_FRAC = 0.35;
 const CLEARANCE = R_MAX + RING_PAD + 4;   // config.node_clearance()
+// config.FILM_BURST_*, FILM_LOSS_GAP, NODE_LABEL_PAD
+const BURST_R = 22, BURST_W = 2, BURST_SPOKES = 6, LOSS_GAP = 12, NAME_PAD = 3;
 const FONT = 18, FONT_SMALL = 14;
 const CHAR_W = 0.602;          // DejaVu Sans Mono's advance, in ems
 const LINE_H = 1.17;           // ...and its line height
@@ -149,6 +152,17 @@ function pill(parent, x, y, text, color) {
   t.textContent = text;
 }
 
+function pillRect(x, y, text) {
+  const w = pillWidth(text);
+  return [x - w / 2, y - PILL_H / 2, w, PILL_H];
+}
+
+/** `render._faded`: `color` blended toward the background by `fade`. */
+function faded([r, g, b], fade) {
+  const bg = [10, 12, 20];
+  return rgb([r, g, b].map((c, i) => Math.round(c + (bg[i] - c) * fade)));
+}
+
 function overlaps(a, b) {
   return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
 }
@@ -234,11 +248,11 @@ export class BoardView {
       const hatchDisc = el("circle", { r: r - 1, fill: "url(#fog-hatch)" }, g);
       const ring = el("path", { fill: "none", stroke: TEXT_DIM, "stroke-width": 2 }, g);
       const count = el("text", { "dominant-baseline": "central", "font-size": FONT }, g);
-      const name = el("text", { y: r + LABEL_GAP + FONT_SMALL * LINE_H / 2, "font-size": FONT_SMALL,
-        "dominant-baseline": "central", fill: TEXT_DIM }, g);
-      name.textContent = s.name;
-      this.nodes.set(s.id, { g, mark, circle, hatchDisc, ring, count, name, r });
+      this.nodes.set(s.id, { g, mark, circle, hatchDisc, ring, count, r, name: s.name });
     }
+    this.markLayer = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL,
+      fill: "none" }, svg);
+    this.nameLayer = el("g", { "font-family": MONO, "font-size": FONT_SMALL, "dominant-baseline": "hanging" }, svg);
     this.dragLayer = el("g", {}, svg);
     this.layout();
   }
@@ -328,12 +342,19 @@ export class BoardView {
     const valid = source !== null ? this.nbrs.get(source) : new Set();
     const human = view?.human ?? null;
     const carrying = new Set(board.fleets.map((f) => `${Math.min(f.src, f.dst)}-${Math.max(f.src, f.dst)}`));
+    this.taken = [];   // labels a star name must not land on
+    this.floor = new Map();   // a badged system's name goes under its badge
 
     this.lanes.forEach((lane, i) => {
       const sa = fogState(lane.a), sb = fogState(lane.b);
       const shown = (sa !== "hidden" && sb !== "hidden") || carrying.has(`${lane.a}-${lane.b}`);
       lane.line.style.display = shown ? "" : "none";
-      lane.g.style.display = shown && (sa === "visible" || sb === "visible") ? "" : "none";
+      const plate = shown && (sa === "visible" || sb === "visible");
+      lane.g.style.display = plate ? "" : "none";
+      if (plate) {
+        const [ax, ay] = this.pos.get(lane.a), [bx, by] = this.pos.get(lane.b);
+        this.taken.push(pillRect((ax + bx) / 2, (ay + by) / 2, String(this.travel[i])));
+      }
       let [width, color] = laneStyle(this.travel[i]);
       color = sa !== "visible" || sb !== "visible" ? rgb(FOG) : rgb(color);
       if (source !== null && (lane.a === source || lane.b === source)) {
@@ -355,7 +376,6 @@ export class BoardView {
       const state = fogState(s.id);
       node.g.style.display = state === "hidden" ? "none" : "";
       const r = node.r;
-      node.name.setAttribute("y", r + LABEL_GAP + FONT_SMALL * LINE_H / 2 + (badged.has(s.id) ? PILL_H + 4 : 0));
       if (view && s.id === view.selected) {
         set(node.mark, { r: r + RING_PAD, stroke: SELECT, "stroke-width": 3, display: "" });
       } else if (valid.has(s.id)) {
@@ -389,7 +409,104 @@ export class BoardView {
       if (f.owner === human || sees(f.src) || sees(f.dst) || human === null) shapes.push(this.fleet(f, travel));
     }
     this.fleetLayer.replaceChildren(...shapes);
+    this.drawMarks(look?.marks ?? null);
+    this.drawNames(look, fogState);
     this.drawDrag(look, human);
+  }
+
+  /** Every fading fight's burst, and the numbers over the map: each side's
+   * losses and each finished hull, stacked over their system in the order
+   * they resolved (`render._draw_film_flashes`, `_film_labels`). */
+  drawMarks(marks) {
+    this.markLayer.replaceChildren();
+    if (!marks) return;
+    const stacks = new Map();
+    const stack = (key) => {
+      if (!stacks.has(key)) stacks.set(key, []);
+      return stacks.get(key);
+    };
+    for (const h of marks.hulls) {
+      stack(h.node).push([`+${h.hulls}`, faded(this.colors.get(h.owner) || NEUTRAL, markFade(h.age))]);
+    }
+    for (const f of marks.fights) {
+      let at;
+      if (f.node === null) {
+        const [ax, ay] = this.pos.get(f.low), [bx, by] = this.pos.get(f.high);
+        at = [ax + (bx - ax) * f.at, ay + (by - ay) * f.at];
+      } else {
+        at = this.pos.get(f.node);
+      }
+      const phase = markPhase(f.age), fade = markFade(f.age);
+      const color = faded(f.color === null ? TEXT : this.colors.get(f.color) || NEUTRAL, fade);
+      const reach = BURST_R * (0.35 + 0.65 * phase);
+      const width = Math.max(1, Math.round(BURST_W * (1 - phase * 0.5)));
+      el("circle", { cx: at[0], cy: at[1], r: reach, stroke: color, "stroke-width": width }, this.markLayer);
+      for (let i = 0; i < BURST_SPOKES; i++) {
+        const angle = 2 * Math.PI * i / BURST_SPOKES + phase;
+        const ux = Math.cos(angle), uy = Math.sin(angle);
+        el("line", { x1: at[0] + ux * reach, y1: at[1] + uy * reach, x2: at[0] + ux * (reach + BURST_R * 0.4),
+          y2: at[1] + uy * (reach + BURST_R * 0.4), stroke: color, "stroke-width": width }, this.markLayer);
+      }
+      const items = stack(f.node === null ? `${at[0]},${at[1]}` : f.node);
+      for (const [owner, lost] of f.losses) {
+        items.push([`−${lost}`, faded(this.colors.get(owner) || NEUTRAL, fade)]);
+      }
+    }
+    for (const [key, items] of stacks) {
+      const at = typeof key === "number" ? this.pos.get(key) : key.split(",").map(Number);
+      const x = at[0], y = at[1] - BURST_R - LOSS_GAP;
+      items.slice().reverse().forEach(([text, color], above) => {
+        const yy = y - above * 22;
+        pill(this.markLayer, x, yy, text, color);
+        this.taken.push(pillRect(x, yy, text));
+      });
+    }
+  }
+
+  /** Star names, placed where they hit neither a system, nor the slot over it
+   * a film writes into, nor any label already on the map; what you are looking
+   * at gets first refusal: the selection, the hover, then the biggest systems
+   * (`render._draw_node_names`). A crowded name waits for a closer zoom. */
+  drawNames(look, fogState) {
+    this.nameLayer.replaceChildren();
+    const view = look?.view ?? null;
+    const [, , vw, vh] = this.camera.screen;
+    const shown = [...this.nodes.keys()].filter((id) => fogState(id) !== "hidden");
+    const taken = this.taken.slice();
+    for (const id of shown) {
+      const [x, y] = this.pos.get(id);
+      const r = this.radius.get(id);
+      taken.push([x - r, y - r, 2 * r, 2 * r]);
+      const slot = pillRect(x, y - BURST_R - LOSS_GAP, "+00");
+      taken.push([slot[0], slot[1] - 22, slot[2], slot[3] + 22]);
+    }
+    const selected = view?.selected ?? null, hover = look?.hover ?? null;
+    const rank = (id) => (id === selected ? -1e9 : id === hover ? -1e8 : -this.radius.get(id));
+    for (const id of shown.sort((a, b) => rank(a) - rank(b))) {
+      const [x, y] = this.pos.get(id);
+      if (x < 0 || y < 0 || x > vw || y > vh) continue;
+      const name = this.nodes.get(id).name;
+      const w = name.length * FONT_SMALL * CHAR_W, h = FONT_SMALL * LINE_H;
+      const r = this.radius.get(id);
+      let placed = null;
+      for (const side of [1, -1]) {
+        let edge = y + side * (r + LABEL_GAP);
+        if (side > 0 && this.floor.has(id)) edge = this.floor.get(id) + NAME_PAD + LABEL_GAP;
+        let rx = x - w / 2, ry = side > 0 ? edge : edge - h;
+        rx = Math.max(0, Math.min(vw - w, rx));
+        ry = Math.max(0, Math.min(vh - h, ry));
+        const padded = [rx - NAME_PAD, ry - NAME_PAD, w + 2 * NAME_PAD, h + 2 * NAME_PAD];
+        if (!taken.some((t) => overlaps(padded, t))) {
+          placed = [rx, ry];
+          taken.push(padded);
+          break;
+        }
+      }
+      if (!placed) continue;
+      const color = id === selected ? SELECT : id === hover ? rgb(TEXT) : TEXT_DIM;
+      const t = el("text", { x: placed[0], y: placed[1] + 1, fill: color }, this.nameLayer);
+      t.textContent = name;
+    }
   }
 
   /** Standing rules as a chevron conveyor in our colour, the one being edited
@@ -410,6 +527,8 @@ export class BoardView {
         const y = a[1] + r + LABEL_GAP + PILL_H / 2;
         avoid = [a[0] - w / 2, y - PILL_H / 2, w, PILL_H];
         badged.add(rule.src);
+        this.taken.push(avoid);
+        this.floor.set(rule.src, avoid[1] + PILL_H);
       }
       for (const [dst, pct, hostile] of rule.lanes) {
         const focused = selected && (dst === view.dest || view.mode !== "choosing");
@@ -420,6 +539,7 @@ export class BoardView {
         if (pct < 100) {
           const [x, y] = ruleLabelAt(a, b, avoid, `${pct}%`);
           pill(this.orderLayer, x, y, `${pct}%`, selected ? rgb(TEXT) : TEXT_DIM);
+          this.taken.push(pillRect(x, y, `${pct}%`));
         }
       }
       if (rule.badge) pill(this.orderLayer, a[0], avoid[1] + PILL_H / 2, rule.badge, selected ? rgb(TEXT) : FORWARD);
