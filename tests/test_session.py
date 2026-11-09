@@ -38,6 +38,7 @@ def test_an_all_bot_game_plays_turn_by_turn_with_films(session):
     assert start["ok"]
     res = start["result"]
     assert res["seed"] == 4 and len(res["static"]["systems"]) == len(res["board"]["sys"])
+    assert len(res["travel"]) == len(res["static"]["lanes"])
     filmed = 0
     for turn in range(1, 6):
         reply = _call(session, "turn.end")

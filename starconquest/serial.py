@@ -73,6 +73,16 @@ def board(state: GameState) -> dict:
     }
 
 
+def travel(state: GameState) -> list[int]:
+    """Each lane's travel time if launched now, in ``static``'s lane order.
+
+    Sent with every board rather than in ``static``: with ship-speed growth on
+    it shortens as the game runs (`GameState.travel_turns`).
+    """
+    pairs = sorted((min(lane.a, lane.b), max(lane.a, lane.b)) for lane in state.lanes.values())
+    return [state.travel_turns(a, b) for a, b in pairs]
+
+
 def fog(visible, seen, intel) -> dict:
     """One seat's fog: what it sees now, what it has ever seen, and its last
     look at each system it no longer sees (``Ui.player_intel``)."""

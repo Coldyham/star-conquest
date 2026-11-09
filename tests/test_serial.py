@@ -54,3 +54,13 @@ def test_the_static_map_has_every_system_and_lane():
     assert [s["id"] for s in blob["systems"]] == sorted(state.systems)
     assert len(blob["lanes"]) == len(state.lanes)
     assert all(a < b for a, b, _ in blob["lanes"])
+
+
+def test_lane_travel_times_follow_the_static_lane_order_and_the_speed():
+    state, _, _ = _played(turns=0, ship_speed_growth_pct=2.0)
+    lanes = serial.static(state)["lanes"]
+    now = serial.travel(state)
+    assert now == [state.travel_turns(a, b) for a, b, _ in lanes]
+    state.turn = 40
+    later = serial.travel(state)
+    assert all(b <= a for a, b in zip(now, later, strict=True)) and later != now

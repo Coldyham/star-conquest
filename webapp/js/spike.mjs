@@ -67,6 +67,7 @@ async function newGame() {
   map = res.static;
   board = fromBoard(res.board);
   view = new BoardView($("map"), map);
+  view.setTravel(res.travel);
   view.draw(board, 1);
   turnMs.length = 0;
   roundTrip.length = 0;
@@ -114,6 +115,7 @@ async function step() {
       if (JSON.stringify(toBoard(board)) !== JSON.stringify(res.board)) mismatches += 1;
     }
     board = fromBoard(res.board);
+    view.setTravel(res.travel);
     view.draw(board, 1);
     setStats({
       turn: String(board.turn),

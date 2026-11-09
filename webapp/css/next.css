@@ -40,7 +40,7 @@ main {
 }
 
 .board { min-width: 0; }
-#map { display: block; width: 100%; height: auto; max-height: calc(100vh - 140px); background: var(--bg); }
+#map { display: block; width: 100%; height: calc(100vh - 140px); background: var(--bg); }
 #caption { min-height: 1.4em; margin: 4px 0 0; color: var(--dim); text-align: center; }
 
 aside {
@@ -85,5 +85,5 @@ dd.bad { color: #e06c6c; }
 
 @media (max-width: 760px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  #map { max-height: 60vh; }
+  #map { height: 60vh; }
 }

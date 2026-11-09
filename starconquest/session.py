@@ -70,14 +70,15 @@ class Session:
         self.seed = seed if seed is not None else resolve_seed(self.settings)
         self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay)
         return {"seed": self.seed, "static": serial.static(self.state), "board": serial.board(self.state),
-                "fog": self._fog()}
+                "travel": serial.travel(self.state), "fog": self._fog()}
 
     def op_turn_end(self) -> dict:
         """Resolve one turn as End Turn (or autoplay's clock) does, and answer the
         film to watch it by and the board it lands on."""
         assert self.state is not None and self.ui is not None and self.settings is not None
         if self.state.winner is not None:
-            return {"board": serial.board(self.state), "film": None, "fog": self._fog(), "ms": 0.0}
+            return {"board": serial.board(self.state), "travel": serial.travel(self.state), "film": None,
+                    "fog": self._fog(), "ms": 0.0}
         t0 = time.perf_counter()
         reel = app.resolve_turn(self.state, self.ui, self.log, self.settings)
         ms = (time.perf_counter() - t0) * 1000
@@ -86,8 +87,8 @@ class Session:
         film = reel.film if reel is not None else None
         self.ui.stop_film()
         self.ui.deferred_view_snap = False
-        return {"board": serial.board(self.state), "film": serial.film(film) if film else None,
-                "fog": self._fog(), "ms": round(ms, 2)}
+        return {"board": serial.board(self.state), "travel": serial.travel(self.state),
+                "film": serial.film(film) if film else None, "fog": self._fog(), "ms": round(ms, 2)}
 
     def op_net_reply(self, req: int, state: str, body: str) -> dict:
         """The page carried out an ``http`` or ``bridge`` effect; hand its answer
