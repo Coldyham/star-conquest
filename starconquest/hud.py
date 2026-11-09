@@ -413,9 +413,9 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
         # losing this makes the sub-mode unreachable on a touch build.
         mode_label, mode_key = "Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab"
         specs.append(("route_mode_rect", mode_label, mode_key, "teal", 6, "right"))
-        # Rally only, and only when there is a front to pick: drawn exactly when it
-        # would do something, the same gate `can_fast_forward` earns its button by.
-        if ui.route_rally and ui.threatened_systems(state):
+        # Rally only. Always something to pick while the game is on: a seat that
+        # borders neither a rival nor a neutral holds the whole map or nothing.
+        if ui.route_rally:
             specs.append(("route_auto_rect", "Auto-route", "T", "violet", 5, "right"))
         specs.append(("route_cancel_rect", "Cancel", "Esc", "red", 4, "right"))
         specs.append(("menu_button_rect", "Menu", "M", "blue", 2, "right"))
@@ -702,6 +702,10 @@ def route_lines(state: GameState, ui: Ui) -> list[tuple[str, Role]]:
             lines.append((f"{len(ui.route_plan)} rules", "text"))
     if ui.route_replaces:
         lines.append((f"{len(ui.route_replaces)} replaced", "likely"))
+    if ui.route_clears:
+        lines.append((f"{len(ui.route_clears)} cleared", "likely"))
+    if smart := ui.route_newly_smart():
+        lines.append((f"{len(smart)} smart hold{'' if len(smart) == 1 else 's'}", "text"))
     if ui.route_unroutable:
         lines.append((f"{len(ui.route_unroutable)} unreachable", "gamble"))
     if ui.route_cycles:
@@ -713,8 +717,10 @@ def route_hint(ui: Ui) -> str:
     """How route mode's current sub-mode is driven."""
     if ui.route_rally:
         return ("Tap the systems ships should gather at — tap again to drop one. "
-                "Everything else you hold forwards to the nearest of them. "
-                "Auto-route picks your threatened systems.")
+                "Everything else you hold forwards to the nearest of them, and every "
+                "other rule is cleared. Auto-route picks your front line (or, with no "
+                "rival in reach, your border with neutral systems); a system under "
+                "attack behind it keeps what it needs and passes the rest on.")
     return ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
             "un-aim, and to drop it from the group.")
 

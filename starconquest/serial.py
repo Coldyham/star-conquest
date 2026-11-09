@@ -18,7 +18,7 @@ from __future__ import annotations
 import dataclasses
 import math
 
-from starconquest import app, hud, mapgen, paths, starlore, stats, turnfilm
+from starconquest import app, combat, hud, mapgen, paths, starlore, stats, turnfilm
 from starconquest.model import GameState, lane_key
 from starconquest.viewstate import CHOOSING, ROUTING, Ui
 
@@ -254,7 +254,8 @@ def over(state: GameState, ui: Ui) -> dict:
 
 def route(state: GameState, ui: Ui) -> dict:
     """Route mode's proposal: the picks, the sinks, the rules it would lay and
-    the ones it would replace, what can't be served or would loop, and the
+    the ones it would replace or clear, the smart holds it would arm (each with
+    what it keeps), what can't be served or would loop, and the
     panel's words and the confirm button's label."""
     def lanes(plan) -> list[dict]:
         return [{"src": src, "lanes": [[d, pct] for d, pct in rule.shares.items() if d in state.systems]}
@@ -265,7 +266,10 @@ def route(state: GameState, ui: Ui) -> dict:
         "sel": sorted(ui.route_sel),
         "dest": ui.route_dest,
         "plan": lanes(ui.route_plan),
-        "replaces": lanes({src: ui.auto_forward[src] for src in ui.route_replaces if src in ui.auto_forward}),
+        "replaces": lanes({src: ui.auto_forward[src] for src in ui.route_replaces | ui.route_clears
+                           if src in ui.auto_forward}),
+        "smart": [[sid, combat.smart_hold(state, sid, ui.human_id)] for sid in sorted(ui.route_newly_smart())
+                  if sid in state.systems],
         "unroutable": sorted(ui.route_unroutable),
         "cycles": sorted(ui.route_cycles),
         "title": "Rally" if ui.route_rally else "Route",

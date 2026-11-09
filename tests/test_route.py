@@ -16,7 +16,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 
 from starconquest import app
-from starconquest import config, mapgen, model, render
+from starconquest import combat, config, hud, mapgen, model, render, serial
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
 from starconquest.model import ForwardRule, GameState, Player, System
@@ -833,7 +833,8 @@ def test_an_un_owned_rally_point_is_legal():
     s = _line(4, owned={0, 1, 2})
     s.systems[3].owner_id = 2
     ui = _rally(s, {3})
-    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0),
+                             2: ForwardRule({3: 100}, 0, smart=True)}   # 2 borders the rival
     assert ui.route_unroutable == set()
 
 
@@ -883,16 +884,44 @@ def test_a_rally_plan_reports_the_rules_it_replaces():
     assert ui.route_replaces == {3}
 
 
-def test_a_rally_point_forwarding_back_into_the_field_is_a_cycle():
-    """The only shape a rally loop can take: the plan rules every system it
-    reaches, so the sink's own leftover rule is the one edge that can close one."""
+def test_a_rally_point_forwarding_back_into_the_field_is_cleared_not_a_cycle():
+    """The one shape a rally loop could take — the sink's own leftover rule — is a
+    rule rally clears, so it never closes one."""
     s = _line(3, owned=range(3))
     ui = _ui(s)
     ui.route_rally = True
     ui.auto_forward[0] = ForwardRule({1: 100}, 0)     # the rally point pushes straight back out
     ui.route_sel = {0}
     ui.recompute_route(s)
-    assert ui.route_cycles == {0, 1}
+    assert ui.route_clears == {0}
+    assert ui.route_cycles == set()
+
+
+def test_rally_clears_every_rule_it_does_not_rewrite():
+    """A new front opens on a system still forwarding to the old one: rallying
+    there must stop it draining the new front, and a pocket's rule goes too."""
+    s = _graph([(0, 1), (1, 2), (3, 4)], {sid: 1 for sid in range(5)})
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[2] = ForwardRule({1: 100}, 0)     # pointed away from the new front
+    ui.auto_forward[3] = ForwardRule({4: 100}, 2)     # in a pocket rally can't reach
+    ui.route_sel = {2}
+    ui.recompute_route(s)
+    assert ui.route_clears == {2, 3}
+    ui.confirm_route(s)
+    assert ui.auto_forward == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0)}
+
+
+def test_chain_leaves_rules_it_does_not_reach_alone():
+    """Chain answers "push these there", not "where should everything go"."""
+    s = _line(4, owned=range(4))
+    ui = _ui(s)
+    ui.auto_forward[3] = ForwardRule({2: 100}, 0)
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 1)
+    assert ui.route_clears == set()
+    ui.confirm_route(s)
+    assert ui.auto_forward[3] == ForwardRule({2: 100}, 0)
 
 
 def test_rally_confirm_breaks_the_cycle_rather_than_arming_it():
@@ -1227,21 +1256,127 @@ def test_auto_rally_replaces_the_picks_rather_than_adding_to_them():
     assert ui.route_sel == {2}
 
 
-def test_auto_rally_does_nothing_when_nothing_is_threatened():
-    s = _line(3, owned={0, 1})
+def test_auto_rally_does_nothing_with_nothing_to_pick():
+    """No rival in reach and no neutral left to border: no front of any kind."""
+    s = _line(3, owned=range(3))
     ui = _rally(s, {0})
+    assert ui.auto_rally_picks(s) == set()
     ui.auto_rally(s)
     assert ui.route_sel == {0}             # the player's own picks are left alone
 
 
-def test_the_auto_route_button_is_drawn_only_in_rally_mode_with_a_front():
+def test_auto_rally_with_nothing_threatened_picks_the_neutral_border():
+    """Before any rival is in reach, the front is the one we expand across."""
+    s = _graph([(0, 1), (1, 2), (1, 3), (3, 4)], {0: 1, 1: 1, 3: 1})   # 2 and 4 neutral
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1, 3}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0)}
+
+
+def test_a_rival_front_outranks_the_neutral_border():
+    s = _line(5, owned={1, 2, 3})
+    s.systems[4].owner_id = 2              # 3 faces a rival; 1 borders neutral 0
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {3}
+
+
+def _inbound(s, dest, ships, turns=1, owner=2):
+    s.players.setdefault(owner, Player(owner, "E", (0, 0, 0)))
+    s.fleets.append(model.Fleet(owner_id=owner, source_id=dest, dest_id=dest, ships=ships,
+                                turns_total=turns, turns_remaining=turns))
+
+
+def test_a_threatened_system_rally_routes_through_gets_a_smart_hold():
+    """It keeps what the attack needs and passes the rest on, so feeding the
+    front never strips a system under attack."""
+    s = _line(4, owned=range(4))
+    _inbound(s, 1, 3)
+    ui = _rally(s, {3})
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0, smart=True)
+    assert ui.route_plan[0] == ForwardRule({1: 100}, 0)
+    assert ui.route_newly_smart() == {1}
+
+
+def test_rally_never_disarms_a_smart_hold():
+    s = _line(3, owned=range(3))
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[0] = ForwardRule({2: 100}, 0, smart=True)
+    ui.route_sel = {2}
+    ui.recompute_route(s)
+    assert ui.route_plan[0].smart and ui.route_newly_smart() == set()
+
+
+def test_auto_rally_passes_through_an_attacked_system_that_can_hold():
+    """Behind the front, rival ships inbound but a garrison that keeps them off:
+    not a rally point, a smart hold on the way to the front."""
+    s = _line(5, owned={0, 1, 2, 3})
+    s.systems[4].owner_id = 2              # 3 is the front
+    s.systems[1].ships = 20
+    _inbound(s, 1, 3)
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {3}
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0, smart=True)
+
+
+def test_auto_rally_rallies_on_an_attacked_system_that_cannot_hold():
+    s = _line(5, owned={0, 1, 2, 3})
+    s.systems[4].owner_id = 2
+    s.systems[1].ships = 1
+    _inbound(s, 1, 30)
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1, 3}
+
+
+def test_auto_rally_with_no_front_rallies_on_every_threatened_system():
+    """Nowhere to pass ships on to, so a system under attack is a rally point
+    whether or not it could hold alone."""
+    s = _line(3, owned=range(3))
+    s.systems[1].ships = 20
+    _inbound(s, 1, 3)
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1}
+
+
+def test_holds_unaided_counts_what_is_built_before_each_wave():
+    s = _line(2, owned={0, 1})
+    s.systems[0].ships, s.systems[0].production, s.systems[0].prod_progress = 0, 1, 0
+    _inbound(s, 0, 1, turns=5)
+    assert combat.holds_unaided(s, 0, 1)           # five hulls built by the time it lands
+    _inbound(s, 0, 40, turns=2)
+    assert not combat.holds_unaided(s, 0, 1)
+
+
+def test_the_auto_route_button_is_drawn_only_in_rally_mode():
     state, ui = _routed_setup()
     try:
         render.draw(_screen(), state, ui)
         assert ui.route_auto_rect == (0, 0, 0, 0)      # chain mode never offers it
         ui.set_route_rally(state, True)
         render.draw(_screen(), state, ui)
-        assert bool(ui.route_auto_rect[2]) == bool(ui.threatened_systems(state))
+        assert ui.route_auto_rect[2] > 0
+    finally:
+        pygame.quit()
+
+
+def test_the_auto_route_button_is_drawn_with_only_a_neutral_border():
+    state, ui = _rally_setup()
+    try:
+        for s in state.systems.values():   # no rivals anywhere: only neutral borders
+            if s.owner_id not in (0, 1):
+                s.owner_id = 0
+        state.fleets.clear()
+        assert ui.threatened_systems(state) == set() and ui.border_systems(state)
+        render.draw(_screen(), state, ui)
+        assert ui.route_auto_rect[2] > 0
+        ax, ay, aw, ah = ui.route_auto_rect
+        _press(state, ui, (ax + aw // 2, ay + ah // 2))
+        assert ui.route_sel == ui.border_systems(state)
     finally:
         pygame.quit()
 
@@ -1282,3 +1417,39 @@ def test_route_sids_take_only_our_own_systems():
     ui.begin_route()
     ui.add_route_sids(state, [0, 2, 3, 99])
     assert ui.route_sel == {0, 3}
+
+
+def test_render_draws_a_rally_plan_that_arms_smart_holds_and_clears_rules():
+    state, ui = _rally_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbrs = sorted(state.systems[home].neighbors)
+        for nbr in nbrs:
+            state.systems[nbr].owner_id = 1
+        _inbound(state, nbrs[0], 3, owner=next(p for p in state.players if p not in (0, 1)))
+        ui.auto_forward[home] = ForwardRule({nbrs[0]: 100}, 0)
+        ui.route_tap(state, home)
+        assert ui.route_newly_smart() == {nbrs[0]} and ui.route_clears == {home}
+        render.draw(_screen(), state, ui)
+    finally:
+        pygame.quit()
+
+
+def test_the_web_build_is_told_what_a_rally_plan_clears_and_arms():
+    state, ui = _rally_setup()
+    try:
+        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
+        nbrs = sorted(state.systems[home].neighbors)
+        for nbr in nbrs:
+            state.systems[nbr].owner_id = 1
+        _inbound(state, nbrs[0], 3, owner=next(p for p in state.players if p not in (0, 1)))
+        ui.auto_forward[home] = ForwardRule({nbrs[0]: 100}, 0)
+        ui.route_tap(state, home)
+        sent = serial.route(state, ui)
+        assert {r["src"] for r in sent["replaces"]} >= {home}
+        assert sent["smart"] == [[nbrs[0], combat.smart_hold(state, nbrs[0], ui.human_id)]]
+        assert any(text == "1 cleared" for text, _ in sent["lines"])
+        assert any(text == "1 smart hold" for text, _ in sent["lines"])
+        assert "route_auto_rect" in {spec[0] for spec in hud.footer(state, ui)}
+    finally:
+        pygame.quit()

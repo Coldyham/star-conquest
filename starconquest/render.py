@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import coach, config, fog, hud, matchnames, paths, starlore, stats, widgets
+from . import coach, combat, config, fog, hud, matchnames, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
@@ -595,15 +595,16 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
     reason; only committed rules hold still (and then only the unselected ones, so
     a board full of them doesn't shimmer).
 
-    A rule the plan would overwrite is drawn underneath in a muted danger tint, so
-    the overwrite is visible before it happens rather than after.
+    A rule the plan would overwrite — or, in rally, delete (`route_clears`) — is
+    drawn underneath in a muted danger tint, so the overwrite is visible before it
+    happens rather than after.
     """
     if ui.mode != ROUTING:
         return
     accent = config.COLOR_ROUTE
 
-    # 1. rules about to be overwritten, under everything else
-    for src in ui.route_replaces:
+    # 1. rules about to be overwritten or cleared, under everything else
+    for src in ui.route_replaces | ui.route_clears:
         old = ui.auto_forward.get(src)
         if old is None or src not in state.systems:
             continue
@@ -684,6 +685,13 @@ def _draw_route_overlay(surface, state: GameState, ui: Ui) -> None:
         sp = ui.view.to_screen(sys.pos)
         _label_pill(surface, small, "loop", _BTN_DANGER[1],
                     (sp[0], sp[1] + config.node_radius(sys.production) + config.s(11)))
+    # A smart hold the plan arms, above the disc where "no route" would go (a
+    # planned system never has one) — the name, and a committed badge, sit below.
+    for sid in ui.route_newly_smart():
+        sys = state.systems[sid]
+        sp = ui.view.to_screen(sys.pos)
+        _label_pill(surface, small, f"smart {combat.smart_hold(state, sid, ui.human_id)}",
+                    config.COLOR_ROUTE, (sp[0], sp[1] - config.node_radius(sys.production) - config.s(15)))
     if ui.route_box:
         x0, y0 = ui.drag_start
         x1, y1 = ui.drag_pos

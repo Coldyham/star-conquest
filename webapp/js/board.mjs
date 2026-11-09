@@ -447,7 +447,7 @@ export class BoardView {
   }
 
   /** Route mode's proposal (`render._draw_route_preview`): rules it would
-   * overwrite in a muted danger tint underneath, the planned rules crawling in
+   * overwrite or clear in a muted danger tint underneath, the planned rules crawling in
    * the route colour, one ring per source pick (danger on anything that can't
    * be served), and a double ring on each sink. */
   drawRoute(route, now) {
@@ -485,7 +485,7 @@ export class BoardView {
     }
   }
 
-  /** Route mode's "no route" and "loop" labels, and the box being dragged,
+  /** Route mode's "no route", "loop" and "smart" labels, and the box being dragged,
    * over the systems (`render._draw_route_overlay`). */
   drawRouteLabels(route, box) {
     for (const id of route.unroutable) {
@@ -495,6 +495,10 @@ export class BoardView {
     for (const id of route.cycles) {
       const [x, y] = this.pos.get(id);
       pill(this.dragLayer, x, y + this.radius.get(id) + 11, "loop", DANGER);
+    }
+    for (const [id, keep] of route.smart ?? []) {
+      const [x, y] = this.pos.get(id);
+      pill(this.dragLayer, x, y - this.radius.get(id) - 15, `smart ${keep}`, ROUTE);
     }
     if (box?.active) {
       el("rect", { x: Math.min(box.x0, box.x), y: Math.min(box.y0, box.y), width: Math.abs(box.x - box.x0),
