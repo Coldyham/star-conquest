@@ -18,10 +18,10 @@ import pygame
 
 from starconquest import (
     ai,
+    app,
     config,
     daily,
     engine,
-    gauntlet,
     gauntletgen,
     mapgen,
     mapmaker,
@@ -40,36 +40,10 @@ from starconquest import input as game_input
 from starconquest import run as gauntlet_run
 from starconquest.app import (
     AUTOPLAY_MS,
-    DAILY_MISSING_MSG,
-    DAILY_OPENING_MSG,
-    DAILY_UNREACHABLE_MSG,
-    DAILY_UNREADABLE_MSG,
     GAUNTLET_GEN_BUDGET_S,
-    GAUNTLET_GEN_EMPTY_MSG,
-    GAUNTLET_GEN_MSG,
-    GAUNTLET_GEN_REFUSED_MSG,
-    GAUNTLET_LISTED_MSG,
-    GAUNTLET_LISTING_FAILED_MSG,
-    GAUNTLET_LISTING_MSG,
-    GAUNTLET_MISSING_MSG,
-    GAUNTLET_OPENING_MSG,
-    GAUNTLET_UNREACHABLE_MSG,
-    GAUNTLET_UNREADABLE_MSG,
     HINT_STRATEGY,
-    PBP_BAD_LOG_MSG,
     PBP_MISSING_MSG,
-    PBP_OPENING_MSG,
-    PBP_OUTDATED_MSG,
-    PBP_POLL_MS,
-    PBP_REBUILD,
     PBP_REFUSED_MSG,
-    PBP_RESOLVE,
-    PBP_STEP,
-    PBP_THROTTLED_MS,
-    PBP_UNOPENED_MSG,
-    PBP_UNREACHABLE_MSG,
-    PBP_UNREADABLE_MSG,
-    PBP_WAIT,
     PLAY_MS,
     WATCH_MISSING_MSG,
     WATCH_OUTDATED_MSG,
@@ -78,7 +52,6 @@ from starconquest.app import (
     _apply_shared_link,
     _begin_game,
     _carry_into,
-    _daily_msg,
     _decode_log,
     _next_history_film,
     apply_rewind,
@@ -97,26 +70,9 @@ from starconquest.app import (
     log_settings,
     open_history,
     open_map_page,
-    open_match,
     open_replay,
-    pbp_adopt,
-    pbp_handed_out,
-    pbp_heard,
-    pbp_idle_floor,
-    pbp_lapse,
-    pbp_open,
-    pbp_opened,
-    pbp_poll_delay,
     pbp_request,
-    pbp_seat_links,
-    pbp_send,
-    pbp_spectate_link,
     pbp_spectate_request,
-    pbp_spectator_floor,
-    pbp_throttled,
-    pbp_trouble,
-    pbp_unwatchable,
-    pbp_verdict,
     post_to_leaderboard,
     press_hint,
     quick_post,
@@ -124,7 +80,6 @@ from starconquest.app import (
     replay_request,
     resolve_turn,
     resume_game,
-    run_ui,
     share_challenge,
     spec_request,
     stage_ui,
@@ -135,9 +90,10 @@ from starconquest.app import (
     toggle_fast_forward,
 )
 from starconquest.menu import MenuState
+from starconquest.pbpclient import PbpClient
 from starconquest.model import GameState
 from starconquest.replay import GameLog
-from starconquest.settings import Settings, apply_globals, fog_off, random_seed, resolve_seed
+from starconquest.settings import Settings, resolve_seed
 from starconquest.viewstate import Ui
 
 # Web only: how often the loop re-reads the browser viewport to refit the canvas.
@@ -166,181 +122,77 @@ def leave_app() -> bool:
     return False
 
 
+def show_note(ms: MenuState, settings: Settings | None, note: app.MenuNote) -> None:
+    """Show an `app.MenuNote` on the setup menu, in its field order."""
+    if note.status is not None:
+        menu.set_status(ms, *note.status)
+    if note.gauntlet is not None:
+        assert settings is not None
+        menu.open_gauntlet(ms, settings, note.gauntlet)
+    if note.said is not None:
+        menu.say_gauntlet(ms, *note.said)
+
+
 def open_run(ms: MenuState, settings: Settings, fresh: bool
              ) -> tuple[GameState, Ui, GameLog, int] | None:
-    """Start a run of the gauntlet picked in the list (``fresh``), or carry on
-    the active run: resume its undecided game if it has one, never a fresh copy,
-    else begin its next stage. None, with a word in the list, when there is
-    nothing to play."""
-    if fresh:
-        g = menu.picked_gauntlet(ms)
-        if g is None or not gauntlet_run.offered(g):
-            return None
-        r: gauntlet_run.Run | None = gauntlet_run.start(g)
-    else:
-        r = gauntlet_run.active()
-        g = gauntlet.find(ms.gauntlets, r.gauntlet_id) if r is not None else None
-        if g is None:
-            return None
-        r = gauntlet_run.active_for(g)
-        if r is None:
-            menu.say_gauntlet(ms, g.id, "The gauntlet has changed since the run began, so the run is over", False)
-            return None
-    assert r is not None
-    sid = gauntlet_run.stage_to_play(r, g)
-    found = menu.enter_stage(ms, settings, g, sid) if sid is not None else None
-    if found is None:
-        return None
-    if r.playing is not None:
-        log = gauntlet_run.restore_log(r.playing.log)
-        if log is None:
-            gauntlet_run.lose_game(r)
-            menu.say_gauntlet(ms, g.id, "The run's game couldn't be loaded, so the run is over", False)
-            return None
-        ai.load_models()   # a resumed game may name a drop-in strategy
-        state, ui = resume_game(log, settings)
-        stage_ui(ui, found, briefing=log.turn_count == 0)
-        run_ui(ui, r, g)
-        return state, ui, log, log.seed
-    state, ui, log, seed = _begin_game(settings, found)
-    run_ui(ui, gauntlet_run.begin(r, found[1].id, log), g)
-    return state, ui, log, seed
+    """`app.open_run` on the menu's picked gauntlet, its word shown in the list."""
+    opened, note = app.open_run(settings, fresh, menu.picked_gauntlet(ms), ms.gauntlets,
+                                lambda g, sid: menu.enter_stage(ms, settings, g, sid))
+    show_note(ms, settings, note)
+    return opened
 
 
 def open_linked_gauntlet(menu_state: MenuState, settings: Settings,
                          gid: str | None, data: dict | None) -> pbp.Request | None:
-    """Act on a gauntlet link at launch: open one already in hand, or start the
-    fetch and answer it for the loop to poll. A stored gauntlet never changes,
-    so one kept from an earlier visit opens straight away, offline included."""
-    if data is not None:
-        g = gauntlet.remember(data)
-        if g is not None:
-            menu.open_gauntlet(menu_state, settings, g.id)
-        return None
-    if gid is None:
-        return None
-    if any(g.id == gid for g in gauntlet.remembered()):
-        menu.open_gauntlet(menu_state, settings, gid)
-        return None
-    pending = gauntlet.fetch(gid)
-    if pending is None:
-        print(f"cannot fetch gauntlet {gid!r}: no endpoint is configured")
-        menu.set_status(menu_state, GAUNTLET_UNREACHABLE_MSG, False)
-    else:
-        menu.set_status(menu_state, GAUNTLET_OPENING_MSG, True)
+    """`app.open_linked_gauntlet`, shown on the menu."""
+    pending, note = app.open_linked_gauntlet(gid, data)
+    show_note(menu_state, settings, note)
     return pending
 
 
 def land_gauntlet(menu_state: MenuState, settings: Settings, state: str, body: str) -> None:
-    """The gauntlet fetch answered: keep it and open the list, or say why not."""
-    data = gauntlet.from_reply(body) if state == pbp.OK else None
-    g = gauntlet.remember(data) if data is not None else None
-    if g is not None:
-        menu.set_status(menu_state, "", True)
-        menu.open_gauntlet(menu_state, settings, g.id)
-        return
-    print(f"gauntlet fetch ended in state {state!r}: {body[:120]!r}")
-    menu.set_status(menu_state,
-                    GAUNTLET_MISSING_MSG if state == pbp.MISSING
-                    else GAUNTLET_UNREADABLE_MSG if state == pbp.OK
-                    else GAUNTLET_UNREACHABLE_MSG, False)
+    """`app.land_gauntlet`, shown on the menu."""
+    show_note(menu_state, settings, app.land_gauntlet(state, body))
 
 
 def open_daily(menu_state: MenuState, day: str = "", kind: str = daily.BOARD) -> pbp.Request | None:
-    """Start fetching ``day``'s daily of ``kind`` (today's when blank) and
-    answer the request for the loop to poll, or say why there is none."""
-    pending = daily.fetch(day, kind)
-    if pending is None:
-        menu.set_status(menu_state, _daily_msg(DAILY_UNREACHABLE_MSG, kind), False)
-    else:
-        menu.set_status(menu_state, _daily_msg(DAILY_OPENING_MSG, kind), True)
+    """`app.open_daily`, shown on the menu."""
+    pending, note = app.open_daily(day, kind)
+    show_note(menu_state, None, note)
     return pending
 
 
 def land_daily(menu_state: MenuState, settings: Settings, state: str, body: str,
                kind: str = daily.BOARD) -> None:
-    """The daily fetch for ``kind`` answered: put its setup on the menu, or say
-    why not. The setup is stashed as a shared link's is, so an installed app
-    relaunched without the fragment still has it."""
-    got = daily.from_reply(body) if state == pbp.OK else None
-    if got is None:
-        print(f"daily fetch ended in state {state!r}: {body[:120]!r}")
-        menu.set_status(menu_state, _daily_msg(
-            DAILY_MISSING_MSG if state == pbp.MISSING
-            else DAILY_UNREADABLE_MSG if state == pbp.OK
-            else DAILY_UNREACHABLE_MSG, kind), False)
-        return
-    day, kind, setup = got
-    settings.copy_from(setup)
-    daily.remember(day, settings, kind)
-    webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.to_token())
-    menu.set_status(menu_state, daily.label(day, settings, kind), True)
+    """`app.land_daily`, shown on the menu."""
+    show_note(menu_state, settings, app.land_daily(settings, state, body, kind))
 
 
 def start_generation(menu_state: MenuState, fragment: str) -> gauntletgen.Job | None:
-    """Start generating from a ``#gauntlet-spec=`` fragment, or None when the
-    fragment is not one (or the spec can never deal, which the status says)."""
-    data = gauntletgen.spec_from_fragment(fragment)
-    if data is None:
-        return None
-    ai.load_models()
-    try:
-        job = gauntletgen.job_from_link(data, random_seed())
-    except ValueError as err:
-        menu.set_status(menu_state, GAUNTLET_GEN_REFUSED_MSG.format(why=err), False)
-        return None
-    menu.set_status(menu_state, GAUNTLET_GEN_MSG.format(pct=0.0, done=0, total=job.total), True)
+    """`app.start_generation`, shown on the menu."""
+    job, note = app.start_generation(fragment)
+    show_note(menu_state, None, note)
     return job
 
 
 def pump_generation(menu_state: MenuState, settings: Settings,
                     job: gauntletgen.Job) -> gauntletgen.Job | None:
-    """Play the generator on for one frame's budget; once done, keep the
-    gauntlet and open the Tutorial list on it. Returns the job while it runs.
-
-    A probe game goes through ``build_state``, which pushes its setup's knobs
-    into ``config``; the menu's own setup is pushed back after every slice, so
-    nothing the menu draws reads a probe's balance."""
-    try:
-        job.step(GAUNTLET_GEN_BUDGET_S)
-    finally:
-        apply_globals(settings)
-    if not job.done:
-        menu.set_status(menu_state, GAUNTLET_GEN_MSG.format(
-            pct=job.progress(), done=len(job.rows), total=job.total), True)
-        return job
-    data = job.result()
-    g = gauntlet.remember(data) if data is not None else None
-    if g is None:
-        menu.set_status(menu_state, GAUNTLET_GEN_EMPTY_MSG, False)
-        return None
-    menu.open_gauntlet(menu_state, settings, g.id)
-    menu.say_gauntlet(menu_state, g.id, f"Generated {g.name}: {len(g.stages)} stages", True)
-    return None
+    """`app.pump_generation` for one frame's budget, shown on the menu."""
+    job_left, note = app.pump_generation(settings, job, GAUNTLET_GEN_BUDGET_S)
+    show_note(menu_state, settings, note)
+    return job_left
 
 
 def ask_listing(menu_state: MenuState, job: gauntletgen.Job) -> tuple[str, str, pbp.Request] | None:
-    """A finished run whose link ticked "Ask for it to be listed publicly":
-    start saving it to the board under the author's name, and answer the
-    gauntlet's id and name with the save for the loop to poll. Nothing is sent for any
-    other run, or when there is no board."""
-    data = job.result() if job.done and job.listing is not None else None
-    if data is None:
-        return None
-    pending = gauntlet.ask_listing(data, job.listing or "")
-    if pending is None:
-        return None
-    menu.say_gauntlet(menu_state, data["id"], GAUNTLET_LISTING_MSG.format(name=data["name"]), True)
-    return data["id"], data["name"], pending
+    """`app.ask_listing`, shown on the menu."""
+    asked, note = app.ask_listing(job)
+    show_note(menu_state, None, note)
+    return asked
 
 
 def land_listing(menu_state: MenuState, gid: str, name: str, state: str) -> None:
-    """The board answered the listing save: say whether it took, in the
-    Gauntlets list if it is still open (`menu.say_gauntlet`)."""
-    if state == pbp.OK:
-        menu.say_gauntlet(menu_state, gid, GAUNTLET_LISTED_MSG.format(name=name), True)
-    else:
-        menu.say_gauntlet(menu_state, gid, GAUNTLET_LISTING_FAILED_MSG.format(name=name), False)
+    """`app.land_listing`, shown on the menu."""
+    show_note(menu_state, None, app.land_listing(gid, name, state))
 PBP_ACTIVITY_EVENTS = frozenset((
     pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEWHEEL, pygame.KEYDOWN,
     pygame.FINGERDOWN, pygame.FINGERMOTION, pygame.WINDOWFOCUSGAINED))
@@ -581,73 +433,22 @@ async def main() -> None:
     elif pending_replay is not None:
         menu.set_status(menu_state, "Loading replay...", True)
 
-    # A `#pbp=<match>:<token>` link (or --match) seats us in a shared match. Same
-    # shape as the replay fetch above — started here, polled once a frame, never
-    # awaited — and mutually exclusive with it, since a launch URL carries one
-    # fragment. Three calls can be in flight over a match's life and each gets its
-    # own slot, because they answer different questions and arrive out of order:
-    # `pbp_ident` asks which seat a link holds (once, ever), `pbp_poll` is the read
-    # that moves the board, `pbp_write` is whatever submission or resolution is on
-    # its way out.
-    pbp_seat: pbp.Seat | None = None
-    pbp_ident: pbp.Request | None = None
-    pbp_poll: pbp.Request | None = None
-    pbp_write: pbp.Request | None = None
-    # ?action=create, and the id it was asked to open under. Minted here and sent
-    # rather than handed back, so a retry after a lost reply opens a second match
-    # instead of quietly rewriting the first.
-    pbp_make: pbp.Request | None = None
-    pbp_making = ""
-    pbp_watchable = False         # ...and whether its setup can be spectated
-    pbp_accum = 0
-    pbp_wait = PBP_POLL_MS        # how long `pbp_accum` runs before the next read
-    pbp_failures = 0              # reads in a row that came back with no match
-    pbp_read_line = ""            # the line the last failed read put up, if any
-    pbp_resolving = False         # whether `pbp_write` is our own resolved turn
-    pbp_stale = False             # our resolve was refused: rebuild on the next read
-    pbp_last: pbp.Match | None = None   # the latest read, which a brief merges into
-    pbp_idle = 0                  # ms since the last input, which stretches the wait
-    pbp_quiet = 0                 # ms since the match last moved (a spectator's floor)
-    pbp_moved: tuple | None = None   # (turn, seats waited on) when it last moved
-    # Every other seat's link, from a match *we* just created — handed to `Ui`
-    # (`pbp_invite`) the moment there is one to hand it to, so the invite overlay
-    # opens on the very first frame of the match rather than a status line that
-    # beat it there.
-    pending_invite_links: list[tuple[int, str]] = []
+    # A `#pbp=<match>:<token>` link (or --match) seats us in a shared match, and a
+    # `#spectate=<match>` link (or --spectate) watches one from no seat. Same shape
+    # as the replay fetch above — started here, polled once a frame, never awaited
+    # — and mutually exclusive with it, since a launch URL carries one fragment.
+    pbp_client = PbpClient()
     invite = (pbp.parse_link(pbp.PBP_FRAGMENT + args.match.strip())
               if args.match.strip() else pbp_request())
-    if invite is not None and pending_replay is None:
-        known = pbp.seat_for(invite[0])
-        if known is not None and known.token == invite[1]:
-            # Seated here before. A seat never moves, so the endpoint is asked
-            # which one it is exactly once per link and the answer is kept.
-            pbp_seat = known
-            pbp_poll = pbp.fetch_state(invite[0])
-        else:
-            pbp_ident = pbp.identify(*invite)
-        if pbp_poll is None and pbp_ident is None:
-            print(f"cannot open match {invite[0]!r}: no endpoint is configured")
-            menu.set_status(menu_state, PBP_UNREACHABLE_MSG, False)
-            invite = None
-        else:
-            menu.set_status(menu_state, "Opening match...", True)
-    elif args.match.strip() and invite is None:
-        print(f"--match {args.match.strip()!r} is not a seat link")
-        menu.set_status(menu_state, PBP_REFUSED_MSG, False)
-    # A `#spectate=<match>` link (or --spectate) watches one from no seat: the same
-    # read as a seat's, with nothing to identify and nothing ever written.
     watching = (pbp.parse_spectate_link(pbp.SPECTATE_FRAGMENT + args.spectate.strip())
                 if args.spectate.strip() else pbp_spectate_request())
-    if watching is not None and pending_replay is None and invite is None:
-        pbp_seat = pbp.spectator(watching)
-        pbp_poll = pbp.fetch_state(watching)
-        if pbp_poll is None:
-            print(f"cannot watch match {watching!r}: no endpoint is configured")
-            menu.set_status(menu_state, PBP_UNREACHABLE_MSG, False)
-            pbp_seat = None
-        else:
-            invite = (watching, "")
-            menu.set_status(menu_state, "Opening match...", True)
+    if pending_replay is None:
+        line = pbp_client.open_link(invite, watching if invite is None else None)
+        if line is not None:
+            menu.set_status(menu_state, *line)
+    if args.match.strip() and invite is None:
+        print(f"--match {args.match.strip()!r} is not a seat link")
+        menu.set_status(menu_state, PBP_REFUSED_MSG, False)
     elif args.spectate.strip() and watching is None:
         print(f"--spectate {args.spectate.strip()!r} is not a match id")
         menu.set_status(menu_state, PBP_MISSING_MSG, False)
@@ -656,7 +457,7 @@ async def main() -> None:
     # list. One fragment per launch, so it never meets the two above.
     pending_gauntlet: pbp.Request | None = None
     linked_gauntlet = False
-    if not args.no_menu and pending_replay is None and invite is None:
+    if not args.no_menu and pending_replay is None and pbp_client.invite is None:
         gid, inline = gauntlet_request()
         linked_gauntlet = gid is not None or inline is not None
         pending_gauntlet = open_linked_gauntlet(menu_state, settings, gid, inline)
@@ -672,7 +473,7 @@ async def main() -> None:
     pending_name: tuple[Ui, pbp.Request] | None = None
     # A won puzzle's par check: the Ui it reports to, the request, and the result asked about.
     pending_par: tuple[Ui, pbp.Request, tuple[int, int]] | None = None
-    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
+    if not args.no_menu and pending_replay is None and pbp_client.invite is None and not linked_gauntlet:
         asked = daily.link(webstore.url_token())
         if asked is not None:
             linked_gauntlet = True   # a link was opened: no generator, no resume prompt
@@ -681,13 +482,13 @@ async def main() -> None:
 
     gen_job: gauntletgen.Job | None = None
     pending_listing: tuple[str, str, pbp.Request] | None = None   # (id, name, save) once a run ends
-    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
+    if not args.no_menu and pending_replay is None and pbp_client.invite is None and not linked_gauntlet:
         gen_job = start_generation(menu_state, spec_request(args.gauntlet_spec))
         linked_gauntlet = gen_job is not None
 
     # If the last saved match was left unfinished, offer to resume it on the menu.
     resume_prompt: GameLog | None = None
-    if not args.no_menu and pending_replay is None and invite is None and not linked_gauntlet:
+    if not args.no_menu and pending_replay is None and pbp_client.invite is None and not linked_gauntlet:
         candidate = replay.latest_log()
         if candidate is not None and not candidate.finished and candidate.turn_count > 0:
             resume_prompt = candidate
@@ -717,7 +518,7 @@ async def main() -> None:
         # a frame, and handing that whole stretch to the film it just started
         # would teleport the glide rather than advance it (`config.MAX_FRAME_MS`).
         dt = min(clock.tick(config.FPS), config.MAX_FRAME_MS)
-        pbp_idle += dt
+        pbp_client.idle += dt
         if pending_listing is not None:
             lstate, _lbody = pending_listing[2].poll()
             if lstate != pbp.PENDING:
@@ -793,233 +594,25 @@ async def main() -> None:
                     # Nothing to review means nothing to watch: fall back to the
                     # menu rather than dropping into a board with no history.
                     scene = "game" if history_states else "menu"
-        # Play-by-post, all three calls in one place. Reads are held off while a
-        # film runs: `Request.poll` empties its own mailbox, so an answer
-        # collected mid-playback is an answer thrown away — and, more to the
-        # point, a turn must never resolve out from under one being drawn.
-        if pbp_make is not None:
-            status, body = pbp_make.poll()
-            if status != pbp.PENDING:
-                pbp_make = None
-                tokens = (pbp.tokens_from(pbp.parse_body(body) or {}, pbp_making)
-                          if status == pbp.OK else {})
-                if not tokens:
-                    print(f"opening match {pbp_making!r} ended in state {status!r}")
-                    menu.set_status(menu_state, pbp_trouble(status, body), False)
-                elif 1 not in tokens:
-                    # We asked for seat 1 and did not get it. Rather than guess
-                    # which seat is ours out of a roster we no longer recognise,
-                    # hand the links over and let a link seat us like anyone else.
-                    menu.set_status(menu_state,
-                                    pbp_handed_out(pbp_making, tokens), True)
-                else:
-                    # Every seat's link, including our own, goes on the invite
-                    # overlay the moment there is a `Ui` to hang it off (see
-                    # `opening` below) rather than a status line and a clipboard
-                    # blob. Ours is there too and not just remembered locally —
-                    # `pbp.remember`'s token lives in this browser's storage
-                    # alone, so a reload, a cleared profile or opening on
-                    # another device has nothing else to recover the seat from.
-                    # Then the ordinary opening path takes over, exactly as it
-                    # would for somebody following the link we just sent them.
-                    pbp_seat = pbp.Seat(pbp_making, 1, tokens[1])
-                    pbp.remember(pbp_seat)
-                    invite = (pbp_seat.match_id, pbp_seat.token)
-                    pbp_poll = pbp.fetch_state(pbp_seat.match_id)
-                    resume_prompt = None
-                    pending_invite_links = pbp_seat_links(pbp_making, tokens)
-                    if pbp_watchable:
-                        pending_invite_links.append(
-                            (viewstate.SPECTATE_ROW, pbp_spectate_link(pbp_making)))
-                    menu.set_status(menu_state, "Match created — copy each seat's link", True)
-        if pbp_ident is not None and invite is not None:
-            status, body = pbp_ident.poll()
-            if status != pbp.PENDING:
-                pbp_ident = None
-                seat = (pbp.seat_from(pbp.parse_body(body) or {}, *invite)
-                        if status == pbp.OK else None)
-                if seat is None:
-                    print(f"seat lookup for {invite[0]!r} ended in state {status!r}")
-                    menu.set_status(menu_state, pbp_trouble(status, body), False)
-                    invite = None
-                else:
-                    pbp_seat = seat
-                    pbp.remember(seat)   # a later launch then skips this round trip
-                    pbp_poll = pbp.fetch_state(seat.match_id)
-        if pbp_write is not None:
-            status, body = pbp_write.poll()
-            if status != pbp.PENDING:
-                pbp_write = None
-                if ui is not None and ui.in_pbp:
-                    pbp_heard(ui, status, body)
-                pbp_accum = 0
-                if status == pbp.OK and pbp_resolving:
-                    # Our own turn, accepted: the match now stands where our board
-                    # does, so a read would only say so. The next turn is ours to
-                    # play meanwhile, and the ordinary cadence picks up the rest.
-                    pbp_wait = PBP_POLL_MS
-                else:
-                    # Otherwise the match has moved or it has not, and only a read
-                    # can tell us which. Ask on the next frame rather than in five
-                    # seconds' time — unless we were told to slow down.
-                    pbp_wait = PBP_THROTTLED_MS if pbp_throttled(body) else 0
-                    # A resolve that did not land leaves a board the match may
-                    # never have had; the stored log is the one that counts.
-                    pbp_stale = pbp_stale or pbp_resolving
-                pbp_resolving = False
-        if pbp_poll is not None and reel is None and pbp_seat is not None:
-            status, body = pbp_poll.poll()
-            if status != pbp.PENDING:
-                pbp_poll = None
-                pbp_accum = 0
-                match = None
-                if status == pbp.OK:
-                    read = pbp.parse_body(body) or {}
-                    match = (pbp.with_brief(pbp_last, read)
-                             if pbp_last is not None and read.get("brief")
-                             else pbp.match_from_dict(read))
-                    pbp_last = match or pbp_last
-                opening = state is None or ui is None or not ui.in_pbp
-                pbp_failures = pbp_failures + 1 if match is None else 0
-                pbp_wait = pbp_poll_delay(pbp_failures)
-                if pbp_throttled(body):
-                    pbp_wait = max(pbp_wait, PBP_THROTTLED_MS)
-                if match is None:
-                    line = pbp_trouble(status, body) if status != pbp.OK \
-                        else PBP_UNREADABLE_MSG
-                    print(f"match read for {pbp_seat.match_id!r} ended in "
-                          f"state {status!r} ({len(body)} bytes)"
-                          + ("" if opening else f"; retrying in {pbp_wait} ms"))
-                    if opening:
-                        menu.set_status(menu_state, line, False)
-                        invite, pbp_seat = None, None
-                    else:
-                        ui.pbp_msg = pbp_read_line = line
-                elif opening and match.rules_version != engine.RULES_VERSION:
-                    # The same call `open_replay` makes about a stored log, for the
-                    # same reason: rebuilding it under today's rules would show a
-                    # match other than the one being played, with nothing on screen
-                    # to say so. Checked only on the way in — a match's rules
-                    # cannot change under it once we are in it.
-                    print(f"match plays rules v{match.rules_version}, "
-                          f"this build plays v{engine.RULES_VERSION}")
-                    menu.set_status(menu_state, PBP_OUTDATED_MSG, False)
-                    invite, pbp_seat = None, None
-                elif opening and pbp_seat.spectating and pbp_unwatchable(match):
-                    # Checked on the way in, from what the endpoint says about
-                    # the match, rather than trusted from the link.
-                    menu.set_status(menu_state, pbp_unwatchable(match), False)
-                    invite, pbp_seat = None, None
-                elif opening and (opened := open_match(match, pbp_seat,
-                                                       settings)) is None:
-                    menu.set_status(menu_state, PBP_BAD_LOG_MSG, False)
-                    invite, pbp_seat = None, None
-                elif opening:
-                    state, ui, log = opened
-                    current_seed = match.seed
-                    if pending_invite_links:
-                        ui.pbp_invite = tuple(pending_invite_links)
-                        pending_invite_links = []
-                    scene = "game"
-                    auto_accum = 0
-                else:
-                    assert state is not None and ui is not None and log is not None
-                    if pbp_read_line and ui.pbp_msg == pbp_read_line:
-                        ui.pbp_msg = ""   # the read that failed has since worked
-                    pbp_read_line = ""
-                    pbp_adopt(match, pbp_seat, ui)
-                    verdict = pbp_verdict(match, state, pbp_stale)
-                    if pbp_seat.spectating and verdict == PBP_RESOLVE:
-                        # Resolving writes the log every seat will be held to,
-                        # which takes a seat's token. A spectator waits for one
-                        # of the players' clients to do it, then steps.
-                        verdict = PBP_WAIT
-                    if (verdict == PBP_WAIT and match.lapsed and pbp_write is None
-                            and not pbp_seat.spectating):   # ...nor files a lapse
-                        # The clock has run out on somebody. Filing their turn is
-                        # what keeps a match from stopping dead because one person
-                        # stopped answering; it does not resolve anything, so the
-                        # next read still finds an ordinary complete turn.
-                        pbp_write = pbp_lapse(state, ui, match, pbp_seat)
-                    elif verdict == PBP_REBUILD:
-                        # More than a turn behind: there is no single turn to
-                        # animate, so the position is rebuilt from the opening.
-                        # The standing rules come across by hand because they are
-                        # the one part of the position the endpoint does not
-                        # store — they are a human convenience that never reaches
-                        # `GameState`, so a rebuild is the only thing here that
-                        # could quietly throw a route plan away.
-                        rules = ui.auto_forward
-                        opened = open_match(match, pbp_seat, settings)
-                        if opened is None:
-                            ui.pbp_msg = PBP_BAD_LOG_MSG
-                        else:
-                            state, ui, log = opened
-                            ui.auto_forward = rules
-                            ui.prune_forward(state)   # ...minus any system lost since
-                            history_states, history_fog, history_events = [], [], []
-                            live_fog = None
-                            pbp_stale = False
-                    elif verdict == PBP_STEP and not (
-                            (script := pbp.settled_turn(match, state.turn))
-                            and pbp.verify_turn(state, script, match)):
-                        # A record we cannot trust — missing, filing an order a
-                        # person never sent, or rolling dice its orders do not
-                        # roll. The board stays where it was, and says why.
-                        ui.pbp_msg = PBP_BAD_LOG_MSG
-                    elif verdict in (PBP_STEP, PBP_RESOLVE):
-                        # One turn played onto the live board and watched like any
-                        # other. Stepping applies the record the resolver stored,
-                        # checked above, so no bot here decides again; resolving is
-                        # the one place one does, on a scratch copy, from an rng
-                        # derived for the turn (`pbp.reseed`).
-                        turn = state.turn
-                        if verdict == PBP_STEP:
-                            reel = resolve_turn(state, ui, log, settings,
-                                                script=pbp.settled_turn(match, turn))
-                        else:
-                            pbp.reseed(state, match.seed)
-                            reel = resolve_turn(
-                                state, ui, log, settings,
-                                seat_orders=pbp.turn_orders(state, match, ai.decide))
-                        pbp_opened(ui)
-                        play_accum = auto_accum = 0
-                        if verdict == PBP_RESOLVE:
-                            # ...and we are the one who noticed, so we are the one
-                            # who reports it. A second client doing the same is
-                            # told the turn already moved, and rebuilds from the
-                            # log that won (`pbp_stale`).
-                            pbp_write = pbp.send_resolved(
-                                pbp_seat, turn, log, replay.digest_hex(state),
-                                state.winner is not None, state.winner)
-                            pbp_resolving = pbp_write is not None
-        if ui is not None and not ui.in_pbp:
-            # Left the match — back to the menu, a new map, a retry. Nothing in
-            # flight is about it anymore, and the seat itself stays remembered so
-            # the link still works.
-            pbp_seat, pbp_poll, pbp_write, pbp_ident = None, None, None, None
-            pbp_failures, pbp_wait, pbp_read_line = 0, PBP_POLL_MS, ""
-            pbp_resolving = pbp_stale = False
-            pbp_last, pbp_moved, pbp_quiet = None, None, 0
-        elif (ui is not None and pbp_seat is not None and pbp_poll is None
-                and pbp_ident is None and pbp_write is None and state is not None
-                and state.winner is None):
-            pbp_accum += dt
-            # A turn resolving or a seat submitting is the match moving, which
-            # is what keeps a spectator's reads quick (`pbp_spectator_floor`).
-            moved = (state.turn, ui.pbp_waiting)
-            pbp_quiet = 0 if moved != pbp_moved else pbp_quiet + dt
-            pbp_moved = moved
-            idle_floor = (pbp_spectator_floor(pbp_quiet, pbp_idle) if ui.spectating
-                          else pbp_idle_floor(pbp_idle))
-            if pbp_accum >= max(pbp_wait, idle_floor):
-                pbp_accum = 0
-                # A brief is only asked for when the board stands where our last
-                # read did; a board ahead of it (our own resolve) or a stale one
-                # needs the whole match.
-                have = (pbp_last.turn if pbp_last is not None and not pbp_stale
-                        and pbp_last.turn == state.turn else None)
-                pbp_poll = pbp.fetch_state(ui.pbp_match, have)
+        # Play-by-post, all three calls in one place (`pbpclient`).
+        heard = pbp_client.step(dt, state, ui, log, settings, filming=reel is not None)
+        if heard.status is not None:
+            menu.set_status(menu_state, *heard.status)
+        if heard.created:
+            resume_prompt = None
+        if heard.game is not None:
+            state, ui, log = heard.game
+        if heard.opened:
+            current_seed = heard.seed
+            scene = "game"
+            auto_accum = 0
+        if heard.rebuilt:
+            history_states, history_fog, history_events = [], [], []
+            live_fog = None
+        if heard.reel is not None:
+            reel = heard.reel
+        if heard.played:
+            play_accum = auto_accum = 0
 
         # Web: the surface only changes size when we resize it, so follow the page
         # (not while F11's fullscreen mode owns it).
@@ -1041,7 +634,7 @@ async def main() -> None:
                 mapmaker.reflow(editor)
         for event in pygame.event.get():
             if event.type in PBP_ACTIVITY_EVENTS:
-                pbp_idle = 0
+                pbp_client.idle = 0
             # Web only, once: the first tap/click/key this session sees is the
             # earliest point simulation code can observe that the player has
             # actually landed on the page (touch arrives as MOUSEBUTTONDOWN — see
@@ -1216,17 +809,14 @@ async def main() -> None:
                     # strategy it already carries). The seed is resolved now and
                     # sent with it: "roll a fresh seed" has to mean one seed for
                     # the whole table, not one each.
-                    if pbp_make is None:
+                    if pbp_client.make is None:
                         current_seed = resolve_seed(settings)
-                        pbp_making, pbp_make = pbp_open(
+                        line = pbp_client.create(
                             settings, current_seed, sorted(menu_state.pbp_roster) or None,
                             menu_state.pbp_deadline_hours, menu_state.pbp_public,
                             menu_state.pbp_title, menu_state.pbp_name)
-                        pbp_watchable = fog_off(settings)
-                        if pbp_make is None:
-                            menu.set_status(menu_state, PBP_UNOPENED_MSG, False)
-                        else:
-                            menu.set_status(menu_state, PBP_OPENING_MSG, True)
+                        if line is not None:
+                            menu.set_status(menu_state, *line)
                 elif action == "create_map":
                     editor = mapmaker.open_editor(settings)
                     scene = "maker"
@@ -1290,14 +880,7 @@ async def main() -> None:
                     # advances when the last seat submits, not when anybody
                     # presses a key. So this sends ours and waits (`input` already
                     # declines a second press while we are waiting).
-                    if (pbp_seat is not None and not pbp_seat.spectating
-                            and pbp_write is None):
-                        pbp_write = pbp_send(state, ui, pbp_seat)
-                        # A read already in flight was asked before our orders
-                        # existed, and landing after them it would put us back on
-                        # the list of seats still to move. The write's own
-                        # follow-up read replaces it.
-                        pbp_poll = None
+                    pbp_client.send(state, ui)
                 else:
                     reel = resolve_turn(state, ui, log, settings)
                 play_accum = 0   # re-time the play cadence from this step

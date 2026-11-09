@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -37,8 +39,8 @@ from starconquest import run as gauntlet_run
 from starconquest.geometry import WorldView
 from starconquest.model import AiParams, GameState, Order
 from starconquest.replay import GameLog
-from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, build_state,
-                                   resolve_seed)
+from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_globals, build_state,
+                                   random_seed, resolve_seed)
 from starconquest.viewstate import Ui
 
 AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
@@ -1557,3 +1559,177 @@ def record_best(settings: Settings, state: GameState, ui: Ui) -> None:
     current, *legacy = settings.challenge_keys()
     webstore.record_best(current, state.turn,
                          state.players[ui.human_id].ships_lost, *legacy)
+
+
+# --------------------------------------------------------------------------- #
+# The setup menu's side of gauntlets, runs and dailies. Each answers what it
+# did plus a `MenuNote` for the menu to show; `main` applies the note to its
+# `MenuState`, and another frontend applies it to its own.
+# --------------------------------------------------------------------------- #
+@dataclass
+class MenuNote:
+    """What the setup menu should show after a call, applied in field order."""
+
+    status: tuple[str, bool] | None = None      # the status line: text, ok
+    gauntlet: str | None = None                 # open the gauntlet list on this id
+    said: tuple[str, str, bool] | None = None   # (gauntlet id, text, ok), said against it
+
+
+Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
+
+
+def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
+             gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None]
+             ) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
+    """Start a run of the gauntlet picked in the list (``fresh``), or carry on
+    the active run: resume its undecided game if it has one, never a fresh copy,
+    else begin its next stage. None, with a word in the list, when there is
+    nothing to play. ``enter`` puts the menu on a stage, as picking it does."""
+    if fresh:
+        g = picked
+        if g is None or not gauntlet_run.offered(g):
+            return None, MenuNote()
+        r: gauntlet_run.Run | None = gauntlet_run.start(g)
+    else:
+        r = gauntlet_run.active()
+        g = gauntlet.find(gauntlets, r.gauntlet_id) if r is not None else None
+        if g is None:
+            return None, MenuNote()
+        r = gauntlet_run.active_for(g)
+        if r is None:
+            return None, MenuNote(said=(g.id, "The gauntlet has changed since the run began, so the run is over",
+                                        False))
+    assert r is not None
+    sid = gauntlet_run.stage_to_play(r, g)
+    found = enter(g, sid) if sid is not None else None
+    if found is None:
+        return None, MenuNote()
+    if r.playing is not None:
+        log = gauntlet_run.restore_log(r.playing.log)
+        if log is None:
+            gauntlet_run.lose_game(r)
+            return None, MenuNote(said=(g.id, "The run's game couldn't be loaded, so the run is over", False))
+        ai.load_models()   # a resumed game may name a drop-in strategy
+        state, ui = resume_game(log, settings)
+        stage_ui(ui, found, briefing=log.turn_count == 0)
+        run_ui(ui, r, g)
+        return (state, ui, log, log.seed), MenuNote()
+    state, ui, log, seed = _begin_game(settings, found)
+    run_ui(ui, gauntlet_run.begin(r, found[1].id, log), g)
+    return (state, ui, log, seed), MenuNote()
+
+
+def open_linked_gauntlet(gid: str | None, data: dict | None) -> tuple[pbp.Request | None, MenuNote]:
+    """Act on a gauntlet link at launch: open one already in hand, or start the
+    fetch and answer it for the loop to poll. A stored gauntlet never changes,
+    so one kept from an earlier visit opens straight away, offline included."""
+    if data is not None:
+        g = gauntlet.remember(data)
+        return None, MenuNote(gauntlet=g.id if g is not None else None)
+    if gid is None:
+        return None, MenuNote()
+    if any(g.id == gid for g in gauntlet.remembered()):
+        return None, MenuNote(gauntlet=gid)
+    pending = gauntlet.fetch(gid)
+    if pending is None:
+        print(f"cannot fetch gauntlet {gid!r}: no endpoint is configured")
+        return None, MenuNote(status=(GAUNTLET_UNREACHABLE_MSG, False))
+    return pending, MenuNote(status=(GAUNTLET_OPENING_MSG, True))
+
+
+def land_gauntlet(state: str, body: str) -> MenuNote:
+    """The gauntlet fetch answered: keep it and open the list, or say why not."""
+    data = gauntlet.from_reply(body) if state == pbp.OK else None
+    g = gauntlet.remember(data) if data is not None else None
+    if g is not None:
+        return MenuNote(status=("", True), gauntlet=g.id)
+    print(f"gauntlet fetch ended in state {state!r}: {body[:120]!r}")
+    return MenuNote(status=(GAUNTLET_MISSING_MSG if state == pbp.MISSING
+                            else GAUNTLET_UNREADABLE_MSG if state == pbp.OK
+                            else GAUNTLET_UNREACHABLE_MSG, False))
+
+
+def open_daily(day: str = "", kind: str = daily.BOARD) -> tuple[pbp.Request | None, MenuNote]:
+    """Start fetching ``day``'s daily of ``kind`` (today's when blank) and
+    answer the request for the loop to poll, or say why there is none."""
+    pending = daily.fetch(day, kind)
+    if pending is None:
+        return None, MenuNote(status=(_daily_msg(DAILY_UNREACHABLE_MSG, kind), False))
+    return pending, MenuNote(status=(_daily_msg(DAILY_OPENING_MSG, kind), True))
+
+
+def land_daily(settings: Settings, state: str, body: str, kind: str = daily.BOARD) -> MenuNote:
+    """The daily fetch for ``kind`` answered: put its setup on the menu, or say
+    why not. The setup is stashed as a shared link's is, so an installed app
+    relaunched without the fragment still has it."""
+    got = daily.from_reply(body) if state == pbp.OK else None
+    if got is None:
+        print(f"daily fetch ended in state {state!r}: {body[:120]!r}")
+        return MenuNote(status=(_daily_msg(
+            DAILY_MISSING_MSG if state == pbp.MISSING
+            else DAILY_UNREADABLE_MSG if state == pbp.OK
+            else DAILY_UNREACHABLE_MSG, kind), False))
+    day, kind, setup = got
+    settings.copy_from(setup)
+    daily.remember(day, settings, kind)
+    webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.to_token())
+    return MenuNote(status=(daily.label(day, settings, kind), True))
+
+
+def start_generation(fragment: str) -> tuple[gauntletgen.Job | None, MenuNote]:
+    """Start generating from a ``#gauntlet-spec=`` fragment, or None when the
+    fragment is not one (or the spec can never deal, which the status says)."""
+    data = gauntletgen.spec_from_fragment(fragment)
+    if data is None:
+        return None, MenuNote()
+    ai.load_models()
+    try:
+        job = gauntletgen.job_from_link(data, random_seed())
+    except ValueError as err:
+        return None, MenuNote(status=(GAUNTLET_GEN_REFUSED_MSG.format(why=err), False))
+    return job, MenuNote(status=(GAUNTLET_GEN_MSG.format(pct=0.0, done=0, total=job.total), True))
+
+
+def pump_generation(settings: Settings, job: gauntletgen.Job,
+                    budget_s: float = GAUNTLET_GEN_BUDGET_S) -> tuple[gauntletgen.Job | None, MenuNote]:
+    """Play the generator on for one slice of ``budget_s``; once done, keep the
+    gauntlet and open the Tutorial list on it. Returns the job while it runs.
+
+    A probe game goes through ``build_state``, which pushes its setup's knobs
+    into ``config``; the menu's own setup is pushed back after every slice, so
+    nothing the menu draws reads a probe's balance."""
+    try:
+        job.step(budget_s)
+    finally:
+        apply_globals(settings)
+    if not job.done:
+        return job, MenuNote(status=(GAUNTLET_GEN_MSG.format(
+            pct=job.progress(), done=len(job.rows), total=job.total), True))
+    data = job.result()
+    g = gauntlet.remember(data) if data is not None else None
+    if g is None:
+        return None, MenuNote(status=(GAUNTLET_GEN_EMPTY_MSG, False))
+    return None, MenuNote(gauntlet=g.id, said=(g.id, f"Generated {g.name}: {len(g.stages)} stages", True))
+
+
+def ask_listing(job: gauntletgen.Job) -> tuple[tuple[str, str, pbp.Request] | None, MenuNote]:
+    """A finished run whose link ticked "Ask for it to be listed publicly":
+    start saving it to the board under the author's name, and answer the
+    gauntlet's id and name with the save for the loop to poll. Nothing is sent for any
+    other run, or when there is no board."""
+    data = job.result() if job.done and job.listing is not None else None
+    if data is None:
+        return None, MenuNote()
+    pending = gauntlet.ask_listing(data, job.listing or "")
+    if pending is None:
+        return None, MenuNote()
+    return ((data["id"], data["name"], pending),
+            MenuNote(said=(data["id"], GAUNTLET_LISTING_MSG.format(name=data["name"]), True)))
+
+
+def land_listing(gid: str, name: str, state: str) -> MenuNote:
+    """The board answered the listing save: say whether it took, in the
+    Gauntlets list if it is still open."""
+    if state == pbp.OK:
+        return MenuNote(said=(gid, GAUNTLET_LISTED_MSG.format(name=name), True))
+    return MenuNote(said=(gid, GAUNTLET_LISTING_FAILED_MSG.format(name=name), False))
