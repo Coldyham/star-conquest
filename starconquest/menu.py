@@ -5,7 +5,9 @@ A sibling of the game board rather than part of it, so ``render.py`` /
 strict split *within* this module: ``draw`` only reads (never mutates
 ``Settings``), ``handle_event`` only mutates ``MenuState``/``Settings`` and
 returns a high-level action string (``"start"``, ``"play_by_post"``,
-``"quit"``) or ``None``.
+``"quit"``) or ``None``. What a press on a setup control means, and the menu's
+words, live in `setupmenu`, which the HTML build's session reads too: this
+module hit-tests and draws.
 
 Widgets are immediate-mode: each draws itself and records its screen rect(s) in
 ``MenuState.rects`` under a string key; ``handle_event`` hit-tests the click
@@ -41,14 +43,10 @@ from pathlib import Path
 
 import pygame
 
-from . import (ai, campaign, combat, config, gauntlet, mapgen, paths, pbp, run, softkeyboard, uifont,
-               webstore, widgets)
-from .model import AiParams
+from . import (ai, campaign, combat, config, gauntlet, paths, pbp, run, setupmenu, softkeyboard,
+               uifont, webstore, widgets)
 from .paths import LEADERBOARD_RECENT_PATH, LEADERBOARD_LOBBY_PATH, is_web, saves_dir
-from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
-                       MapSketch, Settings, fog_off, fresh_rng, lane_lengths, lane_survey_key,
-                       lane_turns, map_sketch, randomise_knobs, random_seed, seed_top, setup_warnings,
-                       sketch_key)
+from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, MapSketch, Settings, fog_off, fresh_rng, randomise_knobs)
 
 # -- menu chrome colours (presentation-only, kept local like render.py's) ----- #
 _PANEL_BG = (18, 20, 30)
@@ -59,10 +57,10 @@ _BTN_BORDER = (70, 78, 100)
 _HL_FILL = (40, 46, 66)
 _HL_BORDER = (120, 150, 210)
 _START_FILL = (46, 92, 60)
-_START_BORDER = (96, 190, 120)
-_DISABLED_TEXT = (78, 84, 100)
-_STATUS_ERR = (214, 130, 110)
-_WARN = (214, 172, 92)  # amber: a challenge whose settings no longer match
+_START_BORDER = setupmenu.START_BORDER
+_DISABLED_TEXT = setupmenu.DISABLED_TEXT
+_STATUS_ERR = setupmenu.STATUS_ERR
+_WARN = setupmenu.WARN  # amber: a challenge whose settings no longer match
 
 # Event types that can change a Settings — the ones worth snapshotting before.
 # MOUSEMOTION is excluded deliberately: it only mutates mid-slider-drag, which the
@@ -84,10 +82,10 @@ _SLIDER_H = 42  # vertical pitch between sliders
 _HEADER_H = 24  # height of a section header
 _PROSE_H = 22  # pitch between wrapped `normal` prose lines (Combat tab)
 _NOTE_H = 18  # ...and between `small` note / table rows
-_MATRIX_N = 3  # jitter matrix: swings per axis, spanning ∓jitter; keep it odd
+_MATRIX_N = setupmenu.MATRIX_N  # jitter matrix: swings per axis
 _MATRIX_ROW_H = 24  # ...its row pitch, and
 _TLABEL_W = 120  # ...the gutter its row labels sit in
-_SEED_MAX_LEN = len(str(seed_top()))  # a typed seed stops at the newest pool's era
+_SEED_MAX_LEN = setupmenu.SEED_MAX_LEN  # a typed seed stops at the newest pool's era
 _FILENAME_MAX_LEN = 24
 _DEFAULT_FILENAME = "starconquest_settings"
 # Saved configs live in a gitignored dir under the writable data dir (repo root
@@ -132,63 +130,27 @@ _ADV_COMBAT = ADV_COMBAT
 # in a save file or a share token, and never trips the un-challenge confirm modal.
 # Hence the third `kind` in `_SLIDER_SPECS`. `attr` deliberately matches the
 # MenuState field name, as it does for the other two kinds.
-_PREVIEW = (
-    ("preview_attacker", "Attacker ships", "preview_attacker", 1, config.COMBAT_PREVIEW_MAX, 1, True),
-    ("preview_defender", "Defender ships", "preview_defender", 1, config.COMBAT_PREVIEW_MAX, 1, True),
-)
+_PREVIEW = setupmenu.PREVIEW
 _ADV_FOG = ADV_FOG
 # Every Advanced-tab slider, flattened — the "Randomise all" die walks these.
 # `_ADV_COMBAT` is deliberately absent: it lives on the Combat tab now, and a die
 # should only roll what you can see (silently changing an off-screen knob would
 # also raise the un-challenge modal for an edit you can't point at).
-_ADV_ALL = _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_FOG
+_ADV_ALL = setupmenu.ADV_ALL
 # The five knobs the built-in heuristic reads. The sixth, `aux`, is bot-defined and
 # so has no fixed label or range — see `_ai_specs`.
-_AI_PARAMS = (
-    ("ai_reserve_frac", "Reserve fraction", "reserve_fraction", 0.0, 0.9, 0.05, False),
-    ("ai_reserve_floor", "Reserve floor", "reserve_floor", 0, 20, 1, True),
-    ("ai_expand", "Expand margin", "expand_margin", 1.0, 3.0, 0.1, False),
-    ("ai_attack", "Attack margin", "attack_margin", 1.0, 3.0, 0.1, False),
-    ("ai_reinforce", "Reinforce margin", "reinforce_margin", 0, 10, 1, True),
-)
-_AUX_KEY = "ai_aux"
+_AI_PARAMS = setupmenu.AI_PARAMS
+_AUX_KEY = setupmenu.AUX_KEY
 
-# key -> (kind, attr, lo, hi, step, is_int); kind routes the setter target.
-_SLIDER_SPECS: dict[str, tuple] = {}
-for _grp in (_ADV_MAP, _ADV_TRAVEL, _ADV_ECON, _ADV_COMBAT, _ADV_FOG):
-    for _key, _label, _attr, _lo, _hi, _step, _is_int in _grp:
-        _SLIDER_SPECS[_key] = ("adv", _attr, _lo, _hi, _step, _is_int)
-for _key, _label, _attr, _lo, _hi, _step, _is_int in _AI_PARAMS:
-    _SLIDER_SPECS[_key] = ("ai", _attr, _lo, _hi, _step, _is_int)
-for _key, _label, _attr, _lo, _hi, _step, _is_int in _PREVIEW:
-    _SLIDER_SPECS[_key] = ("preview", _attr, _lo, _hi, _step, _is_int)
-# The aux knob is registered with the generic range so hit-routing knows the key;
-# whether it is drawn at all, and under what label and range, is the selected
-# strategy's call (`_ai_specs`, resolved live in `_slider_spec`).
-_SLIDER_SPECS[_AUX_KEY] = ("ai", "aux", *ai.AUX_RANGE_DEFAULT, False)
-
-# Zero-value instances for spotting an edited field — the same plain-equality
-# test `Settings.token_dict` uses to decide what a share link needs to carry.
-# Frozen once at import, like every other default baked into these dataclasses.
-_DEFAULT_SETTINGS = Settings()
-_DEFAULT_AI_PARAMS = AiParams()
+_SLIDER_SPECS = setupmenu.SLIDER_SPECS
+_DEFAULT_SETTINGS = setupmenu.DEFAULT_SETTINGS
+_DEFAULT_AI_PARAMS = setupmenu.DEFAULT_AI_PARAMS
 
 
-def _default_for(target):
-    """The zero-value instance matching ``target``'s type, or ``None`` for
-    anything that isn't a persisted setting — the Combat tab's demo sliders
-    write ``MenuState``, which has no notion of a default worth flagging."""
-    if isinstance(target, Settings):
-        return _DEFAULT_SETTINGS
-    if isinstance(target, AiParams):
-        return _DEFAULT_AI_PARAMS
-    return None
+_default_for = setupmenu.default_for
 
 
-def _changed(target, attr: str) -> bool:
-    """True if ``target.attr`` has moved from the game's default."""
-    default = _default_for(target)
-    return default is not None and getattr(target, attr) != getattr(default, attr)
+_changed = setupmenu.changed
 
 
 def _changed_dot(surface, x: int, y: int) -> None:
@@ -382,43 +344,18 @@ class MenuState:
     slider_press: tuple[str, tuple[int, int]] | None = None
 
 
-def _strategy_options() -> list[str]:
-    """Dropdown options: every registered strategy, then ``random``.
-
-    ``random`` is last because it is not one of them — it names no decision
-    function and is resolved to one of the others by ``settings.build_state``
-    from the match seed, so a seat set to it faces a bot the player has not been
-    told. Appending rather than inserting also leaves the measured ladder order
-    above it undisturbed.
-    """
-    return ai.available_strategies() + [RANDOM_STRATEGY]
+_strategy_options = setupmenu.strategy_options
 
 
-def _strategy_label(name: str, aux: float) -> str:
-    """What the strategy dropdown shows for a seat: its name, or for a name since
-    folded into a family (`ai.LEGACY`) the family and the stop it plays at. The
-    seat keeps the stored name until it is edited."""
-    if name not in ai.LEGACY:
-        return name
-    stop = ai.aux_stop_name(name, aux)
-    return f"{ai.family(name)} · {stop}" if stop else ai.family(name)
+_strategy_label = setupmenu.strategy_label
 
 
 def _ai_specs(ms: MenuState, settings: Settings) -> tuple:
-    """Slider specs for the seat the AI tab is editing: the heuristic's five, plus
-    the ``aux`` knob under whatever the seat's strategy calls it. A strategy that
-    declares no meaning for ``aux`` gets no sixth slider."""
-    spec = ai.aux_spec(settings.seat_strategy(ms.ai_seat))
-    if spec is None:
-        return _AI_PARAMS
-    label, lo, hi, step, is_int = spec
-    return _AI_PARAMS + ((_AUX_KEY, label, "aux", lo, hi, step, is_int),)
+    """Slider specs for the seat the AI tab is editing (`setupmenu.ai_specs`)."""
+    return setupmenu.ai_specs(ms.ai_seat, settings)
 
 
-def _ai_seats(settings: Settings) -> list[int]:
-    """Seats the AI tab can tune: opponents 2..N, plus your seat 1 in autoplay."""
-    start = 1 if settings.autoplay else 2
-    return list(range(start, settings.players + 1))
+_ai_seats = setupmenu.ai_seats
 
 
 # --------------------------------------------------------------------------- #
@@ -565,28 +502,7 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
         _text(surface, f["small"], text, colour, center=(w // 2, y))
 
 
-def _challenge_lines(settings: Settings) -> list[tuple[str, tuple[int, int, int]]]:
-    """The challenge banner's two lines and their colours (`_draw_challenge`);
-    the compact menu wraps them to its column."""
-    ch = settings.challenge
-    valid = ch.matches(settings)
-
-    head = f"CHALLENGE — beat {ch.summary()}"
-    if ch.by:
-        head += f"   ·   from {ch.by}"
-    first = (head, _START_BORDER if valid else _WARN)
-
-    if not valid:
-        return [first, ("setup changed — your score won't compare", _WARN)]
-
-    bots = [settings.seat_strategy(s) for s in range(2, settings.players + 1)]
-    bits = [f"seed {settings.seed}", f"{settings.system_count()} systems", settings.mode]
-    if bots:
-        bits.append("vs " + ", ".join(bots))
-    mine = webstore.best(*settings.challenge_keys())
-    if mine is not None:
-        bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
-    return [first, ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
+_challenge_lines = setupmenu.challenge_lines
 
 
 def active_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
@@ -748,9 +664,7 @@ def picked_gauntlet(ms: MenuState) -> gauntlet.Gauntlet | None:
     return _picked(ms)
 
 
-def _gauntlets_label(ms: MenuState) -> str:
-    """The button that opens the list: "Tutorial" while that is all there is."""
-    return "Gauntlets" if len(ms.gauntlets) > 1 else "Tutorial"
+_gauntlets_label = setupmenu.gauntlets_label
 
 
 def _playing_word(ms: MenuState) -> str:
@@ -1043,11 +957,7 @@ def _handle_run(ms: MenuState, settings: Settings, g: gauntlet.Gauntlet, hit: st
 
 
 def _unchallenge_labels() -> tuple[str, str]:
-    """(change-anyway, keep-the-challenge) labels; key hints dropped on a touch
-    build, where there is no Y/N to press — as `_resume_labels` does."""
-    if config.touch_ui:
-        return ("Change it anyway", "Keep the challenge")
-    return ("Change it anyway (Y)", "Keep the challenge (Esc)")
+    return setupmenu.unchallenge_labels(config.touch_ui)
 
 
 def _draw_unchallenge(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
@@ -1114,11 +1024,7 @@ def _draw_menu_modal(surface, ms: MenuState, w: int, h: int, lines, go, stay) ->
 
 
 def _clear_map_labels() -> tuple[str, str]:
-    """(clear-it, keep-it) labels; key hints dropped on a touch build, as
-    `_unchallenge_labels` does."""
-    if config.touch_ui:
-        return ("Clear the map", "Keep it")
-    return ("Clear the map (Y)", "Keep it (Esc)")
+    return setupmenu.clear_map_labels(config.touch_ui)
 
 
 def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
@@ -1143,11 +1049,7 @@ def _draw_clear_map(surface, ms: MenuState, w: int, h: int) -> None:
 
 
 def _slow_labels() -> tuple[str, str]:
-    """(play-anyway, go-back) labels; key hints dropped on a touch build, as
-    `_unchallenge_labels` does."""
-    if config.touch_ui:
-        return ("Play anyway", "Change settings")
-    return ("Play anyway (Y)", "Change settings (Esc)")
+    return setupmenu.slow_labels(config.touch_ui)
 
 
 def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
@@ -1330,36 +1232,16 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
 # otherwise hide an edited knob completely. "ai" isn't listed: it's resolved
 # specially in `_tab_changed`, since it spans two per-seat lists rather than a
 # flat set of Settings attrs.
-_TAB_FIELDS = {
-    "basic": ("players", "nodes", "mode", "seed", "autoplay", "fog_sight", "fog_scout",
-              "custom_map"),
-    "combat": tuple(attr for _, _, attr, *_ in _ADV_COMBAT) + ("in_lane_battles",),
-    "advanced": tuple(attr for _, _, attr, *_ in _ADV_MAP + _ADV_TRAVEL + _ADV_ECON + _ADV_FOG) + ("neutral_produces",),
-}
+_TAB_FIELDS = setupmenu.TAB_FIELDS
 
 
-def _tab_changed(tab: str, settings: Settings) -> bool:
-    """True if anything shown on ``tab`` differs from default."""
-    if tab == "ai":
-        seats = [s - 1 for s in _ai_seats(settings)]
-        if any(settings.ai_strategy[i] != "heuristic" for i in seats):
-            return True
-        return any(settings.ai[i] != _DEFAULT_AI_PARAMS for i in seats)
-    if tab == "basic" and _layout_changed(settings):
-        return True
-    return any(_changed(settings, attr) for attr in _TAB_FIELDS.get(tab, ()))
+_tab_changed = setupmenu.tab_changed
 
 
-def _layout_changed(settings: Settings) -> bool:
-    """A layout left over from a symmetric setup is not a change to a map it
-    cannot shape — the same rule that keeps it out of the setup's key."""
-    return not settings.layout_inert() and _changed(settings, "layout")
+_layout_changed = setupmenu.layout_changed
 
 
-def _step_layout(settings: Settings, step: int) -> None:
-    layouts = mapgen.SYMMETRIC_LAYOUTS
-    at = layouts.index(settings.layout) if settings.layout in layouts else 0
-    settings.layout = layouts[(at + step) % len(layouts)]
+_step_layout = setupmenu.step_layout
 
 
 def _draw_tabs(surface, ms: MenuState, settings: Settings, w: int) -> None:
@@ -1553,18 +1435,7 @@ def _draw_advanced(surface, ms: MenuState, settings: Settings, panel: pygame.Rec
 # the panel floor. Broken by hand, the height is a constant that can be checked.
 # Content width is 516px in a mono font: 46 chars at `normal`, 64 at `small`.
 # --------------------------------------------------------------------------- #
-_COMBAT_PROSE = (
-    "Battles use Lanchester's square law.",
-    "The winner keeps sqrt(W² − L²) ships",
-    # The exact number the code returns, not a range: `_survivors` rounds
-    # sqrt(44) = 6.63 to 7 and always has (banker's rounding, pinned because it
-    # decides seeded replays). "6 or 7" read as though the result were uncertain,
-    # which the readout directly below — "Jitter off: this result is exact." on
-    # this very fight, the page's own 12-vs-10 default — flatly contradicts.
-    # Same 44 characters as the line it replaced, so the panel's hand-broken
-    # height is unmoved.
-    "e.g. 12 attacking 10 leaves 7 — √44, rounded",
-)
+_COMBAT_PROSE = setupmenu.COMBAT_PROSE
 
 
 def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect) -> None:
@@ -1622,7 +1493,7 @@ def _draw_combat(surface, ms: MenuState, settings: Settings, panel: pygame.Rect)
 # applies to neither side and an exact tie annihilates instead of breaking to the
 # defender. The jitter is a property of the dice, not the ground, so it still
 # applies, and the matrix below still reads true.
-_LANE_NOTE = "same jitter, but no defender advantage"
+_LANE_NOTE = setupmenu.LANE_NOTE
 
 
 def _draw_lane_battles(surface, ms: MenuState, settings: Settings, x: int, y: int, width: int) -> int:
@@ -1650,58 +1521,7 @@ def _draw_lane_battles(surface, ms: MenuState, settings: Settings, x: int, y: in
     return y + _CH
 
 
-def _readout_lines(preview: combat.CombatPreview) -> tuple[str, tuple[int, int, int], str, str]:
-    """(headline, headline colour, detail, band) for one previewed fight.
-
-    Pure and separate from the drawing so the three lines can be checked against
-    each other for every slider position — they describe the same fight from
-    three angles and must never disagree.
-    """
-    roll = preview.nominal
-    a, d, s = preview.attacker, preview.defender, roll.survivors
-
-    if roll.winner == combat.ATTACKER:
-        headline, color = f"{a} vs {d} → you keep {s}", config.player_color(1)
-    elif roll.winner == combat.DEFENDER:
-        headline, color = f"{a} vs {d} → they keep {s}", config.player_color(2)
-    else:
-        headline, color = f"{a} vs {d} → both wiped out", _DISABLED_TEXT
-    # Never assert a winner the dice don't guarantee: an uncertain fight goes amber
-    # whoever the average roll favours.
-    if not preview.certain:
-        color = _WARN
-
-    # What each side actually loses. The sub-1:1 exchange *is* the square law, so
-    # stating both losses teaches it without reaching for a counterfactual.
-    if preview.annihilation:
-        detail = "Both fleets are spent — the system goes neutral."
-    elif roll.winner == combat.ATTACKER:
-        lost = f"You lose {a - s}" if s < a else "You lose nothing"
-        detail = f"{lost}, they lose all {d}."
-    else:
-        lost = f"They lose {d - s}" if s < d else "They lose nothing"
-        detail = f"{lost}, you lose all {a}."
-
-    pct = round(preview.jitter * 100)
-    if preview.jitter <= 0:
-        band = "Jitter off: this result is exact."
-    elif not preview.certain:
-        # Name the likely side — the corners disagree, but the average roll still
-        # favours one — then give both ends, so "uncertain" comes with numbers.
-        likely = {combat.ATTACKER: "yours", combat.DEFENDER: "theirs"}.get(roll.winner, "a wipe-out")
-        band = (
-            f"Jitter ±{pct}%: likely {likely}, you keep {preview.best.attacker_survivors}"
-            f" to them {preview.worst.defender_survivors}."
-        )
-    elif preview.best.winner == combat.ATTACKER:
-        band = "Jitter ±{}%: you keep {}–{}.".format(pct, *preview.band)
-    elif preview.best.winner == combat.DEFENDER:
-        # certain the other way: the defender's best roll is the attacker's worst
-        band = f"Jitter ±{pct}%: they keep {preview.best.defender_survivors}–{preview.worst.defender_survivors}."
-    else:  # both corners annihilate — tiny matched fleets, where no roll saves either
-        band = f"Jitter ±{pct}%: no roll leaves a survivor."
-
-    return headline, color, detail, band
+_readout_lines = setupmenu.readout_lines
 
 
 def _draw_fight_readout(surface, preview: combat.CombatPreview, x: int, y: int, width: int) -> int:
@@ -1754,7 +1574,7 @@ def _draw_jitter_matrix(surface, preview: combat.CombatPreview, x: int, y: int, 
     # Each axis runs -1 .. +1 as a fraction of jitter. Keep the count odd so the
     # middle sample is exactly 0.0 — that centre cell is the fight the readout
     # describes, and is matched by identity below.
-    swings = tuple(-1.0 + 2.0 * i / (_MATRIX_N - 1) for i in range(_MATRIX_N))
+    swings = setupmenu.matrix_swings()
 
     if preview.jitter <= 0:  # every cell would be the same fight, and every
         # header would read "0%" — a grid that says nothing, three times over
@@ -1763,8 +1583,7 @@ def _draw_jitter_matrix(surface, preview: combat.CombatPreview, x: int, y: int, 
         return y + _NOTE_H
 
     def label(swing: float) -> str:
-        pct = swing * preview.jitter * 100
-        return "0%" if not pct else f"{'+' if pct > 0 else '−'}{abs(pct):.0f}%"
+        return setupmenu.swing_label(swing, preview.jitter)
 
     def centre(i: int) -> int:
         return x + gutter + cell_w * i + cell_w // 2
@@ -1784,13 +1603,7 @@ def _draw_jitter_matrix(surface, preview: combat.CombatPreview, x: int, y: int, 
             if a_swing == 0.0 and d_swing == 0.0:  # the fight the readout describes
                 box = pygame.Rect(centre(i) - cell_w // 2, cy - _MATRIX_ROW_H // 2, cell_w, _MATRIX_ROW_H)
                 pygame.draw.rect(surface, _HL_FILL, box, border_radius=4)
-            roll = preview.roll(a_swing, d_swing)
-            if roll.winner == combat.ATTACKER:
-                text, color = f"you {roll.survivors}", config.player_color(1)
-            elif roll.winner == combat.DEFENDER:
-                text, color = f"them {roll.survivors}", config.player_color(2)
-            else:
-                text, color = "wipe-out", _DISABLED_TEXT
+            text, color = setupmenu.matrix_cell(preview, a_swing, d_swing)
             _text(surface, f["small"], text, color, center=(centre(i), cy))
     return y + _MATRIX_ROW_H * _MATRIX_N
 
@@ -1874,45 +1687,16 @@ def _sliders(surface, ms, target, specs, x: int, y: int, width: int, names=None)
 # --------------------------------------------------------------------------- #
 # Widgets
 # --------------------------------------------------------------------------- #
-def _visible_adv(settings: Settings):
-    """The Advanced sliders actually on screen for this setup."""
-    if settings.custom_map is None:
-        return _ADV_ALL
-    return _ADV_TRAVEL + _ADV_FOG
+_visible_adv = setupmenu.visible_adv
 
 
 def _survey_lanes(ms: MenuState, settings: Settings) -> None:
-    """Re-survey the setup's lanes if anything that shapes them has changed —
-    but never mid-drag, so a map slider only costs one generation, on release."""
-    if ms.drag_key is not None:
-        return
-    key = lane_survey_key(settings)
-    if key != ms.lane_key:
-        ms.lane_key, ms.lane_ly = key, lane_lengths(settings)
-    if config.compact:  # only the compact menu draws one (`_compact_sketch`)
-        key = sketch_key(settings)
-        if key != ms.sketch_at:
-            ms.sketch_at, ms.sketch = key, map_sketch(settings)
+    """Re-survey the setup's lanes (and on a phone its sketch) if anything
+    that shapes them has changed, never mid-drag (`setupmenu.survey`)."""
+    setupmenu.survey(ms, settings, sketch=config.compact)
 
 
-def _lane_readout_lines(ms: MenuState, settings: Settings) -> list[str]:
-    """What the setup does to travel: the lane spread in turns at the chosen
-    speed, and how much bigger than a standard board the map is laid out. Empty
-    until `pump` has surveyed *this* setup — a stale figure is worse than none."""
-    if ms.lane_key != lane_survey_key(settings):
-        return []
-    spread = lane_turns(ms.lane_ly, settings.ship_ly_per_turn)
-    if spread is None:
-        return []
-    lo, mid, hi = spread
-    span = f"{lo} turn" + ("" if lo == 1 else "s") if lo == hi else f"{lo}-{hi} turns"
-    # "~" when the seed is left to chance: then it is a sample, not your map.
-    sampled = "~" if settings.seed is None and settings.custom_map is None else ""
-    lines = [f"Lanes: {sampled}{span}, median {mid}"]
-    if settings.custom_map is None and settings.nodes > config.STANDARD_MAX_NODES:
-        scale = config.world_side(settings.nodes) / config.WORLD_SIZE
-        lines.append(f"Map: {scale:.1f}x standard width")
-    return lines
+_lane_readout_lines = setupmenu.lane_readout_lines
 
 
 def _lane_readout(surface, ms: MenuState, settings: Settings, x: int, y: int) -> int:
@@ -1964,8 +1748,7 @@ def _die_button(surface, ms, key, rect: pygame.Rect) -> None:
     ms.rects[key] = rect
 
 
-def _fmt(value, is_int: bool) -> str:
-    return str(round(value)) if is_int else f"{value:.2f}"
+_fmt = setupmenu.fmt
 
 
 def _slider(surface, ms, key, label, value, lo, hi, is_int, x, y, width, *,
@@ -2048,8 +1831,8 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 # The footer's daily challenges (`main.open_daily`): one button opening a list
 # of the puzzle and the board, puzzle first as on the board site, each item the
 # key its click is handled as.
-_DAILY_LABEL = "Daily"
-_DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily map"))
+_DAILY_LABEL = setupmenu.DAILY_LABEL
+_DAILY_ITEMS = setupmenu.DAILY_ITEMS
 
 
 def _daily_button(surface, ms: MenuState, x: int, y: int) -> None:
@@ -2069,8 +1852,8 @@ def _draw_daily_list(surface, ms: MenuState) -> None:
 
 # The compact menu's one button for the board's two lists, which the desktop
 # footer has room to offer side by side (`_file_control`).
-_BOARD_LABEL = "Leaderboard"
-_BOARD_ITEMS = (("browse_configs", "Recently played"), ("browse_matches", "Shared matches"))
+_BOARD_LABEL = setupmenu.BOARD_LABEL
+_BOARD_ITEMS = setupmenu.BOARD_ITEMS
 
 
 def _draw_drop_list(surface, ms: MenuState, trigger_key: str, items, open_: bool) -> bool:
@@ -2741,11 +2524,7 @@ def _fit_modal(surface, ms: MenuState, draw_modal) -> None:
 # Resume prompt — a boot-time modal offered when the last game was left unfinished
 # --------------------------------------------------------------------------- #
 def _resume_labels() -> tuple[str, str]:
-    """(resume, new-game) button labels; key hints dropped on a touch build, where
-    there is no Y/N to press — the same wording rule the game's modals use."""
-    if config.touch_ui:
-        return ("Resume", "New game")
-    return ("Resume (Y/Enter)", "New game (N/Esc)")
+    return setupmenu.resume_labels(config.touch_ui)
 
 
 def resume_prompt_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
@@ -2803,25 +2582,20 @@ def handle_event(event, ms: MenuState, settings: Settings):
         return _handle_unchallenge(event, ms, settings)
     if ms.confirm_slow:
         return _handle_slow(event, ms)
-    if event.type in _MUTATING_EVENTS and _comparable(settings):
+    if event.type in _MUTATING_EVENTS:
         # Remember the last setup the challenge's score still applied to, before
         # this event gets a chance to change it. A slider drag is covered by the
         # snapshot its opening MOUSEBUTTONDOWN took.
-        ms.challenge_snapshot = settings.to_dict()
+        setupmenu.before_edit(ms, settings)
     before = _editing_field(ms)
     result = _dispatch(event, ms, settings)
     _sync_text_input(ms, before)
-    if settings.challenge is not None and ms.drag_key is None and not settings.challenge.matches(settings):
-        # Edited away from the challenge's setup. Ask rather than silently
-        # invalidating the score — and wait for a slider to be released first, so
-        # a drag isn't interrupted on its very first pixel.
-        ms.confirm_unchallenge = True
+    # Edited away from the challenge's setup: ask, once a slider is let go.
+    setupmenu.after_edit(ms, settings)
     return result
 
 
-def _comparable(settings: Settings) -> bool:
-    """Is there a challenge whose score still applies to this exact setup?"""
-    return settings.challenge is not None and settings.challenge.matches(settings)
+_comparable = setupmenu.comparable
 
 
 def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
@@ -2841,11 +2615,8 @@ def _handle_clear_map(event, ms: MenuState, settings: Settings) -> None:
         return
     ms.confirm_clear_map = False
     if answer:
-        settings.custom_map = None
-        # `nodes` was reconciled to the recipe and may sit below the generated
-        # floor, so put it back in range now that a generator has to honour it.
-        settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, settings.nodes))
-        set_status(ms, "Custom map cleared — maps come from the seed again", True)
+        setupmenu.clear_map(settings)
+        set_status(ms, setupmenu.CLEARED_MAP_MSG, True)
     return
 
 
@@ -2928,22 +2699,7 @@ def _handle_unchallenge(event, ms: MenuState, settings: Settings) -> str | None:
     if keep_edit is None:
         return None
 
-    ms.confirm_unchallenge = False
-    deferred, ms.pending_action = ms.pending_action, None
-    if keep_edit:
-        settings.challenge = None
-        ms.challenge_snapshot = None
-        # Also drop it from the address bar and the remembered token, or a reload
-        # would resurrect the banner we were just asked to get rid of.
-        webstore.sync_settings(settings.to_token())
-        set_status(ms, "Challenge cleared — this is your own setup now", True)
-        return deferred
-    if ms.challenge_snapshot is not None:
-        settings.copy_from(Settings.from_dict(ms.challenge_snapshot))
-        # The seed field keeps its own edit buffer, so resync it or the box would
-        # still show the rejected number.
-        ms.seed_text = "" if settings.seed is None else str(settings.seed)
-    return None    # kept the challenge: whatever was deferred is cancelled with it
+    return setupmenu.answer_unchallenge(ms, settings, keep_edit, lambda text, ok: set_status(ms, text, ok))
 
 
 def pump(ms: MenuState, settings: Settings) -> None:
@@ -2992,15 +2748,7 @@ def _filter(text: str, allowed, limit: int) -> str:
     return "".join(ch for ch in text if allowed(ch))[:limit]
 
 
-def _seed_digits(text: str) -> str:
-    """The seed field's text: digits only, and no seed past ``seed_top`` — the
-    last digit that would cross it is refused, as a full field refuses one. A
-    seed from an era with no pool yet would deal one bot today and another once
-    its pool is appended (`settings.pool_for`)."""
-    digits = _filter(text, str.isdigit, _SEED_MAX_LEN)
-    while digits and int(digits) > seed_top():
-        digits = digits[:-1]
-    return digits
+_seed_digits = setupmenu.seed_digits
 
 
 def _editing_field(ms: MenuState) -> str | None:
@@ -3158,93 +2906,15 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     if hit in _SLIDER_SPECS:  # grab + jump the slider
         ms.drag_key = hit
         _apply_slider(hit, ms, settings, pos)
-    elif hit.startswith("tab_"):
-        ms.tab = hit[len("tab_") :]
-    elif hit.startswith("seat_"):
-        ms.ai_seat = int(hit[len("seat_") :])
-    elif hit == "strategy":  # toggle the dropdown, rescanning models/
-        if not ms.strategy_open:
-            ai.load_models()
-            ms.strategies = _strategy_options()
-        ms.strategy_open = not ms.strategy_open
-    elif hit.startswith("strategy_opt_"):
-        idx = int(hit[len("strategy_opt_") :])
-        if 0 <= idx < len(ms.strategies) and ms.strategies[idx] != settings.ai_strategy[ms.ai_seat - 1]:
-            # A new strategy starts at its own default stop: an aux carried from
-            # the last one would mean something else to it.
-            settings.ai_strategy[ms.ai_seat - 1] = ms.strategies[idx]
-            settings.ai[ms.ai_seat - 1] = replace(settings.ai[ms.ai_seat - 1], aux=config.AI_AUX)
-        ms.strategy_open = False
-    elif hit == "copy_all":
-        src = settings.ai[ms.ai_seat - 1]
-        src_strat = settings.ai_strategy[ms.ai_seat - 1]
-        for seat in _ai_seats(settings):
-            settings.ai[seat - 1] = replace(src)
-            settings.ai_strategy[seat - 1] = src_strat
-    elif hit == "reset_all":
-        for seat in _ai_seats(settings):
-            settings.ai[seat - 1] = AiParams()
-            settings.ai_strategy[seat - 1] = "heuristic"
-    elif hit == "randomise_ai":
-        _randomise_sliders(settings.ai[ms.ai_seat - 1], _ai_specs(ms, settings))
-        settings.ai_strategy[ms.ai_seat - 1] = ai.family(settings.ai_strategy[ms.ai_seat - 1])
-    elif hit == "randomise_adv":
-        # The hidden groups are not the die's to roll: they describe generation,
-        # and a hand map has already been generated by hand.
-        _randomise_sliders(settings, _visible_adv(settings))
-    elif hit == "neutral_produces":
-        settings.neutral_produces = not settings.neutral_produces
-    elif hit == "in_lane_battles":
-        settings.in_lane_battles = not settings.in_lane_battles
-    elif hit == "players_dec":
-        _set_players(settings, settings.players - 1)
-    elif hit == "players_inc":
-        _set_players(settings, settings.players + 1)
-    elif hit == "nodes_dec":
-        _step_systems(settings, up=False)
-    elif hit == "nodes_inc":
-        _step_systems(settings, up=True)
-    elif hit == "mode_random":
-        settings.mode = "random"
-    elif hit == "mode_symmetric":
-        settings.mode = "symmetric"
+    elif setupmenu.press(ms, settings, hit, lambda text, ok: set_status(ms, text, ok)):
+        pass
     elif hit == "ui_size_dec":
         set_ui_size(ms, webstore.step_ui_size(ms.ui_size, -1))
     elif hit == "ui_size_inc":
         set_ui_size(ms, webstore.step_ui_size(ms.ui_size, +1))
-    elif hit == "layout_dec":
-        _step_layout(settings, -1)
-    elif hit == "layout_inc":
-        _step_layout(settings, +1)
     elif hit == "seed_field":
         ms.editing_seed = True
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
-    elif hit == "seed_random":
-        settings.seed = random_seed()
-        ms.seed_text = str(settings.seed)
-    elif hit == "autoplay":
-        settings.autoplay = not settings.autoplay
-    elif hit == "share_games":
-        # A preference the store might refuse (private browsing, a full quota).
-        # Say so rather than redrawing an unticked box with no explanation: an
-        # opt-in that silently forgets itself is worse than one that fails loudly.
-        want = not webstore.share_games()
-        if not webstore.set_share_games(want) and want:
-            set_status(ms, "Couldn't save that here — replays stay private", False)
-    elif hit == "animate_turns":
-        want = not webstore.animate_turns()
-        if not webstore.set_animate_turns(want) and want:
-            set_status(ms, "Couldn't save that here — turns stay instant", False)
-    elif hit == "ironman":
-        want = not webstore.ironman()
-        if not webstore.set_ironman(want) and want:
-            set_status(ms, "Couldn't save that here — History stays available", False)
-    elif hit == "fog_of_war":
-        if fog_off(settings):  # off -> on: apply the fog preset
-            settings.fog_sight = config.FOG_ON_SIGHT
-            settings.fog_scout = config.FOG_ON_SCOUT
-        else:  # on -> off: full visibility
-            settings.fog_sight = settings.fog_scout = config.FOG_MAX_HOPS
     elif hit == "daily_menu":
         ms.daily_open = not was_open
     elif hit == "board_menu":
@@ -3305,45 +2975,19 @@ def _handle_click(pos, ms: MenuState, settings: Settings):
     return None
 
 
-def _slider_spec(key: str, ms: MenuState, settings: Settings) -> tuple | None:
-    """``_SLIDER_SPECS[key]``, except the aux knob, whose range belongs to the
-    strategy the edited seat is running (None if it declares no aux knob)."""
-    if key == _AUX_KEY:
-        for k, _label, attr, lo, hi, step, is_int in _ai_specs(ms, settings):
-            if k == key:
-                return ("ai", attr, lo, hi, step, is_int)
-        return None
-    return _SLIDER_SPECS.get(key)
+_slider_spec = setupmenu.slider_spec
 
 
 def _apply_slider(key: str, ms: MenuState, settings: Settings, pos) -> None:
-    spec = _slider_spec(key, ms, settings)
     track = ms.rects.get(key)
-    if spec is None or track is None:
+    if track is None:
         return
-    kind, attr, lo, hi, step, is_int = spec
-    t = 0.0 if track.w == 0 else max(0.0, min(1.0, (pos[0] - track.x) / track.w))
-    raw = lo + t * (hi - lo)
-    snapped = round(raw / step) * step
-    snapped = max(lo, min(hi, snapped))
-    value = round(snapped) if is_int else round(snapped, 4)
-    if kind == "adv":
-        target = settings
-    elif kind == "preview":
-        target = ms  # transient: never reaches Settings, so no un-challenge prompt
-    else:
-        target = settings.ai[ms.ai_seat - 1]
-        if key == _AUX_KEY:
-            # Editing a legacy seat's stop makes it a seat of the family.
-            name = settings.ai_strategy[ms.ai_seat - 1]
-            settings.ai_strategy[ms.ai_seat - 1] = ai.family(name)
-    setattr(target, attr, value)
+    t = 0.0 if track.w == 0 else (pos[0] - track.x) / track.w
+    setupmenu.apply_slider(key, ms, settings, t)
 
 
 def _randomise_sliders(target, specs) -> None:
-    """Scramble every slider in ``specs`` to a random in-bounds, step-snapped value
-    on ``target`` — the Advanced/AI 'roll' buttons, just for fun. Shares the
-    snap-and-clamp logic with ``_apply_slider``."""
+    """Scramble every slider in ``specs`` on ``target`` (the dice buttons)."""
     randomise_knobs(target, specs, fresh_rng())
 
 
@@ -3383,52 +3027,28 @@ def _settings_path(name: str) -> Path:
 # "saved" is confirming something the player just watched themselves do, while an
 # error is the only account they get of something that did *not* happen, and one
 # that clears before it can be read is worse than none.
-_STATUS_MS = 4000
-_STATUS_ERROR_MS = 15000
+_STATUS_MS = setupmenu.STATUS_MS
+_STATUS_ERROR_MS = setupmenu.STATUS_ERROR_MS
 
 
 def _start(ms: MenuState, settings: Settings, action: str = "start"):
-    """``action``, unless a hand-drawn map would refuse to build.
-
-    ``mapgen.generate_custom`` asserts on a recipe with blockers — it is the strict
-    builder behind the one tolerant gate — so the half-built map ``mapmaker.commit``
-    deliberately lets through has to stop here rather than there. The creator says
-    the same thing on its own *Play now*; this is the same refusal for the route
-    that goes back to the menu first.
-    """
-    blockers = settings.custom_map.blockers() if settings.custom_map is not None else []
-    if blockers:
-        set_status(ms, blockers[0].text, False)
-        return None
+    """``action``, unless a hand-drawn map would refuse to build or a bot
+    warns about the setup (`setupmenu.start`)."""
     if action in ("start", "run", "run_continue"):
-        # Play by post passes through here only to reach its roster prompt, and
-        # which seats are bots is not known until that is confirmed — it asks
-        # there instead (`_handle_pbp_prompt`).
+        blockers = settings.custom_map.blockers() if settings.custom_map is not None else []
+        if blockers:
+            set_status(ms, blockers[0].text, False)
+            return None
         return _unless_slow(ms, settings, action)
-    return action
+    return setupmenu.start(ms, settings, action, lambda t, ok: set_status(ms, t, ok))
 
 
 def _unless_slow(ms: MenuState, settings: Settings, action: str,
                  people: set[int] | None = None) -> str | None:
-    """``action``, unless a bot in the setup warns it will struggle — then raise
-    the slow-setup modal holding ``action`` for "Play anyway" to re-issue.
-
-    ``people`` is which seats a person holds (see `settings.setup_warnings`).
-    A warning already played through once is not asked again for the same
-    setup; any change that moves its text asks afresh.
-    """
-    lines = setup_warnings(settings, people)
-    title = ""
+    """``action``, unless a bot (or the weekly campaign) asks first
+    (`setupmenu.unless_slow`)."""
     asked = campaign.confirm(ms.campaign_watch.status) if action == "start" else None
-    if asked is not None:
-        # One modal for both: the campaign's lines first, under the node's name.
-        title, campaign_lines = asked
-        lines = campaign_lines + lines
-    if not lines or tuple(lines) == ms.slow_ack:
-        return action
-    ms.confirm_slow, ms.slow_lines, ms.slow_action = True, lines, action
-    ms.slow_title = title
-    return None
+    return setupmenu.unless_slow(ms, settings, action, people, asked)
 
 
 def _handle_slow(event, ms: MenuState) -> str | None:
@@ -3447,12 +3067,7 @@ def _handle_slow(event, ms: MenuState) -> str | None:
             answer = False
     if answer is None:
         return None
-    action, ms.slow_action = ms.slow_action, None
-    ms.confirm_slow = False
-    if not answer:
-        return None
-    ms.slow_ack = tuple(ms.slow_lines)
-    return action
+    return setupmenu.answer_slow(ms, answer)
 
 
 def set_status(ms: MenuState, text: str, ok: bool) -> None:
@@ -3472,49 +3087,16 @@ def set_ui_size(ms: MenuState, pct: int) -> None:
         set_status(ms, "Couldn't save the UI size here — it lasts this session", False)
 
 
-def _set_players(settings: Settings, n: int) -> None:
-    if settings.custom_map is not None:
-        return _interlocked()
-    settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, n))
-    settings.nodes = max(settings.nodes, settings.min_nodes())
+_set_players = setupmenu.set_players
 
 
-def _node_step(n: int, up: bool) -> int:
-    """The Systems stepper's next value: one at a time up to a standard board,
-    then whole ``config.NODES_BIG_STEP`` multiples, or reaching ``MAX_NODES`` takes
-    eighty presses."""
-    big, step = config.STANDARD_MAX_NODES, config.NODES_BIG_STEP
-    if up:
-        return n + 1 if n < big else (n // step + 1) * step
-    return n - 1 if n <= big else max(big, -(-n // step) * step - step)
+_node_step = setupmenu.node_step
 
 
-def _set_nodes(settings: Settings, n: int) -> None:
-    if settings.custom_map is not None:
-        return _interlocked()
-    settings.nodes = max(settings.min_nodes(), min(config.MAX_NODES, n))
+_set_nodes = setupmenu.set_nodes
 
 
-def _step_systems(settings: Settings, up: bool) -> None:
-    """Move the Systems row to the next map size this setup can actually build.
-
-    A generated symmetric map only comes in whole sectors (``Settings.system_count``),
-    so a plain step can land on a request that builds the board already shown.
-    Steps on past those to the next size that differs, and stores that size, which
-    builds itself. A press with no such size in its direction does nothing.
-    """
-    if settings.layout_inert():
-        return _set_nodes(settings, _node_step(settings.nodes, up))
-
-    def size(n: int) -> int:
-        return mapgen.symmetric_size(n, settings.players, settings.layout)
-
-    now = settings.system_count()
-    n = _node_step(now, up)
-    while size(n) == now and settings.min_nodes() < n < config.MAX_NODES:
-        n += 1 if up else -1
-    if size(n) != now:
-        _set_nodes(settings, size(n))
+_step_systems = setupmenu.step_systems
 
 
 def _interlocked() -> None:

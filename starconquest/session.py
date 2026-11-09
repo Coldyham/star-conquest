@@ -22,8 +22,10 @@ import math
 import time
 import traceback
 
-from starconquest import ai, app, bench, engine, hostio, hud, play, serial, turnfilm
+from starconquest import (ai, app, bench, engine, hostio, hud, paths, play, replay, serial, setupmenu, turnfilm,
+                          webstore)
 from starconquest import recipe as recipes
+from starconquest import run as gauntlet_run
 from starconquest.model import GameState
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
@@ -83,6 +85,13 @@ class Session:
         # turn (`app.build_history`), and the live fog to restore on leaving.
         self.history: tuple[list, list, list] | None = None
         self.live_fog: tuple | None = None
+        # The setup menu (`setupmenu`): its state, whether the page is laid out
+        # for a finger (no key hints) and as a phone (which shows a map sketch),
+        # and an unfinished match to offer resuming, asked once at boot.
+        self.menu = setupmenu.Menu()
+        self.touch = False
+        self.compact = False
+        self.resume_log: GameLog | None = None
 
     def handle(self, raw: str) -> str:
         try:
@@ -109,14 +118,225 @@ class Session:
         return {"api": API_VERSION, "rules": engine.RULES_VERSION, "bots": sorted(ai.STRATEGIES),
                 "loaded": loaded}
 
-    def op_game_start(self, settings: dict, seed: int | None = None) -> dict:
-        """A fresh match on ``settings`` (`Settings.from_dict`), seeded or rolled."""
-        self.settings = Settings.from_dict(settings)
+    def op_game_start(self, settings: dict | None = None, seed: int | None = None) -> dict:
+        """A fresh match on ``settings`` (`Settings.from_dict`), or on the menu's
+        setup when none are given (Start Game), seeded or rolled."""
+        if settings is not None:
+            self.settings = Settings.from_dict(settings)
+        elif self.settings is None:
+            self.settings = Settings()
+        ai.load_models()   # files added since boot, or named by a loaded setup
         self.seed = seed if seed is not None else resolve_seed(self.settings)
         self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay)
-        return {"seed": self.seed, "static": serial.static(self.state), "board": serial.board(self.state),
-                "travel": serial.travel(self.state), "fog": self._fog(), "view": self._view(),
+        self.history = self.live_fog = None
+        return self._started()
+
+    def _started(self) -> dict:
+        return {"seed": self.seed, "static": serial.static(self._state()), "board": serial.board(self._state()),
+                "travel": serial.travel(self._state()), "fog": self._fog(), "view": self._view(),
                 "legends": serial.legends()}
+
+    # ------------------------------------------------------------------ #
+    # The setup menu (`setupmenu`): the page sends a control's key, a
+    # slider's fraction or the seed field's text, and draws the reply's
+    # ``menu`` as it stands. ``action`` is for the page to carry out
+    # (``start``, ``quit``, or a screen of a later phase).
+    def op_menu_open(self, prefill: dict | None = None, touch: bool = False, compact: bool = False,
+                     first: bool = False) -> dict:
+        """Show the menu: at boot (``first``) on a fresh setup, pre-filled from
+        the address (``prefill``) and then a shared link, as the command line
+        and the link pre-fill pygame's; afterwards on the setup last played,
+        the match left behind."""
+        self.touch, self.compact = bool(touch), bool(compact)
+        if first or self.settings is None:
+            self.settings = Settings.from_dict(prefill or {})
+            app._apply_shared_link(self.settings)
+            self.menu = setupmenu.Menu()
+            self.resume_log = None
+            if first:
+                log = replay.latest_log()
+                if (log is not None and not log.finished and log.turn_count > 0
+                        and not gauntlet_run.is_playing(log)):
+                    self.resume_log = log
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.menu.strategies = setupmenu.strategy_options()
+        return self._menu()
+
+    def _menu(self, action: str | None = None) -> dict:
+        ms, settings = self.menu, self._settings()
+        out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN)),
+               "action": action, "status": None,
+               "stale": not setupmenu.surveyed(ms, settings, self.compact)}
+        if ms.status:   # said once; the page holds it on screen
+            out["status"] = {"text": ms.status, "ok": ms.status_ok,
+                             "ms": setupmenu.STATUS_MS if ms.status_ok else setupmenu.STATUS_ERROR_MS}
+            ms.status = ""
+        if self.resume_log is not None:
+            go, stay = setupmenu.resume_labels(self.touch)
+            out["resume"] = {"title": "Resume last game?", "detail": setupmenu.resume_detail(self.resume_log),
+                             "go": go, "stay": stay}
+        return out
+
+    def _say(self, text: str, ok: bool) -> None:
+        self.menu.status, self.menu.status_ok = text, ok
+
+    def op_menu_press(self, key: str) -> dict:
+        """A press on the menu's control ``key`` (`setupmenu.view` names them)."""
+        ms, settings, key = self.menu, self._settings(), str(key)
+        if ms.confirm_unchallenge or ms.confirm_slow or ms.confirm_clear_map:
+            return self._menu(self._answer(key))
+        if key != "seed":
+            ms.editing_seed = False
+        if not (key == "strategy" or key.startswith("strategy_opt_")):
+            ms.strategy_open = False
+        daily_was, board_was = ms.daily_open, ms.board_open
+        ms.daily_open = ms.board_open = False
+        setupmenu.before_edit(ms, settings)
+        action = None
+        if key == "start":
+            action = setupmenu.start(ms, settings, "start", self._say)
+        elif key == "daily_menu":
+            ms.daily_open = not daily_was
+        elif key == "board_menu":
+            ms.board_open = not board_was
+        elif setupmenu.press(ms, settings, key, self._say):
+            pass
+        elif key == "get_link":
+            updated, copied = webstore.share_token(settings.to_token())
+            if copied:
+                self._say("Link copied — paste to share", True)
+            elif updated:
+                self._say("Link updated — copy it from the address bar", True)
+            else:
+                self._say("Couldn't create link", False)
+        elif key in ("browse_matches", "browse_configs"):
+            self._browse(key)
+        elif key == "clear_map":
+            ms.confirm_clear_map = settings.custom_map is not None
+        elif key == "quit":
+            # The page asks the browser to close it, which a tab rarely allows.
+            self._say(setupmenu.CANT_CLOSE_MSG, False)
+            action = key
+        elif key in setupmenu.LATER:
+            self._say(setupmenu.LATER_MSG.format(what=setupmenu.LATER[key]), False)
+        else:
+            raise ValueError(f"not a menu control: {key!r}")
+        setupmenu.after_edit(ms, settings)
+        return self._menu(action)
+
+    def _browse(self, key: str) -> None:
+        """Open one of the board's lists in this tab, as pygame's footer does."""
+        path, opened, failed = (
+            (paths.LEADERBOARD_LOBBY_PATH, "Shared matches opened", "Couldn't open the lobby")
+            if key == "browse_matches" else
+            (paths.LEADERBOARD_RECENT_PATH, "Recently played opened", "Couldn't open the leaderboard"))
+        url = webstore.leaderboard_url(path)
+        if not url:
+            self._say("No leaderboard is configured", False)
+        elif webstore.open_url(url):
+            self._say(opened, True)
+        elif webstore.copy_to_clipboard(url):
+            self._say("Couldn't open a tab — link copied instead", True)
+        else:
+            self._say(failed, False)
+
+    def _answer(self, key: str) -> str | None:
+        """A press while a confirm is up: only its two buttons answer it."""
+        ms, settings = self.menu, self._settings()
+        if ms.confirm_unchallenge and key in ("unchallenge_change", "unchallenge_keep"):
+            return setupmenu.answer_unchallenge(ms, settings, key == "unchallenge_change", self._say)
+        if ms.confirm_slow and key in ("slow_go", "slow_back"):
+            return setupmenu.answer_slow(ms, key == "slow_go")
+        if ms.confirm_clear_map and key in ("clear_map_yes", "clear_map_no"):
+            ms.confirm_clear_map = False
+            if key == "clear_map_yes":
+                setupmenu.clear_map(settings)
+                self._say(setupmenu.CLEARED_MAP_MSG, True)
+        return None
+
+    def op_menu_key(self, name: str) -> dict:
+        """A key on the menu, by its ``KeyboardEvent.key`` name: Y or Enter
+        answers a confirm yes and N or Esc no; otherwise Esc closes an open
+        list, and Enter (or space) starts as Start Game does."""
+        ms, name = self.menu, str(name)
+        modal = setupmenu.modal(ms, self._settings(), self.touch)
+        if modal is not None:
+            if name in ("y", "Y", "Enter"):
+                return self.op_menu_press(modal["go"]["key"])
+            if name in ("n", "N", "Escape"):
+                return self.op_menu_press(modal["stay"]["key"])
+            return self._menu()
+        if ms.strategy_open or ms.daily_open or ms.board_open:
+            if name == "Escape":
+                ms.strategy_open = ms.daily_open = ms.board_open = False
+            return self._menu()
+        if name in ("Enter", " "):
+            return self.op_menu_press("start")
+        if name == "Escape":
+            return self.op_menu_press("quit")
+        return self._menu()
+
+    def op_menu_slide(self, key: str, t: float, phase: str = "move") -> dict:
+        """Slider ``key`` pressed (``phase`` ``"start"``), dragged or let go
+        (``"end"``) at fraction ``t`` of its track. The lanes are measured again
+        only once it is let go."""
+        ms, settings = self.menu, self._settings()
+        if phase == "start":
+            ms.strategy_open = ms.daily_open = ms.board_open = False
+            setupmenu.before_edit(ms, settings)
+            ms.drag_key = str(key)
+        setupmenu.apply_slider(str(key), ms, settings, float(t))
+        if phase == "end":
+            ms.drag_key = None
+            setupmenu.after_edit(ms, settings)
+        return self._menu()
+
+    def op_menu_seed(self, text: str, done: bool = False) -> dict:
+        """The seed field holds ``text`` as typed (filtered to a seed it can
+        take); ``done`` when it loses the caret."""
+        ms, settings = self.menu, self._settings()
+        setupmenu.before_edit(ms, settings)
+        setupmenu.set_seed_text(ms, settings, str(text))
+        ms.editing_seed = not done
+        setupmenu.after_edit(ms, settings)
+        return self._menu()
+
+    def op_menu_survey(self) -> dict:
+        """Measure the setup's lanes (and on a phone its map sketch), which the
+        page asks for once the setup has settled."""
+        setupmenu.survey(self.menu, self._settings(), self.compact)
+        return self._menu()
+
+    def op_menu_resume(self, accept: bool) -> dict:
+        """Answer the boot prompt: play the unfinished match on, or leave it."""
+        log, self.resume_log = self.resume_log, None
+        if not accept or log is None:
+            return self._menu()
+        ai.load_models()   # a resumed game may name a drop-in strategy
+        settings = self._settings()
+        self.state, self.ui = app.resume_game(log, settings)
+        self.log, self.seed = log, log.seed
+        self.history = self.live_fog = None
+        return {"game": self._started()}
+
+    def op_parity_menu(self, recipe: dict) -> dict:
+        """Put a parity screen's menu recipe on screen (`tools/parity_next.py`):
+        a fresh setup with the recipe's menu fields set, and for the resume
+        prompt the match it offers, played out from its game recipe."""
+        self.settings = Settings()
+        self.menu = setupmenu.Menu()
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.resume_log = None
+        if recipe.get("surface") == "resume":
+            self.resume_log = recipes.build(recipe).log
+            self.settings = Settings()
+        for step in recipe.get("steps", []):
+            if step[0] == "menu" and hasattr(self.menu, step[1]):
+                setattr(self.menu, step[1], step[2])
+        setupmenu.survey(self.menu, self.settings, self.compact)
+        return self._menu()
 
     def op_turn_end(self) -> dict:
         """Resolve one turn as End Turn (or autoplay's clock) does, and answer the
@@ -395,6 +615,11 @@ class Session:
             return bench.decide_times(bot, aux, nodes, seed, turns)
         finally:
             ai.set_budget_scale(1.0)
+
+    def _settings(self) -> Settings:
+        if self.settings is None:
+            self.settings = Settings()
+        return self.settings
 
     def _state(self) -> GameState:
         assert self.state is not None, "no game"

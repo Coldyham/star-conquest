@@ -1,14 +1,15 @@
 """Shoot the parity screens in the HTML build, beside pygame's baseline.
 
 Serves `/next/` locally, and for every recipe in
-`tests/fixtures/parity_screens.json` the HTML build can draw yet (its game
-surface: play, history, the modals), loads it into the page through the
-session (`Session.op_parity_load`, the same `starconquest.recipe` build the
-pygame side draws from) and screenshots it in headless Chrome to
+`tests/fixtures/parity_screens.json` the HTML build can draw yet (the setup
+menu and its prompts, and the game surface: play, history, the modals), loads
+it into the page through the session (`Session.op_parity_menu` and
+`op_parity_load`, the same `starconquest.recipe` build the pygame side draws
+from) and screenshots it in headless Chrome to
 `results/parity/next/<size>/<name>.png`. `tools/parity_sheet.py` then sets
 each beside its baseline. A shot already taken is kept unless ``--force``.
 
-    uv run python tools/parity_next.py                 # every game screen, every size
+    uv run python tools/parity_next.py                 # every screen it draws, every size
     uv run python tools/parity_next.py --only game-hint --force
 """
 
@@ -30,8 +31,10 @@ OUT = ROOT / "results" / "parity" / "next"
 PORT = 8011
 # The sizes, as CSS pixels (`parity_shots.SIZES`), and whether each is a phone.
 SIZES = {"desktop": ("1440x960", False), "phone": ("412x870", True), "phone-land": ("870x412", True)}
-# Recipes on the game surface whose screen belongs to a later phase.
-LATER = ("stage-", "pbp-", "confirm-quit")
+# The surfaces the HTML build draws, and the recipes on them whose screen
+# belongs to a later phase.
+SURFACES = ("game", "menu", "resume")
+LATER = ("stage-", "pbp-", "confirm-quit", "menu-pbp-prompt")
 
 SCRIPT = """(async () => {
   try {
@@ -48,7 +51,7 @@ def shoot(recipe: dict, size: str) -> str:
     proc = subprocess.run(
         ["node", str(ROOT / "tools" / "chrome.mjs"),
          f"http://127.0.0.1:{PORT}/next/?input={'touch' if SIZES[size][1] else 'mouse'}",
-         "--until", "window.scNext && window.scNext.game.view", "--timeout", "60",
+         "--until", "window.scNext && window.scNext.game.ready", "--timeout", "60",
          "--size", SIZES[size][0], *(["--mobile"] if SIZES[size][1] else []),
          "--shot", str(path), "--eval", SCRIPT % json.dumps(recipe)],
         capture_output=True, text=True, check=False)
@@ -67,7 +70,7 @@ def main() -> None:
     ap.add_argument("--size", nargs="*", choices=list(SIZES), help="these sizes only (default: all)")
     args = ap.parse_args()
     recipes = [r for r in json.loads(RECIPES.read_text())["screens"]
-               if r["surface"] == "game" and not r["name"].startswith(LATER)
+               if r["surface"] in SURFACES and not r["name"].startswith(LATER)
                and (not args.only or r["name"] in args.only)]
     server = serve.start(PORT)
     try:

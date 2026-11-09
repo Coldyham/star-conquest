@@ -30,6 +30,7 @@ from starconquest import (
     pbp,
     render,
     replay,
+    setupmenu,
     share,
     softkeyboard,
     turnfilm,
@@ -103,7 +104,7 @@ WEB_VIEWPORT_POLL_MS = 250
 
 
 # Shown on the menu when a confirmed quit couldn't actually close the app.
-CANT_CLOSE_MSG = "Close the tab or app window to exit"
+CANT_CLOSE_MSG = setupmenu.CANT_CLOSE_MSG
 
 
 def leave_app() -> bool:

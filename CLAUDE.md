@@ -55,7 +55,8 @@ uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots 
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 node --test webapp/tests/*.test.mjs             # the HTML build's JS suite
 uv run python -m starconquest.serve             # the HTML build (in progress) at 127.0.0.1:8000/next/
-                                                 # (?players=3&seed=7 sets it up; the spike is /next/spike.html)
+                                                 # (?players=3&seed=7 pre-fills its menu, &go plays it;
+                                                 # the spike is /next/spike.html)
 ```
 
 Measurement, tuning and generator tools (benches, censuses, CMA-ES, par
@@ -98,7 +99,8 @@ the game is testable headlessly. The boundaries are load-bearing:
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
   `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run`,
-  and the HTML build's `app`, `hostio`, `pbpclient`, `serial`, `session`, `bench`, `play`, `hud`
+  and the HTML build's `app`, `hostio`, `pbpclient`, `serial`, `session`, `bench`, `play`, `hud`,
+  `setupmenu`
   (`test_no_core_module_imports_pygame`). `fog` and `turnfilm` are
   presentation-only: the engine and AI never consult them.
 - **The HTML build (in progress, `docs/design/html-frontend.md`)** runs the core in
@@ -106,7 +108,8 @@ the game is testable headlessly. The boundaries are load-bearing:
   I/O there**: `hostio` queues effects for the page and takes its replies;
   `sc_auth` never reaches Python. **What a press means lives in `play`, and the
   play screen's words in `hud`**, read by both shells: change them there, never
-  in `input` or `render` alone. The pygame shell stays the live game until
+  in `input` or `render` alone. **The setup menu's presses, words and view live
+  in `setupmenu`**, likewise: never in `menu` alone. The pygame shell stays the live game until
   `/next/` reaches parity; check a shell change against the parity screens
   (`tools/parity_shots.py --out`).
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,

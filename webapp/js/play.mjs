@@ -4,15 +4,18 @@
 // as a system id, the orders under it, a drag's two ends or a key's name
 // (`starconquest.play`), and the reply's `view` is drawn as it stands. What
 // is only about looking stays here: the camera, the pointer's hover and drag,
-// and the film's clock. A setup comes from the address until the menu is
-// built: ?players=3&nodes=30&seed=7&mode=symmetric&fog=1 (sight in hops);
-// ?input=touch lays it out for a finger (`hud.fitLayout`).
+// and the film's clock. The page opens on the setup menu (`menu.mjs`); the
+// address pre-fills it as the command line pre-fills pygame's:
+// ?players=3&nodes=30&seed=7&mode=symmetric&fog=1 (sight in hops), and &go
+// skips the menu and plays it. ?input=touch lays it out for a finger
+// (`hud.fitLayout`).
 
 import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
 import { Core, pageInfo } from "./core.mjs";
-import { compact, fitLayout, Hud } from "./hud.mjs";
+import { compact, fitLayout, Hud, touch } from "./hud.mjs";
 import { FLASH_MS, Marks, readMarks } from "./marks.mjs";
+import { SetupMenu } from "./menu.mjs";
 import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -32,13 +35,39 @@ function status(text, error = false) {
   $("status").className = error ? "error" : "";
 }
 
+/** The setup the address asks for, as `Settings` fields: the menu's pre-fill. */
 function setup() {
   const settings = {};
-  for (const key of ["players", "nodes"]) if (params.has(key)) settings[key] = Number(params.get(key));
+  for (const key of ["players", "nodes", "seed"]) if (params.has(key)) settings[key] = Number(params.get(key));
   if (params.has("mode")) settings.mode = params.get("mode");
   if (params.has("fog")) settings.fog_sight = Number(params.get("fog"));
   if (params.has("ai")) settings.ai_strategy = params.get("ai").split(",");
   return settings;
+}
+
+const menu = new SetupMenu($("setup"), core, {
+  start: () => newGame(),
+  quit: () => window.close(),
+  resumed: (res) => {
+    menu.hide();
+    game.film = null;
+    game.legends = res.legends;
+    adopt(res);
+    clock(game.view.step_ms);
+  },
+});
+
+/** Back to the setup menu: the match is left behind, as pygame's Menu leaves it. */
+async function openMenu(first = false) {
+  clearTimeout(game.timer);
+  game.film = null;
+  game.busy = false;
+  game.map = null;   // the next board is drawn afresh, the camera fitted to it
+  if (game.modal) {
+    game.modal = null;
+    game.hud.modal(null);
+  }
+  await menu.open({ first, prefill: first ? setup() : null, touch: touch(), compact: compact() });
 }
 
 /** What the board draws through: the view, fog, and the pointer. A film
@@ -155,12 +184,23 @@ async function act(op, args = {}) {
   }
 }
 
-async function newGame(seed = null) {
+/** Start the menu's setup (Start Game), the seed it names or a fresh one. */
+async function newGame() {
   game.film = null;
-  const res = await core.call("game.start", { settings: setup(), seed });
+  let res;
+  try {
+    res = await core.call("game.start");
+  } catch (err) {
+    menu.say({ text: `Couldn't start: ${err.message}`, ok: false, ms: 15000 });
+    console.error(err.trace || err);
+    return;
+  }
+  menu.hide();
+  game.map = null;
   game.legends = res.legends;
   adopt(res);
   status("");
+  clock(game.view.step_ms);
 }
 
 /** A whole new board from the session (a new game, a retry, an undo): rebuild
@@ -191,7 +231,7 @@ function adopt(res) {
 
 /** End the turn, and play its film onto the board the page already has. */
 async function endTurn(byHand = true) {
-  if (game.busy || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
+  if (game.busy || menu.shown || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
   game.busy = true;
   const thinking = setTimeout(() => { $("caption").textContent = "Thinking…"; }, THINKING_MS);
   try {
@@ -221,7 +261,7 @@ async function endTurn(byHand = true) {
 function clock(ms) {
   clearTimeout(game.timer);
   const v = game.view;
-  if (!v || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
+  if (!v || menu.shown || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
   game.timer = setTimeout(() => endTurn(false), ms);
 }
 
@@ -262,6 +302,8 @@ async function actOn(action) {
   if (action === null || action === undefined) return;
   if (action === "end_turn") {
     endTurn();
+  } else if (action === "menu") {
+    openMenu();
   } else if (action === "reset_view") {
     game.board_view.rest(game.view.snap);
     redraw();
@@ -540,7 +582,7 @@ function zoomButton(factor) {
 }
 
 async function key(event) {
-  if (!game.view || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (menu.shown || !game.view || event.ctrlKey || event.metaKey || event.altKey) return;
   if (game.modal) {
     const k = event.key.toLowerCase();
     if (k === "y" || k === "enter") $("modal").querySelector(".btn.amber").click();
@@ -578,8 +620,9 @@ async function boot() {
   }
   status("Starting…");
   await core.call("boot", pageInfo());
-  const seed = params.has("seed") ? Number(params.get("seed")) : null;
-  await newGame(seed);
+  status("");
+  await openMenu(true);
+  if (params.has("go")) await newGame();
   const map = $("map");
   map.addEventListener("pointerdown", press);
   map.addEventListener("pointermove", move);
@@ -613,10 +656,21 @@ async function boot() {
     redraw();
     if (game.view) game.hud.top(game.board.turn, game.view);
   }).observe(map);
+  addEventListener("resize", () => {
+    if (menu.shown) menu.open({ touch: touch(), compact: compact() });
+  });
+  game.ready = true;
 }
 
-/** Put a parity screen's recipe on screen (`tools/parity_next.py`). */
+/** Put a parity screen's recipe on screen (`tools/parity_next.py`): the menu's
+ * through `parity.menu`, the game's through `parity.load`. */
 async function loadRecipe(recipe) {
+  if (recipe.surface === "menu" || recipe.surface === "resume") {
+    await openMenu();
+    await menu.send("parity.menu", { recipe });
+    return;
+  }
+  menu.hide();
   game.film = null;
   game.map = null;   // a new board view: the camera starts fitted
   const res = await core.call("parity.load", { recipe });
