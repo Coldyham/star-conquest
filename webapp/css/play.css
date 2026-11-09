@@ -1,0 +1,194 @@
+/* The play screen, laid out as the pygame shell's desktop screen: a top bar,
+   the map with its camera buttons, the side panel over End Turn, and the
+   footer strip. Colours are `config.COLOR_*` and `widgets.BTN_*`. */
+
+@font-face {
+  font-family: "DejaVu Sans Mono";
+  src: local("DejaVu Sans Mono"), url("../fonts/DejaVuSansMono.ttf") format("truetype");
+  font-weight: normal;
+}
+@font-face {
+  font-family: "DejaVu Sans Mono";
+  src: local("DejaVu Sans Mono Bold"), url("../fonts/DejaVuSansMono-Bold.ttf") format("truetype");
+  font-weight: bold;
+}
+
+:root {
+  --bg: #0a0c14;
+  --bar: rgb(18, 20, 30);
+  --panel: rgb(16, 18, 28);
+  --rule: rgb(40, 44, 60);
+  --text: rgb(225, 230, 240);
+  --dim: rgb(140, 148, 165);
+  --select: rgb(250, 240, 150);
+  --forward: rgb(110, 205, 195);
+  --fog: rgb(58, 62, 82);
+  --sure: rgb(96, 190, 120);
+  --likely: rgb(200, 150, 96);
+  --gamble: rgb(200, 96, 104);
+  --popup: rgb(20, 24, 36);
+  --well: rgb(12, 14, 22);
+  --font: "DejaVu Sans Mono", ui-monospace, monospace;
+  --top-h: 40px;
+  --foot-h: 48px;
+  --side-w: 240px;
+  --end-h: 96px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.2 var(--font); }
+body { overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; }
+
+#app {
+  display: grid;
+  height: 100vh;
+  height: 100dvh;
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  grid-template-rows: var(--top-h) minmax(0, 1fr) var(--foot-h);
+}
+
+/* --- top bar ------------------------------------------------------------ */
+#top {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--bar);
+  position: relative;
+  white-space: nowrap;
+  min-width: 0;
+}
+#turn { font-size: 18px; }
+#lost { color: var(--dim); }
+#scores { flex: 1; display: flex; gap: 22px; margin: 0 0 0 14px; padding: 0; list-style: none; overflow: hidden; min-width: 0; }
+#scores li { display: flex; align-items: center; gap: 6px; cursor: default; }
+#scores .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+#scores .frozen { color: var(--dim); }
+#scores .frozen .swatch {
+  background-image: repeating-linear-gradient(45deg, transparent 0 2px, rgba(255, 255, 255, .35) 2px 3px);
+}
+#tip {
+  position: absolute;
+  top: calc(var(--top-h) + 4px);
+  z-index: 5;
+  padding: 8px;
+  background: rgb(24, 26, 38);
+  border: 1px solid;
+  border-radius: 6px;
+  color: var(--dim);
+}
+#tip p { margin: 0; }
+#tip p:first-child { color: var(--text); }
+
+/* --- the map ------------------------------------------------------------ */
+#mapbox { grid-column: 1; grid-row: 2; position: relative; overflow: hidden; }
+#map { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+#caption {
+  position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
+  margin: 0; padding: 2px 6px; border-radius: 5px; background: var(--bg); color: var(--dim);
+  pointer-events: none;
+}
+#caption:empty { display: none; }
+#status { position: absolute; left: 14px; top: 10px; margin: 0; color: var(--dim); }
+#status:empty { display: none; }
+#status.error { color: var(--gamble); white-space: pre-wrap; }
+#camera { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 8px; }
+#camera .btn { height: 44px; font-size: 14px; }
+#camera .glyph { width: 44px; font-size: 22px; padding: 0; }
+
+/* --- buttons (widgets.btn and BTN_*) -------------------------------------- */
+.btn {
+  height: 40px; padding: 0 12px; border: 2px solid; border-radius: 6px;
+  color: var(--text); font-size: 18px; white-space: nowrap;
+}
+.btn.blue { background: rgb(40, 52, 78); border-color: rgb(110, 140, 200); }
+.btn.active { background: rgb(92, 70, 46); border-color: rgb(190, 150, 96); }
+.btn.amber { background: rgb(120, 86, 46); border-color: rgb(200, 150, 96); }
+.btn.violet { background: rgb(52, 46, 78); border-color: rgb(150, 130, 200); }
+.btn.red { background: rgb(92, 46, 52); border-color: rgb(200, 96, 104); }
+.btn.green { background: rgb(46, 92, 60); border-color: rgb(96, 190, 120); }
+.btn.teal { background: rgb(44, 62, 74); border-color: rgb(120, 180, 200); }
+.btn.gold { background: rgb(92, 76, 36); border-color: rgb(210, 180, 80); }
+.btn:disabled { opacity: .45; cursor: default; }
+@media (hover: none) { .key { display: none; } }
+
+/* --- the side panel and End Turn ---------------------------------------- */
+#side { grid-column: 2; grid-row: 2 / 4; display: flex; flex-direction: column; min-height: 0; }
+#panel {
+  flex: 1; min-height: 0; overflow: hidden; padding: 14px;
+  background: var(--panel); border-left: 1px solid var(--rule);
+}
+#panel h2 { margin: 0 0 4px; font-size: 18px; font-weight: normal; overflow-wrap: anywhere; }
+#panel h2.long { font-size: 14px; }
+#panel p { margin: 0; line-height: 22px; white-space: pre; }
+#panel p.wrap, #panel .legend p { white-space: normal; }
+#panel .legend p { margin-bottom: 22px; color: var(--dim); }
+#panel section + section { margin-top: 12px; }
+#panel .head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+#panel .lore {
+  flex: none; width: 20px; height: 20px; padding: 0; border: 1px solid var(--dim); border-radius: 50%;
+  background: none; color: var(--dim); font-size: 12px; line-height: 1;
+}
+#end-turn {
+  height: var(--end-h); flex: none; border-radius: 0; font-size: 30px; width: 100%;
+}
+
+/* --- the footer strip --------------------------------------------------- */
+#footer {
+  grid-column: 1; grid-row: 3; display: flex; align-items: center; gap: 10px;
+  padding: 0 14px; background: var(--bar); min-width: 0; overflow: hidden;
+}
+#footer .spacer { flex: 1; }
+
+/* --- the send popup ----------------------------------------------------- */
+#popup {
+  position: absolute; z-index: 4; width: 184px; padding: 8px;
+  display: flex; flex-direction: column; gap: 5px;
+  background: var(--popup); border: 1px solid var(--select); border-radius: 8px;
+  font-size: 14px; touch-action: none;
+}
+#popup.forward { border-color: var(--forward); }
+#popup .row { height: 22px; display: flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
+#popup .tabs { justify-content: stretch; border-bottom: 1px solid rgb(70, 80, 104); gap: 5px; }
+#popup .tab {
+  flex: 1; height: 22px; padding: 0; border: none; border-radius: 5px 5px 0 0;
+  background: var(--well); color: var(--dim); font-size: 14px;
+}
+#popup .tab.on { background: var(--popup); color: var(--text); box-shadow: inset 0 2px 0 var(--select); }
+#popup.forward .tab.on { box-shadow: inset 0 2px 0 var(--forward); }
+#popup .title { justify-content: space-between; color: var(--select); }
+#popup.forward .title { color: var(--forward); }
+#popup .title span:first-child { overflow: hidden; text-overflow: ellipsis; }
+#popup .dim { color: var(--dim); }
+#popup .forecast { width: 100%; justify-content: space-between; border: none; background: none; padding: 0; font-size: 14px; }
+#popup .forecast .i {
+  flex: none; width: 14px; height: 14px; border: 1px solid var(--dim); border-radius: 50%;
+  color: var(--dim); font-size: 10px; line-height: 12px; text-align: center;
+}
+#popup .stepper { justify-content: space-between; font-size: 18px; }
+#popup .step {
+  width: 18px; height: 18px; padding: 0; border: 1px solid var(--select); border-radius: 3px;
+  background: none; color: var(--select); font-size: 14px; line-height: 1;
+}
+#popup.forward .step { border-color: var(--forward); color: var(--forward); }
+#popup input[type=range] { width: 100%; margin: 0; accent-color: var(--select); }
+#popup.forward input[type=range] { accent-color: var(--forward); }
+#popup .pair { display: flex; gap: 5px; }
+#popup .pb {
+  flex: 1; height: 22px; padding: 0; border: 1px solid rgb(70, 80, 104); border-radius: 5px;
+  background: rgb(30, 36, 52); color: var(--dim); font-size: 14px;
+}
+#popup .pb.on { background: rgb(75, 72, 45); border-color: var(--select); color: var(--text); }
+#popup.forward .pb.on { background: rgb(33, 61, 58); border-color: var(--forward); }
+#popup .pb.danger { background: rgb(58, 38, 42); border-color: rgb(170, 96, 104); color: var(--text); }
+
+.tone-text { color: var(--text); }
+.tone-dim { color: var(--dim); }
+.tone-select { color: var(--select); }
+.tone-fog { color: var(--fog); }
+.tone-sure { color: var(--sure); }
+.tone-likely { color: var(--likely); }
+.tone-gamble { color: var(--gamble); }

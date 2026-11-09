@@ -73,6 +73,15 @@ def build_info(zip_path: str) -> str:
             f'export const GAME_ZIP = "{zip_path}";\n')
 
 
+# The shell's own font (`uifont`), served to the page at fonts/.
+FONTS = ("DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf")
+
+
+def font_path(name: str) -> Path:
+    """One of `FONTS` in the game's assets, or a path that does not exist."""
+    return ROOT / "starconquest" / "assets" / name if name in FONTS else ROOT / "missing"
+
+
 def stage(out: Path) -> None:
     pyodide = fetch_pyodide.fetch()
     if out.exists():
@@ -87,6 +96,9 @@ def stage(out: Path) -> None:
     (out / "py").mkdir()
     (out / "py" / name).write_bytes(data)
     (out / "js" / "build.mjs").write_text(build_info(f"py/{name}"))
+    (out / "fonts").mkdir()
+    for font in FONTS:
+        shutil.copy2(font_path(font), out / "fonts" / font)
     total = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"staged {out}: {name} ({len(data) // 1024} KB), {total // 1024} KB in all")
 

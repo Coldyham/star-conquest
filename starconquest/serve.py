@@ -123,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(b"a stale build: reload", "text/plain", status=404)
             else:
                 self._send(data, TYPES[".zip"], immutable)
+        elif rest.startswith("fonts/"):
+            self._file(build_next.font_path(rest[len("fonts/"):]))
         elif rest.startswith(f"pyodide/{fetch_pyodide.VERSION}/"):
             self._file(_inside(fetch_pyodide.fetch(), rest.split("/", 2)[2]), immutable)
         else:

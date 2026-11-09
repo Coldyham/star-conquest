@@ -97,7 +97,8 @@ byte-identical.
 
 ## The Pyodide spike (phase 0)
 
-`uv run python -m starconquest.serve` serves `/next/` locally: an all-bot game
+`uv run python -m starconquest.serve` served `/next/` locally (now
+`/next/spike.html`; `?play=1` autoplays): an all-bot game
 on an SVG board, each turn's film played by the JS `Reel` and checked against
 the board Python returns. `tools/build_web.sh` stages the same tree at
 `web/next/` for deploy previews, never failing the build over it. Pyodide
@@ -128,3 +129,50 @@ from localhost.
 **Caveat:** the service worker (scope `/`) caches `/next/` like any other path.
 That is safe, because the zip's name is its hash, but `/next/` gets its own
 rules in phase 7.
+
+## The play screen (phase 1, in progress)
+
+`/next/` is now the play screen: `webapp/index.html` and `css/play.css`, laid
+out as pygame's desktop screen, driven by `js/play.mjs`. Until the menu is
+built a setup comes from the address: `?players=3&nodes=30&seed=7&mode=symmetric&fog=1`
+(fog is sight in hops). `window.scNext` exposes the page's state for headless
+runs (`tools/chrome.mjs --eval`).
+
+**Who decides what.** Python decides every rule and writes every word; the
+page hit-tests, draws, and keeps what is only about looking.
+
+- `play` holds what a press means, moved verbatim out of `input`: a tap on a
+  system, a press near lanes (the orders and rules in reach, nearest first;
+  a repeat press cycles), a drag's release, the clear and cancel presses, and
+  every live-play key by its `KeyboardEvent.key` name. `input` hit-tests in
+  pygame's pixels and hands over; the page does the same through the session.
+- `hud` holds the words: the side panel's rows, the scoreboard's entries at
+  each level of detail and its tooltip, the popup's caption, presets, discard
+  button and forecast (longest wording first, for the page to fit), the
+  legends, and the footer's buttons with their keys, colours and squeeze
+  order. Colours go as roles (`text`, `dim`, a seat id…). `render` reads the
+  same functions, so the parity screens stayed byte-identical.
+- `serial.view` is what the page draws from `Ui`. The session answers it from
+  `game.start` and `turn.end` and from the press ops: `ui.tap`, `ui.lane`,
+  `ui.empty`, `ui.drag`, `ui.hover`, `ui.key` (which answers an action for
+  the page: `end_turn`, `reset_view`, `menu`…) and `ui.call`, which reaches
+  only the `Ui` methods in `session.UI_CALLS`.
+- The page keeps the camera (`js/camera.mjs`, `WorldView` with the free
+  clamp), the hover and drag between presses, and the film's clock. During a
+  film it draws the union of what was visible before and after.
+
+Sizes are screen pixels at any zoom, as in `render`: the board draws through
+the camera, and only positions move.
+
+**Done:** the map with fog and its rings, queued orders and the popup's
+preview, the send popup (tabs, forecast, stepper, slider, presets, discard),
+the side panel, the scoreboard and its tooltip, the footer, End Turn and the
+film, a drag to send, the camera (wheel, drag to pan, the zoom buttons), New
+map and Retry.
+
+**Still to do in phase 1:** forwarding rules on the map and the Forward tab's
+hold and split rows; route mode; the film's marks and labels; star names
+yielding to each other; autoplay, play and fast forward; game over; undo;
+the hint; history with its graphs and coach; the lore and odds cards; the
+compact layout (the docked popup as a bottom sheet, the footer's "more"
+list); and shooting the parity recipes into `results/parity/next/`.

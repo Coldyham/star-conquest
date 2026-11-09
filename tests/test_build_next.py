@@ -48,3 +48,9 @@ print(json.dumps({{"turn": reply["result"]["board"]["turn"], "from": starconques
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout.strip().splitlines()[-1])
     assert got["turn"] == 1 and got["from"].startswith(str(tmp_path))
+
+
+def test_only_the_shell_fonts_are_served():
+    assert all(build_next.font_path(f).is_file() for f in build_next.FONTS)
+    assert not build_next.font_path("../main.py").exists()
+    assert not build_next.font_path("gauntlets/tutorial.json").exists()

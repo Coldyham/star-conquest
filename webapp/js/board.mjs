@@ -1,12 +1,14 @@
-// The map as SVG: lanes, systems and fleets, drawn from `serial` snapshots.
-// A frame is a pure function of the static map, a board and how far through
-// the turn's movement the fleets are (`travel`); nothing here keeps state
-// between frames except the SVG nodes it reuses.
+// The map as SVG: lanes, systems, fleets and the orders on them, drawn from
+// `serial` snapshots through a `Camera`.
 //
-// Sizes are screen pixels, as in `render`: a system's radius, a label's text
-// and a lane's width stay the same whatever the map's extent. `unit` is how
-// many map units one pixel spans at the size the SVG had when it was built.
+// Everything is in screen pixels, as in `render`: a system's radius, a label's
+// text and a lane's width stay the same at any zoom, and only positions move
+// with the camera. A frame is a pure function of the static map, a board, how
+// far through the turn's movement the fleets are (`travel`), and what the
+// player is looking at (`look`); nothing here keeps state between frames
+// except the SVG nodes it reuses.
 
+import { Camera } from "./camera.mjs";
 import { progressAt } from "./reel.mjs";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -15,17 +17,23 @@ const MONO = "DejaVu Sans Mono, monospace";
 // config.COLOR_*
 const BG = "#0a0c14";
 const LANE = [52, 58, 78];
+const LANE_HILITE = "rgb(120,140,190)";
 const NEUTRAL = [122, 128, 140];
 const TEXT = [225, 230, 240];
 const TEXT_DARK = [12, 14, 22];
 const TEXT_DIM = "rgb(140,148,165)";
+const SELECT = "rgb(250,240,150)";
+const FOG = [58, 62, 82];
 
 // config, in pixels: NODE_MIN_RADIUS / NODE_MAX_RADIUS for production 5 (poorest)
 // and 2 (richest), FLEET_SIZE, FILM_ARRIVAL_GAP, NODE_LABEL_GAP, the progress
-// ring's offset, node_clearance() and MAP_FIT_PADDING, FONT_SIZE / FONT_SIZE_SMALL.
+// ring's offset, NODE_RING_PAD, node_clearance() and MAP_FIT_PADDING,
+// NODE_TAP_MIN, LANE_PICK_DIST, the arrowheads, FONT_SIZE / FONT_SIZE_SMALL.
 const R_MIN = 12, R_MAX = 26, PROD_LO = 2, PROD_HI = 5;
-const FLEET = 9, ARRIVAL_GAP = 4, LABEL_GAP = 5, RING_GAP = 4;
-const FIT_PAD = Math.max(50, R_MAX + 6 + 4);
+const FLEET = 9, ARRIVAL_GAP = 4, LABEL_GAP = 5, RING_GAP = 4, RING_PAD = 6;
+export const FIT_PAD = Math.max(50, R_MAX + RING_PAD + 4);
+const TAP_MIN = 22, LANE_PICK = 10;
+const ARROW = 13, ARROW_GAP = 6, ARROW_WING = 0.6;
 const FONT = 18, FONT_SMALL = 14;
 const CHAR_W = 0.602;          // DejaVu Sans Mono's advance, in ems
 const LINE_H = 1.17;           // ...and its line height
@@ -35,6 +43,10 @@ function el(name, attrs = {}, parent = null) {
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   if (parent) parent.appendChild(node);
   return node;
+}
+
+function set(node, attrs) {
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
 }
 
 function rgb([r, g, b]) {
@@ -80,95 +92,254 @@ function arcPath(r, frac) {
   return `M 0 ${-r} A ${r} ${r} 0 ${frac > 0.5 ? 1 : 0} 0 ${x} ${y}`;
 }
 
+function segmentDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** A planned send: the lane as a line, an open chevron short of the destination. */
+function planned(parent, a, b, destR, color, width) {
+  const [ax, ay] = a, [bx, by] = b;
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  const ux = (bx - ax) / len, uy = (by - ay) / len;
+  const tx = bx - ux * (destR + ARROW_GAP), ty = by - uy * (destR + ARROW_GAP);
+  const backX = tx - ux * ARROW, backY = ty - uy * ARROW;
+  const wing = ARROW * ARROW_WING;
+  el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: color, "stroke-width": width }, parent);
+  el("polyline", { points: `${backX - uy * wing},${backY + ux * wing} ${tx},${ty} ${backX + uy * wing},${backY - ux * wing}`,
+    fill: "none", stroke: color, "stroke-width": width, "stroke-linejoin": "round" }, parent);
+}
+
 export class BoardView {
   constructor(svg, map) {
     this.svg = svg;
     this.map = map;
-    const [x0, y0, x1, y1] = map.world;
-    // Fit the map with FIT_PAD pixels clear on every side, as `WorldView` does.
-    const box = svg.getBoundingClientRect();
-    const span = Math.max(x1 - x0, y1 - y0);
-    const u = box.width > 4 * FIT_PAD && box.height > 4 * FIT_PAD
-      ? Math.max((x1 - x0) / (box.width - 2 * FIT_PAD), (y1 - y0) / (box.height - 2 * FIT_PAD))
-      : span / 1000;
-    this.unit = u;
-    const pad = FIT_PAD * u;
-    svg.setAttribute("viewBox", `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`);
     svg.replaceChildren();
+    const defs = el("defs", {}, svg);
+    const hatch = el("pattern", { id: "fog-hatch", patternUnits: "userSpaceOnUse", width: 6, height: 6,
+      patternTransform: "rotate(45)" }, defs);
+    el("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: rgb(brighten(FOG)), "stroke-width": 1 }, hatch);
     this.colors = new Map(map.players.map((p) => [p.id, p.neutral ? NEUTRAL : p.color]));
     this.prod = new Map(map.systems.map((s) => [s.id, s.prod]));
-    this.pos = new Map(map.systems.map((s) => [s.id, [s.x, s.y]]));
+    this.world = new Map(map.systems.map((s) => [s.id, [s.x, s.y]]));
+    this.nbrs = new Map(map.systems.map((s) => [s.id, new Set(s.nbrs)]));
     this.radius = new Map(map.systems.map((s) => {
       const t = Math.min(1, Math.max(0, (s.prod - PROD_LO) / (PROD_HI - PROD_LO)));
-      return [s.id, Math.round(R_MAX + t * (R_MIN - R_MAX)) * u];
+      return [s.id, Math.round(R_MAX + t * (R_MIN - R_MAX))];
     }));
-    // Lanes, then each lane's travel time on a plate at its midpoint
-    // (`widgets.label_pill`); `setTravel` styles and fills both.
-    const lanes = el("g", {}, svg);
-    const plates = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL * u }, svg);
+    this.pos = new Map();
+    this.travel = map.lanes.map(() => 1);
+    const box = svg.getBoundingClientRect();
+    this.camera = new Camera(map.world, [0, 0, Math.max(1, box.width), Math.max(1, box.height)], FIT_PAD);
+
+    const laneLayer = el("g", {}, svg);
+    const plates = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL }, svg);
     this.lanes = map.lanes.map(([a, b]) => {
-      const [ax, ay] = this.pos.get(a);
-      const [bx, by] = this.pos.get(b);
-      const line = el("line", { x1: ax, y1: ay, x2: bx, y2: by }, lanes);
-      const g = el("g", { transform: `translate(${(ax + bx) / 2} ${(ay + by) / 2})` }, plates);
-      const rect = el("rect", { fill: BG, rx: 5 * u }, g);
+      const line = el("line", {}, laneLayer);
+      const g = el("g", {}, plates);
+      const rect = el("rect", { fill: BG, rx: 5 }, g);
       const text = el("text", { "dominant-baseline": "central", fill: TEXT_DIM }, g);
-      return { line, rect, text };
+      return { a, b, line, g, rect, text };
     });
-    this.fleetLayer = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL * u }, svg);
+    this.orderLayer = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL,
+      "stroke-linecap": "round" }, svg);
+    this.fleetLayer = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL }, svg);
     this.nodes = new Map();
     const systems = el("g", { "font-family": MONO, "text-anchor": "middle" }, svg);
     for (const s of map.systems) {
-      const g = el("g", { transform: `translate(${s.x} ${s.y})` }, systems);
       const r = this.radius.get(s.id);
+      const g = el("g", {}, systems);
+      const mark = el("circle", { fill: "none" }, g);
       // pygame strokes inside the disc; an SVG stroke straddles its path.
-      const circle = el("circle", { r: r - u, "stroke-width": 2 * u }, g);
-      const ring = el("path", { fill: "none", stroke: TEXT_DIM, "stroke-width": 2 * u }, g);
-      const count = el("text", { "dominant-baseline": "central", "font-size": FONT * u }, g);
-      const name = el("text", { y: r + (LABEL_GAP + FONT_SMALL * LINE_H / 2) * u, "font-size": FONT_SMALL * u,
+      const circle = el("circle", { r: r - 1, "stroke-width": 2 }, g);
+      const hatchDisc = el("circle", { r: r - 1, fill: "url(#fog-hatch)" }, g);
+      const ring = el("path", { fill: "none", stroke: TEXT_DIM, "stroke-width": 2 }, g);
+      const count = el("text", { "dominant-baseline": "central", "font-size": FONT }, g);
+      const name = el("text", { y: r + LABEL_GAP + FONT_SMALL * LINE_H / 2, "font-size": FONT_SMALL,
         "dominant-baseline": "central", fill: TEXT_DIM }, g);
       name.textContent = s.name;
-      this.nodes.set(s.id, { circle, ring, count, r });
+      this.nodes.set(s.id, { g, mark, circle, hatchDisc, ring, count, name, r });
+    }
+    this.dragLayer = el("g", {}, svg);
+    this.layout();
+  }
+
+  /** The SVG's box changed: refit the camera to it. */
+  resize() {
+    const box = this.svg.getBoundingClientRect();
+    this.camera.resize([0, 0, Math.max(1, box.width), Math.max(1, box.height)]);
+    this.layout();
+  }
+
+  /** Recompute every system's screen position after the camera moved. */
+  layout() {
+    const box = this.camera.screen;
+    this.svg.setAttribute("viewBox", `0 0 ${box[2]} ${box[3]}`);
+    for (const [id, [x, y]] of this.world) this.pos.set(id, this.camera.toScreen(x, y));
+    for (const [id, node] of this.nodes) {
+      const [x, y] = this.pos.get(id);
+      node.g.setAttribute("transform", `translate(${x} ${y})`);
+    }
+    for (const lane of this.lanes) {
+      const [ax, ay] = this.pos.get(lane.a);
+      const [bx, by] = this.pos.get(lane.b);
+      set(lane.line, { x1: ax, y1: ay, x2: bx, y2: by });
+      lane.g.setAttribute("transform", `translate(${(ax + bx) / 2} ${(ay + by) / 2})`);
     }
   }
 
   /** Style and label each lane by its travel time: `travel` is the session's
    * list, in the static map's lane order. */
   setTravel(travel) {
-    const u = this.unit, h = FONT_SMALL * LINE_H * u + 4 * u;
-    this.lanes.forEach(({ line, rect, text }, i) => {
-      const [width, color] = laneStyle(travel[i]);
-      line.setAttribute("stroke", rgb(color));
-      line.setAttribute("stroke-width", width * u);
+    this.travel = travel;
+    const h = FONT_SMALL * LINE_H + 4;
+    this.lanes.forEach(({ rect, text }, i) => {
       const label = String(travel[i]);
-      const w = label.length * FONT_SMALL * CHAR_W * u + 8 * u;
+      const w = label.length * FONT_SMALL * CHAR_W + 8;
       text.textContent = label;
-      for (const [k, v] of Object.entries({ x: -w / 2, y: -h / 2, width: w, height: h })) rect.setAttribute(k, v);
+      set(rect, { x: -w / 2, y: -h / 2, width: w, height: h });
     });
   }
 
-  /** Draw `board` with fleets `travel` of the way through the turn's step. */
-  draw(board, travel) {
+  /** The system under screen point (px, py): the nearest within reach
+   * (`input.pick_node`), or null. */
+  pick(px, py) {
+    let best = null, bestD = 0;
+    for (const [id, [x, y]] of this.pos) {
+      const d = Math.hypot(px - x, py - y);
+      if (d <= Math.max(this.radius.get(id) + 2, TAP_MIN) && (best === null || d < bestD)) {
+        best = id;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  /** The queued orders whose lane passes within reach of (px, py), nearest
+   * first, as `play.LaneTag`s (`input._pick_lane`). */
+  laneHits(px, py, view) {
+    const hits = [];
+    view.pending.forEach(([src, dst], i) => {
+      const [ax, ay] = this.pos.get(src);
+      const [bx, by] = this.pos.get(dst);
+      const d = segmentDist(px, py, ax, ay, bx, by);
+      if (d <= LANE_PICK) hits.push([d, ["order", i, -1]]);
+    });
+    return hits.sort((a, b) => a[0] - b[0]).map(([, tag]) => tag);
+  }
+
+  /** Draw `board` with fleets `travel` of the way through the turn's step.
+   * `look` is what the player sees and is doing: `sees(id)`, `seen` (a Set),
+   * and the session's `view` (selection, orders, the popup) plus the page's
+   * own `hover` and `drag`; without it, everything is in plain sight. */
+  draw(board, travel, look = null) {
+    const view = look?.view ?? null;
+    const sees = look?.sees ?? (() => true);
+    const fogState = (id) => (sees(id) ? "visible" : look?.seen?.has(id) ? "fogged" : "hidden");
+    const source = view?.source ?? null;
+    const valid = source !== null ? this.nbrs.get(source) : new Set();
+    const human = view?.human ?? null;
+    const carrying = new Set(board.fleets.map((f) => `${Math.min(f.src, f.dst)}-${Math.max(f.src, f.dst)}`));
+
+    this.lanes.forEach((lane, i) => {
+      const sa = fogState(lane.a), sb = fogState(lane.b);
+      const shown = (sa !== "hidden" && sb !== "hidden") || carrying.has(`${lane.a}-${lane.b}`);
+      lane.line.style.display = shown ? "" : "none";
+      lane.g.style.display = shown && (sa === "visible" || sb === "visible") ? "" : "none";
+      let [width, color] = laneStyle(this.travel[i]);
+      color = sa !== "visible" || sb !== "visible" ? rgb(FOG) : rgb(color);
+      if (source !== null && (lane.a === source || lane.b === source)) {
+        color = LANE_HILITE;
+        width = Math.max(width, 3);
+      }
+      set(lane.line, { stroke: color, "stroke-width": width });
+    });
+
+    this.orderLayer.replaceChildren();
+    if (view) this.drawOrders(view, human);
+
     for (const s of board.sys.values()) {
       const node = this.nodes.get(s.id);
+      const state = fogState(s.id);
+      node.g.style.display = state === "hidden" ? "none" : "";
+      const r = node.r;
+      if (view && s.id === view.selected) {
+        set(node.mark, { r: r + RING_PAD, stroke: SELECT, "stroke-width": 3, display: "" });
+      } else if (valid.has(s.id)) {
+        set(node.mark, { r: r + RING_GAP, stroke: LANE_HILITE, "stroke-width": 2, display: "" });
+      } else if (look && s.id === look.hover) {
+        set(node.mark, { r: r + RING_GAP, stroke: TEXT_DIM, "stroke-width": 2, display: "" });
+      } else {
+        node.mark.setAttribute("display", "none");
+      }
+      if (state === "fogged") {
+        set(node.circle, { fill: rgb(FOG), stroke: rgb(brighten(FOG)) });
+        node.hatchDisc.setAttribute("display", "");
+        node.ring.setAttribute("d", "");
+        set(node.count, { fill: rgb(TEXT) });
+        node.count.textContent = "?";
+        continue;
+      }
+      node.hatchDisc.setAttribute("display", "none");
       const color = this.colors.get(s.owner) || NEUTRAL;
-      node.circle.setAttribute("fill", rgb(color));
-      node.circle.setAttribute("stroke", rgb(brighten(color)));
+      set(node.circle, { fill: rgb(color), stroke: rgb(brighten(color)) });
       node.count.setAttribute("fill", rgb(textOn(color)));
-      node.count.textContent = String(s.ships);
+      const own = view && s.owner === human && view.available[s.id] !== undefined;
+      node.count.textContent = String(own ? view.available[s.id] : s.ships);
       const prod = this.prod.get(s.id);
       const frac = prod > 0 ? s.prog / prod : 0;
-      node.ring.setAttribute("d", frac > 0 ? arcPath(node.r + RING_GAP * this.unit, frac) : "");
+      node.ring.setAttribute("d", frac > 0 ? arcPath(r + RING_GAP, frac) : "");
     }
+
     const shapes = [];
-    for (const f of board.fleets) shapes.push(this.fleet(f, travel));
+    for (const f of board.fleets) {
+      if (f.owner === human || sees(f.src) || sees(f.dst) || human === null) shapes.push(this.fleet(f, travel));
+    }
     this.fleetLayer.replaceChildren(...shapes);
+    this.drawDrag(look, human);
+  }
+
+  /** Queued sends, the order being edited in the select colour, and the move
+   * the popup is editing (`render._draw_pending`, `_draw_choosing_preview`). */
+  drawOrders(view, human) {
+    const own = rgb(this.colors.get(human) || NEUTRAL);
+    view.pending.forEach(([src, dst, ships], i) => {
+      const a = this.pos.get(src), b = this.pos.get(dst);
+      const chosen = i === view.sel_order;
+      planned(this.orderLayer, a, b, this.radius.get(dst), chosen ? SELECT : own, chosen ? 5 : 3);
+      const label = el("text", { x: a[0] + (b[0] - a[0]) * 0.4, y: a[1] + (b[1] - a[1]) * 0.4 - 10,
+        fill: rgb(TEXT), "dominant-baseline": "central" }, this.orderLayer);
+      label.textContent = String(ships);
+    });
+    if (view.mode === "choosing" && view.selected !== null && view.dest !== null) {
+      const a = this.pos.get(view.selected), b = this.pos.get(view.dest);
+      const line = el("g", view.popup?.forward ? { "stroke-dasharray": "8 6" } : {}, this.orderLayer);
+      planned(line, a, b, this.radius.get(view.dest), SELECT, 3);
+    }
+  }
+
+  /** The rubber band while dragging from a source toward a target (`render._draw_drag`). */
+  drawDrag(look, human) {
+    this.dragLayer.replaceChildren();
+    const drag = look?.drag;
+    if (!drag?.active) return;
+    const [ax, ay] = this.pos.get(drag.src);
+    const col = rgb(this.colors.get(human) || NEUTRAL);
+    el("line", { x1: ax, y1: ay, x2: drag.x, y2: drag.y, stroke: col, "stroke-width": 3 }, this.dragLayer);
+    el("circle", { cx: drag.x, cy: drag.y, r: 5, fill: "none", stroke: col, "stroke-width": 2 }, this.dragLayer);
+    const t = look.hover;
+    if (t !== null && t !== drag.src && this.nbrs.get(drag.src).has(t)) {
+      const [tx, ty] = this.pos.get(t);
+      el("circle", { cx: tx, cy: ty, r: this.radius.get(t) + 4, fill: "none", stroke: SELECT, "stroke-width": 2 },
+        this.dragLayer);
+    }
   }
 
   /** A fleet's triangle, where `render._fleet_at` puts it: along its lane by
    * `progressAt`, held short of a node it has reached, shifted to its track. */
   fleet(f, travel) {
-    const u = this.unit;
     const [ax, ay] = this.pos.get(f.src);
     const [bx, by] = this.pos.get(f.dst);
     const p = progressAt(f, travel);
@@ -177,16 +348,16 @@ export class BoardView {
     const len = Math.hypot(bx - ax, by - ay) || 1;
     const ux = (bx - ax) / len, uy = (by - ay) / len;
     if (f.remaining <= 0) {
-      const gap = this.radius.get(f.dst) + ARRIVAL_GAP * u;
+      const gap = this.radius.get(f.dst) + ARRIVAL_GAP;
       if (Math.hypot(bx - x, by - y) < gap) {
         x = bx - ux * gap;
         y = by - uy * gap;
       }
     }
-    const spread = (FLEET + 3) * u;
+    const spread = FLEET + 3;
     x -= uy * f.slot * spread;
     y += ux * f.slot * spread;
-    const s = FLEET * u;
+    const s = FLEET;
     const pts = [[x + ux * s, y + uy * s], [x - ux * s - uy * s * 0.7, y - uy * s + ux * s * 0.7],
       [x - ux * s + uy * s * 0.7, y - uy * s - ux * s * 0.7]];
     const g = el("g");
