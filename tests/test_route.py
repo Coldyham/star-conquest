@@ -1274,3 +1274,11 @@ def test_t_picks_the_front_in_rally_mode_only():
         assert ui.route_sel == ui.threatened_systems(state)
     finally:
         pygame.quit()
+
+
+def test_route_sids_take_only_our_own_systems():
+    state = _line(5, owned={0, 1, 3})
+    ui = _ui(state)
+    ui.begin_route()
+    ui.add_route_sids(state, [0, 2, 3, 99])
+    assert ui.route_sel == {0, 3}

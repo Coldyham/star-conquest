@@ -717,11 +717,15 @@ class Ui:
         game, the reset button, a defeat, a win — never from an ordinary turn
         just because fog grew, or the view would keep moving under the player.
         """
+        self.view.fit_to([state.systems[sid].pos for sid in self.snap_points(state)])
+
+    def snap_points(self, state: GameState) -> list[int]:
+        """The systems `reset_view` frames: every one once there is nothing left
+        to hide, else those seen so far. A frontend with its own camera frames
+        these."""
         if state.winner is not None or state.is_defeated(self.human_id):
-            points = [s.pos for s in state.systems.values()]
-        else:
-            points = [s.pos for sid, s in state.systems.items() if sid in self.seen]
-        self.view.fit_to(points)
+            return list(state.systems)
+        return [sid for sid in state.systems if sid in self.seen]
 
     def graph_seats(self) -> tuple[int, ...]:
         """The seats the graphs' legend offers: every seat once review is
@@ -1074,11 +1078,18 @@ class Ui:
         rule or the queued order; a share snaps to `config.FORWARD_SNAP_PCT`. A no-op on a zeroed rect (the popup closed mid-drag) or a
         zero-width range (an empty source)."""
         x, _y, w, _h = self.slider_rect
-        lo, hi, _value = self.slider_range(state)
         travel = w - 2 * config.SLIDER_KNOB_R
-        if w <= 0 or travel <= 0 or hi <= lo:
+        if w <= 0 or travel <= 0:
             return
-        t = max(0.0, min(1.0, (px - x - config.SLIDER_KNOB_R) / travel))
+        self.set_slider_fraction(state, (px - x - config.SLIDER_KNOB_R) / travel)
+
+    def set_slider_fraction(self, state: GameState, t: float) -> None:
+        """Set the count being edited to fraction ``t`` (clamped to 0..1) of the
+        slider's range: what a press at that point along the track means."""
+        lo, hi, _value = self.slider_range(state)
+        if hi <= lo:
+            return
+        t = max(0.0, min(1.0, t))
         count = round(lo + t * (hi - lo))
         if self.forward_armed:
             snap = config.FORWARD_SNAP_PCT
@@ -1524,11 +1535,18 @@ class Ui:
         bx, by, bw, bh = _clip_to_play(rect)
         if bw <= 0 or bh <= 0:
             return
+        inside = []
         for sid, sys in state.systems.items():
-            if sys.owner_id != self.human_id:
-                continue
             sx, sy = self.view.to_screen(sys.pos)
             if bx <= sx <= bx + bw and by <= sy <= by + bh:
+                inside.append(sid)
+        self.add_route_sids(state, inside)
+
+    def add_route_sids(self, state: GameState, sids) -> None:
+        """Add those of ``sids`` that are ours to the route's group, as a box
+        drawn around them does; a frontend that hit-tests its own map calls this."""
+        for sid in sids:
+            if sid in state.systems and state.systems[sid].owner_id == self.human_id:
                 self.route_sel.add(sid)
         self.recompute_route(state)
 

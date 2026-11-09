@@ -360,3 +360,18 @@ def test_a_lane_emptied_by_another_lanes_rise_stays_and_comes_back():
     ui.focus_lane(2)
     ui.set_share(50)
     assert ui.auto_forward[0].shares == {1: 50, 2: 50}
+
+
+def test_a_fraction_along_the_slider_sets_the_count_or_the_snapped_share():
+    state, ui = _hub(), _ui()
+    ui.reset_selection()
+    ui.selected = 0
+    ui.begin_send(state, 4)
+    lo, hi, _ = ui.slider_range(state)
+    ui.set_slider_fraction(state, 0.5)
+    assert ui.slider_range(state)[2] == round(lo + 0.5 * (hi - lo))
+    ui.set_slider_fraction(state, 7.0)      # clamped
+    assert ui.slider_range(state)[2] == hi
+    _forward(state, ui, 0, 1)
+    ui.set_slider_fraction(state, 0.33)
+    assert ui.edited_share() % config.FORWARD_SNAP_PCT == 0

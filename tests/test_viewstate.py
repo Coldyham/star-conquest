@@ -240,3 +240,13 @@ def test_clear_fading_marks_drops_everything():
     ui.clear_fading_marks()
 
     assert ui.fading_fights == [] and ui.fading_hulls == []
+
+
+# --------------------------------------------------------------------------- #
+# The pure halves a frontend with its own camera and hit-testing calls
+# --------------------------------------------------------------------------- #
+def test_snap_points_are_the_seen_systems_until_nothing_is_hidden():
+    systems = [System(i, (i * 10.0, 0.0), owner_id=1 if i == 0 else 0) for i in range(4)]
+    assert sorted(_ui({0, 2}).snap_points(_state(systems))) == [0, 2]
+    assert sorted(_ui({0, 2}).snap_points(_state(systems, winner=1))) == [0, 1, 2, 3]
+    assert sorted(_ui({0}).snap_points(_state(systems, human_alive=False))) == [0, 1, 2, 3]
