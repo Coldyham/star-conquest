@@ -21,6 +21,7 @@ import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
 const $ = (id) => document.getElementById(id);
 const DRAG_THRESHOLD = 8;   // config.DRAG_THRESHOLD
 const THINKING_MS = 150;    // a turn slower than this says so
+const TICK_MS = 1000;       // the session's clock (`Session.op_tick`): the campaign's lookup and its grace
 
 const core = new Core(new URL("../worker.mjs", import.meta.url));
 const params = new URLSearchParams(location.search);
@@ -29,6 +30,7 @@ const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
   hover: null, drag: null, pan: null, box: null, film: null, fingers: new Map(), pinch: null, pressed: false, held: new Marks(), busy: false, looping: false, marks: new Marks(),
   queued: [],   // game actions pressed while a turn was resolving or filming (`actOn`)
+  stale: false,   // a pushed view was set aside while a turn was in flight (`pushed`)
 };
 
 function status(text, error = false) {
@@ -57,6 +59,37 @@ const menu = new SetupMenu($("setup"), core, {
     clock(game.view.step_ms);
   },
 });
+
+/** What an answer from the board changed, drawn unasked (`Session.op_net_reply`):
+ * a fetched replay opens in history, one that would not open says why on the
+ * menu, and anything else redraws the play screen, once no turn is in flight. */
+function pushed(p) {
+  if (p.game) {
+    menu.hide();
+    game.film = null;
+    game.map = null;
+    game.legends = p.game.legends;
+    adopt(p.game);
+    status("");
+  } else if (p.menu) {
+    if (menu.shown) menu.draw(p.menu);
+  } else if (p.view && game.view && !menu.shown) {
+    if (game.busy || game.film || game.seeking || game.replaying) game.stale = true;
+    else show(p.view);
+  }
+}
+core.onPush = pushed;
+setInterval(() => {
+  if (document.hidden || game.busy || game.film) return;
+  core.call("tick").then((res) => core.push(res), () => {});
+}, TICK_MS);
+
+/** Fetch the view a push left stale while a turn was in flight. */
+function freshen() {
+  if (!game.stale || game.busy || game.film) return;
+  game.stale = false;
+  act("game.view");
+}
 
 /** Back to the setup menu: the match is left behind, as pygame's Menu leaves it. */
 async function openMenu(first = false) {
@@ -254,6 +287,7 @@ async function endTurn(byHand = true) {
     if (res.snap) game.board_view.rest(res.view.snap);
     show(res.view);
     game.busy = false;
+    freshen();
     if (!runQueued()) clock(res.film ? 0 : res.view.step_ms);
   } catch (err) {
     clearTimeout(thinking);
@@ -350,7 +384,7 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed"]);
+  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "share", "leaderboard"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -412,6 +446,7 @@ async function seek(turn) {
     show(res.view);
   } finally {
     game.seeking = false;
+    freshen();
   }
   if (game.seekTo !== undefined && game.seekTo !== null) {
     const next = game.seekTo;
@@ -437,6 +472,7 @@ async function replay() {
     }
   } finally {
     game.replaying = false;
+    freshen();
   }
 }
 

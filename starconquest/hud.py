@@ -6,7 +6,8 @@ sends them to the HTML page, so a line is worded in one place. A colour goes
 as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, ``"route"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
 colour; the win overlay adds ``"teal"``, ``"beat"``, ``"tie"``, ``"miss"``,
-``"par"`` and ``"failed"``, and the coach ``"violet"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
+``"par"`` and ``"failed"``, the coach ``"violet"``, and the side panel's
+campaign reminder ``"campaign"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
 star name in it, so it may need the small font), ``"row"`` for one line, and
 ``"wrap"`` for a line to reflow to the panel's width.
 """
@@ -634,6 +635,25 @@ def result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, Role]]:
         verdict, colour = f"Short of{who} {against}", "miss"
     lines.append(("small", verdict, colour))
     return note + lines
+
+
+def match_notes(ui: Ui) -> list[tuple[str, Role]]:
+    """What this match is for, as ``(text, role)`` lines for the head of the
+    side panel: the gauntlet stage and its target, the weekly campaign's
+    reminder (`app.campaign_tick`), and a challenge link's target. Not in the
+    top bar, which they would share with the scoreboard (on a portrait phone,
+    by covering it)."""
+    notes: list[tuple[str, Role]] = []
+    if ui.stage_label:
+        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, "teal"))
+    if ui.campaign_label:
+        notes.append((ui.campaign_label, "campaign"))
+    if ui.challenge_target is not None:
+        turns, lost = ui.challenge_target
+        who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
+        notes.append((f"Beat {who}{turns}t / {lost} lost", "teal"))
+    return notes
 
 
 def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:

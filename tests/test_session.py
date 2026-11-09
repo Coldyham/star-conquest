@@ -421,3 +421,136 @@ def test_every_menu_parity_recipe_loads(session, games):
             assert res["menu"]["modal"]["title"] == "This setup is slow"
         if r["surface"] == "resume":
             assert res["resume"]
+
+
+# --------------------------------------------------------------------------- #
+# The board (sharing): the win overlay's two buttons, answers that land on it
+# later, the campaign's lookup and a watched replay
+def _won(session) -> None:
+    """A human game a few turns in, then decided for the human by fiat."""
+    _human_game(session)
+    for _ in range(2):
+        _call(session, "turn.end")
+    session.state.winner = session.ui.human_id
+
+
+def _effects(reply: dict, kind: str) -> list[dict]:
+    return [e for e in reply["effects"] if e["t"] == kind]
+
+
+def test_a_win_is_shared_as_a_challenge_link(session):
+    _won(session)
+    over = _menu(session, "game.view")["view"]["over"]
+    assert over["share"] == ["Challenge a friend", "C"] and over["board"][0] == "Post on leaderboard"
+    reply = _call(session, "game.action", name="share")
+    [clip] = _effects(reply, "clipboard")
+    assert clip["text"].startswith(PAGE["origin"] + "/next/#")
+    assert reply["result"]["view"]["over"]["notes"].startswith("Challenge link copied")
+
+
+def test_the_entry_form_opens_on_the_result_and_its_log_goes_up(session):
+    _won(session)
+    reply = _call(session, "game.action", name="leaderboard")
+    [fire] = _effects(reply, "fire")
+    from starconquest import paths
+    assert fire["url"].endswith(paths.LEADERBOARD_LOG_PATH)
+    assert json.loads(fire["body"])["match_id"] == session.log.match_id
+    [nav] = _effects(reply, "navigate")
+    assert "#" in nav["url"]
+    assert reply["result"]["view"]["over"]["notes"].startswith("Leaderboard opened")
+
+
+def test_a_quick_post_lands_its_summary_and_then_views_the_map(session):
+    _won(session)
+    session.ui.post_as = "Ann"
+    assert _menu(session, "game.view")["view"]["over"]["board"] == ["Post as Ann", "L"]
+    reply = _call(session, "game.action", name="leaderboard")
+    [bridge] = _effects(reply, "bridge")
+    assert bridge["fn"] == "quickPost" and bridge["args"][1] == "Ann"
+    assert reply["result"]["view"]["over"]["board"][0] == "Posting…"
+    turns, lost = session.state.turn, session.state.players[1].ships_lost
+    body = json.dumps({"game_key": "k1", "score_count": 1, "best_turns": turns, "best_lost": lost,
+                       "best_user_name": "Ann"})
+    pushed = _menu(session, "net.reply", req=bridge["req"], state="ok", body=body)["pushed"]
+    over = pushed["view"]["over"]
+    assert over["board"] == ["View on board", "L"] and over["notes"] == "Posted  ·  the first score on this map"
+    reply = _call(session, "game.action", name="leaderboard")
+    [nav] = _effects(reply, "navigate")
+    assert nav["url"].endswith("?key=k1")
+
+
+def test_the_signed_in_name_lands_on_the_post_button(session):
+    _won(session)
+    session.ui.post_name_due = True
+    reply = _call(session, "game.view")
+    [bridge] = _effects(reply, "bridge")
+    assert bridge["fn"] == "ownName"
+    pushed = _menu(session, "net.reply", req=bridge["req"], state="ok", body="Bea")["pushed"]
+    assert pushed["view"]["over"]["board"] == ["Post as Bea", "L"]
+    # An answer that changes nothing on screen pushes nothing.
+    assert "pushed" not in _menu(session, "net.reply", req=999, state="ok", body="")
+
+
+def test_a_watched_game_offers_neither_button(session):
+    _won(session)
+    session.ui.watched = True
+    view = _menu(session, "game.view")["view"]
+    assert view["over"]["share"] is None
+    assert not _effects(_call(session, "game.action", name="share"), "clipboard")
+
+
+def test_the_match_notes_head_the_panel(session):
+    _human_game(session)
+    session.ui.challenge_target, session.ui.challenge_by = (12, 3), "Ann"
+    session.ui.campaign_label = "Node 4: open"
+    notes = _menu(session, "game.view")["view"]["notes"]
+    assert notes == [["Node 4: open", "campaign"], ["Beat Ann's 12t / 3 lost", "teal"]]
+
+
+def test_the_campaign_is_asked_about_before_start_and_stamped_on_the_match(session, games, monkeypatch):
+    from starconquest import campaign
+    monkeypatch.setattr(campaign, "SETTLE_S", 0.0)
+    _call(session, "boot", page=PAGE, store={})
+    reply = _call(session, "menu.open", first=True, prefill={"players": 2, "seed": 5})
+    [http] = [e for e in _effects(reply, "http") if "campaign" in e["url"]]
+    assert "starting=1" in http["url"]
+    body = json.dumps({"node": {"id": 4, "kind": "field"}, "now": 0,
+                       "status": {"why": "not-adjacent", "can": False}})
+    _menu(session, "net.reply", req=http["req"], state="ok", body=body)
+    res = _menu(session, "menu.press", key="start")
+    assert res["action"] is None
+    modal = res["menu"]["modal"]
+    assert modal["title"] == "Campaign node 4" and "won't be a campaign move" in json.dumps(modal["lines"])
+    assert _menu(session, "menu.press", key="slow_go")["action"] == "start"
+    game = _menu(session, "game.start")
+    assert session.ui.campaign_start == "not-adjacent"
+    assert game["view"]["notes"] == [["Node 4: not a move", "campaign"]]
+
+
+def _played_log() -> tuple[str, str]:
+    s = Session()
+    _call(s, "boot", page=PAGE, store={})
+    _call(s, "game.start", settings={"players": 2, "nodes": 8, "autoplay": True}, seed=3)
+    for _ in range(4):
+        _call(s, "turn.end")
+    return s.log.encoded(), s.log.match_id
+
+
+def test_a_log_link_fetches_the_replay_and_opens_it_in_history(session, games):
+    blob, match_id = _played_log()
+    hostio.reset()
+    _call(session, "boot", page={**PAGE, "hash": f"#log={match_id}"}, store={})
+    reply = _call(session, "menu.open", first=True)
+    assert reply["result"]["status"]["text"] == "Loading replay..."
+    [http] = [e for e in _effects(reply, "http") if f"id={match_id}" in e["url"]]
+    game = _menu(session, "net.reply", req=http["req"], state="ok", body=blob)["pushed"]["game"]
+    assert game["view"]["history"]["turn"] == 0 and game["legends"]
+    assert session.ui.watched
+
+
+def test_a_replay_that_is_not_there_says_so_on_the_menu(session, games):
+    _call(session, "boot", page={**PAGE, "hash": "#log=0123456789abcdef"}, store={})
+    reply = _call(session, "menu.open", first=True)
+    [http] = _effects(reply, "http")
+    pushed = _menu(session, "net.reply", req=http["req"], state="missing", body="")["pushed"]
+    assert pushed["menu"]["status"]["text"].startswith("That replay isn't on the leaderboard")

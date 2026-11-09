@@ -21,9 +21,10 @@ import json
 import math
 import time
 import traceback
+from collections.abc import Callable
 
-from starconquest import (ai, app, bench, engine, hostio, hud, paths, play, replay, serial, setupmenu, turnfilm,
-                          webstore)
+from starconquest import (ai, app, bench, campaign, daily, engine, hostio, hud, paths, pbp, play, replay, serial,
+                          setupmenu, share, turnfilm, webstore)
 from starconquest import recipe as recipes
 from starconquest import run as gauntlet_run
 from starconquest.model import GameState
@@ -92,6 +93,13 @@ class Session:
         self.touch = False
         self.compact = False
         self.resume_log: GameLog | None = None
+        # The board: the weekly campaign's lookup for the setup on the menu or
+        # in play (`campaign.Watcher`), a replay being fetched for a `#log=`
+        # link, and the calls whose answers land on the win overlay (the
+        # signed-in name, a puzzle's par, a quick post), each with its landing.
+        self.campaign = campaign.Watcher()
+        self.fetching: share.Download | None = None
+        self.waits: list[tuple[pbp.Request, Callable[[str, str], None]]] = []
 
     def handle(self, raw: str) -> str:
         try:
@@ -105,6 +113,7 @@ class Session:
         else:
             try:
                 reply.update(ok=True, result=fn(**(cmd.get("args") or {})))
+                self._ask_due()
             except Exception as err:  # noqa: BLE001 - a failed command answers, never kills the worker
                 reply.update(ok=False, error=f"{type(err).__name__}: {err}", trace=traceback.format_exc())
         reply["effects"] = hostio.drain()
@@ -121,6 +130,7 @@ class Session:
     def op_game_start(self, settings: dict | None = None, seed: int | None = None) -> dict:
         """A fresh match on ``settings`` (`Settings.from_dict`), or on the menu's
         setup when none are given (Start Game), seeded or rolled."""
+        menu_setup = settings is None
         if settings is not None:
             self.settings = Settings.from_dict(settings)
         elif self.settings is None:
@@ -129,6 +139,10 @@ class Session:
         self.seed = seed if seed is not None else resolve_seed(self.settings)
         self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay)
         self.history = self.live_fog = None
+        if menu_setup:
+            # What the campaign said about this setup as it begins (Start).
+            app.stamp_campaign(self.ui, self.campaign)
+            app.campaign_tick(self.ui, self.settings, self.campaign)
         return self._started()
 
     def _started(self) -> dict:
@@ -158,6 +172,7 @@ class Session:
                 if (log is not None and not log.finished and log.turn_count > 0
                         and not gauntlet_run.is_playing(log)):
                     self.resume_log = log
+                self._watch_link()
         self.state = self.ui = self.log = None
         self.history = self.live_fog = None
         self.menu.strategies = setupmenu.strategy_options()
@@ -165,6 +180,7 @@ class Session:
 
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
+        self.campaign.pump(settings)
         out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN),
                                       every_tab=self.compact),
                "action": action, "status": None,
@@ -196,7 +212,8 @@ class Session:
         setupmenu.before_edit(ms, settings)
         action = None
         if key == "start":
-            action = setupmenu.start(ms, settings, "start", self._say)
+            action = setupmenu.start(ms, settings, "start", self._say,
+                                     asked=campaign.confirm(self.campaign.status))
         elif key == "daily_menu":
             ms.daily_open = not daily_was
         elif key == "board_menu":
@@ -462,10 +479,13 @@ class Session:
             self.seed = self.log.seed
             self.history = self.live_fog = None
             self.state, self.ui = app.resume_game(self.log, self.settings)
+            if not ui.watched:
+                app.stamp_campaign(self.ui, self.campaign)
             return self._whole()
         elif name == "rewind_confirmed" and ui.history and not ui.in_pbp:
             self.history = self.live_fog = None
             self.state, self.ui = app.apply_rewind(self.log, self.settings, ui.history_turn)
+            self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
             return self._whole()
         elif name == "toggle_route":
             # Leaving discards the plan: it is only ever committed by its confirm.
@@ -485,12 +505,39 @@ class Session:
             except OSError:
                 pass
             self.seed = self.log.seed
+            self.history = self.live_fog = None
             self.state, self.ui = app.resume_game(self.log, self.settings)
+            if not ui.watched:
+                app.stamp_campaign(self.ui, self.campaign)
             return self._whole()
         elif name == "undo" and ui.can_undo(state):
             self.state, self.ui = app.apply_rewind(self.log, self.settings, max(self.log.turn_count - 1, 0))
+            self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
             return self._whole()
+        elif name == "share" and ui.can_post(state):
+            # A challenge link to the clipboard, or a daily's result line.
+            ui.share_msg = (app.copy_daily_result(self.settings, state, ui) if ui.daily_day
+                            else app.share_challenge(self.settings, state, ui, self.seed, self.log))
+        elif name == "leaderboard" and ui.can_post(state):
+            self._leaderboard()
         return {"fresh": False, "view": self._view()}
+
+    def _leaderboard(self) -> None:
+        """The win overlay's board button, by what it does now
+        (`Ui.board_action`): open the map's page once posted, post under the
+        remembered or signed-in name, or open the entry form."""
+        state, ui = self._state(), self._ui()
+        assert self.settings is not None and self.log is not None and self.seed is not None
+        board = ui.board_action()
+        if board == "view":
+            ui.share_msg = app.open_map_page(ui.posted_key) or ui.share_msg
+        elif board == "post":
+            request = app.quick_post(self.settings, state, ui, self.seed, self.log)
+            if request is not None:
+                figures = (state.turn, state.players[ui.human_id].ships_lost)
+                self.waits.append((request, lambda st, body: app.land_quick_post(ui, figures, st, body)))
+        elif board == "enter":
+            ui.share_msg = app.post_to_leaderboard(self.settings, state, ui, self.seed, self.log)
 
     def _whole(self, fresh: bool = True) -> dict:
         """The board on screen (a history turn while reviewing) and its view.
@@ -605,8 +652,111 @@ class Session:
 
     def op_net_reply(self, req: int, state: str, body: str) -> dict:
         """The page carried out an ``http`` or ``bridge`` effect; hand its answer
-        to whoever is polling for it."""
-        return {"delivered": hostio.reply(req, state, body)}
+        to whoever is polling for it. ``pushed`` is what the answer changed on
+        screen, for the page to draw unasked: a ``view`` (the win overlay's
+        button or line, the campaign reminder), a ``game`` (a fetched replay,
+        opened in history), or a ``menu`` reply (a replay that would not open)."""
+        out: dict = {"delivered": hostio.reply(req, state, body)}
+        pushed = self._land()
+        if pushed:
+            out["pushed"] = pushed
+        return out
+
+    def op_tick(self) -> dict:
+        """The page's clock, once a second while it is open: the campaign's
+        lookup settles, refreshes and counts its grace down on it. ``pushed``
+        as `op_net_reply`'s, when the reminder's words changed."""
+        if not hostio.in_worker():   # not booted: the watcher would decide it is off for good
+            return {}
+        pushed = self._land()
+        return {"pushed": pushed} if pushed else {}
+
+    def op_game_view(self) -> dict:
+        """The play screen's view as it stands, for a page that set a pushed
+        one aside while a turn was in flight."""
+        return {"view": self._view()}
+
+    def _watch_link(self) -> None:
+        """A ``#log=<id>`` link asks to watch a posted replay: fetch it, and
+        open it in history once it lands (`_land`)."""
+        wanted = app.replay_request()
+        if not wanted:
+            return
+        self.fetching = share.fetch_log(wanted)
+        if self.fetching is None:
+            print(f"cannot fetch replay {wanted!r}: no endpoint, or not a match id")
+            self._say(app.WATCH_UNREACHABLE_MSG, False)
+        else:
+            self._say("Loading replay...", True)
+
+    def _ask_due(self) -> None:
+        """Start the calls a command made due: the signed-in name for the win
+        overlay's post button, and a daily puzzle's par (`app.resolve_turn`)."""
+        ui = self.ui
+        if ui is None:
+            return
+        if ui.post_name_due:
+            ui.post_name_due = False
+            asked = share.signed_in_name()
+            if asked is not None:
+                self.waits.append((asked, lambda st, body: app.land_post_name(ui, st, body)))
+        if ui.par_due is not None:
+            figures, ui.par_due = ui.par_due, None
+            asked = daily.par_check(ui.daily_day, *figures)
+            if asked is not None:
+                self.waits.append((asked, lambda st, body: app.land_par(ui, figures, st, body)))
+
+    def _land(self) -> dict:
+        """Land every answer that has arrived, and keep the campaign's lookup
+        current. Answers what changed on screen (`op_net_reply`'s ``pushed``)."""
+        pushed: dict = {}
+        before = self._view()
+        waiting = []
+        for request, land in self.waits:
+            got, body = request.poll()
+            if got == pbp.PENDING:
+                waiting.append((request, land))
+            else:
+                land(got, body)
+        self.waits = waiting
+        if self.ui is not None and self.state is not None and self.settings is not None:
+            app.campaign_tick(self.ui, self.settings, self.campaign)
+        else:
+            self.campaign.pump(self._settings())
+        if self.fetching is not None:
+            got, body = self.fetching.poll()
+            if got != share.PENDING:
+                self.fetching = None
+                return self._open_watched(got, body)
+        if before is not None and self._view() != before:
+            pushed["view"] = self._view()
+        return pushed
+
+    def _open_watched(self, got: str, body: str) -> dict:
+        """A fetched replay landed: open it in history from its first turn, or
+        say on the menu why it can't be (`main`'s ``pending_replay``)."""
+        opened = app.open_replay(body, self._settings()) if got == share.OK else None
+        if opened is not None:
+            self.state, self.ui, self.log = opened
+            self.seed = self.log.seed
+            states, fog, events, live = app.open_history(self.state, self.ui, self.log)
+            if states:
+                self.history, self.live_fog = (states, fog, events), live
+                return {"game": {**self._whole(), "legends": serial.legends()}}
+            self.state = self.ui = self.log = None
+        elif got != share.OK:
+            print(f"replay fetch ended in state {got!r}")
+            self._say(app.WATCH_MISSING_MSG if got == share.MISSING else app.WATCH_UNREACHABLE_MSG, False)
+        else:
+            stale = app._decode_log(body)
+            if stale is not None and not stale.is_current:
+                print(f"replay was recorded under rules v{stale.rules_version}, "
+                      f"this build plays v{engine.RULES_VERSION}")
+                self._say(app.WATCH_OUTDATED_MSG, False)
+            else:
+                print(f"replay body was not a readable log ({len(body)} bytes): {body[:120]!r}")
+                self._say(app.WATCH_UNREADABLE_MSG, False)
+        return {"menu": self._menu()}
 
     def op_bench_decide(self, bot: str, aux: float, nodes: int, seed: int, turns: int,
                         budget_scale: float | None = None) -> dict:

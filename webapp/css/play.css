@@ -307,7 +307,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--text); font-size: 14px; text-align: left; border-radius: 4px; }
 #graph .note-row.on { background: rgb(30, 34, 50); }
 #graph .note-row .turn { flex: none; min-width: 34px; }
-:root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); }
+:root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); --campaign: rgb(255, 210, 63); }
+#panel .match-note { font-size: 14px; margin: 0 0 6px; }
 #app.graphing #camera { bottom: calc(min(320px, 45%) + 18px); }
 
 /* --- the footer's "more" list -------------------------------------------- */

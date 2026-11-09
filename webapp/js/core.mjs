@@ -42,8 +42,15 @@ export class Core {
     }
   }
 
+  /** Hand the session an effect's answer. What it changed on screen comes
+   * back as `pushed`, for `onPush` to draw. */
   answer(req, state, body) {
-    this.call("net.reply", { req, state, body }).catch(() => {});
+    this.call("net.reply", { req, state, body }).then((res) => this.push(res), () => {});
+  }
+
+  /** A reply's `pushed`, if any, to whoever draws it. */
+  push(res) {
+    if (res && res.pushed && this.onPush) this.onPush(res.pushed);
   }
 
   effect(e) {

@@ -257,8 +257,7 @@ when it can't, as `main.leave_app` does on the web.
 **Differences kept on purpose:** no Game UI size stepper (the browser's own
 zoom does that job, and the plan drops `ui_scale`); the desktop footer is
 pygame's web footer (Get Link and the board's lists, not Save and Load, which
-wait for files in phase 7); the slow-setup confirm does not yet add the
-weekly campaign's lines, which need the board (phase 3); a slider on a phone
+wait for files in phase 7); a slider on a phone
 grabs on touch rather than waiting for a sideways move, so the panel scrolls
 from anywhere else.
 
@@ -266,3 +265,46 @@ from anywhere else.
 recipe but the play-by-post prompt (phase 4) shoots (`tools/parity_next.py`),
 and a headless run sets players, a seed and a slider, starts, plays three
 turns, goes back to the menu, reloads and resumes the match.
+
+## Sharing (phase 3)
+
+`/next/` talks to the board as pygame's web build does, through the same
+`app`, `share` and `campaign` calls; the session carries out pygame's loop's
+part (`main`'s ``pending_*`` polls).
+
+- **The win overlay's two buttons** are game actions (`game.action`
+  ``share`` and ``leaderboard``, and the C and L keys), gated on
+  `Ui.can_post` as pygame gates them. Share copies a challenge link (a daily's
+  result line on a daily); the board button opens the entry form, posts under
+  a name (`share.quick_post`, through the board's own module in the page), or
+  once posted opens the map's page (`Ui.board_action`). Each sends the replay
+  first, the press being the consent. The overlay's line under them is
+  `Ui.share_msg`.
+- **An answer lands later, and is pushed.** The signed-in name for the post
+  button, a puzzle's par and a quick post's summary are asked for after the
+  command that made them due (`Session._ask_due`) and land when the page hands
+  back the answer (`net.reply`). That reply's ``pushed`` is what changed on
+  screen: a ``view``, a ``game`` or a ``menu`` reply. The page draws it unasked,
+  or, while a turn is in flight, asks for the view again once it lands
+  (`game.view`).
+- **The weekly campaign.** The session keeps one `campaign.Watcher`, pumped by
+  the menu's replies and by `tick`, which the page sends once a second (it
+  settles a lookup, refreshes it, and counts a grace down). Start raises the
+  campaign's confirm with the slow-setup lines; the answer at Start is stamped
+  on the match, kept through an undo or rewind and stamped again on a retry.
+- **The match's notes** (`hud.match_notes`: the stage, the campaign's
+  reminder, a challenge link's target) head the side panel, on a portrait
+  phone only while nothing is in focus, as `render` draws them.
+- **A `#log=<id>` link** fetches the replay at boot ("Loading replay...") and
+  opens it in history at turn 0, as someone else's game; one that is missing,
+  unreadable or recorded under older rules says so on the menu.
+- **Share replays** needed nothing new: the checkpoint upload in
+  `app.resolve_turn` already goes out as a ``fire`` effect.
+
+**Differences kept on purpose:** a board page opens in this tab (the
+``navigate`` effect, as pygame's web build does), so the back button returns
+to a fresh `/next/`; a decided match is not offered to resume, so nothing is
+lost.
+
+**Left for later:** a link pasted into an open page (`hashchange`) is not read
+until a reload, and the daily's buttons and par wait for phase 5 with the daily.

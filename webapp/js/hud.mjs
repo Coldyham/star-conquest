@@ -202,6 +202,10 @@ export class Hud {
   panel(view) {
     const panel = this.$("panel");
     const p = view.panel;
+    // The match's notes (`hud.match_notes`): at the column's head, or on a
+    // portrait band only while nothing is in focus.
+    const notes = view.notes.map(([text, role]) => h("p", { class: "wrap match-note",
+      style: `color:${this.color(role)}` }, text));
     const clears = [];
     if (p.clear.all) {
       clears.push(h("button", { type: "button", class: "clear", onclick: () => this.on.call("clear_all_forward", []) },
@@ -213,20 +217,20 @@ export class Hud {
     }
     if (view.route) {
       const r = view.route;
-      panel.replaceChildren(h("section", {}, h("h2", {}, r.title),
+      panel.replaceChildren(...(portrait() ? [] : notes), h("section", {}, h("h2", {}, r.title),
         ...r.lines.map(([text, role]) => h("p", { style: `color:${this.color(role)}` }, text)),
         h("p", { class: "wrap hint" }, r.hint)));
       return;
     }
     if (p.focus === null) {
       if (portrait()) {
-        panel.replaceChildren(...clears, h("p", { class: "wrap dim" }, p.portrait));
+        panel.replaceChildren(...clears, ...notes, h("p", { class: "wrap dim" }, p.portrait));
         return;
       }
       const set = this.legends[p.legend];
       const text = compact() ? set.compact : touch() ? set.touch : set.keys;
       const title = p.legend === "history" ? "History" : "Star Conquest";
-      panel.replaceChildren(...clears, h("div", { class: "legend" }, h("h2", {}, title),
+      panel.replaceChildren(...notes, ...clears, h("div", { class: "legend" }, h("h2", {}, title),
         ...text.split("\n\n").map((para) => h("p", {}, para.replace(/\n/g, " ")))));
       return;
     }
@@ -252,7 +256,7 @@ export class Hud {
       panel.replaceChildren(h("div", { class: "band" }, h("section", {}, rows(p.compact, p.lore)), h("section", {}, right)));
       return;
     }
-    const parts = [...clears, h("section", {}, rows(p.system, p.lore))];
+    const parts = [...notes, ...clears, h("section", {}, rows(p.system, p.lore))];
     if (p.lane.length) parts.push(h("section", {}, rows(p.lane)));
     if (p.rule.length) parts.push(h("section", {}, rows(finger ? p.rule_touch : p.rule)));
     panel.replaceChildren(...parts);

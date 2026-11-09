@@ -2024,21 +2024,10 @@ def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> py
 
 
 def _match_notes(ui: Ui) -> list[tuple[str, tuple[int, int, int]]]:
-    """What this match is for, as (text, colour) lines for the head of the side
-    panel (`_panel_notes`): the gauntlet stage and its target, the campaign
-    reminder, the challenge target. Not in the top bar, which they would share
-    with the scoreboard (on a portrait phone, by covering it)."""
-    notes: list[tuple[str, tuple[int, int, int]]] = []
-    if ui.stage_label:
-        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
-        notes.append((text, _BTN_TEAL[1]))
-    if ui.campaign_label:
-        notes.append((ui.campaign_label, config.COLOR_CAMPAIGN))
-    if ui.challenge_target is not None:
-        turns, lost = ui.challenge_target
-        who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
-        notes.append((f"Beat {who}{turns}t / {lost} lost", _BTN_TEAL[1]))
-    return notes
+    """What this match is for (`hud.match_notes`), as (text, colour) lines for
+    the head of the side panel (`_panel_notes`)."""
+    colours = {"teal": _BTN_TEAL[1], "campaign": config.COLOR_CAMPAIGN}
+    return [(text, colours[role]) for text, role in hud.match_notes(ui)]
 
 
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:

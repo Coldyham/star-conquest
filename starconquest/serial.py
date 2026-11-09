@@ -138,6 +138,7 @@ def view(state: GameState, ui: Ui) -> dict:
         "snap": ui.snap_points(state),
         "popup": popup(state, ui) if ui.mode == CHOOSING else None,
         "panel": panel(state, ui),
+        "notes": [list(n) for n in hud.match_notes(ui)],
         "scores": scores(state, ui),
         "footer": [list(b) for b in hud.footer(state, ui)],
         "more_open": ui.more_open,
