@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -255,3 +256,14 @@ def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
     assert view["graph"]["coach"]["summary"]
     view = _call(session, "ui.call", method="toggle_trace", args=[2])["result"]["view"]
     assert [r[4] for r in view["graph"]["rows"] if r[0] == 2] == [True]
+
+
+def test_every_game_parity_recipe_loads_as_the_match_on_screen(session):
+    recipes = json.loads((Path(__file__).parent / "fixtures" / "parity_screens.json").read_text())["screens"]
+    _call(session, "boot", page=PAGE, store={})
+    for r in recipes:
+        if r["surface"] != "game":
+            continue
+        reply = _call(session, "parity.load", recipe=r)
+        assert reply["ok"], (r["name"], reply.get("trace"))
+        assert json.loads(json.dumps(reply["result"])) == reply["result"]

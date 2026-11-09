@@ -64,9 +64,11 @@ Two checks hold the new build to the old one.
   sets). The resolved recipes are committed as
   `tests/fixtures/parity_screens.json`, and `tests/test_parity_screens.py`
   keeps them in step with the tool.
-- The HTML build will replay the same steps through its session and shoot
-  `results/parity/next/`. `tools/parity_sheet.py` then sets each pair side by
-  side and flags a screen missing from either side.
+- The HTML build replays the same steps through its session and shoots
+  `results/parity/next/` (`tools/parity_next.py`). Both sides build a recipe
+  with `starconquest.recipe`; the session's `parity.load` is the page's way in.
+  `tools/parity_sheet.py` then sets each pair side by side and flags a screen
+  missing from either side.
 - Pygame and HTML pixels will never match, so this is a review by eye plus a
   check that every screen exists in both builds. It is not a pixel diff.
 
@@ -164,15 +166,20 @@ page hit-tests, draws, and keeps what is only about looking.
 Sizes are screen pixels at any zoom, as in `render`: the board draws through
 the camera, and only positions move.
 
-**Done:** the map with fog and its rings, queued orders and the popup's
-preview, the send popup (tabs, forecast, stepper, slider, presets, discard),
+**Done, desktop:** the map with fog and its rings, the camera (resting on
+what has been seen, as `Ui.reset_view`), queued orders, the send popup, the
+Forward tab with holds and splits, forwarding rules on the map, route mode,
 the side panel, the scoreboard and its tooltip, the footer, End Turn and the
-film, a drag to send, the camera (wheel, drag to pan, the zoom buttons), New
-map and Retry.
+film with its marks, star names that yield, a drag to send, autoplay, play,
+fast forward, undo, retry, new map, game over, the hint and its modal, the
+lore and odds cards, history (scrubber, playback, held marks, rewind), and
+its graphs and coach. Every phase-1 parity recipe shoots at the desktop size
+(`tools/parity_next.py`, 22 screens).
 
-**Still to do in phase 1:** forwarding rules on the map and the Forward tab's
-hold and split rows; route mode; the film's marks and labels; star names
-yielding to each other; autoplay, play and fast forward; game over; undo;
-the hint; history with its graphs and coach; the lore and odds cards; the
-compact layout (the docked popup as a bottom sheet, the footer's "more"
-list); and shooting the parity recipes into `results/parity/next/`.
+**Differences kept on purpose:** a recipe loaded mid-game frames what has
+been seen by then, where pygame's camera was framed at turn 0 and never moved;
+a page fits names around what is on screen with its own font metrics.
+
+**Still to do in phase 1:** the compact layout (a phone, either way up: the
+docked popup as a bottom sheet, the footer's "more" list, the portrait panel
+band) and its parity shots.

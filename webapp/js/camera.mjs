@@ -7,6 +7,7 @@ export const ZOOM_MAX = 6;          // config.ZOOM_MAX
 export const LIVE_ROOM = 0.5;       // config.LIVE_ROOM
 export const WHEEL_STEP = 1.15;     // config.ZOOM_WHEEL_STEP
 export const BUTTON_STEP = 1.25;    // config.ZOOM_BUTTON_STEP
+export const PAN_PADDING = 110;     // config.MAP_PAN_PADDING
 
 /** geometry.room_zoom_min: the zoom at which `room` of the fitted map shows past each side. */
 export function roomZoomMin(room) {
@@ -74,6 +75,43 @@ export class Camera {
     this.offX += dx;
     this.offY += dy;
     this.clamp();
+  }
+
+  /** `WorldView.fit_to`: the resting view for `points` (world [x, y]) rather
+   * than the whole map, which zooming out still reaches. */
+  fitTo(points) {
+    if (!points.length) {
+      this.reset();
+      return;
+    }
+    const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+    const [bx0, by0, bx1, by1] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const [sx, sy, sw, sh] = this.screen;
+    const bw = Math.max(1e-6, bx1 - bx0), bh = Math.max(1e-6, by1 - by0);
+    const target = Math.min(Math.max(1, sw - 2 * this.padding) / bw, Math.max(1, sh - 2 * this.padding) / bh);
+    this.zoom = Math.max(1, Math.min(ZOOM_MAX, target / this.fitScale));
+    const s = this.scale;
+    const centre = (s0, len, w0, w1) => s0 + this.padding + (Math.max(1, len - 2 * this.padding) - (w1 - w0) * s) / 2 - w0 * s;
+    this.offX = centre(sx, sw, bx0, bx1);
+    this.offY = centre(sy, sh, by0, by1);
+    this.clampStrict();
+  }
+
+  /** `WorldView._clamp`: centre an axis whose zoomed map fits the padded view,
+   * else keep `PAN_PADDING` past the outermost system. */
+  clampStrict() {
+    const s = this.scale;
+    const [wx0, wy0, wx1, wy1] = this.world;
+    const [sx, sy, sw, sh] = this.screen;
+    const pad = Math.max(this.padding, PAN_PADDING);
+    const axis = (off, s0, len, w0, w1) => {
+      if ((w1 - w0) * s <= Math.max(1, len - 2 * this.padding) + 1e-9) {
+        return s0 + this.padding + (Math.max(1, len - 2 * this.padding) - (w1 - w0) * s) / 2 - w0 * s;
+      }
+      return Math.max(s0 + len - pad - w1 * s, Math.min(s0 + pad - w0 * s, off));
+    };
+    this.offX = axis(this.offX, sx, sw, wx0, wx1);
+    this.offY = axis(this.offY, sy, sh, wy0, wy1);
   }
 
   /** `WorldView._clamp_room`. */

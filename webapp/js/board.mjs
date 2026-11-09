@@ -259,6 +259,12 @@ export class BoardView {
     this.layout();
   }
 
+  /** The camera's resting view: framed to `ids` (`Ui.snap_points`). */
+  rest(ids) {
+    this.camera.fitTo(ids.map((id) => this.world.get(id)));
+    this.layout();
+  }
+
   /** The SVG's box changed: refit the camera to it. */
   resize() {
     const box = this.svg.getBoundingClientRect();

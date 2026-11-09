@@ -43,3 +43,13 @@ test("a pan never takes more than the room's share of the map off screen", () =>
   cam.reset();
   assert.deepEqual(cam.toScreen(500, 250), [600, 450]);
 });
+
+test("fitting to a few points zooms in on them, centred, within the zoom limits", () => {
+  const cam = new Camera(WORLD, SCREEN, 50);
+  cam.fitTo([[100, 100], [200, 150]]);
+  assert.equal(cam.zoom, 6);   // the box is small: held at ZOOM_MAX
+  const [x, y] = cam.toScreen(150, 125);
+  assert.ok(Math.abs(x - 600) < 1e-6 && Math.abs(y - 450) < 1e-6);
+  cam.fitTo([]);
+  assert.equal(cam.zoom, 1);
+});

@@ -131,6 +131,7 @@ def view(state: GameState, ui: Ui) -> dict:
                       if s.owner_id == ui.human_id},
         "visible": sorted(ui.visible),
         "seen": sorted(ui.seen),
+        "snap": ui.snap_points(state),
         "popup": popup(state, ui) if ui.mode == CHOOSING else None,
         "panel": panel(state, ui),
         "scores": scores(state, ui),

@@ -40,8 +40,6 @@ from starconquest import (
     ai,
     app,
     config,
-    engine,
-    gauntlet,
     main,
     mapmaker,
     menu,
@@ -50,9 +48,8 @@ from starconquest import (
     replay,
     webstore,
 )
-from starconquest.custommap import CustomMap
+from starconquest import recipe as recipe_mod
 from starconquest.settings import Settings
-from starconquest.viewstate import SELECTED
 
 OUT = ROOT / "results" / "parity" / "baseline"
 RECIPES = ROOT / "tests" / "fixtures" / "parity_screens.json"
@@ -204,43 +201,10 @@ def lay_out(size: str) -> pygame.Surface:
 # --------------------------------------------------------------------------- #
 # Symbols: system ids picked off the board when a step runs
 # --------------------------------------------------------------------------- #
-def _mine(state, pid):
-    return sorted((s for s in state.systems.values() if s.owner_id == pid),
-                  key=lambda s: (-s.ships, s.id))
-
-
-def resolve(arg, state, ui):
-    if not (isinstance(arg, str) and arg.startswith("@")):
-        return arg
-    me = ui.human_id
-    mine = _mine(state, me)
-    if arg in ("@home", "@home2"):
-        i = 0 if arg == "@home" else min(1, len(mine) - 1)
-        return mine[i].id
-    if arg in ("@nbr", "@nbr2"):
-        src = state.systems[resolve("@home" if arg == "@nbr" else "@home2", state, ui)]
-        foreign = [n for n in src.neighbors if state.systems[n].owner_id != me]
-        pool = foreign or list(src.neighbors)
-        return min(pool, key=lambda n: (state.systems[n].ships, n))
-    if arg == "@far":
-        owned = {s.id for s in mine}
-        others = [s for s in state.systems.values() if s.id not in owned]
-        return min(others, key=lambda s: s.id).id
-    raise ValueError(f"unknown symbol {arg}")
-
-
 # --------------------------------------------------------------------------- #
-# Running a recipe
+# Running a recipe: built by `starconquest.recipe`, drawn here
 # --------------------------------------------------------------------------- #
-def _settings(recipe: dict) -> Settings:
-    patch = dict(recipe.get("settings") or {})
-    s = Settings.from_dict(patch)
-    for step in recipe["steps"]:
-        if step[0] == "map":
-            cm = CustomMap.from_dict(_map_data(step[1]))
-            assert cm is not None, step
-            s.custom_map = cm
-    return s
+resolve = recipe_mod.resolve
 
 
 def _map_data(ref) -> dict:
@@ -253,75 +217,17 @@ def _resolve_maps(steps: list) -> list:
     return [["map", _map_data(s[1])] if s[0] == "map" else s for s in steps]
 
 
+def _settings(recipe: dict) -> Settings:
+    return recipe_mod.settings_of(recipe, _map_data)
+
+
 def _play(state, ui, log, n: int, until_over: bool = False) -> None:
-    for _ in range(n):
-        if state.winner is not None:
-            break
-        replay.reseed(state)
-        human = None
-        if state.human() is not None and not state.is_defeated(ui.human_id):
-            human = engine.decide_seat(state, ui.human_id, ai.decide)
-        record = engine.end_turn(state, human_orders=human, decide=ai.decide)
-        log.record_turn(record, human_ai=True)
-        app.refresh_fog(state, ui)
-    ui.prune_forward(state)
-
-
-def _call(ui, state, method: str, args: list):
-    fn = getattr(ui, method)
-    params = list(fn.__code__.co_varnames[1:fn.__code__.co_argcount])
-    return fn(state, *args) if params[:1] == ["state"] else fn(*args)
+    recipe_mod.play(state, ui, log, n)
 
 
 def run_game(recipe: dict, screen: pygame.Surface) -> list:
-    settings = _settings(recipe)
-    seed = recipe.get("seed", 0)
-    stage = None
-    for step in recipe["steps"]:
-        if step[0] == "stage":
-            g = next(g for g in gauntlet.builtin() if g.id == step[1])
-            st = g.stages[step[2]]
-            settings = gauntlet.stage_settings(st)
-            seed = settings.seed if settings.seed is not None else seed
-            stage = (g, st)
-    state, ui, log = app.start_game(settings, seed, autoplay=False, stage=stage)
-    history = None
-    overlay = None
-    resolved: list = []
-    for step in recipe["steps"]:
-        kind = step[0]
-        if kind == "turns":
-            _play(state, ui, log, step[1])
-        elif kind == "until_over":
-            _play(state, ui, log, step[1])
-            assert state.winner is not None, f"{recipe['name']}: no winner in {step[1]} turns"
-        elif kind == "select":
-            sid = resolve(step[1], state, ui)
-            ui.reset_selection()
-            ui.selected, ui.mode = sid, SELECTED
-            step = ["select", sid]
-        elif kind == "ui":
-            args = [resolve(a, state, ui) for a in step[2:]]
-            _call(ui, state, step[1], args)
-            step = ["ui", step[1], *args]
-        elif kind == "set":
-            value = resolve(step[2], state, ui)
-            if step[1] == "pbp_invite":
-                value = tuple(tuple(x) for x in value)
-            setattr(ui, step[1], value)
-            step = ["set", step[1], step[2] if step[1] == "pbp_invite" else value]
-        elif kind == "hint":
-            app.take_hint(state, ui, log)
-        elif kind == "history":
-            history = app.open_history(state, ui, log)
-            if step[1] >= 0:
-                ui.history_turn = min(step[1], ui.history_max)
-        elif kind == "overlay":
-            overlay = step[1]
-        elif kind == "map":
-            step = ["map", _map_data(step[1])]
-        resolved.append(step)
-
+    built = recipe_mod.build(recipe, _map_data)
+    state, ui, history, overlay = built.state, built.ui, built.history, built.overlay
     if history is not None and history[0]:
         states, fog, _events, _live = history
         i = max(0, min(ui.history_turn, len(states) - 1))
@@ -340,7 +246,7 @@ def run_game(recipe: dict, screen: pygame.Surface) -> list:
         render.draw_confirm_rewind(screen, ui.history_turn)
     elif overlay == "hint":
         render.draw_confirm_hint(screen, ui, app.HINT_STRATEGY.title())
-    return resolved
+    return built.resolved
 
 
 def run_menu(recipe: dict, screen: pygame.Surface) -> list:

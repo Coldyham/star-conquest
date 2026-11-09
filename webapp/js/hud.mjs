@@ -370,7 +370,7 @@ export class Hud {
   plot() {
     const { g, plot } = this.plotData;
     const W = plot.clientWidth || 600, H = plot.clientHeight || 200;
-    const left = 24, right = 8, top = 8, bottom = 22;
+    const left = g.area ? 40 : 30, right = 8, top = 8, bottom = 22;
     const pw = Math.max(1, W - left - right), ph = Math.max(1, H - top - bottom);
     plot.setAttribute("viewBox", `0 0 ${W} ${H}`);
     const ids = Object.keys(g.series);
@@ -381,17 +381,20 @@ export class Hud {
       peak = 0;
       for (let t = 0; t <= g.turns; t++) peak = Math.max(peak, ids.reduce((s, pid) => s + (val(pid, t) ?? 0), 0));
     } else peak = Math.max(0, ...ids.flatMap((pid) => g.series[pid].filter((v) => v !== null)));
-    const ymax = g.area ? 100 : niceCeil(peak);
+    // A whole-number metric never gets a fractional gridline (its axis starts
+    // at 5); a share spans the whole map (`render._draw_history_graph`).
+    const ymax = g.area ? 100 : niceCeil(g.metric === "income" ? peak : Math.max(peak, 5));
     const x = (t) => left + (g.turns > 0 ? (t / g.turns) * pw : 0);
     const y = (v) => top + ph - (v / ymax) * ph;
     const grid = sv("g", { stroke: "rgb(40,44,60)", "stroke-width": 1 }, plot);
     const labels = sv("g", { fill: "rgb(140,148,165)", "font-size": 14, "font-family": FONT }, plot);
-    const steps = ymax <= 5 ? ymax : 5;
+    // 1x and 5x tops split into fifths, 2x into quarters: every line a round figure.
+    const steps = String(ymax).replace(/^[0.]+/, "")[0] === "2" ? 4 : 5;
     for (let i = 0; i <= steps; i++) {
       const v = (ymax / steps) * i;
       sv("line", { x1: left, x2: left + pw, y1: y(v), y2: y(v) }, grid);
       const t = sv("text", { x: 2, y: y(v) + 5 }, labels);
-      t.textContent = g.area ? `${Math.round(v)}` : `${+v.toFixed(1)}`;
+      t.textContent = g.area ? `${Math.round(v)}%` : g.metric === "income" ? v.toFixed(1) : String(Math.round(v));
     }
     const room = Math.max(1, Math.floor(pw / 110));
     const tick = Math.max(1, niceCeil(g.turns / room));

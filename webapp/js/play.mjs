@@ -169,6 +169,7 @@ function adopt(res) {
   game.board = fromBoard(res.board);
   if (!sameMap) game.board_view = new BoardView($("map"), game.map);
   game.board_view.setTravel(res.travel);
+  if (!sameMap) game.board_view.rest(res.view.snap);   // `Ui.reset_view` on a fresh game
   game.hud = new Hud(game.map, game.legends, {
     call: (method, args) => act("ui.call", { method, args }),
     lane: async (dest, delta) => {
@@ -195,10 +196,7 @@ async function endTurn(byHand = true) {
     if (res.film) await playFilm(res.film, res.view, before);
     game.board = fromBoard(res.board);
     game.board_view.setTravel(res.travel);
-    if (res.snap) {
-      game.board_view.camera.reset();
-      game.board_view.layout();
-    }
+    if (res.snap) game.board_view.rest(res.view.snap);
     show(res.view);
     game.busy = false;
     clock(res.film ? 0 : res.view.step_ms);
@@ -259,8 +257,7 @@ async function actOn(action) {
   if (action === "end_turn") {
     endTurn();
   } else if (action === "reset_view") {
-    game.board_view.camera.reset();
-    game.board_view.layout();
+    game.board_view.rest(game.view.snap);
     redraw();
   } else if (GAME_ACTIONS.has(action)) {
     if (game.busy) return;
@@ -546,7 +543,20 @@ async function boot() {
   }).observe(map);
 }
 
-// For headless runs (`tools/chrome.mjs --eval`): the page's state and its two verbs.
-window.scNext = { game, act, endTurn };
+/** Put a parity screen's recipe on screen (`tools/parity_next.py`). */
+async function loadRecipe(recipe) {
+  game.film = null;
+  game.map = null;   // a new board view: the camera starts fitted
+  const res = await core.call("parity.load", { recipe });
+  game.legends = res.legends;
+  adopt(res);
+  game.hover = res.view.hover;
+  redraw();
+  if (res.modal) ask(res.modal);
+  status("");
+}
+
+// For headless runs (`tools/chrome.mjs --eval`): the page's state and its verbs.
+window.scNext = { game, act, endTurn, loadRecipe };
 
 boot();

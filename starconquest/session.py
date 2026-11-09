@@ -23,6 +23,7 @@ import time
 import traceback
 
 from starconquest import ai, app, bench, engine, hostio, hud, play, serial, turnfilm
+from starconquest import recipe as recipes
 from starconquest.model import GameState
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
@@ -346,6 +347,26 @@ class Session:
             raise ValueError(f"not a page-callable Ui method: {method!r}")
         fn(self._ui(), self._state(), *(args or []))
         return {"view": self._view()}
+
+    def op_parity_load(self, recipe: dict) -> dict:
+        """Build a parity screen's game recipe (`recipe.build`) as the match
+        on screen, for `tools/parity_next.py` to shoot beside pygame's. Its
+        modal, if any, comes back as ``modal``."""
+        built = recipes.build(recipe)
+        self.settings, self.seed, self.state, self.ui, self.log = (
+            built.settings, built.seed, built.state, built.ui, built.log)
+        self.history = self.live_fog = None
+        if built.history is not None and built.history[0]:
+            states, fog, events, live = built.history
+            self.history, self.live_fog = (states, fog, events), live
+        out = {**self._whole(), "legends": serial.legends()}
+        if built.overlay == "rewind":
+            title, body, confirm = hud.confirm_rewind(self.ui.history_turn)
+            out["modal"] = {"kind": "rewind", "title": title, "body": body, "confirm": confirm}
+        elif built.overlay == "hint":
+            title, body, confirm = hud.confirm_hint(self.ui, app.HINT_STRATEGY.title())
+            out["modal"] = {"kind": "hint", "title": title, "body": body, "confirm": confirm}
+        return out
 
     def op_net_reply(self, req: int, state: str, body: str) -> dict:
         """The page carried out an ``http`` or ``bridge`` effect; hand its answer

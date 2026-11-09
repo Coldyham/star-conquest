@@ -121,7 +121,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `playstyle.py --baseline`, `playstyle_worker.py` | Regenerate the Playstyle bots column; the readings worker | leaderboard.md |
 | `render_board.py` | Render the board's Jinja2 pages | leaderboard.md |
 | `parity_replays.py` | Record the replay-parity corpus: seeded bot games and stored logs, a digest per turn | html-frontend.md |
-| `parity_shots.py`, `parity_sheet.py` | Draw every pygame screen as the visual baseline; contact sheets pairing it with the HTML build's shots | html-frontend.md |
+| `parity_shots.py`, `parity_next.py`, `parity_sheet.py` | Draw every pygame screen as the visual baseline; shoot the same recipes in the HTML build; contact sheets pairing the two | html-frontend.md |
 | `fetch_pyodide.py`, `build_next.py` | The pinned, checksum-checked Pyodide; stage `/next/` (page, Pyodide, the hashed game zip) | html-frontend.md |
 | `spike_bench.py`, `spike_pygbag.py`, `chrome.mjs` | The Pyodide gate: decide times native, in Node, in Chrome and in pygbag; startup; download sizes; replay parity in Pyodide. `chrome.mjs` drives headless Chrome over DevTools with no npm | html-frontend.md |
 | `dump_film_fixtures.py` | Turn films for the JS `Reel` mirror's test | html-frontend.md |
