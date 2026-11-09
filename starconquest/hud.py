@@ -386,8 +386,9 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     to the left edge, and the buttons that hand control to the AI or a review
     mode (History, Clear, Route, Autoplay, Play, Fast forward) packed right.
     Where the strip is too narrow the least essential fold behind a "more"
-    button, kept longest first: acting in this game (Clear, Route, Hint), then
-    looking at or handing it over (History, Play, Autoplay), then leaving it
+    button, kept longest first: acting in this game (Clear, Route, Undo), then
+    looking at or handing it over (History, Play, then Hint, which as training
+    help folds before Play, then Autoplay), then leaving it
     (Menu last, since it reaches everything else). Fast forward outranks them
     all, being offered only when watching is all there is to do. Route mode
     gets a strip of its own.
@@ -442,7 +443,7 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     if ui.can_undo(state):
         specs.append(("undo_button_rect", "Undo", "U", "amber", 9, "right"))
     if ui.can_review(state):
-        specs.append(("history_button_rect", "History", "H", "violet", 7, "right"))
+        specs.append(("history_button_rect", "History", "H", "violet", 8, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
     if not ui.spectating:   # a spectator has nothing to clear
@@ -460,11 +461,11 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
         if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", None, "active", 10, "right"))
+            specs.append(("hint_button_rect", "✗", None, "active", 6, "right"))
             if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", None, "green", 10, "right"))
+                specs.append(("hint_apply_rect", "✓", None, "green", 6, "right"))
         else:
-            specs.append(("hint_button_rect", "Hint", "K", "gold", 10, "right"))
+            specs.append(("hint_button_rect", "Hint", "K", "gold", 6, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -475,7 +476,7 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     if not ui.in_pbp:
         specs.append(("autoplay_button_rect", "Take control" if ui.autoplay else "Autoplay", "A", "active" if ui.autoplay else "blue", 5, "right"))
         if not ui.autoplay:
-            specs.append(("play_pause_rect", "Pause" if ui.playing else "Play", "P", "active" if ui.playing else "blue", 6, "right"))
+            specs.append(("play_pause_rect", "Pause" if ui.playing else "Play", "P", "active" if ui.playing else "blue", 7, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means

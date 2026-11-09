@@ -1859,8 +1859,9 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     button (`_lay_out_footer`) rather than drawn overlapping. The ranking matters because a touch player has
     no keys to fall back on, and runs in three tiers, kept longest first:
 
-    - acting in this game: Clear, Route, Hint (its ✗/✓ pair alike);
-    - looking at or handing it over: History, Play, Autoplay;
+    - acting in this game: Clear, Route, Undo;
+    - looking at or handing it over: History, Play, then Hint (its ✗/✓ pair
+      alike: training help, so it folds before Play), Autoplay;
     - leaving it: Menu, Retry, New map — Menu last of these to go, since it
       reaches everything else (Esc goes there too).
 
