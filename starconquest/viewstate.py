@@ -255,6 +255,12 @@ class Ui:
     history_max: int = 0
     history_reveal: bool = False
     dragging_scrubber: bool = False
+    # The standing rules on each history board (`GameLog.rules_for`, the live
+    # ones on the latest) and the live rules, held aside while `auto_forward`
+    # shows the reviewed board's (`show_history_rules`, the same swap as fog);
+    # `leave_history_rules` puts them back.
+    history_rules: list[dict[int, ForwardRule]] = field(default_factory=list)
+    live_rules: dict[int, ForwardRule] | None = None
     # End-of-game graphs over the reviewed map (`render._draw_history_graph`),
     # docked over the map's lower part or, with `graph_full`, filling the whole
     # space between the bars; the scrubber stays either way. `history_chart` is
@@ -784,6 +790,22 @@ class Ui:
         self.history_turn = max(0, min(self.coach_review.notes[self.coach_sel].turn, self.history_max))
         self.playing = False
         self.clear_fading_marks()   # a jump, as with the scrubber
+
+    def show_history_rules(self) -> None:
+        """Under review, `auto_forward` is the rules standing on the board on
+        screen, not the end of the game's, so every reader (the map, the panel,
+        a hold badge) shows that turn's as it was played."""
+        if self.live_rules is None:
+            return
+        i = self.history_turn
+        self.auto_forward = self.history_rules[i] if 0 <= i < len(self.history_rules) else {}
+
+    def leave_history_rules(self) -> None:
+        """Back to the live rules on leaving review."""
+        if self.live_rules is not None:
+            self.auto_forward = self.live_rules
+        self.live_rules = None
+        self.history_rules = []
 
     def toggle_trace(self, pid: int) -> None:
         """Show or hide ``pid``'s line on the graphs."""

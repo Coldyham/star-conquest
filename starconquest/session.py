@@ -514,6 +514,7 @@ class Session:
         ui.clear_fading_marks()
         if self.live_fog is not None:
             ui.visible, ui.seen, ui.player_intel = self.live_fog
+        ui.leave_history_rules()
         self.history = self.live_fog = None
 
     def _shown(self) -> GameState:
@@ -530,6 +531,7 @@ class Session:
             ui.visible, ui.seen, ui.player_intel = every, set(every), {}
         else:
             ui.visible, ui.seen, ui.player_intel = fog[i]
+        ui.show_history_rules()
         return states[i]
 
     def _held(self) -> dict | None:
