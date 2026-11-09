@@ -63,7 +63,7 @@
 
 /* --- the panel ------------------------------------------------------------ */
 #setup .panel {
-  width: 560px; height: 496px; background: var(--m-panel); border: 1px solid var(--m-border); border-radius: 10px;
+  width: 560px; max-width: calc(100vw / var(--zoom, 1) - 20px); height: 496px; background: var(--m-panel); border: 1px solid var(--m-border); border-radius: 10px;
   overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--m-btn-edge) transparent;
 }
 .tab-basic { padding: 34px 34px 0; }
@@ -245,18 +245,27 @@ input.seed:focus { border-color: var(--m-hl-edge); }
 
 /* portrait: title, tabs, the panel as tall as its tallest tab, the map, then the actions */
 .compact.portrait #setup .main { flex: none; }
-.compact.portrait #setup .panel { height: 56vh; height: calc(56dvh / var(--zoom, 1)); }
-.compact.portrait #setup .columns { grid-template-columns: 1fr; }
-.compact.portrait .lanecheck .caveat { white-space: normal; }
-.compact.portrait .tab-basic { padding: 16px 18px 0; }
+.compact #setup .panel { display: grid; align-items: start; }
+.compact #setup .panel > div { grid-area: 1 / 1; }
+.compact #setup .panel > .off { visibility: hidden; }
+.compact.portrait #setup .panel { height: auto; max-height: 56vh; max-height: calc(56dvh / var(--zoom, 1)); }
 .compact.portrait .tab-basic .row, .compact.portrait .checks .row { height: 46px; }
-.compact.portrait .tab-combat .section:has(.short) .long { display: none; }
-.compact.portrait .tab-combat .section .short { display: inline; }
-.compact.portrait .readout .headline { font-size: 18px; line-height: 24px; }
-.compact.portrait .lanecheck { flex-wrap: wrap; height: auto; }
-.compact.portrait .lanecheck .caveat { order: 3; flex-basis: 100%; }
-.compact.portrait .lanecheck .check { margin-left: auto; }
-.compact.portrait .matrix thead th:first-child, .compact.portrait .matrix tbody th { width: 64px; }
+
+/* A panel narrower than pygame's `menu._NARROW_PANEL_W` stacks what sits side by
+   side (the Advanced and Combat tabs' two columns) and reflows its prose, by the
+   panel's own width: an upright phone with room keeps both columns. */
+#setup .panel { container-type: inline-size; }
+@container (max-width: 499px) {
+  .columns { grid-template-columns: 1fr; }
+  .tab-basic { padding: 16px 18px 0; }
+  .tab-combat .section:has(.short) .long { display: none; }
+  .tab-combat .section .short { display: inline; }
+  .readout .headline { font-size: 18px; line-height: 24px; }
+  .lanecheck { flex-wrap: wrap; height: auto; }
+  .lanecheck .caveat { order: 3; flex-basis: 100%; white-space: normal; }
+  .lanecheck .check { margin-left: auto; }
+  .matrix thead th:first-child, .matrix tbody th { width: 64px; }
+}
 
 /* landscape: the title, map and actions in a column on the left, the tabs and panel beside it */
 .compact:not(.portrait) #setup {

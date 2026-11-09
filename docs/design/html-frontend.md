@@ -201,9 +201,15 @@ play-by-post, gauntlet stages, and the map maker.
 ## The setup menu (phase 2)
 
 `/next/` opens on the setup menu (`js/menu.mjs`, `css/menu.css`), laid out as
-pygame's: on a desktop its 1440x960 canvas, on a phone the compact menu, the
-panel scrolling, a sketch of the map and the actions in a grid along the foot,
-sideways the title, map and actions in a column beside the panel. The address
+pygame's: on a desktop its 1440x960 canvas, on a phone the compact menu, a
+sketch of the map and the actions in a grid along the foot, sideways the
+title, map and actions in a column beside the panel. As in pygame, a panel
+narrower than 500 units (`menu._NARROW_PANEL_W`) stacks the Advanced and
+Combat tabs' two columns, judged by a container query on the panel's own
+width, so an upright phone with room keeps both. A phone is sent every tab
+(`setupmenu.view`'s ``panels``) and lays the others, hidden, under the one
+shown, so the panel is as tall as its tallest tab (pygame's
+`_tallest_tab_h`) and never moves as the tabs change. The address
 pre-fills it as the command line pre-fills pygame's
 (`?players=3&nodes=30&seed=7&mode=symmetric&fog=1`, fog as sight in hops), then
 a shared link (`#<token>`) does; `&go` skips the menu and plays it. Start
