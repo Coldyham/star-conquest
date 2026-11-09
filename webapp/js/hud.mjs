@@ -45,7 +45,10 @@ const measure = document.createElement("canvas").getContext("2d");
  * is portrait. Sets `--zoom` and the `touch`, `compact` and `portrait` classes
  * on the root, which the stylesheet lays out by. */
 export function fitLayout() {
-  const finger = matchMedia("(hover: none)").matches;
+  // ?input=touch or ?input=mouse says which to assume: for trying the phone
+  // layouts on a desktop, and for headless shots, where `hover` can't be faked.
+  const input = new URLSearchParams(location.search).get("input");
+  const finger = input ? input === "touch" : matchMedia("(hover: none)").matches;
   const cw = innerWidth, ch = innerHeight;
   let zoom = 1;
   if (finger) {

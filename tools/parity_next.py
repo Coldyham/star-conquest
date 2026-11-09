@@ -46,7 +46,8 @@ def shoot(recipe: dict, size: str) -> str:
     path = OUT / size / f"{recipe['name']}.png"
     path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
-        ["node", str(ROOT / "tools" / "chrome.mjs"), f"http://127.0.0.1:{PORT}/next/",
+        ["node", str(ROOT / "tools" / "chrome.mjs"),
+         f"http://127.0.0.1:{PORT}/next/?input={'touch' if SIZES[size][1] else 'mouse'}",
          "--until", "window.scNext && window.scNext.game.view", "--timeout", "60",
          "--size", SIZES[size][0], *(["--mobile"] if SIZES[size][1] else []),
          "--shot", str(path), "--eval", SCRIPT % json.dumps(recipe)],

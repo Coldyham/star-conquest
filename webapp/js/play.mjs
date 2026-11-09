@@ -5,7 +5,8 @@
 // (`starconquest.play`), and the reply's `view` is drawn as it stands. What
 // is only about looking stays here: the camera, the pointer's hover and drag,
 // and the film's clock. A setup comes from the address until the menu is
-// built: ?players=3&nodes=30&seed=7&mode=symmetric&fog=1 (sight in hops).
+// built: ?players=3&nodes=30&seed=7&mode=symmetric&fog=1 (sight in hops);
+// ?input=touch lays it out for a finger (`hud.fitLayout`).
 
 import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
