@@ -39,7 +39,7 @@ from starconquest.viewstate import CHOOSING, SELECTED, Ui
 
 def _make_ui(state):
     ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
-    # mirror main.new_ui: with fog off (the default) the whole map is visible
+    # mirror app.new_ui: with fog off (the default) the whole map is visible
     ui.visible = set(state.systems)
     ui.seen = set(state.systems)
     return ui
@@ -288,7 +288,7 @@ def test_a_seat_left_to_the_seed_is_revealed_by_the_win_message():
     the overlay reads the bot that actually played rather than the placeholder,
     and says it was dealt at random. Revealing it at game over is the payoff,
     and costs nothing: there is no turn left to play with the knowledge."""
-    from starconquest import main
+    from starconquest import app
     from starconquest.settings import RANDOM_STRATEGY, Settings, build_state
 
     ai.load_models()   # a random seat is dealt from the roster `models/` registers
@@ -298,7 +298,7 @@ def test_a_seat_left_to_the_seed_is_revealed_by_the_win_message():
         cfg.ai_strategy[1] = RANDOM_STRATEGY          # seat 2
         state = build_state(cfg, 5)
         ui = _make_ui(state)
-        ui.seat_bots = main.seat_bot_labels(state)
+        ui.seat_bots = app.seat_bot_labels(state)
         ui.random_seats = frozenset({2})
         state.winner = 2
         label = render._winner_label(state, ui)
@@ -1315,7 +1315,7 @@ def test_history_panel_swaps_the_legend_and_drops_the_live_controls():
 
 
 def test_a_shared_match_never_offers_rewind():
-    """Rewinding rebuilds a fresh, un-networked `Ui` (`main.resume_game`), which
+    """Rewinding rebuilds a fresh, un-networked `Ui` (`app.resume_game`), which
     would silently fork the local view away from a match the server and every
     other seat still think is at a later turn — so play-by-post must never offer
     the button, however far back the scrubber sits."""

@@ -315,8 +315,8 @@ def test_an_autoplay_demo_plays_the_same_game_the_bot_column_does():
     cfg.ai_strategy = ["marshal", "knower", "heuristic"]
 
     # The app's own autoplay path: no human seat at all, every seat decided by
-    # the engine's own loop (`main.resolve_turn` passes no `human_orders`), each
-    # turn's rng derived as `main.resolve_turn` derives it.
+    # the engine's own loop (`app.resolve_turn` passes no `human_orders`), each
+    # turn's rng derived as `app.resolve_turn` derives it.
     state = settings_mod.build_state(replace(cfg, autoplay=True), 7)
     assert state.human() is None
     turns = 0
@@ -397,7 +397,7 @@ def test_reconstructing_a_replay_never_asks_a_seat_to_decide_anything():
 def test_an_unresolved_log_is_left_unfinished():
     """A run that hits max_turns without a winner (a draw counts as a winner —
     `state.winner == 0` — so this is genuinely unresolved) must not be recorded
-    as finished with no winner, the same guard `main.resolve_turn` applies."""
+    as finished with no winner, the same guard `app.resolve_turn` applies."""
     cfg = _setup()
     log = replay.new_log(cfg, 11)
     result = sim.play_settings(cfg, 11, "heuristic", max_turns=2, log=log)

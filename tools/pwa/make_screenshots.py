@@ -19,7 +19,7 @@ from pathlib import Path
 import pygame
 
 from starconquest import ai, config, engine, render
-from starconquest import main  # reuse new_ui/refresh_fog (fog seeding); import is guarded, no side effects
+from starconquest import app  # reuse new_ui (fog seeding)
 from starconquest.settings import Settings, build_state
 
 OUT = Path(__file__).resolve().parent
@@ -53,7 +53,7 @@ def _render(w: int, h: int, turns: int) -> pygame.Surface:
             break
         engine.end_turn(state, decide=ai.decide)
 
-    ui = main.new_ui(state, autoplay=False)  # seeds the human's fog at this board
+    ui = app.new_ui(state, autoplay=False)  # seeds the human's fog at this board
     surface = pygame.Surface((w, h))
     render.draw(surface, state, ui)
     return surface

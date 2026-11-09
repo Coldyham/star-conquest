@@ -16,7 +16,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
-from starconquest import campaign, config, main, mapgen, menu, pbp, render
+from starconquest import app, campaign, config, mapgen, menu, pbp, render
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.settings import Settings
@@ -318,10 +318,10 @@ def test_main_writes_the_label_each_frame_but_never_for_a_watched_replay(monkeyp
     watch = campaign.Watcher()
     watch.status = status(why="grace", graceUntil=NOW + 30 * MIN, received=time.monotonic())
     monkeypatch.setattr(campaign, "enabled", lambda: False)   # pump is a no-op
-    main.campaign_tick(ui, Settings(seed=42), watch)
+    app.campaign_tick(ui, Settings(seed=42), watch)
     assert ui.campaign_label == "Node 3: post within 30 min"
     ui.watched = True
-    main.campaign_tick(ui, Settings(seed=42), watch)
+    app.campaign_tick(ui, Settings(seed=42), watch)
     assert ui.campaign_label is None
 
 
@@ -335,18 +335,18 @@ def test_a_game_started_after_losing_access_is_told_its_win_wont_count():
 
 def test_the_stamp_taken_at_start_rides_on_the_posted_score(monkeypatch):
     settings = Settings(seed=42)
-    state, ui, log = main.start_game(settings, 42, False)
+    state, ui, log = app.start_game(settings, 42, False)
     state.turn = 30            # a challenge with no turns reads as none at all
     watch = campaign.Watcher()
     watch.status = status(why="adjacent")
-    main.stamp_campaign(ui, watch)
+    app.stamp_campaign(ui, watch)
     assert ui.campaign_start == "adjacent"
-    shared = main.challenge_settings(settings, state, ui, 42, log)
+    shared = app.challenge_settings(settings, state, ui, 42, log)
     assert shared.challenge is not None and shared.challenge.campaign == "adjacent"
     back = Settings.from_token(shared.to_token())
     assert back.challenge is not None and back.challenge.campaign == "adjacent"
     # Nothing looked up, nothing claimed.
     watch.status = None
-    main.stamp_campaign(ui, watch)
-    again = main.challenge_settings(settings, state, ui, 42, log).challenge
+    app.stamp_campaign(ui, watch)
+    again = app.challenge_settings(settings, state, ui, 42, log).challenge
     assert again is not None and again.campaign == ""

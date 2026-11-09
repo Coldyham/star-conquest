@@ -3,7 +3,7 @@
 Two kinds of case, each stored with the board digest after every turn
 (`replay.digest_hex`, index 0 is the opening board):
 
-* **live**: a seeded all-bot game played here the way `main.resolve_turn` plays
+* **live**: a seeded all-bot game played here the way `app.resolve_turn` plays
   one (`replay.reseed`, then `engine.end_turn` with `ai.decide`), every wall-clock
   guard lifted (`ai.set_budget_scale(math.inf)`), so a re-run must decide the
   same orders. Re-playing it checks the bots; reconstructing its log checks the
@@ -113,7 +113,7 @@ def live_settings(case: Live) -> Settings:
 
 
 def _play(settings: Settings, seed: int, cap: int) -> tuple[replay.GameLog, list[str], int | None]:
-    """An all-bot match played as `main.resolve_turn` plays one, digests per turn."""
+    """An all-bot match played as `app.resolve_turn` plays one, digests per turn."""
     state = build_state(settings, seed)
     log = replay.new_log(settings, seed, state)
     digests = [replay.digest_hex(state)]

@@ -9,7 +9,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 import pytest
 
-from starconquest import config, fog, main, render, replay, stats
+from starconquest import app, config, fog, render, replay, stats
 from starconquest import input as game_input
 from starconquest.settings import Settings
 import itertools
@@ -23,10 +23,10 @@ def _finished_review(tmp_path, monkeypatch, turns=8, **setup):
     settings = Settings(seed=1, nodes=18, players=3, **setup)
     log = replay.new_log(settings, 1)
     log.path = tmp_path / "game.json"
-    state, ui = main.resume_game(log, settings)
+    state, ui = app.resume_game(log, settings)
     ui.autoplay = True
     for _ in range(turns):
-        main.resolve_turn(state, ui, log, settings)
+        app.resolve_turn(state, ui, log, settings)
     return screen, state, ui, log
 
 
@@ -35,7 +35,7 @@ def test_a_chart_reads_every_board_it_is_given(tmp_path, monkeypatch):
     scoreboard says about that board — the graph never disagrees with the map."""
     try:
         _screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
-        states, _fog, _events = main.build_history(ui, log)
+        states, _fog, _events = app.build_history(ui, log)
         chart = stats.chart(states)
         assert chart.turns == log.turn_count
         assert chart.seats == tuple(sorted(p.id for p in state.non_neutral_players()))
@@ -77,7 +77,7 @@ def test_an_empty_history_charts_nothing():
 def _mid_game_review(tmp_path, monkeypatch, turns=12, **setup):
     _screen, state, ui, log = _finished_review(tmp_path, monkeypatch, turns, **setup)
     assert state.winner is None
-    states, fogs, _e, _l = main.open_history(state, ui, log)
+    states, fogs, _e, _l = app.open_history(state, ui, log)
     assert not ui.history_reveal
     known = stats.sightings(states, [f[0] for f in fogs], ui.human_id)
     return ui, known
@@ -141,7 +141,7 @@ def test_a_knocked_out_rival_stays_known_once_sighted():
 def test_g_toggles_the_graphs_and_tab_cycles_the_metric(tmp_path, monkeypatch):
     try:
         _screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
-        main.open_history(state, ui, log)
+        app.open_history(state, ui, log)
         shown = ui.history_graph
         game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_g, mod=0), state, ui)
         assert ui.history_graph is not shown
@@ -158,7 +158,7 @@ def test_clicking_the_plot_jumps_to_that_turn(tmp_path, monkeypatch):
     right edge lands on the final turn and one on its left on the opening."""
     try:
         screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
-        states, _f, _e, _l = main.open_history(state, ui, log)
+        states, _f, _e, _l = app.open_history(state, ui, log)
         ui.history_graph = True
         ui.history_turn = ui.history_max // 2
         render.draw(screen, states[ui.history_turn], ui)
@@ -182,7 +182,7 @@ def test_clicking_the_plot_jumps_to_that_turn(tmp_path, monkeypatch):
 def test_closed_graphs_leave_no_hit_rects(tmp_path, monkeypatch):
     try:
         screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
-        states, _f, _e, _l = main.open_history(state, ui, log)
+        states, _f, _e, _l = app.open_history(state, ui, log)
         ui.history_graph = False
         render.draw(screen, states[-1], ui)
         assert ui.graph_plot_rect == (0, 0, 0, 0) and ui.graph_tab_rects == []
@@ -193,7 +193,7 @@ def test_closed_graphs_leave_no_hit_rects(tmp_path, monkeypatch):
 
 def _open_graphs(tmp_path, monkeypatch):
     screen, state, ui, log = _finished_review(tmp_path, monkeypatch)
-    states, _f, _e, _l = main.open_history(state, ui, log)
+    states, _f, _e, _l = app.open_history(state, ui, log)
     ui.history_reveal = True          # every seat offered, as on a finished game
     ui.history_graph = True
     return screen, states[-1], ui
@@ -389,12 +389,12 @@ def test_a_reviewed_turn_holds_its_fight_and_hull_marks(tmp_path, monkeypatch):
     from starconquest import turnfilm
     try:
         screen, state, ui, log = _finished_review(tmp_path, monkeypatch, turns=30)
-        states, fogs, events, _l = main.open_history(state, ui, log)
+        states, fogs, events, _l = app.open_history(state, ui, log)
         ui.stop_film()                # the last live turn's, still running headless
         fight_turn = next(i for i, evs in enumerate(events)
                           if any(isinstance(e, turnfilm.Landed) and e.steps for e in evs))
         ui.history_turn = fight_turn
-        main.hold_history_marks(ui, states, fogs, events)
+        app.hold_history_marks(ui, states, fogs, events)
         ui.visible, ui.seen, ui.player_intel = fogs[fight_turn]
         marks = list(render._flash_marks(states[fight_turn], ui))
         assert marks and all(m.fade == 0.0 and m.phase == 1.0 for m in marks)
@@ -404,7 +404,7 @@ def test_a_reviewed_turn_holds_its_fight_and_hull_marks(tmp_path, monkeypatch):
         render.draw(screen, states[fight_turn], ui)
 
         ui.history_turn = 0           # the opening: nothing happened yet
-        main.hold_history_marks(ui, states, fogs, events)
+        app.hold_history_marks(ui, states, fogs, events)
         assert list(render._flash_marks(states[0], ui)) == []
     finally:
         pygame.quit()

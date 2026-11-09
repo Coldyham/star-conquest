@@ -173,7 +173,7 @@ class SimResult:
 class ReplayResult:
     """One bot's run through a stored setup, seen from the human seat it took over.
 
-    Mirrors what a win writes into a challenge link (``main.challenge_settings``):
+    Mirrors what a win writes into a challenge link (``app.challenge_settings``):
     ``turns`` is ``state.turn`` at the win and ``lost`` that seat's ``ships_lost``,
     so a bot's row and a human's score are the same two numbers measured the same
     way. ``won`` is the discriminator — a lost or timed-out game still reports both.
@@ -397,7 +397,7 @@ def play_settings(
     ``turns``/``lost`` report how long it lasted and what it spent. Never rank a
     lost game against a won one on turns alone.
 
-    ``log``, given, is filled in turn by turn exactly as ``main.resolve_turn``
+    ``log``, given, is filled in turn by turn exactly as ``app.resolve_turn``
     fills in a live match's — every seat's orders and combat draws, off the same
     ``TurnRecord`` every ``end_turn`` call already returns — so replaying it back
     through ``replay.reconstruct`` reproduces this exact run, with nothing
@@ -411,7 +411,7 @@ def play_settings(
     in this match at all, and that is the closest available flag to saying so; a
     caller keeping the log only for a win (``tools/bot_replay.py``) simply
     discards it otherwise. ``log.mark_finished`` is called only on an actual win
-    or loss (``state.winner is not None``), the same guard ``main.resolve_turn``
+    or loss (``state.winner is not None``), the same guard ``app.resolve_turn``
     uses — a log that hit ``max_turns`` unresolved is left correctly unfinished
     rather than marked finished with no winner.
     """

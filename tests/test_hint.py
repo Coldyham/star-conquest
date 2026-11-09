@@ -6,7 +6,7 @@ from __future__ import annotations
 import random
 
 from starconquest import ai, combat, config, engine
-from starconquest import main as game_main
+from starconquest import app
 from starconquest import settings as settings_mod
 from starconquest.geometry import WorldView
 from starconquest.model import Fleet, ForwardRule, Order
@@ -147,17 +147,17 @@ def test_a_hint_leaves_the_game_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(GameLog, "save", lambda self: None)
     before = (state.rng.getstate(), {sid: (n.owner_id, n.ships) for sid, n in state.systems.items()},
               state.players[1].ai_strategy)
-    assert game_main.press_hint(state, ui, log)    # the first press only asks
+    assert app.press_hint(state, ui, log)    # the first press only asks
     assert not ui.hinted and not ui.hint_live(state)
-    game_main.take_hint(state, ui, log)           # ...and the modal's Show takes it
+    app.take_hint(state, ui, log)           # ...and the modal's Show takes it
     assert ui.hinted and ui.hint_live(state) and log.hinted_from == state.turn
     assert all(o.owner_id == 1 and o.ships > 0 for o in ui.hint_orders)
     after = (state.rng.getstate(), {sid: (n.owner_id, n.ships) for sid, n in state.systems.items()},
              state.players[1].ai_strategy)
     assert before == after
-    assert not game_main.press_hint(state, ui, log)   # pressed again: hidden
+    assert not app.press_hint(state, ui, log)   # pressed again: hidden
     assert not ui.hint_live(state) and ui.hinted
-    assert not game_main.press_hint(state, ui, log)   # and again: shown, no second ask
+    assert not app.press_hint(state, ui, log)   # and again: shown, no second ask
     assert ui.hint_live(state)
 
 
@@ -267,7 +267,7 @@ def test_a_shown_hint_splits_into_hide_and_apply():
     try:
         state, ui, _ = _game()
         ui.view = _footer_ui(state).view
-        ui.hint_orders = game_main.hint_orders(state, 1)
+        ui.hint_orders = app.hint_orders(state, 1)
         ui.hint_turn = state.turn
         assert ui.hint_left(state)
         render.draw(screen, state, ui)

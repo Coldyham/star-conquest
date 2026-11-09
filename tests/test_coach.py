@@ -10,7 +10,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
 
-from starconquest import coach, combat, config, engine, main, render, replay
+from starconquest import app, coach, combat, config, engine, render, replay
 from starconquest import input as game_input
 from starconquest.model import Order
 from starconquest.settings import Settings
@@ -151,12 +151,12 @@ def _decided_review(tmp_path, monkeypatch):
     settings = Settings(seed=1, nodes=18, players=3)
     log = replay.new_log(settings, 1)
     log.path = tmp_path / "game.json"
-    state, ui = main.resume_game(log, settings)
+    state, ui = app.resume_game(log, settings)
     ui.autoplay = True
     while state.winner is None and state.turn < 300:
-        main.resolve_turn(state, ui, log, settings)
+        app.resolve_turn(state, ui, log, settings)
     assert state.winner is not None
-    states, _f, _e, _l = main.open_history(state, ui, log)
+    states, _f, _e, _l = app.open_history(state, ui, log)
     return screen, states, ui
 
 
@@ -197,9 +197,9 @@ def test_no_coach_mid_game(tmp_path, monkeypatch):
     settings = Settings(seed=1, nodes=14, players=2)
     log = replay.new_log(settings, 1)
     log.path = tmp_path / "game.json"
-    state, ui = main.resume_game(log, settings)
+    state, ui = app.resume_game(log, settings)
     ui.autoplay = True
     for _ in range(4):
-        main.resolve_turn(state, ui, log, settings)
-    main.open_history(state, ui, log)
+        app.resolve_turn(state, ui, log, settings)
+    app.open_history(state, ui, log)
     assert ui.coach_review is None and not ui.coach_open

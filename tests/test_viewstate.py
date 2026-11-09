@@ -66,7 +66,7 @@ def test_reset_view_ignores_unseen_systems_even_when_owned_by_a_rival():
 
 
 def test_reset_view_frames_the_whole_map_once_defeated():
-    """Defeat force-reveals fog elsewhere (main._accumulate_fog); the camera
+    """Defeat force-reveals fog elsewhere (app._accumulate_fog); the camera
     should stop hiding the map too, even if `seen` never grew past the start."""
     systems = [System(id=i, pos=(float(i * 10), 0.0)) for i in range(5)]
     state = _state(systems, human_alive=False)

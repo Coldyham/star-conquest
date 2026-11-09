@@ -25,7 +25,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 import pytest
 
-from starconquest import main as app
+from starconquest import app
 from starconquest import ai, config, engine, pbp, replay, webstore
 from starconquest.model import ForwardRule, GameState, Order
 from starconquest.paths import WEB_AUTH_KEY

@@ -122,8 +122,8 @@ def test_consecutive_events_of_one_kind_share_a_beat():
 
 
 def test_linger_gives_combat_its_own_dwell_and_a_trailing_hold():
-    """A live End Turn (`main.resolve_turn`) asks for this; history playback
-    (`main._next_history_film`) never does, since a run of animated turns there
+    """A live End Turn (`app.resolve_turn`) asks for this; history playback
+    (`app._next_history_film`) never does, since a run of animated turns there
     must glide continuously rather than stop-start for every fight."""
     film = turnfilm.film([_landed(0), _landed(1), _landed(2)], linger=True)
     assert film.beats[0].ms == config.FILM_LINGER_COMBAT_MS
@@ -211,7 +211,7 @@ def test_a_lead_borrows_only_what_is_actually_there():
 
 def test_a_fight_lands_on_the_films_closing_instant():
     """Which is the frame the next turn's glide starts on, so a chained run of
-    animated turns never stops for one (`main._next_history_film`). The burst
+    animated turns never stops for one (`app._next_history_film`). The burst
     outliving the join is `Ui.fading_fights`' job, not the film's."""
     film = turnfilm.film([turnfilm.Advanced(((0, 3),)), _landed(0), _landed(1)])
     at = [ms for ms, e in film.cues if isinstance(e, turnfilm.Landed)]

@@ -9,7 +9,7 @@ import pygame
 import pytest
 
 from starconquest import config, gauntlet, menu, paths, replay, run, webstore
-from starconquest import main as game_main
+from starconquest import app, main
 from starconquest.settings import Settings
 
 
@@ -212,7 +212,7 @@ def _win(state, ui, turns: int) -> None:
 def test_a_run_game_plays_ironman_without_the_hint(screen):
     g = _chain()
     ms, settings = _menu(g)
-    opened = game_main.open_run(ms, settings, fresh=True)
+    opened = main.open_run(ms, settings, fresh=True)
     assert opened is not None
     state, ui, log, _seed = opened
     assert ui.run_id and ui.ironman and (ui.run_at, ui.run_total) == (1, 3)
@@ -226,22 +226,22 @@ def test_a_run_game_plays_ironman_without_the_hint(screen):
 def test_a_run_win_within_target_carries_on_and_a_slow_one_ends_it(screen):
     g = _chain()
     ms, settings = _menu(g)
-    opened = game_main.open_run(ms, settings, fresh=True)
+    opened = main.open_run(ms, settings, fresh=True)
     assert opened is not None
     state, ui, log, _seed = opened
     _win(state, ui, 12)                 # target 14: met
-    game_main.record_run_step(state, ui, log)
+    app.record_run_step(state, ui, log)
     assert ui.run_ok and "1/3" in ui.run_note
     assert ui.offers_next_stage(state)
     r = run.active()
     assert r is not None and r.cleared == 1
 
-    nxt = game_main.open_run(ms, settings, fresh=False)    # Next stage
+    nxt = main.open_run(ms, settings, fresh=False)    # Next stage
     assert nxt is not None
     state, ui, log, _seed = nxt
     assert ui.run_at == 2 and ui.stage_target is None     # stage 1 has no target
     state.winner = 2                                      # a loss
-    game_main.record_run_step(state, ui, log)
+    app.record_run_step(state, ui, log)
     assert not ui.run_ok and "Run over at stage 2/3" in ui.run_note
     assert run.active() is None
 
@@ -249,13 +249,13 @@ def test_a_run_win_within_target_carries_on_and_a_slow_one_ends_it(screen):
 def test_in_a_run_an_earlier_best_does_not_carry_it_on(screen):
     g = _chain()
     ms, settings = _menu(g)
-    opened = game_main.open_run(ms, settings, fresh=True)
+    opened = main.open_run(ms, settings, fresh=True)
     assert opened is not None
     state, ui, log, _seed = opened
     ui.stage_met_before = True          # a fast win on this stage in free play
     _win(state, ui, 30)                 # this game: over the 14-turn target
     assert not ui.offers_next_stage(state)
-    game_main.record_run_step(state, ui, log)
+    app.record_run_step(state, ui, log)
     assert "14 turns or fewer not met" in ui.run_note
     ui.run_id = ""                      # the same game, as free play
     assert ui.offers_next_stage(state)
@@ -264,11 +264,11 @@ def test_in_a_run_an_earlier_best_does_not_carry_it_on(screen):
 def test_continuing_a_run_resumes_its_game_never_a_fresh_one(screen):
     g = _chain()
     ms, settings = _menu(g)
-    opened = game_main.open_run(ms, settings, fresh=True)
+    opened = main.open_run(ms, settings, fresh=True)
     assert opened is not None
     _state, _ui, log, _seed = opened
     assert log.path is not None
-    again = game_main.open_run(ms, settings, fresh=False)
+    again = main.open_run(ms, settings, fresh=False)
     assert again is not None
     _state, ui, back, _seed = again
     assert back.path is not None and back.path.name == log.path.name
@@ -280,9 +280,9 @@ def test_continuing_a_run_resumes_its_game_never_a_fresh_one(screen):
 def test_a_run_whose_game_is_gone_is_over(screen):
     g = _chain()
     ms, settings = _menu(g)
-    assert game_main.open_run(ms, settings, fresh=True) is not None
+    assert main.open_run(ms, settings, fresh=True) is not None
     webstore.set(paths.WEB_RUN_LOG_KEY, "")   # a cleared store, and no file on disk
-    assert game_main.open_run(ms, settings, fresh=False) is None
+    assert main.open_run(ms, settings, fresh=False) is None
     assert run.active() is None
     assert ms.gauntlet_note is None or "couldn't be loaded" in ms.gauntlet_note[1]
 
@@ -331,7 +331,7 @@ def test_start_run_puts_the_menu_on_the_first_stage_and_asks_main_to_run(screen)
 def test_a_run_under_way_offers_continue_and_abandon_takes_two_presses(screen):
     g = _chain()
     ms, settings = _open(g)
-    assert game_main.open_run(ms, settings, fresh=True) is not None
+    assert main.open_run(ms, settings, fresh=True) is not None
     ms, settings = _open(g)
     _list(ms, settings)
     assert "run_continue" in ms.rects and "run_start" not in ms.rects
@@ -346,7 +346,7 @@ def test_a_run_under_way_offers_continue_and_abandon_takes_two_presses(screen):
 def test_starting_over_another_gauntlets_run_asks_first(screen):
     first, second = _chain(gid="first"), _chain(gid="second")
     ms, settings = _open(first, [second])
-    assert game_main.open_run(ms, settings, fresh=True) is not None
+    assert main.open_run(ms, settings, fresh=True) is not None
     ms, settings = _open(second, [first])
     assert _press(ms, settings, "run_start") is None and ms.run_confirm == "run_start"
     assert _press(ms, settings, "run_start") == "run"
@@ -355,11 +355,11 @@ def test_starting_over_another_gauntlets_run_asks_first(screen):
 def test_continue_run_puts_the_menu_on_the_runs_stage(screen):
     g = _chain()
     ms, settings = _open(g)
-    opened = game_main.open_run(ms, settings, fresh=True)
+    opened = main.open_run(ms, settings, fresh=True)
     assert opened is not None
     state, ui, log, _seed = opened
     _win(state, ui, 12)
-    game_main.record_run_step(state, ui, log)
+    app.record_run_step(state, ui, log)
     ms, settings = _open(g)
     assert _press(ms, settings, "run_continue") == "run_continue"
     assert ms.stage_at == (g.id, 1)
@@ -370,11 +370,11 @@ def test_the_overlay_says_what_the_game_did_to_the_run(screen):
 
     g = _chain()
     ms, settings = _menu(g)
-    opened = game_main.open_run(ms, settings, fresh=True)
+    opened = main.open_run(ms, settings, fresh=True)
     assert opened is not None
     state, ui, log, _seed = opened
     _win(state, ui, 30)
-    game_main.record_run_step(state, ui, log)
+    app.record_run_step(state, ui, log)
     lines = [text for _k, text, _c in render._result_lines(state, ui)]
     assert ui.run_note in lines
     assert not any("not yet" in t or "Stage cleared" in t for t in lines)   # the run's line replaces the stage's

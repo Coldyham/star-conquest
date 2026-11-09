@@ -19,8 +19,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
-from starconquest import main as app
-from starconquest import ai, config, fog, input, mapgen, render, replay
+from starconquest import ai, app, config, fog, input, mapgen, render, replay
 from starconquest.model import Order
 
 pygame.init()

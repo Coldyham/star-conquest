@@ -15,7 +15,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
-from starconquest import main
+from starconquest import app
 from starconquest import config, mapgen, model, render
 from starconquest import input as game_input
 from starconquest.geometry import WorldView
@@ -359,7 +359,7 @@ def test_confirmed_rules_expand_into_orders_at_end_of_turn():
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
     ui.confirm_route(s)
-    orders = main.auto_forward_orders(s, ui)
+    orders = app.auto_forward_orders(s, ui)
     assert {(o.source_id, o.dest_id, o.ships) for o in orders} == {(0, 1, 5), (1, 2, 5)}
 
 
@@ -756,7 +756,7 @@ def test_resolving_a_turn_drops_any_open_plan():
     try:
         home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
         ui.route_sel = {home}
-        main.resolve_turn(state, ui)
+        app.resolve_turn(state, ui)
         assert ui.mode == IDLE and ui.route_sel == set()
     finally:
         pygame.quit()

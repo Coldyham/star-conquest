@@ -10,6 +10,7 @@ the result for side-by-side review (`tools/parity_sheet.py`).
     uv run python tools/parity_shots.py                 # every screen, every size
     uv run python tools/parity_shots.py --only game-    # names starting with this
     uv run python tools/parity_shots.py --list
+    uv run python tools/parity_shots.py --out results/parity/check   # redraw elsewhere, to compare
 
 Writes `results/parity/baseline/<size>/<name>.png` (the screen at each size,
 recorded as it goes and skipped when already there; `--force` redraws) and
@@ -37,6 +38,7 @@ import pygame
 
 from starconquest import (
     ai,
+    app,
     config,
     engine,
     gauntlet,
@@ -79,7 +81,7 @@ DUEL = {"players": 2, "nodes": 12}
 #   ["ui", method, *args]   a `Ui` method (state passed when it takes one)
 #   ["set", field, value]   a `Ui` field
 #   ["menu", field, value]  a `MenuState` field
-#   ["hint"]                the Hint, confirmed (`main.take_hint`)
+#   ["hint"]                the Hint, confirmed (`app.take_hint`)
 #   ["history", turn]       open history review at turn (-1: the latest)
 #   ["stage", gauntlet_id, stage_index]   the board is that gauntlet stage
 #   ["overlay", kind]       a confirm modal: quit, rewind, hint
@@ -251,7 +253,7 @@ def _play(state, ui, log, n: int, until_over: bool = False) -> None:
             human = engine.decide_seat(state, ui.human_id, ai.decide)
         record = engine.end_turn(state, human_orders=human, decide=ai.decide)
         log.record_turn(record, human_ai=True)
-        main.refresh_fog(state, ui)
+        app.refresh_fog(state, ui)
     ui.prune_forward(state)
 
 
@@ -272,7 +274,7 @@ def run_game(recipe: dict, screen: pygame.Surface) -> list:
             settings = gauntlet.stage_settings(st)
             seed = settings.seed if settings.seed is not None else seed
             stage = (g, st)
-    state, ui, log = main.start_game(settings, seed, autoplay=False, stage=stage)
+    state, ui, log = app.start_game(settings, seed, autoplay=False, stage=stage)
     history = None
     overlay = None
     resolved: list = []
@@ -299,9 +301,9 @@ def run_game(recipe: dict, screen: pygame.Surface) -> list:
             setattr(ui, step[1], value)
             step = ["set", step[1], step[2] if step[1] == "pbp_invite" else value]
         elif kind == "hint":
-            main.take_hint(state, ui, log)
+            app.take_hint(state, ui, log)
         elif kind == "history":
-            history = main.open_history(state, ui, log)
+            history = app.open_history(state, ui, log)
             if step[1] >= 0:
                 ui.history_turn = min(step[1], ui.history_max)
         elif kind == "overlay":
@@ -325,7 +327,7 @@ def run_game(recipe: dict, screen: pygame.Surface) -> list:
     elif overlay == "rewind":
         render.draw_confirm_rewind(screen, ui.history_turn)
     elif overlay == "hint":
-        render.draw_confirm_hint(screen, ui, main.HINT_STRATEGY.title())
+        render.draw_confirm_hint(screen, ui, app.HINT_STRATEGY.title())
     return resolved
 
 
@@ -343,7 +345,7 @@ def run_menu(recipe: dict, screen: pygame.Surface) -> list:
 
 def run_resume(recipe: dict, screen: pygame.Surface) -> list:
     settings = _settings(recipe)
-    state, ui, log = main.start_game(settings, recipe.get("seed", 0), autoplay=False)
+    state, ui, log = app.start_game(settings, recipe.get("seed", 0), autoplay=False)
     _play(state, ui, log, recipe["steps"][0][1])
     ms, idle = menu.MenuState(), Settings()
     menu._survey_lanes(ms, idle)
@@ -399,7 +401,12 @@ def main_cli() -> None:
     ap.add_argument("--only", default="", help="screens whose name starts with this")
     ap.add_argument("--force", action="store_true", help="redraw screens already on disk")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--out", default="", help="draw into this folder instead of the baseline "
+                    "(a regression check: compare it with the baseline byte for byte)")
     args = ap.parse_args()
+    global OUT
+    if args.out:
+        OUT = Path(args.out).resolve()
     wanted = [r for r in SCREENS if r["name"].startswith(args.only)]
     if args.list:
         for r in wanted:
@@ -415,7 +422,7 @@ def main_cli() -> None:
     for recipe in wanted:
         for size in recipe["sizes"]:
             path = OUT / size / f"{recipe['name']}.png"
-            if path.exists() and not args.force and recipe["name"] in out:
+            if path.exists() and not args.force and recipe["name"] in out and not args.out:
                 continue
             try:
                 resolved = shoot(recipe, size)
@@ -425,6 +432,8 @@ def main_cli() -> None:
                 continue
             out[recipe["name"]] = {**recipe, "steps": resolved}
             print(f"  {size:10} {recipe['name']}", flush=True)
+        if args.out:
+            continue
         RECIPES.parent.mkdir(parents=True, exist_ok=True)
         RECIPES.write_text(json.dumps(
             {"variant": "web", "sizes": SIZES, "clock_ms": CLOCK_MS,

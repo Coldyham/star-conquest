@@ -7,7 +7,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
 
-from starconquest import ai, config, main, render, replay
+from starconquest import ai, app, config, render, replay
 from starconquest import input as game_input
 from starconquest import settings as settings_mod
 from starconquest.settings import RANDOM_STRATEGY, Settings
@@ -27,7 +27,7 @@ def _game(tmp_path, monkeypatch):
     cfg = Settings(seed=5, nodes=18, players=3)
     cfg.ai_strategy[1] = RANDOM_STRATEGY
     cfg.ai_strategy[2] = "knower"
-    state, ui, log = main.start_game(cfg, 5, False)
+    state, ui, log = app.start_game(cfg, 5, False)
     return screen, cfg, state, ui, log
 
 
@@ -96,8 +96,8 @@ def test_the_graph_legend_names_each_seats_bot(tmp_path, monkeypatch):
         screen, cfg, state, ui, log = _game(tmp_path, monkeypatch)
         ui.autoplay = True
         for _ in range(4):
-            main.resolve_turn(state, ui, log, cfg)
-        states, *_ = main.open_history(state, ui, log)
+            app.resolve_turn(state, ui, log, cfg)
+        states, *_ = app.open_history(state, ui, log)
         ui.history_reveal = True
         ui.history_graph = ui.graph_full = True
         drawn = []
@@ -121,4 +121,4 @@ def test_a_stop_that_repeats_its_family_is_left_off():
     spec = ai.aux_spec("thinker")
     assert spec is not None
     state.players[2].ai_params.aux = float(spec[1] + names.index("Thinker"))
-    assert main.seat_bot_labels(state)[2] == "Thinker"
+    assert app.seat_bot_labels(state)[2] == "Thinker"

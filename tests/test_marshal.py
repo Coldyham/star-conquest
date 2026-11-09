@@ -153,7 +153,7 @@ def test_game_is_reproducible_from_its_seed():
 
 
 def test_marshal_works_as_the_autoplayed_human_seat():
-    """`main.resolve_turn` calls `ai.decide` for the human seat, out of pid order."""
+    """`app.resolve_turn` calls `ai.decide` for the human seat, out of pid order."""
     state = _state(seat=1)
     state.players[1].is_human = True
     for _ in range(5):
