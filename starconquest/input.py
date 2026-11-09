@@ -13,10 +13,10 @@ import copy
 
 import pygame
 
-from . import config, starlore, stats
+from . import config, play, stats
 from .geometry import dist, point_segment_dist
 from .model import GameState
-from .viewstate import CHOOSING, FOOTER_RECTS, IDLE, ROUTING, SELECTED, Ui
+from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SELECTED, Ui
 
 
 def pick_node(state: GameState, ui: Ui, pos: tuple[int, int]) -> int | None:
@@ -586,7 +586,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
             _arm_drag(state, ui, event.pos)
             return action
         if event.button == 3:
-            _cancel(ui)
+            play.cancel(ui)
     return None
 
 
@@ -614,102 +614,34 @@ def _arm_drag(state: GameState, ui: Ui, pos) -> None:
 
 def _arm_pan(ui: Ui, pos) -> None:
     """A press that hits nothing at all (no node, no lane, no button — the
-    same empty-space press ``_cancel`` already claims for deselection) arms a
+    same empty-space press ``play.cancel`` already claims for deselection) arms a
     camera-pan drag instead. No competing tap meaning exists there once
-    ``_cancel`` has run, so it's a free gesture, and it works identically for
+    ``play.cancel`` has run, so it's a free gesture, and it works identically for
     mouse and touch (unlike a modifier-key or alternate-button pan would)."""
     ui.pan_active = True
     ui.pan_last = pos
 
 
 def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
-    """Release of a drag over a system: if it's an adjacent neighbour of the
-    source, open the send/forward popup for that lane (same as tapping it)."""
-    src = ui.drag_src
-    target = pick_node(state, ui, pos)
-    if src is None or target is None or target == src:
-        return
-    if not state.are_adjacent(src, target):
-        return
-    ui.reset_selection()
-    ui.sel_forward = None
-    ui.selected = src
-    ui.mode = SELECTED
-    forward = shift or ui.opens_on_forward(state, src)
-    ui.begin_send(state, target, forward=forward)
+    """Release of a drag over a system: `play.drag_send` on whatever is under it."""
+    play.drag_send(state, ui, ui.drag_src, pick_node(state, ui, pos), shift)
 
 
-def _clear_selected(ui: Ui) -> None:
-    """Context-sensitive cancel/clear — shared by the X/Backspace/Delete keys and
-    their footer button: discard whatever the popup is editing (a composed send, or
-    the queued order / standing rule it was reopened on), else drop a dormant rule
-    highlighted without a popup, else drop the selected system's own forward rule.
-    A no-op when none of those apply."""
-    if ui.mode == CHOOSING:
-        ui.cancel_send()
-    elif ui.sel_forward is not None:
-        ui.clear_forward(ui.sel_forward)
-    elif ui.selected is not None:
-        ui.clear_forward(ui.selected)
+# pygame's keys by the `KeyboardEvent.key` names `play.key` reads.
+_KEY_NAMES = {pygame.K_RETURN: "Enter", pygame.K_KP_ENTER: "Enter", pygame.K_SPACE: " ",
+              pygame.K_BACKSPACE: "Backspace", pygame.K_DELETE: "Delete", pygame.K_ESCAPE: "Escape"}
+
+
+def _key_name(event) -> str:
+    return _KEY_NAMES.get(event.key) or pygame.key.name(event.key)
 
 
 def _handle_key(event, state: GameState, ui: Ui) -> str | None:
-    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-        # A play-by-post turn we have already submitted is not ours to end again:
-        # the turn advances when the last seat is in, not when anyone presses a
-        # key. Suppressed rather than swallowed further up so every other control
-        # — panning, looking, opening history — keeps working while you wait.
-        # A spectator has no turn to end at all.
-        return None if ui.awaiting_others(state) or ui.spectating else "end_turn"
-    if event.key in (pygame.K_p, pygame.K_a):
-        # Play and autoplay both resolve turns on a clock of their own, which a
-        # shared match has no room for: its turns advance when the last seat
-        # submits. Dead here exactly as their footer buttons are (`render`), so
-        # the key and the button cannot disagree about it.
-        if ui.in_pbp:
-            return None
-        return "toggle_play" if event.key == pygame.K_p else "toggle_autoplay"
-    if event.key == pygame.K_f:
-        # main gates this on the human actually being knocked out (see
-        # Ui.can_fast_forward); from here it is just another action string.
-        return "toggle_fast_forward"
-    if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
-        _clear_selected(ui)
-        return None
-    if event.key == pygame.K_n:
-        # a stage's seed is pinned: a new map would leave it (Retry stays)
-        return None if ui.in_stage else "restart"
-    if event.key == pygame.K_b and ui.in_stage:
-        ui.briefing_open = True
-        return None
-    if event.key == pygame.K_i:
-        _open_lore(state, ui, ui.selected if ui.selected is not None else ui.hover)
-        return None
-    if event.key == pygame.K_r:
+    action = play.key(state, ui, _key_name(event), shift=bool(getattr(event, "mod", 0) & pygame.KMOD_SHIFT))
+    if action == "reset_view":
         ui.reset_view(state)
         return None
-    if event.key == pygame.K_m:
-        return "menu"
-    if event.key == pygame.K_t:
-        return "retry" if ui.can_retry else None
-    if event.key == pygame.K_u:
-        return "undo" if ui.can_undo(state) else None
-    if event.key == pygame.K_h:
-        return "toggle_history"
-    if event.key == pygame.K_g:
-        return "toggle_route"
-    if event.key == pygame.K_k:
-        if event.mod & pygame.KMOD_SHIFT:
-            ui.apply_hint(state)   # a no-op unless the hint is up, as its button is
-            return None
-        # main gates this on `Ui.can_hint`, the same call that draws the button
-        return "hint"
-    if event.key == pygame.K_ESCAPE:
-        if ui.mode != IDLE or ui.sel_order is not None or ui.sel_forward is not None:
-            _cancel(ui)
-            return None
-        return "menu"
-    return None
+    return action
 
 
 def _handle_route_event(event, state: GameState, ui: Ui) -> str | None:
@@ -841,12 +773,6 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> str | None:
     return None
 
 
-def _open_lore(state: GameState, ui: Ui, sid: int | None) -> None:
-    """Put up the star info card for system ``sid``, if the catalogue has its name."""
-    if sid in state.systems and state.systems[sid].name in starlore.LORE:
-        ui.lore_sid = sid
-
-
 def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | None]:
     """The bar/on-map buttons that mean the same thing in every interaction scene.
 
@@ -872,13 +798,13 @@ def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | N
     if ui.undo_button_rect[2] and _point_in_rect(pos, ui.undo_button_rect):
         return True, "undo"
     if ui.clear_button_rect[2] and _point_in_rect(pos, ui.clear_button_rect):
-        _clear_selected(ui)
+        play.clear_selected(ui)
         return True, None
     if ui.stage_hint_rect[2] and _point_in_rect(pos, ui.stage_hint_rect):
         ui.briefing_open = True
         return True, None
     if ui.lore_button_rect[2] and _point_in_rect(pos, ui.lore_button_rect):
-        _open_lore(state, ui, ui.selected)
+        play.open_lore(state, ui, ui.selected)
         return True, None
     if _press_camera(state, ui, pos):
         return True, None
@@ -976,7 +902,7 @@ def _popup_press(state: GameState, ui: Ui, pos) -> bool:
             ui.cancel_send()
             return True
         if ui.done_rect[2] and _point_in_rect(pos, ui.done_rect):
-            _cancel(ui)   # what a tap on empty map does: the send stands, the source is let go
+            play.cancel(ui)   # what a tap on empty map does: the send stands, the source is let go
             return True
         # the count slider: grab it and jump to where the press landed. Must be
         # tested before the popup-background drag below, which would otherwise
@@ -1053,38 +979,13 @@ def _handle_left_click(state: GameState, ui: Ui, pos, shift: bool = False) -> st
         # clicks cycle through everything sharing the lane (else cancel).
         hit = _pick_lane(state, ui, pos)
         if hit is None:
-            _cancel(ui)
+            play.cancel(ui)
             _arm_pan(ui, pos)
-        elif hit[0] == "order":
-            ui.edit_order(state, hit[1])
         else:
-            ui.edit_forward(state, hit[1], hit[2])
+            play.tap_lane(state, ui, hit)
         return None
 
-    ui.sel_order = None  # selecting a system is composing, not editing an order/rule
-    ui.sel_forward = None
-    if ui.selected is not None and ui.mode in (SELECTED, CHOOSING):
-        if node == ui.selected:
-            ui.reset_selection()  # deselect the source
-        elif ui.mode == CHOOSING and node == ui.dest:
-            return None  # already targeting it; adjust via popup
-        elif ui.source(state) is not None and state.are_adjacent(ui.selected, node):
-            # commit a send-all to this neighbour and open the popup. Arm it as a
-            # forward rule when Shift is held (desktop), when the source has no
-            # ships to send right now — forwarding future production is then the
-            # only useful action, and it's the mobile-friendly default (no Shift) —
-            # or when it already forwards by a rule set up this turn.
-            forward = shift or ui.opens_on_forward(state, ui.selected)
-            ui.begin_send(state, node, forward=forward)
-        else:
-            ui.reset_selection()
-            ui.selected = node
-            ui.mode = SELECTED
-        return None
-
-    # IDLE
-    ui.mode = SELECTED
-    ui.selected = node
+    play.tap_system(state, ui, node, shift)
     return None
 
 
@@ -1112,30 +1013,4 @@ def _pick_lane(state: GameState, ui: Ui, pos) -> tuple[str, int, int] | None:
             d = point_segment_dist(pos, a, b)
             if d <= config.LANE_PICK_DIST:
                 hits.append((d, ("rule", src, dest)))
-    if not hits:
-        return None
-    order = [tag for _, tag in sorted(hits, key=lambda h: h[0])]  # nearest first, then order-before-rule
-    if ui.sel_order is not None:
-        current = ("order", ui.sel_order, -1)
-    elif ui.mode == CHOOSING and ui.forward_armed and ui.selected is not None and ui.dest is not None:
-        current = ("rule", ui.selected, ui.dest)
-    else:
-        current = None
-    if current in order:  # cycle to the next item on this lane
-        return order[(order.index(current) + 1) % len(order)]
-    return order[0]
-
-
-def _cancel(ui: Ui) -> None:
-    if ui.mode == CHOOSING:
-        source = ui.selected
-        ui.close_send()  # close the popup, keeping the committed send
-        # ...and finish with its source, so the next press on its neighbour selects
-        # that system instead of sending it a second fleet. It stays lit as a hover,
-        # and in the side panel, until the pointer moves or the next tap.
-        ui.reset_selection()
-        ui.hover = source
-    elif ui.sel_forward is not None:
-        ui.sel_forward = None  # deselect a highlighted (dormant) auto-forward rule
-    else:
-        ui.reset_selection()
+    return play.lane_pick(ui, [tag for _, tag in sorted(hits, key=lambda h: h[0])])

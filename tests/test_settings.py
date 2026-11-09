@@ -879,7 +879,7 @@ def test_no_core_module_imports_pygame():
     core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
             "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
             "campaign", "gauntlet", "stats", "dealer", "gauntletgen", "daily", "coach", "run",
-            "app", "hostio", "pbpclient", "serial", "session", "bench")
+            "app", "hostio", "pbpclient", "serial", "session", "bench", "play")
     pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
     for name in core:
         tree = ast.parse((pkg / f"{name}.py").read_text())
@@ -911,7 +911,7 @@ def test_no_core_module_reads_a_screen_size():
     core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
             "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
             "campaign", "gauntlet", "stats", "dealer", "gauntletgen", "daily", "coach", "run",
-            "hostio", "pbpclient", "serial", "session", "bench")
+            "hostio", "pbpclient", "serial", "session", "bench", "play")
     root = pathlib.Path(__file__).resolve().parent.parent
     paths = [root / "starconquest" / f"{name}.py" for name in core]
     paths += sorted((root / "models").glob("*.py"))
