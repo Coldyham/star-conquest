@@ -198,6 +198,10 @@ class Ui:
     #                      system the rally field never reached in rally mode
     #   route_cycles     — systems the plan would trap ships circling in (see
     #                      `_detect_route_cycles`)
+    #   route_clears     — rally only: systems whose live rule the plan leaves
+    #                      out (a rally point, a pocket no rally point reaches),
+    #                      which a confirm deletes, so the plan is the whole of
+    #                      the empire's forwarding (see `_plan_rally`)
     #   route_box        — a selection box is being dragged. Its corners reuse
     #                      `drag_start`/`drag_pos` below, which are dead in this
     #                      mode; the separate flag is what stops render's
@@ -211,6 +215,7 @@ class Ui:
     route_replaces: set[int] = field(default_factory=set)
     route_unroutable: set[int] = field(default_factory=set)
     route_cycles: set[int] = field(default_factory=set)
+    route_clears: set[int] = field(default_factory=set)
     #   route_press      — a press landed on empty map space and may yet become a
     #                      box. Separate from `route_box` (already past the drag
     #                      threshold) so a tap that never moves selects nothing.
@@ -1407,6 +1412,7 @@ class Ui:
         self.route_replaces = set()
         self.route_unroutable = set()
         self.route_cycles = set()
+        self.route_clears = set()
         self.route_box = False
         self.route_press = False
         if self.mode == ROUTING:
@@ -1464,10 +1470,21 @@ class Ui:
             self.route_dest = sid
         self.recompute_route(state)
 
+    def frontier_systems(self, state: GameState) -> set[int]:
+        """The systems we hold that border a rival: the front line proper, half of
+        `threatened_systems`. Neutral neighbours don't count — neutral never
+        attacks."""
+        return {
+            sid for sid, sys in state.systems.items()
+            if sys.owner_id == self.human_id
+            and any(state.systems[n].owner_id not in (self.human_id, 0) and n in self.visible
+                    for n in sys.neighbors)
+        }
+
     def threatened_systems(self, state: GameState) -> set[int]:
         """The systems we hold that something is pointed at: a rival holds a
-        neighbouring system, or rival ships are already inbound. Neutral neighbours
-        don't count — neutral never attacks.
+        neighbouring system (`frontier_systems`), or rival ships are already
+        inbound. Neutral neighbours don't count — neutral never attacks.
 
         The same shape as the AI's own `_threat`, recomputed here rather than
         imported, so the shell keeps its derived stats local (and `ai` stays out of
@@ -1476,31 +1493,55 @@ class Ui:
         both are in full view at any sight range — the `visible` guards are there so
         that stays true if the tiers ever change.
         """
-        threatened = set()
-        for sid, sys in state.systems.items():
-            if sys.owner_id != self.human_id:
-                continue
-            if any(state.systems[n].owner_id not in (self.human_id, 0) and n in self.visible
-                   for n in sys.neighbors):
-                threatened.add(sid)
+        threatened = self.frontier_systems(state)
         for f in state.fleets:
             if f.owner_id != self.human_id and state.systems.get(f.dest_id) is not None \
                     and state.systems[f.dest_id].owner_id == self.human_id:
                 threatened.add(f.dest_id)
         return threatened
 
-    def auto_rally(self, state: GameState) -> None:
-        """Rally on every threatened system at once — the front line as one gesture.
+    def border_systems(self, state: GameState) -> set[int]:
+        """The systems we hold next to a neutral one: where we expand from, and so
+        auto-route's front when no rival is in reach yet."""
+        return {
+            sid for sid, sys in state.systems.items()
+            if sys.owner_id == self.human_id
+            and any(state.systems[n].owner_id == 0 and n in self.visible for n in sys.neighbors)
+        }
 
-        Replaces the picks rather than adding to them: it is a "do the obvious thing"
-        button, and what it means has to be the same whatever was picked before. Tap
-        from there to adjust. A no-op when nothing is threatened, which is also when
-        render leaves the button out.
+    def auto_rally_picks(self, state: GameState) -> set[int]:
+        """The rally points auto-route would pick. Never empty while the game is on:
+        a seat bordering neither a rival nor a neutral holds the whole map or none.
+
+        Every system on the front (`frontier_systems`) is a rally point. One behind
+        it with rival ships inbound is one only if it can't keep them off by itself
+        (`combat.holds_unaided`); one that can is left to the plan, which gives it a
+        smart hold (`_plan_rally`) — it keeps what the attack needs and passes the
+        rest on to the front, rather than soaking up everything nearer to it than
+        the front is. With no front at all to pass ships on to, every threatened
+        system is a rally point. With nothing threatened either, the front is the
+        expansion one: every system bordering a neutral (`border_systems`).
         """
         threatened = self.threatened_systems(state)
         if not threatened:
+            return self.border_systems(state)
+        frontier = self.frontier_systems(state)
+        weak = {sid for sid in threatened - frontier
+                if not combat.holds_unaided(state, sid, self.human_id)}
+        return (frontier | weak) if frontier else threatened
+
+    def auto_rally(self, state: GameState) -> None:
+        """Rally on `auto_rally_picks` at once — the front line as one gesture.
+
+        Replaces the picks rather than adding to them: it is a "do the obvious thing"
+        button, and what it means has to be the same whatever was picked before. Tap
+        from there to adjust. A no-op on the (finished-game) chance there is
+        nothing to pick.
+        """
+        picks = self.auto_rally_picks(state)
+        if not picks:
             return
-        self.route_sel = threatened
+        self.route_sel = picks
         self.recompute_route(state)
 
     def route_sources(self) -> set[int]:
@@ -1511,6 +1552,12 @@ class Ui:
         never picked, so what it plans is `route_plan` and nothing narrower.
         """
         return self.route_sel - {self.route_dest}
+
+    def route_newly_smart(self) -> set[int]:
+        """Planned systems whose smart hold the plan arms — not ones already smart,
+        which the map and panel show already."""
+        return {sid for sid, rule in self.route_plan.items()
+                if rule.smart and not (sid in self.auto_forward and self.auto_forward[sid].smart)}
 
     def add_route_box(self, state: GameState, rect: tuple[int, int, int, int]) -> None:
         """Add every one of our systems inside a dragged screen-space box.
@@ -1568,6 +1615,7 @@ class Ui:
         self.route_replaces = set()
         self.route_unroutable = set()
         self.route_cycles = set()
+        self.route_clears = set()
         self._prune_route_sel(state)
         if self.route_rally:
             self._plan_rally(state)
@@ -1594,18 +1642,19 @@ class Ui:
         """The systems a rule could live on — the search space for both sub-modes."""
         return {sid for sid, s in state.systems.items() if s.owner_id == self.human_id}
 
-    def _add_hop(self, node: int, shares: dict[int, int]) -> None:
+    def _add_hop(self, node: int, shares: dict[int, int], smart: bool = False) -> None:
         """Record one planned rule: the system's surplus down the lanes in
         ``shares``. The hold of any existing rule is kept — it is about the
         system's own safety, whichever way its ships go — so re-running a route over
         a conveyor that is already correct is idempotent rather than quietly
-        resetting tuning. An existing rule is reported replaced only when its lanes
-        change."""
+        resetting tuning. ``smart`` arms a smart hold on top (a threatened system,
+        in rally); it never disarms one. An existing rule is reported replaced only
+        when its lanes change."""
         old = self.auto_forward.get(node)
         if old is not None and old.shares != shares:
             self.route_replaces.add(node)
-        self.route_plan[node] = (ForwardRule(shares, old.hold, old.smart) if old is not None
-                                 else ForwardRule(shares))
+        self.route_plan[node] = (ForwardRule(shares, old.hold, old.smart or smart) if old is not None
+                                 else ForwardRule(shares, smart=smart))
 
     def _plan_chain(self, state: GameState) -> None:
         """Chain routing: walk each selected system's path to the destination.
@@ -1660,10 +1709,23 @@ class Ui:
 
         Since every hop steps to a strictly nearer node, the plan still cannot loop,
         however many ways a system splits.
+
+        A threatened system the plan routes through (rival ships inbound, or a
+        rival next door, but not picked) gets a **smart hold**: it keeps what the
+        heaviest wave needs and forwards the rest, so passing ships on never
+        strips a system under attack. Auto-route leaves exactly the threatened
+        systems that can hold unaided to be ruled this way (`auto_rally`).
+
+        Rally is the **whole** plan for the empire's forwarding: every live rule it
+        doesn't rewrite — on a rally point, or in a pocket no rally point reaches —
+        goes in `route_clears` and is deleted on confirm. A rule left standing from
+        an earlier plan is exactly the one that keeps draining a system that has
+        since become the front.
         """
         if not self.route_sel:
             return
         owned = self._owned(state)
+        threatened = self.threatened_systems(state)
         cost = model.flow_costs(state, owned, set(self.route_sel))
         for node in sorted(cost, key=lambda n: (cost[n], n)):
             if node in self.route_sel:
@@ -1675,8 +1737,10 @@ class Ui:
                 and (nbr in self.route_sel or nbr in self.route_plan)
             ]
             if hops:
-                self._add_hop(node, model.shares_even(dict.fromkeys(hops, 0)))
+                self._add_hop(node, model.shares_even(dict.fromkeys(hops, 0)), node in threatened)
         self.route_unroutable = owned - set(self.route_plan) - self.route_sel
+        self.route_clears = {sid for sid in self.auto_forward
+                             if sid not in self.route_plan and self.rule_is_live(state, sid)}
 
     def _detect_route_cycles(self, state: GameState) -> None:
         """Flag systems where the plan would close a loop with a *surviving* rule.
@@ -1684,9 +1748,8 @@ class Ui:
         The plan alone can't loop — each hop steps strictly closer to a sink. But a
         sink itself gets no plan rule, so if one already forwards back into the plan
         (directly, or down a chain of rules on systems the plan doesn't touch) ships
-        circulate forever. In rally mode that is the *only* way a loop can form, the
-        plan covering every reachable system: an owned rally point still carrying a
-        rule from before is a sink that isn't one. Friendly arrivals
+        circulate forever. Rally can't loop at all: every rule it doesn't rewrite is
+        in `route_clears`, which this leaves out of the graph. Friendly arrivals
         are lossless, so nothing is destroyed; the ships simply never reach a
         front, which is worse than losing them because it looks like it is
         working. `confirm_route` breaks any loop it finds here.
@@ -1698,7 +1761,7 @@ class Ui:
         graph: dict[int, list[int]] = {
             src: [d for d, pct in rule.shares.items() if pct > 0]
             for src, rule in self.auto_forward.items()
-            if self.rule_is_live(state, src)
+            if self.rule_is_live(state, src) and src not in self.route_clears
         }
         graph.update({src: [d for d, pct in rule.shares.items() if pct > 0]
                       for src, rule in self.route_plan.items()})
@@ -1713,6 +1776,8 @@ class Ui:
         """
         self.recompute_route(state)
         plan = dict(self.route_plan)
+        for sid in self.route_clears:   # rally rewrites every rule, not only the ones it reaches
+            self.clear_forward(sid)
         # Break any loop before arming it. The closing edge is always a rule on a
         # system the plan doesn't touch (the plan itself is acyclic), so dropping
         # exactly those clears every cycle without discarding planned hops.

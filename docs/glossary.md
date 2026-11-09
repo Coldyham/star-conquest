@@ -63,7 +63,7 @@ them.
 | --- | --- | --- |
 | **send** | a one-off launch from the send popup | `Order` |
 | **route** / **forwarding rule** | a standing order that sends a system's new ships on | `forward_*`, `Ui.forward_this_turn` |
-| **Auto-route** | routes picked for your threatened systems | |
+| **Auto-route** | routes picked for your threatened systems (or, with none, your border with neutral systems) | |
 | **hint** | marshal's moves for your turn, shown on the map; a hinted game is never posted | `Ui.hinted` |
 
 ## Gauntlets, the campaign and the daily

@@ -454,7 +454,8 @@ somewhere (a rally point, or a planned system) get a share. The no-cycle guarant
 untouched: every lane of a split steps strictly nearer, so the potential still
 decreases along every edge.
 
-**Auto-route** picks every threatened system as a rally point in one press — the front
+**Auto-route** picks the threatened systems as rally points in one press (which ones:
+see "A threatened system the plan passes through gets a smart hold", below) — the front
 line as one gesture, which is the shape rally is for. "Threatened" is the AI's own
 `_threat` (a rival, not neutral, holding a neighbour, or rival ships inbound), copied
 into `viewstate` rather than imported, since the shell computes its derived stats
@@ -462,8 +463,8 @@ locally and `render`/`input` may not reach into `ai`. It discloses nothing fog h
 a neighbour of a system we hold is one hop away, and a fleet inbound to one ends at a
 system we hold, so both are in full view at any sight tier. It replaces the picks
 rather than adding to them — a "do the obvious thing" button has to mean the same
-whatever came before — and render leaves it out entirely when nothing is threatened,
-so it is drawn exactly when it would do something.
+whatever came before. With nothing threatened it falls back to the neutral border
+(below), so it is always drawn in rally.
 
 A richer version was considered and dropped: a rally point that claims only the
 systems closer to it than to a front. It is a better *idea* and a much worse control —
@@ -475,6 +476,42 @@ you can see on the map before confirming.
 a confirm blows away hand-made rules the plan disagrees with. That is what "everything
 flows to the nearest point" means, and the panel's `N replaced` count is the
 disclosure — the same line chain mode has, doing much more work here.
+
+**And it clears every rule it doesn't rewrite.** A rule on a rally point, or in a
+pocket no rally point reaches, used to survive a confirm. That made sense when a
+system had one rule and a rally point's was usually a hand-made attack; with split
+rules and auto-route it was the trap: a new front opens on a system still forwarding
+to the old one, one press of auto-route makes it a rally point, and its old rule goes
+on draining the new front until the next turn shows it. So a rally plan is the whole
+of the empire's forwarding: everything else goes in `route_clears`, is drawn in the
+overwrite tint, counted as `N cleared`, and deleted on confirm. The cleared rules are
+also what made rally's one possible loop (a sink still forwarding back into the
+field), so rally can no longer loop at all. Chain still leaves alone what it doesn't
+reach: it answers "push *these* there", not "where should everything go".
+
+**A threatened system the plan passes through gets a smart hold.** Rally rules every
+system it reaches, so a system behind the front with rival ships inbound — or a
+frontier system the player didn't pick — would forward its garrison away under the
+attack. `_plan_rally` arms a smart hold on any threatened system it rules: it keeps
+what the heaviest wave needs (`combat.smart_hold`) and passes the rest on. It never
+disarms one, and a hand-set hold is kept underneath, as `_add_hop` keeps every hold.
+
+So auto-route no longer rallies on every threatened system. The front
+(`Ui.frontier_systems`) is always a rally point; a system threatened only by inbound
+ships is one only when it can't keep them off alone — `combat.holds_unaided`, its
+garrison plus what it builds by the turn each wave lands, against `hold_count` of that
+wave. One that can hold is left to the plan, so it passes its surplus on rather than
+soaking up everything nearer to it than the front is; one that can't is a sink, so
+ships gather to save it. With no front at all there is nowhere to pass ships on to, so
+every threatened system is a rally point, as before.
+
+**With nothing threatened, auto-route rallies on the neutral border.** Before any rival
+is in reach — the opening, or a quiet corner of a big map — the button used to vanish,
+yet "gather where the empire meets the unclaimed" is the same one-press question with
+the expansion front as the answer: every system we hold next to a neutral one
+(`Ui.border_systems`). A rival front, or any threat, still outranks it entirely. So
+the button is always drawn in rally: a seat bordering neither a rival nor a neutral
+holds the whole map or nothing, and the game is over either way.
 
 **The sub-mode is sticky; the proposal is not.** `reset_route` runs every turn from
 `main.resolve_turn`, so clearing `route_rally` there would drag the player back to
