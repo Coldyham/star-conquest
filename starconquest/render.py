@@ -2004,10 +2004,9 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         # losing this makes the sub-mode unreachable on a touch build.
         mode_label = _key_hint("Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab")
         specs.append(("route_mode_rect", mode_label, *_BTN_TEAL, 6, "right"))
-        # Rally only, and only when there is a front (or a neutral border) to pick:
-        # drawn exactly when it would do something, the same gate
-        # `can_fast_forward` earns its button by.
-        if ui.route_rally and ui.auto_rally_picks(state):
+        # Rally only. Always something to pick while the game is on: a seat that
+        # borders neither a rival nor a neutral holds the whole map or nothing.
+        if ui.route_rally:
             specs.append(("route_auto_rect", _key_hint("Auto-route", "T"), *_BTN_VIOLET, 5, "right"))
         specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
         specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))

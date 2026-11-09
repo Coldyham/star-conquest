@@ -463,8 +463,8 @@ locally and `render`/`input` may not reach into `ai`. It discloses nothing fog h
 a neighbour of a system we hold is one hop away, and a fleet inbound to one ends at a
 system we hold, so both are in full view at any sight tier. It replaces the picks
 rather than adding to them — a "do the obvious thing" button has to mean the same
-whatever came before — and render leaves it out entirely when nothing is threatened,
-so it is drawn exactly when it would do something.
+whatever came before. With nothing threatened it falls back to the neutral border
+(below), so it is always drawn in rally.
 
 A richer version was considered and dropped: a rally point that claims only the
 systems closer to it than to a front. It is a better *idea* and a much worse control —
@@ -509,9 +509,9 @@ every threatened system is a rally point, as before.
 is in reach — the opening, or a quiet corner of a big map — the button used to vanish,
 yet "gather where the empire meets the unclaimed" is the same one-press question with
 the expansion front as the answer: every system we hold next to a neutral one
-(`Ui.border_systems`). A rival front, or any threat, still outranks it entirely; the
-button is gone only when there is no border of either kind (`Ui.auto_rally_picks`
-being empty is the one gate for drawing it and for pressing it).
+(`Ui.border_systems`). A rival front, or any threat, still outranks it entirely. So
+the button is always drawn in rally: a seat bordering neither a rival nor a neutral
+holds the whole map or nothing, and the game is over either way.
 
 **The sub-mode is sticky; the proposal is not.** `reset_route` runs every turn from
 `main.resolve_turn`, so clearing `route_rally` there would drag the player back to

@@ -1510,8 +1510,8 @@ class Ui:
         }
 
     def auto_rally_picks(self, state: GameState) -> set[int]:
-        """The rally points auto-route would pick — empty when it has nothing to do,
-        which is also when render leaves its button out.
+        """The rally points auto-route would pick. Never empty while the game is on:
+        a seat bordering neither a rival nor a neutral holds the whole map or none.
 
         Every system on the front (`frontier_systems`) is a rally point. One behind
         it with rival ships inbound is one only if it can't keep them off by itself
@@ -1535,7 +1535,8 @@ class Ui:
 
         Replaces the picks rather than adding to them: it is a "do the obvious thing"
         button, and what it means has to be the same whatever was picked before. Tap
-        from there to adjust. A no-op when there is nothing to pick.
+        from there to adjust. A no-op on the (finished-game) chance there is
+        nothing to pick.
         """
         picks = self.auto_rally_picks(state)
         if not picks:

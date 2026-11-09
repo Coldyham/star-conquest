@@ -1352,14 +1352,14 @@ def test_holds_unaided_counts_what_is_built_before_each_wave():
     assert not combat.holds_unaided(s, 0, 1)
 
 
-def test_the_auto_route_button_is_drawn_only_in_rally_mode_with_a_front():
+def test_the_auto_route_button_is_drawn_only_in_rally_mode():
     state, ui = _routed_setup()
     try:
         render.draw(_screen(), state, ui)
         assert ui.route_auto_rect == (0, 0, 0, 0)      # chain mode never offers it
         ui.set_route_rally(state, True)
         render.draw(_screen(), state, ui)
-        assert bool(ui.route_auto_rect[2]) == bool(ui.auto_rally_picks(state))
+        assert ui.route_auto_rect[2] > 0
     finally:
         pygame.quit()
 
