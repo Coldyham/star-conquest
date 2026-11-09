@@ -164,6 +164,34 @@ export class Hud {
     nav.replaceChildren(...left, h("span", { class: "spacer" }), ...right);
   }
 
+  /** The game-over veil (`render._draw_win_overlay`): who won, the result,
+   * and what to do next. */
+  veil(view) {
+    const veil = this.$("veil");
+    const over = view.over;
+    if (!over) {
+      veil.hidden = true;
+      return;
+    }
+    const button = (label, key, colour, action) => h("button", { type: "button", class: `btn ${colour}`,
+      onclick: () => this.on.action(action) }, label, key ? h("span", { class: "key" }, ` (${key})`) : null);
+    const second = over.next_stage ? button("Next stage", "N", "teal", "next_stage")
+      : over.in_stage ? null : button("New map", "N", "green", "restart");
+    const kids = [
+      h("h1", { style: `color:${this.color(over.headline[1])}` }, over.headline[0]),
+      ...over.lines.map(([kind, text, role]) => h("p", { class: kind, style: `color:${this.color(role)}` }, text)),
+      h("div", { class: "grid" }, button("Retry", "T", "amber", "retry"), second,
+        button("Setup menu", "M", "blue", "menu"), button("History & coach", "H", "violet", "toggle_history")),
+    ];
+    if (over.share) {
+      kids.push(h("div", { class: "share" }, button(over.share[0], over.share[1], "teal", "share"),
+        over.board ? button(over.board[0], over.board[1], "gold", "leaderboard") : null));
+      if (over.notes) kids.push(h("p", { class: "small dim" }, over.notes));
+    }
+    veil.replaceChildren(h("div", { class: "stack" }, ...kids));
+    veil.hidden = false;
+  }
+
   /** The send popup (`render._draw_send_popup`), or nothing. Returns its node
    * when shown, for the page to place. Built once per lane and tab, then
    * updated in place, so a slider being dragged is never replaced under the

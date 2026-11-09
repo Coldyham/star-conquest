@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from starconquest import hud, mapgen, starlore, turnfilm
+from starconquest import app, hud, mapgen, paths, starlore, turnfilm
 from starconquest.model import GameState, lane_key
 from starconquest.viewstate import CHOOSING, Ui
 
@@ -138,6 +138,8 @@ def view(state: GameState, ui: Ui) -> dict:
         "autoplay": ui.autoplay,
         "playing": ui.playing,
         "fast_forward": ui.fast_forward,
+        "step_ms": app.step_delay(ui, app.PLAY_MS),
+        "over": over(state, ui) if state.winner is not None and not ui.history else None,
         "can": {
             "end_turn": state.winner is None and not ui.awaiting_others(state) and not ui.spectating,
             "undo": ui.can_undo(state),
@@ -213,6 +215,22 @@ def panel(state: GameState, ui: Ui) -> dict:
         "compact": [list(r) for r in hud.system_rows_compact(state, ui, sys)],
         "lane": [list(r) for r in hud.lane_rows(state, ui, focus, dest)] if dest is not None else [],
         "lore": focus == ui.selected and sys.name in starlore.LORE and not ui.history,
+    }
+
+
+def over(state: GameState, ui: Ui) -> dict:
+    """The game-over veil: the headline, the result lines, and which buttons it
+    offers (`render._draw_win_overlay`)."""
+    text, role = hud.headline(state, ui)
+    share = ui.can_post(state)
+    return {
+        "headline": [text, role],
+        "lines": [list(line) for line in hud.result_lines(state, ui)],
+        "next_stage": ui.offers_next_stage(state),
+        "in_stage": ui.in_stage,
+        "share": list(hud.share_label(ui)) if share else None,
+        "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
+        "notes": ui.share_msg if share else "",
     }
 
 

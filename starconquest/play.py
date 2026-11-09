@@ -188,3 +188,31 @@ def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
             return None
         return "menu"
     return None
+
+
+def over_key(state: GameState, ui: Ui, name: str) -> str | None:
+    """A key on the game-over veil: retry, a new map (or the next stage),
+    the menu, history, and the two ways to share."""
+    if name == "t":
+        return "retry"
+    if name == "n":
+        # In a stage N is Next stage, or nothing after the last one.
+        if ui.in_stage:
+            return "next_stage" if ui.offers_next_stage(state) else None
+        return "restart"
+    if name in ("m", "Escape"):
+        return "menu"
+    if name == "h":
+        return "toggle_history"
+    if name == "c":
+        return "share"
+    if name == "l":
+        return "leaderboard"
+    return None
+
+
+def press_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
+    """A key in whichever scene is up: the game-over veil, else live play."""
+    if state.winner is not None:
+        return over_key(state, ui, name)
+    return key(state, ui, name, shift)

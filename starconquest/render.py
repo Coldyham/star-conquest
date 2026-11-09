@@ -173,7 +173,9 @@ def _role(role: hud.Role) -> tuple[int, int, int]:
         return config.player_color(role)
     return {"text": config.COLOR_TEXT, "dim": config.COLOR_TEXT_DIM, "select": config.COLOR_SELECT,
             "fog": config.COLOR_FOG, "forward": _forward_accent(), "sure": _BTN_GREEN[1],
-            "likely": _BTN_AMBER[1], "gamble": _BTN_DANGER[1]}[role]
+            "likely": _BTN_AMBER[1], "gamble": _BTN_DANGER[1], "teal": _BTN_TEAL[1],
+            "beat": _VERDICT_BEAT, "tie": _VERDICT_TIE, "miss": _VERDICT_MISS, "par": _PAR_GOLD,
+            "failed": (214, 130, 110)}[role]
 
 
 # --------------------------------------------------------------------------- #
@@ -3001,11 +3003,8 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     surface.blit(veil, (0, 0))
 
     big, normal = _fonts()["big"], _fonts()["normal"]
-    if state.winner == 0:
-        msg, color = "Mutual annihilation — draw", config.COLOR_TEXT
-    else:
-        msg = f"{_winner_label(state, ui)} wins!"
-        color = config.player_color(state.winner)
+    msg, role = hud.headline(state, ui)
+    color = _role(role)
 
     # Tappable buttons — touch equivalents of the T/R/M/H/Esc keys. Every box takes
     # the width of the widest label in the grid, so the rows stay square and no
@@ -3016,7 +3015,7 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
     second = _key_hint("Next stage", "N") if nxt else _key_hint("New map", "N")
     labels = [_key_hint("Retry", "T"), second, _key_hint("Setup menu", "M"), _key_hint("History & coach", "H")]
     # A daily's result goes out as a line, not a link: everyone has its map.
-    share_label = _key_hint("Copy daily result" if ui.daily_day else "Challenge a friend", "C")
+    share_label = _key_hint(*hud.share_label(ui))
     board_label = _board_label(ui)
     share = ui.can_post(state)
     # The constant, not a resolved URL: a blank one disables the feature
@@ -3108,24 +3107,10 @@ def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:
         ui.leaderboard_button_rect = (0, 0, 0, 0)
 
 
-# How much of a name the leaderboard button shows.
-_POST_NAME_SHOWN = 16
-
-
 def _board_label(ui: Ui) -> str:
-    """The win overlay's leaderboard button, by what it does now
-    (``Ui.board_action``)."""
-    action = ui.board_action()
-    if action == "view":
-        return _key_hint("View on board", "L")
-    if action == "posting":
-        return "Posting…"
-    if action == "post":
-        name = ui.post_as.strip()
-        if len(name) > _POST_NAME_SHOWN:
-            name = name[:_POST_NAME_SHOWN - 1].rstrip() + "…"
-        return _key_hint(f"Post as {name}", "L")
-    return _key_hint("Post on leaderboard", "L")
+    """The win overlay's leaderboard button, by what it does now (`hud.board_label`)."""
+    label, key = hud.board_label(ui)
+    return _key_hint(label, key) if key else label
 
 
 _COACH_KIND = {   # a note's turn label, coloured by what kind of lesson it is
@@ -3191,113 +3176,12 @@ def _draw_coach_marks(surface, state: GameState, ui: Ui) -> None:
             pygame.draw.circle(surface, config.COLOR_HINT, ui.view.to_screen(node.pos), r, max(2, config.s(2)))
 
 
-def _winner_label(state: GameState, ui: Ui) -> str:
-    """"Verdant (Knower · Predict)" — the winning seat, and the bot that was
-    driving it, as the top bar's tooltip and the graph legend name it
-    (`Ui.seat_bots`). A seat left to random says so: "(Marshal, random)".
-
-    Named only for a seat no person was playing: a human seat says who won and
-    stops there, and a seat claimed part-way through (``engine.claim_seat``) is a
-    human seat by then, so a game somebody took over is credited to them rather
-    than to the strategy it opened under. The whole board is a bot's under
-    autoplay, which is exactly when this is worth reading.
-
-    Neutral is excluded explicitly. It is a real player (``id == 0``) carrying the
-    default ``ai_strategy`` like any other, but nothing ever asks it to decide —
-    and it reaches here on the one path that can name it, a mutual annihilation,
-    where "Neutral (Heuristic)" would credit a bot that never played.
-
-    A random seat is revealed here — which is the point, and costs nothing, since
-    there is no turn left to play with the knowledge. A seat `Ui.seat_bots` has
-    no label for falls back to ``Player.ai_strategy`` itself, capitalised rather
-    than title-cased, so a drop-in keeps the shape its author gave its filename
-    (``claudeBot`` stays ``ClaudeBot``).
-    """
-    name = config.player_name(state.winner)
-    player = state.players.get(state.winner)
-    if player is None or player.is_neutral or player.is_human or not player.ai_strategy:
-        return name
-    raw = player.ai_strategy
-    bot = ui.seat_bots.get(state.winner) or f"{raw[:1].upper()}{raw[1:]}"
-    if state.winner in ui.random_seats:
-        bot += ", random"
-    return f"{name} ({bot})"
+_winner_label = hud.winner_label
 
 
 def _result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, tuple[int, int, int]]]:
-    """(font kind, text, colour) for the score under the win message: turns first,
-    ships lost as the tiebreak, then the verdict against any challenge.
-
-    Only for the human's own result — there is nothing to boast about, or to
-    compare against a challenge, in watching two bots fight. When the match came
-    from a challenge link, say outright whether the target fell. Returned rather
-    than drawn so the overlay can measure the block before placing it.
-
-    A watched replay says whose result this is, because it is otherwise an overlay
-    identical to our own win with the two sharing buttons missing from it — which
-    reads as a broken feature rather than as the rule it is (``Ui.can_post``). It
-    leads rather than trails: it qualifies the "X wins!" above it, and leaving the
-    verdict last keeps it the line callers read off the end.
-    """
-    note = ([("small", "Someone else's game, replayed", config.COLOR_TEXT_DIM)]
-            if ui.watched else [])
-    # A run's game says what it did to the run, win or lose, in place of the
-    # stage's own verdict (`main.record_run_step`).
-    run_line = ([("small", ui.run_note, _BTN_TEAL[1] if ui.run_ok else _VERDICT_MISS)]
-                if ui.run_note else [])
-    # A spectator sits at neutral's id, which is also a mutual annihilation's
-    # winner: no result here is theirs.
-    if ui.spectating or state.winner != ui.human_id:
-        if ui.challenge_target is not None:
-            return note + [("normal", "Challenge failed", (214, 130, 110))] + run_line
-        return note + run_line
-
-    lost = state.players[ui.human_id].ships_lost
-    line = f"Conquered in {state.turn} turns  ·  {lost} ships lost"
-    if ui.hand_turns < state.turn:
-        line += f"  ·  {ui.hand_turns} played by hand"
-    lines = [("normal", line, config.COLOR_TEXT)]
-    if ui.par_note:
-        # Only ever set for a player whose result met the puzzle's par (`main.land_par`).
-        lines.append(("normal", ui.par_note, _PAR_GOLD))
-    if run_line:
-        lines += run_line
-    elif ui.in_stage and ui.can_post(state):
-        lines.append(_stage_verdict(state, ui))
-
-    if ui.challenge_target is None:
-        return note + lines
-    # Same ordering the score uses: fewer turns wins, ties broken on losses, and
-    # equal on both is a dead heat.
-    target = ui.challenge_target
-    mine = (state.turn, lost)
-    who = f" {ui.challenge_by}'s" if ui.challenge_by else ""
-    against = f"{target[0]} turns / {target[1]} lost"
-    if mine < target:
-        verdict, colour = f"Beat{who} {against}", _VERDICT_BEAT
-    elif mine == target:
-        verdict, colour = f"Matched{who} {against}", _VERDICT_TIE
-    else:
-        verdict, colour = f"Short of{who} {against}", _VERDICT_MISS
-    lines.append(("small", verdict, colour))
-    return note + lines
-
-
-def _stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, tuple[int, int, int]]:
-    """The win overlay's stage line: cleared, or which way the target went. A
-    win short of it says so, and says too when an earlier best already cleared
-    the stage, since Next stage is then still offered."""
-    cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
-    if not ui.run_id:
-        cleared += "".join(f"  ·  {label} unlocked: {title}" for label, title in ui.unlocked(state))
-    target = ui.stage_target
-    if target is None:
-        return ("small", cleared, _BTN_TEAL[1])
-    if ui.met_target(state):
-        return ("small", f"{target.text()}: met  ·  {cleared}", _BTN_TEAL[1])
-    if ui.stage_met_before:
-        return ("small", f"{target.text()}: not this time  ·  your best clears it", _VERDICT_TIE)
-    return ("small", f"{target.text()}: not yet", _VERDICT_MISS)
+    """`hud.result_lines` in colour, for the win overlay to measure and draw."""
+    return [(kind, text, _role(role)) for kind, text, role in hud.result_lines(state, ui)]
 
 
 # Scrubber fill — a bright blue on the shared slider trough, echoing the play button.

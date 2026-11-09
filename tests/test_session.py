@@ -143,3 +143,34 @@ def test_a_forward_rule_is_armed_shown_and_reopened(session):
     assert view["panel"]["rule"][0][0] == "Auto-forward"
     view = _call(session, "ui.call", method="clear_all_forward")["result"]["view"]
     assert view["rules"] == []
+
+
+def test_flow_actions_undo_retry_and_restart(session):
+    start, _, _ = _human_game(session)
+    for _ in range(2):
+        _call(session, "turn.end")
+    res = _call(session, "game.action", name="undo")["result"]
+    assert res["fresh"] and res["board"]["turn"] == 1
+    res = _call(session, "game.action", name="retry")["result"]
+    assert res["fresh"] and res["board"]["turn"] == 0 and res["seed"] == start["seed"]
+    assert res["board"] == start["board"]
+    res = _call(session, "game.action", name="restart")["result"]
+    assert res["fresh"] and res["seed"] == start["seed"] + 1
+    view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
+    assert view["autoplay"] and view["step_ms"] == 350
+    view = _call(session, "game.action", name="toggle_play")["result"]["view"]
+    assert view["playing"]
+
+
+def test_a_decided_game_shows_its_veil_and_answers_its_keys(session):
+    _call(session, "boot", page=PAGE, store={})
+    _call(session, "game.start", settings={"players": 2, "nodes": 8, "autoplay": True}, seed=3)
+    for _ in range(300):
+        res = _call(session, "turn.end")["result"]
+        if res["board"]["winner"] is not None:
+            break
+    over = res["view"]["over"]
+    assert over is not None and over["headline"][0].endswith("wins!") and over["share"] is None
+    assert not res["view"]["can"]["end_turn"]
+    assert _call(session, "ui.key", name="t")["result"]["action"] == "retry"
+    assert _call(session, "ui.key", name="Escape")["result"]["action"] == "menu"

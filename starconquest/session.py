@@ -154,8 +154,49 @@ class Session:
     def op_ui_key(self, name: str, shift: bool = False) -> dict:
         """A key by its ``KeyboardEvent.key`` name. ``action`` is for the page
         to carry out (``end_turn``, ``reset_view``, ``menu``…), or None."""
-        action = play.key(self._state(), self._ui(), str(name), bool(shift))
+        action = play.press_key(self._state(), self._ui(), str(name), bool(shift))
         return {"action": action, "view": self._view()}
+
+    def op_game_action(self, name: str) -> dict:
+        """One of `main`'s actions on the match: play and pause, autoplay, fast
+        forward, a new map, a retry from turn 0, or undoing the last turn. One
+        that replaces the board answers it whole, as `game.start` does, with
+        ``fresh`` set."""
+        state, ui = self._state(), self._ui()
+        assert self.settings is not None and self.log is not None and self.seed is not None
+        if name == "toggle_play":
+            app.apply_toggle_play(ui)
+        elif name == "toggle_autoplay":
+            ui.autoplay = not ui.autoplay
+            ui.playing = False
+            ui.reset_selection()
+            ui.reset_route()
+            ui.clear_pending()
+        elif name == "toggle_fast_forward":
+            app.toggle_fast_forward(state, ui)
+        elif name == "restart" and not ui.in_stage:
+            self.seed += 1
+            self.state, self.ui, self.log = app.start_game(self.settings, self.seed, app.carry_autoplay(ui))
+            return self._whole()
+        elif name == "retry":
+            # Fork the log at turn 0, so the finished record stays intact.
+            self.log = self.log.fork(0)
+            try:
+                self.log.save()
+            except OSError:
+                pass
+            self.seed = self.log.seed
+            self.state, self.ui = app.resume_game(self.log, self.settings)
+            return self._whole()
+        elif name == "undo" and ui.can_undo(state):
+            self.state, self.ui = app.apply_rewind(self.log, self.settings, max(self.log.turn_count - 1, 0))
+            return self._whole()
+        return {"fresh": False, "view": self._view()}
+
+    def _whole(self) -> dict:
+        state = self._state()
+        return {"fresh": True, "seed": self.seed, "static": serial.static(state), "board": serial.board(state),
+                "travel": serial.travel(state), "fog": self._fog(), "view": self._view()}
 
     def op_ui_call(self, method: str, args: list | None = None) -> dict:
         """One of `UI_CALLS`, by name."""

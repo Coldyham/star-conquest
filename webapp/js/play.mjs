@@ -110,6 +110,7 @@ function place(box) {
 function show(view) {
   game.view = view;
   game.hud.draw(game.board.turn, view);
+  game.hud.veil(view);
   redraw();
 }
 
@@ -129,12 +130,21 @@ async function act(op, args = {}) {
 async function newGame(seed = null) {
   game.film = null;
   const res = await core.call("game.start", { settings: setup(), seed });
+  game.legends = res.legends;
+  adopt(res);
+  status("");
+}
+
+/** A whole new board from the session (a new game, a retry, an undo): rebuild
+ * the map when it changed, and draw. */
+function adopt(res) {
   game.seed = res.seed;
+  const sameMap = game.map && JSON.stringify(game.map) === JSON.stringify(res.static);
   game.map = res.static;
   game.board = fromBoard(res.board);
-  game.board_view = new BoardView($("map"), game.map);
+  if (!sameMap) game.board_view = new BoardView($("map"), game.map);
   game.board_view.setTravel(res.travel);
-  game.hud = new Hud(game.map, res.legends, {
+  game.hud = new Hud(game.map, game.legends, {
     call: (method, args) => act("ui.call", { method, args }),
     lane: async (dest, delta) => {
       await core.call("ui.call", { method: "focus_lane", args: [dest] });
@@ -143,14 +153,14 @@ async function newGame(seed = null) {
     footer,
     odds: () => {},
     lore: () => {},
+    action: actOn,
   });
-  status("");
   show(res.view);
 }
 
 /** End the turn, and play its film onto the board the page already has. */
-async function endTurn() {
-  if (game.busy || !game.view?.can.end_turn) return;
+async function endTurn(byHand = true) {
+  if (game.busy || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
   game.busy = true;
   const thinking = setTimeout(() => { $("caption").textContent = "Thinking…"; }, THINKING_MS);
   try {
@@ -166,6 +176,8 @@ async function endTurn() {
       game.board_view.layout();
     }
     show(res.view);
+    game.busy = false;
+    clock(res.film ? 0 : res.view.step_ms);
   } catch (err) {
     clearTimeout(thinking);
     status(`End turn failed: ${err.message}`, true);
@@ -173,6 +185,16 @@ async function endTurn() {
   } finally {
     game.busy = false;
   }
+}
+
+/** Autoplay's and Play's clock: the next turn `ms` from now (straight on
+ * after a film, so a run of turns glides without a stop), while either is on
+ * and the game is undecided. */
+function clock(ms) {
+  clearTimeout(game.timer);
+  const v = game.view;
+  if (!v || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
+  game.timer = setTimeout(() => endTurn(false), ms);
 }
 
 /** Walk `film` on the page's board at the wall clock; any press skips to its end. */
@@ -200,18 +222,29 @@ function playFilm(film, view, before) {
   });
 }
 
-function act_on(action) {
-  switch (action) {
-    case null: case undefined: return;
-    case "end_turn": endTurn(); return;
-    case "reset_view":
-      game.board_view.camera.reset();
-      game.board_view.layout();
-      redraw();
-      return;
-    case "restart": newGame(); return;
-    case "retry": newGame(game.seed); return;
-    default: status(`${action.replace(/_/g, " ")}: not in this build yet`);
+const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "restart", "retry", "undo"]);
+
+async function actOn(action) {
+  if (action === null || action === undefined) return;
+  if (action === "end_turn") {
+    endTurn();
+  } else if (action === "reset_view") {
+    game.board_view.camera.reset();
+    game.board_view.layout();
+    redraw();
+  } else if (GAME_ACTIONS.has(action)) {
+    if (game.busy) return;
+    clearTimeout(game.timer);
+    const res = await core.call("game.action", { name: action }).catch((err) => {
+      status(`${action} failed: ${err.message}`, true);
+      return null;
+    });
+    if (!res) return;
+    if (res.fresh) adopt(res);
+    else show(res.view);
+    clock(game.view.step_ms);
+  } else {
+    status(`${action.replace(/_/g, " ")}: not in this build yet`);
   }
 }
 
@@ -225,7 +258,7 @@ function footer(attr) {
   };
   if (attr === "clear_button_rect") act("ui.call", { method: "clear_selected" });
   else if (attr === "hint_apply_rect") act("ui.call", { method: "apply_hint" });
-  else act_on(actions[attr]);
+  else actOn(actions[attr]);
 }
 
 // --- the pointer on the map ---------------------------------------------- //
@@ -336,7 +369,7 @@ async function key(event) {
   const name = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   if (name === " " || name === "Enter") event.preventDefault();
   const res = await act("ui.key", { name, shift: event.shiftKey });
-  act_on(res?.action);
+  actOn(res?.action);
 }
 
 async function boot() {
@@ -368,7 +401,7 @@ async function boot() {
   });
   document.addEventListener("keydown", key);
   $("end-turn").addEventListener("click", endTurn);
-  $("reset-view").addEventListener("click", () => act_on("reset_view"));
+  $("reset-view").addEventListener("click", () => actOn("reset_view"));
   $("zoom-in").addEventListener("click", () => zoomButton(BUTTON_STEP));
   $("zoom-out").addEventListener("click", () => zoomButton(1 / BUTTON_STEP));
   new ResizeObserver(() => {

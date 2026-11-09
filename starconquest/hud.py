@@ -5,7 +5,8 @@ Both shells read these: `render` lays them out in pygame and `serial.view`
 sends them to the HTML page, so a line is worded in one place. A colour goes
 as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
-colour. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
+colour; the win overlay adds ``"teal"``, ``"beat"``, ``"tie"``, ``"miss"``,
+``"par"`` and ``"failed"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
 star name in it, so it may need the small font), ``"row"`` for one line, and
 ``"wrap"`` for a line to reflow to the panel's width.
 """
@@ -531,3 +532,145 @@ def clear_forward_label(ui: Ui) -> str:
 def clear_dangerous_label(count: int) -> str:
     """The panel's button that clears the rules pointed at systems we don't hold."""
     return f"Clear dangerous ({count})"
+
+
+def headline(state: GameState, ui: Ui) -> tuple[str, Role]:
+    """The game-over veil's headline: who won, in their colour, or a draw."""
+    if state.winner == 0:
+        return "Mutual annihilation — draw", "text"
+    return f"{winner_label(state, ui)} wins!", state.winner
+
+
+def winner_label(state: GameState, ui: Ui) -> str:
+    """"Verdant (Knower · Predict)" — the winning seat, and the bot that was
+    driving it, as the top bar's tooltip and the graph legend name it
+    (`Ui.seat_bots`). A seat left to random says so: "(Marshal, random)".
+
+    Named only for a seat no person was playing: a human seat says who won and
+    stops there, and a seat claimed part-way through (``engine.claim_seat``) is a
+    human seat by then, so a game somebody took over is credited to them rather
+    than to the strategy it opened under. The whole board is a bot's under
+    autoplay, which is exactly when this is worth reading.
+
+    Neutral is excluded explicitly. It is a real player (``id == 0``) carrying the
+    default ``ai_strategy`` like any other, but nothing ever asks it to decide —
+    and it reaches here on the one path that can name it, a mutual annihilation,
+    where "Neutral (Heuristic)" would credit a bot that never played.
+
+    A random seat is revealed here — which is the point, and costs nothing, since
+    there is no turn left to play with the knowledge. A seat `Ui.seat_bots` has
+    no label for falls back to ``Player.ai_strategy`` itself, capitalised rather
+    than title-cased, so a drop-in keeps the shape its author gave its filename
+    (``claudeBot`` stays ``ClaudeBot``).
+    """
+    name = config.player_name(state.winner)
+    player = state.players.get(state.winner)
+    if player is None or player.is_neutral or player.is_human or not player.ai_strategy:
+        return name
+    raw = player.ai_strategy
+    bot = ui.seat_bots.get(state.winner) or f"{raw[:1].upper()}{raw[1:]}"
+    if state.winner in ui.random_seats:
+        bot += ", random"
+    return f"{name} ({bot})"
+
+
+def result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, Role]]:
+    """(font kind, text, role) for the score under the win message: turns first,
+    ships lost as the tiebreak, then the verdict against any challenge.
+
+    Only for the human's own result — there is nothing to boast about, or to
+    compare against a challenge, in watching two bots fight. When the match came
+    from a challenge link, say outright whether the target fell. Returned rather
+    than drawn so the overlay can measure the block before placing it.
+
+    A watched replay says whose result this is, because it is otherwise an overlay
+    identical to our own win with the two sharing buttons missing from it — which
+    reads as a broken feature rather than as the rule it is (``Ui.can_post``). It
+    leads rather than trails: it qualifies the "X wins!" above it, and leaving the
+    verdict last keeps it the line callers read off the end.
+    """
+    note: list[tuple[str, str, Role]] = ([("small", "Someone else's game, replayed", "dim")]
+            if ui.watched else [])
+    # A run's game says what it did to the run, win or lose, in place of the
+    # stage's own verdict (`main.record_run_step`).
+    run_line: list[tuple[str, str, Role]] = ([("small", ui.run_note, "teal" if ui.run_ok else "miss")]
+                if ui.run_note else [])
+    # A spectator sits at neutral's id, which is also a mutual annihilation's
+    # winner: no result here is theirs.
+    if ui.spectating or state.winner != ui.human_id:
+        if ui.challenge_target is not None:
+            return note + [("normal", "Challenge failed", "failed")] + run_line
+        return note + run_line
+
+    lost = state.players[ui.human_id].ships_lost
+    line = f"Conquered in {state.turn} turns  ·  {lost} ships lost"
+    if ui.hand_turns < state.turn:
+        line += f"  ·  {ui.hand_turns} played by hand"
+    lines: list[tuple[str, str, Role]] = [("normal", line, "text")]
+    if ui.par_note:
+        # Only ever set for a player whose result met the puzzle's par (`main.land_par`).
+        lines.append(("normal", ui.par_note, "par"))
+    if run_line:
+        lines += run_line
+    elif ui.in_stage and ui.can_post(state):
+        lines.append(stage_verdict(state, ui))
+
+    if ui.challenge_target is None:
+        return note + lines
+    # Same ordering the score uses: fewer turns wins, ties broken on losses, and
+    # equal on both is a dead heat.
+    target = ui.challenge_target
+    mine = (state.turn, lost)
+    who = f" {ui.challenge_by}'s" if ui.challenge_by else ""
+    against = f"{target[0]} turns / {target[1]} lost"
+    if mine < target:
+        verdict, colour = f"Beat{who} {against}", "beat"
+    elif mine == target:
+        verdict, colour = f"Matched{who} {against}", "tie"
+    else:
+        verdict, colour = f"Short of{who} {against}", "miss"
+    lines.append(("small", verdict, colour))
+    return note + lines
+
+
+def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:
+    """The win overlay's stage line: cleared, or which way the target went. A
+    win short of it says so, and says too when an earlier best already cleared
+    the stage, since Next stage is then still offered."""
+    cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
+    if not ui.run_id:
+        cleared += "".join(f"  ·  {label} unlocked: {title}" for label, title in ui.unlocked(state))
+    target = ui.stage_target
+    if target is None:
+        return ("small", cleared, "teal")
+    if ui.met_target(state):
+        return ("small", f"{target.text()}: met  ·  {cleared}", "teal")
+    if ui.stage_met_before:
+        return ("small", f"{target.text()}: not this time  ·  your best clears it", "tie")
+    return ("small", f"{target.text()}: not yet", "miss")
+
+
+# How much of a name the leaderboard button shows.
+POST_NAME_SHOWN = 16
+
+
+def board_label(ui: Ui) -> tuple[str, str | None]:
+    """The win overlay's leaderboard button and its key, by what it does now
+    (``Ui.board_action``)."""
+    action = ui.board_action()
+    if action == "view":
+        return "View on board", "L"
+    if action == "posting":
+        return "Posting…", None
+    if action == "post":
+        name = ui.post_as.strip()
+        if len(name) > POST_NAME_SHOWN:
+            name = name[:POST_NAME_SHOWN - 1].rstrip() + "…"
+        return f"Post as {name}", "L"
+    return "Post on leaderboard", "L"
+
+
+def share_label(ui: Ui) -> tuple[str, str]:
+    """The win overlay's share button and its key: a daily's result goes out as
+    a line, not a link, since everyone has its map."""
+    return ("Copy daily result" if ui.daily_day else "Challenge a friend"), "C"

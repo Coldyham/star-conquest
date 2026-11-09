@@ -492,21 +492,7 @@ def handle_event(event, state: GameState, ui: Ui) -> str | None:
     # the finished game behind the fog of war.
     if state.winner is not None:
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_t:
-                return "retry"
-            if event.key == pygame.K_n:
-                # In a stage N is Next stage, or nothing after the last one.
-                if ui.in_stage:
-                    return "next_stage" if ui.offers_next_stage(state) else None
-                return "restart"
-            if event.key in (pygame.K_m, pygame.K_ESCAPE):
-                return "menu"
-            if event.key == pygame.K_h:
-                return "toggle_history"
-            if event.key == pygame.K_c:
-                return "share"
-            if event.key == pygame.K_l:
-                return "leaderboard"
+            return play.over_key(state, ui, _key_name(event))
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if ui.share_button_rect[2] and _point_in_rect(event.pos, ui.share_button_rect):
                 return "share"
