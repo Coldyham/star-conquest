@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import coach, combat, config, fog, matchnames, model, paths, starlore, stats, widgets
+from . import coach, combat, config, fog, hud, matchnames, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
@@ -161,6 +161,19 @@ def draw(surface: pygame.Surface, state: GameState, ui: Ui) -> None:
     elif ui.spectating:
         _draw_spectator_notice(surface, state, ui)
     _draw_score_tooltip(surface, state, ui)
+
+
+_BTN_BY_NAME = {"blue": _BTN_BLUE, "active": _BTN_ACTIVE, "amber": _BTN_AMBER, "violet": _BTN_VIOLET,
+                "red": _BTN_RED, "green": _BTN_GREEN, "teal": _BTN_TEAL, "gold": _BTN_GOLD}
+
+
+def _role(role: hud.Role) -> tuple[int, int, int]:
+    """A `hud` colour role in RGB: a seat id is that seat's colour."""
+    if isinstance(role, int):
+        return config.player_color(role)
+    return {"text": config.COLOR_TEXT, "dim": config.COLOR_TEXT_DIM, "select": config.COLOR_SELECT,
+            "fog": config.COLOR_FOG, "sure": _BTN_GREEN[1], "likely": _BTN_AMBER[1],
+            "gamble": _BTN_DANGER[1]}[role]
 
 
 # --------------------------------------------------------------------------- #
@@ -913,27 +926,21 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         ui.hold_smart_rect = _draw_smart_chip(surface, font, row, ui.hold_minus_rect, rule.smart, accent)
         cy += bh + gap
 
-    this_turn = ui.forward_this_turn(state, ui.selected) if rule is not None else {}
-    stay = max(0, ui.available(state, ui.selected) - sum(this_turn.values()))
-
     if split and rule is not None:
         cy = _draw_split_rows(surface, font, ui, state, rule, layout, inner, cy, iw, bh, gap, s, accent)
-        effect = f"{sum(this_turn.values())} go  ·  {stay} stay"
+        effect = hud.popup_effect(state, ui)
         _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
         cy += bh + gap
         left = pygame.Rect(inner, cy, tw, bh)
         right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
-        _draw_popup_button(surface, left, "Even split", rule.shares == model.shares_even(rule.shares), accent=accent)
+        _draw_popup_button(surface, left, "Even split", hud.even_split(ui), accent=accent)
         _draw_popup_button(surface, right, "Delete all", danger=True)
         ui.even_split_rect = (left.x, left.y, left.w, left.h)
         ui.delete_all_rect = (right.x, right.y, right.w, right.h)
         cy += bh + gap
     else:
         # effect caption: what this actually does this turn, in plain words (dim)
-        if ui.forward_armed:
-            effect = f"{this_turn.get(ui.dest, 0)} go  ·  {stay} stay"
-        else:
-            effect = f"send {ui.chosen}  ·  {max(0, garrison - ui.chosen)} home"
+        effect = hud.popup_effect(state, ui)
         _text(surface, font, effect, config.COLOR_TEXT_DIM, center=(inner + iw // 2, cy + bh // 2))
         cy += bh + gap
         if not ui.forward_armed:
@@ -980,14 +987,9 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
         # preset matching the current value lights up in the mode accent.
         left = pygame.Rect(inner, cy, tw, bh)
         right = pygame.Rect(inner + tw + gap, cy, iw - tw - gap, bh)
-        if ui.forward_armed:
-            share = ui.edited_share()
-            _draw_popup_button(surface, left, "50%", share == 50, accent=accent)
-            _draw_popup_button(surface, right, "100%", share == 100, accent=accent)
-        else:
-            cap = ui._active_cap(state)
-            _draw_popup_button(surface, left, "Half", ui.chosen == max(1, cap // 2), accent=accent)
-            _draw_popup_button(surface, right, "All", ui.chosen == cap, accent=accent)
+        (half, half_lit), (whole, whole_lit) = hud.popup_presets(state, ui)
+        _draw_popup_button(surface, left, half, half_lit, accent=accent)
+        _draw_popup_button(surface, right, whole, whole_lit, accent=accent)
         ui.send_half_rect = (left.x, left.y, left.w, left.h)
         ui.send_all_rect = (right.x, right.y, right.w, right.h)
         cy += bh + gap
@@ -996,10 +998,7 @@ def _draw_send_popup(surface, state: GameState, ui: Ui) -> None:
     # reads "Cancel" only while composing — reopened on something that was already
     # on the board, the same press is a deletion, and should say so.
     cancel = pygame.Rect(inner, cy, iw, bh)
-    if ui.editing_existing:
-        discard = ("Delete lane" if split else "Delete rule") if ui.forward_armed else "Delete order"
-    else:
-        discard = "Cancel"
+    discard = hud.popup_discard(ui)
     if docked:
         # Docked, the popup is a panel rather than a card on the map, and closing
         # it by tapping the map isn't something a panel says; Done says it.
@@ -1018,38 +1017,11 @@ def _forecast_line(state: GameState, ui: Ui, font, width: int) -> tuple[str, tup
     wording that fits ``width``; green for a sure capture, amber for a likely
     one, red for a gamble. Only what the player can see goes in: a destination
     out of full view says so instead of reading its garrison."""
-    src, dest = ui.selected, ui.dest
-    turns = state.travel_turns(src, dest) if src is not None and dest is not None else None
-    if turns is None:
+    line = hud.forecast(state, ui)
+    if line is None:
         return None
-    if not ui.sees(dest):
-        forms = [f"lands in {turns} turns · garrison unseen", f"in {turns} · unseen"]
-        colour = config.COLOR_TEXT_DIM
-    else:
-        landing = ui.landing_at(state, dest, turns)
-        fc = combat.forecast_landing(state, ui.human_id, dest, turns, landing)
-        if fc.reinforce:
-            there = fc.garrison + fc.landing
-            forms = [f"lands in {turns} turns: {there} there", f"in {turns}: {there} there"]
-            colour = config.COLOR_TEXT_DIM
-        else:
-            odds = fc.odds
-            assert odds is not None
-            g = fc.garrison
-            if odds.sure:
-                long = f"sure, ~{round(odds.survivors)} left"
-                short = f"sure ~{round(odds.survivors)}"
-                colour = _BTN_GREEN[1]
-            else:
-                # never "100%" for what a roll can still lose, nor "0%" for a chance
-                pct = min(99, max(1, round(odds.capture * 100))) if odds.capture > 0 else 0
-                long = f"{pct}% win · {fc.sure_at} is sure"
-                short = f"{pct}% · {fc.sure_at} sure"
-                colour = _BTN_AMBER[1] if odds.capture >= 0.5 else _BTN_DANGER[1]
-            forms = [f"{landing} vs {g} in {turns} turns: {long}",
-                     f"{landing} vs {g} in {turns}: {long}",
-                     f"{landing} vs {g}: {long}", f"{landing} vs {g}: {short}",
-                     f"{landing}v{g} {short}", f"{landing}v{g} {short.replace(' · ', '·')}", short]
+    forms, tone = line
+    colour = _role(tone)
     for text in forms:
         if font.size(text)[0] <= width:
             return text, colour
@@ -1976,100 +1948,8 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     fbh = config.FOOTER_BTN_H
     y = by + (config.footer_rect()[3] - fbh) // 2
 
-    # (ui attribute, label, fill, edge, how long it survives a squeeze, which
-    # cluster it's pinned to), in visual order within its cluster — left to right.
-    # play/pause is hidden under autoplay, which drives turns on its own timer and
-    # would make it a no-op; history needs a recorded turn to scrub through, and
-    # under ironman a decided game (`Ui.can_review`).
-    specs: list[tuple[str, str, tuple, tuple, int, str]] = []
-
-    # Route mode replaces the strip wholesale rather than adding to it: the shared
-    # zeroing loop below then takes every live-play rect out of service for free,
-    # so nothing from the ordinary strip can be clicked under an open plan.
-    if ui.mode == ROUTING:
-        # One button rather than a Chain/Rally pair: with two, whichever is lit has
-        # to be read as "you are here" and the other as "go here", and a strip of
-        # buttons that all mean "do this" is the wrong place to learn that. This
-        # one names the sub-mode it is *in* and switches when pressed. Teal ties it
-        # to the live-play Route button it came from, and it outranks Cancel in a
-        # squeeze — Cancel still has Esc and the confirm slot behind it, whereas
-        # losing this makes the sub-mode unreachable on a touch build.
-        mode_label = _key_hint("Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab")
-        specs.append(("route_mode_rect", mode_label, *_BTN_TEAL, 6, "right"))
-        # Rally only, and only when there is a front to pick: drawn exactly when it
-        # would do something, the same gate `can_fast_forward` earns its button by.
-        if ui.route_rally and ui.threatened_systems(state):
-            specs.append(("route_auto_rect", _key_hint("Auto-route", "T"), *_BTN_VIOLET, 5, "right"))
-        specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
-        specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
-        _lay_out_footer(surface, ui, specs, y, fbh, font)
-        return
-
-    # The "leaves this game" group, pinned left away from the control-cluster
-    # taps, Menu first (and first in the folded list), then the two restarts
-    # side by side in the win overlay's colours. Menu is where Esc goes too.
-    specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 4, "left"))
-    # Retry restarts this match from turn 0, the same fork as the win overlay's
-    # Retry: the one way back to the start of a game that has no history to
-    # rewind through (a daily). No confirm, like New map beside it. It took Quit's
-    # place: Quit only opened a modal, which on the web can do no more than Menu
-    # (main.leave_app), so Esc goes to the menu instead.
-    if ui.can_retry:
-        specs.append(("retry_live_button_rect", _key_hint("Retry", "T"), *_BTN_AMBER, 3, "left"))
-    # new map reseeds mid-game too (not just at game end), with no confirmation —
-    # matching the N key exactly. (R is reset-view, and has no button here: the
-    # on-map zoom cluster carries it.)
-    # Not in a gauntlet stage: its seed is pinned, so a new map would leave it.
-    if not ui.in_stage:
-        specs.append(("restart_live_button_rect", _key_hint("New map", "N"), *_BTN_GREEN, 2, "left"))
-    # Undo takes back the last turn: History's rewind to the turn before, in one
-    # press, with no confirm (a daily puzzle is where it earns its place).
-    if ui.can_undo(state):
-        specs.append(("undo_button_rect", _key_hint("Undo", "U"), *_BTN_AMBER, 9, "right"))
-    if ui.can_review(state):
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 7, "right"))
-    # clear/cancel mirrors X (and Backspace/Delete): discards the send being
-    # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
-    if not ui.spectating:   # a spectator has nothing to clear
-        specs.append(("clear_button_rect", _key_hint("Clear", "X"), *_BTN_BLUE, 12, "right"))
-    # Route mode: multi-select a group of systems and forward them all to one
-    # destination. Gated on the same predicate as the G key, so the button is
-    # drawn exactly when the mode means something.
-    if ui.can_route(state):
-        specs.append(("route_button_rect", _key_hint("Route", "G"), *_BTN_TEAL, 11, "right"))
-    # Hint: a bot's suggested sends, as training help. Its first press in a game
-    # not yet hinted asks (`main.press_hint`), since a hinted game is never
-    # posted (`Ui.can_post`). While it is up it splits in two: put it away, or
-    # queue what it suggests — the latter only while there is something left.
-    # Glyphs only, so the pair is no wider than the button it replaces; the map
-    # caption names their keys (`_draw_hint`).
-    if ui.can_hint(state):
-        if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 10, "right"))
-            if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 10, "right"))
-        else:
-            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 10, "right"))
-    # autoplay hands the human seat's decisions to the AI, or takes control back;
-    # shown either way, unlike play/pause. Neither is offered in a shared match:
-    # a play-by-post turn advances when the last seat submits, so there is no
-    # clock here for either control to run, and a client that ran one anyway
-    # would resolve a turn the others had not agreed to. Taken away rather than
-    # guarded, the same treatment End Turn gets while we are waiting — and
-    # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
-    if not ui.in_pbp:
-        specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 5, "right"))
-        if not ui.autoplay:
-            specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
-    # Fast forward: only while the human is knocked out and the match plays on, so
-    # the rest of it can be watched at speed rather than a turn every 350ms. Same
-    # gate the F key goes through, so the button is drawn exactly when it means
-    # something.
-    if ui.can_fast_forward(state):
-        specs.append(
-            ("fast_forward_rect", _key_hint("Normal speed" if ui.fast_forward else "Fast forward", "F"), *(_BTN_ACTIVE if ui.fast_forward else _BTN_BLUE), 13, "right")
-        )
-
+    specs = [(attr, _key_hint(label, key) if key else label, *_BTN_BY_NAME[colour], keep, side)
+             for attr, label, key, colour, keep, side in hud.footer(state, ui)]
     _lay_out_footer(surface, ui, specs, y, fbh, font)
 
 
@@ -2248,26 +2128,14 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
     ui.score_rects = []
 
     def vis(pid: int) -> str:
-        return _score_vis(state, ui, pid)
+        return hud.score_vis(state, ui, pid)
 
     seats = [pid for pid in sorted(state.players) if not state.players[pid].is_neutral and vis(pid) != "hidden"]
     if not seats:
         return
 
     def label(pid: int, v: str, with_name: bool, terse: int = 0) -> str:
-        p = state.players[pid]
-        # A shared match can seat a person at any colour, so the scoreboard is the
-        # one place that says outright which swatch is yours — a solo game has no
-        # such ambiguity (it is always the seat you are looking at), hence `in_pbp`.
-        you = " (you)" if ui.in_pbp and pid == ui.human_id else ""
-        if v == "out":
-            return f"{p.name} out{you}" if with_name else f"out{you}"
-        systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
-        name = f"{p.name} " if with_name else ""
-        mark = "" if v == "live" else " ?"  # stale, last-known intel
-        stats_ = (f"{systems}s {ships}sh {prod:.1f}/t", f"{systems}s {ships}sh", f"{ships}sh",
-                  f"{ships}")[terse]
-        return f"{name}{stats_}{mark}{you}"
+        return hud.score_label(state, ui, pid, v, with_name, terse)
 
     def row_width(with_name: bool, terse: int = 0) -> int:
         # gaps between entries only, at the spacing that level draws with
@@ -2300,26 +2168,8 @@ def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None
         x += sw_w + font.size(txt)[0] + gap
 
 
-def _score_vis(state: GameState, ui: Ui, pid: int) -> str:
-    """How much the scoreboard knows of ``pid``: live | frozen | out | hidden."""
-    p = state.players[pid]
-    live = pid == ui.human_id or any(state.systems[s].owner_id == pid for s in ui.visible)
-    if not (live or pid in ui.player_intel):
-        return "hidden"  # never sighted — you don't know it exists
-    if not p.alive:
-        return "out"
-    return "live" if live else "frozen"
-
-
-def _seat_who(state: GameState, ui: Ui, pid: int) -> str:
-    """Who is playing ``pid``, for a tooltip or a key: its bot (`Ui.bot_label`),
-    "you", or "a person" for someone else's seat in a shared match."""
-    bot = ui.bot_label(state, pid)
-    if bot is not None:
-        return bot
-    if pid == ui.human_id:
-        return "you"
-    return "a person"
+_score_vis = hud.score_vis
+_seat_who = hud.seat_who
 
 
 def _draw_score_tooltip(surface, state: GameState, ui: Ui) -> None:
@@ -2330,17 +2180,9 @@ def _draw_score_tooltip(surface, state: GameState, ui: Ui) -> None:
     rect = next((r for p, r in ui.score_rects if p == pid), None)
     if pid is None or rect is None or pid not in state.players:
         return
-    v = _score_vis(state, ui, pid)
-    if v == "hidden":
+    lines = hud.score_tip(state, ui, pid)
+    if not lines:
         return
-    p = state.players[pid]
-    lines = [f"{p.name} · {_seat_who(state, ui, pid)}"]
-    if v == "out":
-        lines.append("Knocked out")
-    else:
-        systems, ships, prod = _player_stats(state, pid) if v == "live" else ui.player_intel[pid]
-        stats_line = f"{systems} systems · {ships} ships · {prod:.1f} ships/turn"
-        lines.append(stats_line if v == "live" else f"Last seen: {stats_line}")
     font = _fonts()["small"]
     pad = config.s(8)
     w = max(font.size(line)[0] for line in lines) + 2 * pad
@@ -2522,25 +2364,7 @@ def _panel_system_compact(surface, state: GameState, ui: Ui, x, y, sys) -> int:
     width = _panel_w()
     if sys.id == ui.selected and sys.name in starlore.LORE and not ui.history:
         width -= _draw_lore_button(surface, ui, x + _panel_w(), y)
-    if sys.id not in ui.visible:
-        y = _head_named(surface, x, y, sys.label, config.COLOR_TEXT_DIM, width)
-        return _row(surface, x, y, "Out of sight", config.COLOR_TEXT_DIM)
-    colour = config.player_color(sys.owner_id)
-    y = _head_named(surface, x, y, sys.label, colour, width)
-    who = config.player_name(sys.owner_id)
-    if sys.owner_id == ui.human_id and not ui.spectating:
-        y = _row(surface, x, y, f"{who} · {ui.available(state, sys.id)}/{sys.ships} free", colour)
-    else:
-        y = _row(surface, x, y, f"{who} · {sys.ships} ships", colour)
-    if sys.production > 0:
-        y = _row(surface, x, y, f"1 per {sys.production}t · {sys.prod_progress}/{sys.production}",
-                 config.COLOR_TEXT_DIM)
-    else:
-        y = _row(surface, x, y, "Builds nothing", config.COLOR_TEXT_DIM)
-    threat = _adjacent_enemy_strength(state, sys.id, sys.owner_id)
-    fin, ein = _inbound_summary(state, sys.id, sys.owner_id)
-    tail = f" · in +{fin}/{ein}" if fin or ein else f" · {len(sys.neighbors)} lanes"
-    return _row(surface, x, y, f"Threat {threat}{tail}", config.COLOR_TEXT_DIM)
+    return _draw_rows(surface, x, y, hud.system_rows_compact(state, ui, sys), width)
 
 
 def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
@@ -2652,29 +2476,19 @@ def _panel_system(surface, state: GameState, ui: Ui, x, y, sys) -> int:
     width = _panel_w()
     if sys.id == ui.selected and sys.name in starlore.LORE and not ui.history:
         width -= _draw_lore_button(surface, ui, x + _panel_w(), y)
-    if sys.id not in ui.visible:
-        # fogged system: we know where it is, not who holds it or how strong it is
-        y = _head_named(surface, x, y, sys.label, config.COLOR_TEXT_DIM, width)
-        y = _row(surface, x, y, "Owner: ?", config.COLOR_TEXT_DIM)
-        y = _row(surface, x, y, "Ships: ?", config.COLOR_TEXT_DIM)
-        y = _row(surface, x, y, "(out of sight)", config.COLOR_TEXT_DIM)
-        return y
-    y = _head_named(surface, x, y, sys.label, config.player_color(sys.owner_id), width)
-    y = _row(surface, x, y, f"Owner: {config.player_name(sys.owner_id)}", config.player_color(sys.owner_id))
-    if sys.owner_id == ui.human_id and not ui.spectating:
-        y = _row(surface, x, y, f"Ships: {ui.available(state, sys.id)} free / {sys.ships} total", config.COLOR_TEXT)
-    else:
-        y = _row(surface, x, y, f"Ships: {sys.ships}", config.COLOR_TEXT)
-    if sys.production > 0:
-        y = _row(surface, x, y, f"Production: {sys.production} turns/ship", config.COLOR_TEXT_DIM)
-        y = _row(surface, x, y, f"  building: {sys.prod_progress}/{sys.production}", config.COLOR_TEXT_DIM)
-    else:
-        y = _row(surface, x, y, "Production: none", config.COLOR_TEXT_DIM)
-    y = _row(surface, x, y, f"Threat (adj): {_adjacent_enemy_strength(state, sys.id, sys.owner_id)}", config.COLOR_TEXT_DIM)
-    fin, ein = _inbound_summary(state, sys.id, sys.owner_id)
-    if fin or ein:
-        y = _row(surface, x, y, f"Inbound: +{fin}f / {ein}e", config.COLOR_TEXT_DIM)
-    y = _row(surface, x, y, f"Neighbours: {len(sys.neighbors)}", config.COLOR_TEXT_DIM)
+    return _draw_rows(surface, x, y, hud.system_rows(state, ui, sys), width)
+
+
+def _draw_rows(surface, x, y, rows: list[hud.Row], head_width: int | None = None) -> int:
+    """`hud` rows down the panel from ``(x, y)``; returns the y below them."""
+    for text, role, kind in rows:
+        colour = _role(role)
+        if kind == "head":
+            y = _head_named(surface, x, y, text, colour, head_width)
+        elif kind == "wrap":
+            y = _rows_named(surface, x, y, text, colour)
+        else:
+            y = _row(surface, x, y, text, colour)
     return y
 
 
@@ -2692,25 +2506,7 @@ def _draw_lore_button(surface, ui: Ui, right: int, y: int) -> int:
 
 
 def _panel_lane(surface, state: GameState, ui: Ui, x, y, src, dest) -> int:
-    lane = state.lanes.get(lane_key(src, dest))
-    if lane is None:
-        return y
-    d = state.systems[dest]
-    y = _head_named(surface, x, y, f"Lane -> {d.label}", config.COLOR_TEXT)
-    turns = state.travel_turns(src, dest) or lane.travel_turns
-    y = _row(surface, x, y, f"{lane.length_ly} ly  ·  {turns} turns", config.COLOR_TEXT)
-    if config.SHIP_SPEED_GROWTH_PCT > 0:
-        y = _row(surface, x, y, f"Ship speed: {config.ship_speed(state.turn):.1f} ly/turn", config.COLOR_TEXT_DIM)
-    if dest in ui.visible:
-        y = _row(surface, x, y, f"Target: {config.player_name(d.owner_id)} · {d.ships}sh", config.player_color(d.owner_id))
-    else:
-        y = _row(surface, x, y, "Target: ? · ?sh", config.COLOR_TEXT_DIM)
-    if ui.mode == CHOOSING and ui.forward_armed:
-        go = ui.forward_this_turn(state, src).get(dest, 0)
-        y = _rows_named(surface, x, y, f"Forwarding {ui.edited_share()}% · {go} go", config.COLOR_SELECT)
-    elif ui.mode == CHOOSING:
-        y = _row(surface, x, y, f"Sending: {ui.chosen}", config.COLOR_SELECT)
-    return y
+    return _draw_rows(surface, x, y, hud.lane_rows(state, ui, src, dest))
 
 
 def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
@@ -2758,91 +2554,14 @@ def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
 # with a footer button (History, Autoplay, Fast forward, Menu, New map) name
 # their own key on the button itself via `_key_hint`.
 # `test_help_text_fits_the_empty_panel_whole` is what holds the length.
-_LEGEND_TOUCH = """Take every system to win.
-
-Tap one of your systems, then a neighbour, to send its garrison down that lane
-— or drag between the two.
-
-The popup retunes the count, or makes it a standing rule (Forward). Done
-finishes with that system.
-
-Route plans a whole front's worth of rules at once.
-
-Drag to pan, pinch to zoom."""
-
-_LEGEND_KEYS = """Take every system to win.
-
-Click one of your systems, then a neighbour, to send its garrison down that
-lane — or drag between the two.
-
-The popup retunes the count; its Forward tab turns the send into a standing
-rule instead, and Shift+click arms one without opening it.
-
-Route (G) plans a whole front's worth of rules at once.
-
-Drag to pan, wheel to zoom."""
-
-# A landscape phone (`config.compact`) has a narrower, shorter panel: about 14
-# rows of 24 characters against the touch build's 23 rows, so the two scenes
-# whose legend runs longer get a cut of their own. What goes is what a control
-# already says at the point of use: Done, route mode, the Exit button.
-_LEGEND_COMPACT_TOUCH = """Take every system to win.
-
-Tap your system, then a neighbour, to send ships, or drag between them.
-
-The popup sets the count; Forward makes it a standing rule.
-
-Drag to pan, pinch to zoom."""
-
-_LEGEND_HISTORY_COMPACT_TOUCH = """Reviewing turns already played: nothing here changes the game.
-
-Scrub or ◀/▶ to step a turn; Play runs it back. Graphs charts every seat.
-
-Rewind to here replays from this turn."""
-
-# A spectator has nothing to send, so none of the live legend's verbs are theirs:
-# only what the screen is for, and how to look around it.
-_LEGEND_SPECTATING_TOUCH = """Watching from no seat: the whole board, and nobody's orders.
-
-Each turn plays out here once every seat is in. The line at the top says who the
-turn is waiting on.
-
-Tap a system to see it. Drag to pan, pinch to zoom."""
-
-_LEGEND_SPECTATING_KEYS = """Watching from no seat: the whole board, and nobody's orders.
-
-Each turn plays out here once every seat is in. The line at the top says who the
-turn is waiting on.
-
-Point at a system to see it. Drag to pan, wheel or −/+ to zoom."""
-
-# History review is a different scene with different controls, so it gets its own
-# pair rather than the live-play text above: none of the live legend's verbs work
-# while scrubbing (there is no turn to end and no order to give —
-# `input._handle_history_event` is modal and answers nothing else), and none of the controls that *do* work here are named there.
-_LEGEND_HISTORY_TOUCH = """Reviewing turns already played — nothing here changes the game.
-
-Drag the scrubber, or the ◀/▶ buttons, to step a turn. Play runs it back.
-Graphs charts every seat's systems, ships, income and losses. After the game,
-its Coach tab lists turns worth a second look: tap one to go there.
-
-Drag the map to pan, pinch to zoom.
-
-Rewind to here restarts play from the turn on screen. Exit returns to the live
-board."""
-
-_LEGEND_HISTORY_KEYS = """Reviewing turns already played — nothing here changes the game.
-
-Drag the scrubber or press ←/→ to step a turn; Home/End jump to either end. P
-plays it back.
-
-Point at a system to see it as it was then; drag to pan, wheel to zoom. G
-shows graphs of every seat's systems, ships, income and losses; Tab changes
-graph, F makes it full screen. After the game, the Coach tab lists turns worth
-a second look: click one, or Up/Down, to go there.
-
-Rewind to here restarts play from the turn on screen. Esc returns to the live
-board."""
+_LEGEND_TOUCH = hud.LEGEND_TOUCH
+_LEGEND_KEYS = hud.LEGEND_KEYS
+_LEGEND_COMPACT_TOUCH = hud.LEGEND_COMPACT_TOUCH
+_LEGEND_HISTORY_COMPACT_TOUCH = hud.LEGEND_HISTORY_COMPACT_TOUCH
+_LEGEND_SPECTATING_TOUCH = hud.LEGEND_SPECTATING_TOUCH
+_LEGEND_SPECTATING_KEYS = hud.LEGEND_SPECTATING_KEYS
+_LEGEND_HISTORY_TOUCH = hud.LEGEND_HISTORY_TOUCH
+_LEGEND_HISTORY_KEYS = hud.LEGEND_HISTORY_KEYS
 
 
 def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
@@ -2903,15 +2622,7 @@ def _legend_text(history: bool, spectating: bool = False) -> str:
     """The legend for the scene and the input modality — the one place the
     variants are chosen between, so the test that measures whether a legend fits
     the panel measures the same string the panel draws."""
-    if history:
-        if config.compact:
-            return _LEGEND_HISTORY_COMPACT_TOUCH
-        return _LEGEND_HISTORY_TOUCH if config.touch_ui else _LEGEND_HISTORY_KEYS
-    if spectating:
-        return _LEGEND_SPECTATING_TOUCH if config.touch_ui else _LEGEND_SPECTATING_KEYS
-    if config.compact:
-        return _LEGEND_COMPACT_TOUCH
-    return _LEGEND_TOUCH if config.touch_ui else _LEGEND_KEYS
+    return hud.legend_text(history, spectating, config.touch_ui, config.compact)
 
 
 def _panel_legend(surface, x, y, bottom: int, history: bool = False,
@@ -3097,45 +2808,9 @@ def _draw_card(surface, title: str, label: str, accent, paras, close: str, notes
         y += _row_h()
 
 
-def _panel_lane_target(state: GameState, ui: Ui, focus: int):
-    """Neighbour whose lane stats to show: the chosen dest, a hovered neighbour, or
-    — failing both — the destination of a standing rule on the focused system.
-
-    That last case is why a rule shows its lane at all: on the map the rule's own
-    label sits on the lane it uses, so the panel is where you read that lane's
-    length and travel time (a split shows its first lane). (A queued order reopened for editing takes the
-    first case instead — the popup sets ``ui.dest`` to its destination.)
-    """
-    if ui.mode == CHOOSING and ui.dest is not None:
-        return ui.dest
-    if ui.selected is not None and ui.hover is not None and ui.hover != ui.selected and state.are_adjacent(ui.selected, ui.hover):
-        return ui.hover
-    rule = ui.auto_forward.get(focus)
-    first = next(iter(rule.shares), None) if rule is not None else None
-    if first is not None and first in state.systems:
-        return first
-    return None
-
-
-def _adjacent_enemy_strength(state: GameState, sid: int, owner: int) -> int:
-    """Largest garrison of a non-friendly, non-neutral neighbour."""
-    best = 0
-    for n in state.systems[sid].neighbors:
-        o = state.systems[n]
-        if o.owner_id not in (owner, 0):
-            best = max(best, o.ships)
-    return best
-
-
-def _inbound_summary(state: GameState, sid: int, owner: int) -> tuple[int, int]:
-    """(friendly, enemy) ships currently inbound to a system."""
-    friendly = enemy = 0
-    for f in state.fleets_incoming(sid):
-        if f.owner_id == owner:
-            friendly += f.ships
-        else:
-            enemy += f.ships
-    return friendly, enemy
+_panel_lane_target = hud.lane_target
+_adjacent_enemy_strength = hud.adjacent_enemy_strength
+_inbound_summary = hud.inbound_summary
 
 
 def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:

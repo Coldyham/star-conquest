@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import dataclasses
 
-from starconquest import mapgen, turnfilm
-from starconquest.model import GameState
+from starconquest import hud, mapgen, starlore, turnfilm
+from starconquest.model import GameState, lane_key
+from starconquest.viewstate import CHOOSING, Ui
 
 # Derived figures an event's class computes, sent alongside its fields.
 _DERIVED = {
@@ -106,3 +107,117 @@ def film(f: turnfilm.Film) -> dict:
         "cues": [[ms, event(ev)] for ms, ev in f.cues],
         "total": f.total_ms,
     }
+
+
+def view(state: GameState, ui: Ui) -> dict:
+    """Everything the play screen draws from `Ui`: the selection and the popup,
+    the orders queued, what each of our systems can still send, fog, the side
+    panel and scoreboard (worded by `hud`), and which controls are live."""
+    me = state.players.get(ui.human_id)
+    return {
+        "human": ui.human_id,
+        "mode": ui.mode,
+        "selected": ui.selected,
+        "dest": ui.dest,
+        "hover": ui.hover,
+        "source": ui.source(state),
+        "sel_order": ui.sel_order,
+        "sel_forward": ui.sel_forward,
+        "pending": [[o.source_id, o.dest_id, o.ships] for o in ui.pending],
+        "available": {str(sid): ui.available(state, sid) for sid, s in sorted(state.systems.items())
+                      if s.owner_id == ui.human_id},
+        "visible": sorted(ui.visible),
+        "seen": sorted(ui.seen),
+        "popup": popup(state, ui) if ui.mode == CHOOSING else None,
+        "panel": panel(state, ui),
+        "scores": scores(state, ui),
+        "footer": [list(b) for b in hud.footer(state, ui)],
+        "lost": me.ships_lost if me is not None and not ui.spectating else None,
+        "autoplay": ui.autoplay,
+        "playing": ui.playing,
+        "fast_forward": ui.fast_forward,
+        "can": {
+            "end_turn": state.winner is None and not ui.awaiting_others(state) and not ui.spectating,
+            "undo": ui.can_undo(state),
+            "retry": ui.can_retry,
+            "hint": ui.can_hint(state),
+            "route": ui.can_route(state),
+            "fast_forward": ui.can_fast_forward(state),
+            "review": ui.can_review(state),
+        },
+    }
+
+
+def popup(state: GameState, ui: Ui) -> dict | None:
+    """The send popup's content: the lane, the count or share being edited and
+    its slider, the presets, the forecast, and the discard button's word."""
+    if ui.selected not in state.systems or ui.dest not in state.systems:
+        return None
+    src, dest = state.systems[ui.selected], state.systems[ui.dest]
+    rule = ui.edited_rule()
+    lane = state.lanes.get(lane_key(src.id, dest.id))
+    seen = ui.sees(dest.id)
+    line = None if ui.forward_armed else hud.forecast(state, ui)
+    lo, hi, value = ui.slider_range(state)
+    return {
+        "src": src.id,
+        "dest": dest.id,
+        "forward": ui.forward_armed,
+        "split": rule is not None and len(rule.shares) > 1,
+        "editing": ui.editing_existing,
+        "garrison": src.ships,
+        "dest_ships": dest.ships if seen else None,
+        "dest_owner": dest.owner_id if seen else None,
+        "lane": [lane.length_ly, state.travel_turns(src.id, dest.id)] if lane is not None else None,
+        "effect": hud.popup_effect(state, ui),
+        "forecast": {"forms": line[0], "tone": line[1], "odds": seen} if line is not None else None,
+        "value": f"send {ui.edited_share()}%" if ui.forward_armed else str(ui.chosen),
+        "slider": [lo, hi, value],
+        "presets": [list(p) for p in hud.popup_presets(state, ui)],
+        "discard": hud.popup_discard(ui),
+    }
+
+
+def panel(state: GameState, ui: Ui) -> dict:
+    """The side panel: the system in focus and the lane it is looking down, or
+    the legend's scene when nothing is in focus."""
+    editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
+    focus = editing_rule if editing_rule is not None else (ui.selected if ui.selected is not None else ui.hover)
+    if focus not in state.systems:
+        return {"focus": None, "legend": "history" if ui.history else "spectating" if ui.spectating else "live"}
+    sys = state.systems[focus]
+    dest = hud.lane_target(state, ui, focus)
+    return {
+        "focus": focus,
+        "system": [list(r) for r in hud.system_rows(state, ui, sys)],
+        "compact": [list(r) for r in hud.system_rows_compact(state, ui, sys)],
+        "lane": [list(r) for r in hud.lane_rows(state, ui, focus, dest)] if dest is not None else [],
+        "lore": focus == ui.selected and sys.name in starlore.LORE and not ui.history,
+    }
+
+
+def scores(state: GameState, ui: Ui) -> list[dict]:
+    """The scoreboard: each seat the human knows of, how much it knows, its entry
+    at each level of detail (with its name, then shedding the rest), and its
+    tooltip."""
+    out = []
+    for pid in sorted(state.players):
+        if state.players[pid].is_neutral:
+            continue
+        v = hud.score_vis(state, ui, pid)
+        if v == "hidden":
+            continue
+        forms = [hud.score_label(state, ui, pid, v, True)]
+        forms += [hud.score_label(state, ui, pid, v, False, terse) for terse in range(4)]
+        out.append({"id": pid, "vis": v, "forms": forms, "tip": hud.score_tip(state, ui, pid)})
+    return out
+
+
+def legends() -> dict:
+    """The empty panel's legend for each scene and input, sent once."""
+    return {"live": {"touch": hud.LEGEND_TOUCH, "keys": hud.LEGEND_KEYS, "compact": hud.LEGEND_COMPACT_TOUCH},
+            "history": {"touch": hud.LEGEND_HISTORY_TOUCH, "keys": hud.LEGEND_HISTORY_KEYS,
+                        "compact": hud.LEGEND_HISTORY_COMPACT_TOUCH},
+            "spectating": {"touch": hud.LEGEND_SPECTATING_TOUCH, "keys": hud.LEGEND_SPECTATING_KEYS,
+                           "compact": hud.LEGEND_SPECTATING_TOUCH}}
+

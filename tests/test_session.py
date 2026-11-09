@@ -63,3 +63,64 @@ def test_a_failing_command_answers_rather_than_raising(session):
     assert not reply["ok"] and "AssertionError" in reply["error"] and reply["trace"]
     assert not _call(session, "no.such")["ok"]
     assert not json.loads(session.handle("{oops"))["ok"]
+
+
+def _human_game(session, seed=11):
+    _call(session, "boot", page=PAGE, store={})
+    start = _call(session, "game.start", settings={"players": 2, "nodes": 12}, seed=seed)["result"]
+    view = start["view"]
+    home = int(next(iter(view["available"])))
+    nbrs = next(s["nbrs"] for s in start["static"]["systems"] if s["id"] == home)
+    return start, home, nbrs[0]
+
+
+def test_a_send_is_composed_by_taps_and_resolved_by_end_turn(session):
+    start, home, nbr = _human_game(session)
+    assert start["view"]["mode"] == "idle" and start["view"]["panel"]["legend"] == "live"
+    view = _call(session, "ui.tap", sid=home)["result"]["view"]
+    assert view["mode"] == "selected" and view["selected"] == home
+    assert view["panel"]["focus"] == home and view["panel"]["system"][0][2] == "head"
+    view = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    pop = view["popup"]
+    assert view["mode"] == "choosing" and pop["src"] == home and pop["dest"] == nbr
+    assert pop["discard"] == "Cancel" and [p[0] for p in pop["presets"]] == ["Half", "All"]
+    assert pop["forecast"]["forms"] and pop["slider"][2] == int(pop["value"])
+    sending = int(pop["value"])
+    view = _call(session, "ui.call", method="step_count", args=[-1])["result"]["view"]
+    assert int(view["popup"]["value"]) == sending - 1
+    view = _call(session, "ui.empty")["result"]["view"]
+    assert view["mode"] == "idle" and view["pending"] == [[home, nbr, sending - 1]]
+    assert view["available"][str(home)] == 1
+    turn = _call(session, "turn.end")["result"]
+    assert turn["board"]["turn"] == 1 and turn["view"]["pending"] == []
+    assert any(f[1:4] == [home, nbr, sending - 1] for f in turn["board"]["fleets"])
+
+
+def test_a_lane_press_reopens_the_order_on_it(session):
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    _call(session, "ui.empty")
+    view = _call(session, "ui.lane", hits=[["order", 0, -1]])["result"]["view"]
+    assert view["sel_order"] == 0 and view["popup"]["discard"] == "Delete order"
+    view = _call(session, "ui.call", method="cancel_send")["result"]["view"]
+    assert view["pending"] == []
+
+
+def test_keys_answer_actions_and_only_listed_ui_methods_are_callable(session):
+    _, home, _ = _human_game(session)
+    assert _call(session, "ui.key", name="Enter")["result"]["action"] == "end_turn"
+    assert _call(session, "ui.key", name="Escape")["result"]["action"] == "menu"
+    _call(session, "ui.tap", sid=home)
+    reply = _call(session, "ui.key", name="Escape")["result"]
+    assert reply["action"] is None and reply["view"]["mode"] == "idle"
+    assert not _call(session, "ui.call", method="reset_view")["ok"]
+    assert not _call(session, "ui.call", method="__class__")["ok"]
+
+
+def test_the_view_is_plain_json_through_a_game(session):
+    _human_game(session)
+    for _ in range(5):
+        res = _call(session, "turn.end")["result"]
+        assert json.loads(json.dumps(res["view"])) == res["view"]
+        assert {s["id"] for s in res["view"]["scores"]} == {1, 2}
