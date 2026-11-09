@@ -92,8 +92,12 @@ def test_a_send_is_composed_by_taps_and_resolved_by_end_turn(session):
     view = _call(session, "ui.empty")["result"]["view"]
     assert view["mode"] == "idle" and view["pending"] == [[home, nbr, sending - 1]]
     assert view["available"][str(home)] == 1
+    assert view["committed"] == {str(home): sending - 1}
     turn = _call(session, "turn.end")["result"]
     assert turn["board"]["turn"] == 1 and turn["view"]["pending"] == []
+    # Nothing is promised once the turn resolves, so the film's counts are the
+    # film's board's own, never the resolved board's.
+    assert turn["view"]["committed"] == {}
     assert any(f[1:4] == [home, nbr, sending - 1] for f in turn["board"]["fleets"])
 
 

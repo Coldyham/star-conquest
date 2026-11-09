@@ -129,6 +129,10 @@ def view(state: GameState, ui: Ui) -> dict:
         "editing_rule": ui.selected if ui.mode == CHOOSING and ui.forward_armed else ui.sel_forward,
         "available": {str(sid): ui.available(state, sid) for sid, s in sorted(state.systems.items())
                       if s.owner_id == ui.human_id},
+        # What the queue already promises out of each of our systems: the board
+        # shows a system's ships less this (`render._draw_systems`), from the
+        # board it is drawing, so a film's counts are the film's own.
+        "committed": {str(sid): n for sid in sorted(state.systems) if (n := ui.committed(sid))},
         "visible": sorted(ui.visible),
         "seen": sorted(ui.seen),
         "snap": ui.snap_points(state),

@@ -408,8 +408,11 @@ export class BoardView {
       const color = this.colors.get(s.owner) || NEUTRAL;
       set(node.circle, { fill: rgb(color), stroke: rgb(brighten(color)) });
       node.count.setAttribute("fill", rgb(textOn(color)));
-      const own = view && s.owner === human && view.available[s.id] !== undefined;
-      node.count.textContent = String(own ? view.available[s.id] : s.ships);
+      // Ours shows what is still free to send: the ships on the board being
+      // drawn, less what the queue promises (`render._draw_systems`). Taken off
+      // this board, not the view's, so a film counts on its own board.
+      const own = view && s.owner === human;
+      node.count.textContent = String(own ? s.ships - (view.committed?.[s.id] ?? 0) : s.ships);
       const prod = this.prod.get(s.id);
       const frac = prod > 0 ? s.prog / prod : 0;
       node.ring.setAttribute("d", frac > 0 ? arcPath(r + RING_GAP, frac) : "");

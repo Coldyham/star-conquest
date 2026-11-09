@@ -185,7 +185,9 @@ graphs work in layout units, dividing a pointer's screen position by the zoom.
 Compact draws systems at 0.8, docks the popup (in the side column sideways, a
 sheet across the foot upright) with its lane row and Done, folds the footer's
 ways out of the game behind the "more" list from the start, and upright puts
-the panel in a band under the map (the system on the left, its lane and rule
+the panel in a band of fixed height under the map (as pygame's
+`config.PORTRAIT_PANEL_H`, so the map never moves as it fills; it scrolls past
+its room) (the system on the left, its lane and rule
 on the right), End Turn across the foot, the scrubber in two rows and the
 graphs' legend under the plot. Every phase-1 recipe shoots at all three sizes.
 
