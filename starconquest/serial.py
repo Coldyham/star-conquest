@@ -141,6 +141,8 @@ def view(state: GameState, ui: Ui) -> dict:
         "step_ms": app.step_delay(ui, app.PLAY_MS),
         "over": over(state, ui) if state.winner is not None and not ui.history else None,
         "route": route(state, ui) if ui.mode == ROUTING else None,
+        "hint": hint(state, ui) if ui.hint_live(state) else None,
+        "card": card(state, ui),
         "can": {
             "end_turn": state.winner is None and not ui.awaiting_others(state) and not ui.spectating,
             "undo": ui.can_undo(state),
@@ -256,6 +258,38 @@ def route(state: GameState, ui: Ui) -> dict:
         "hint": hud.route_hint(ui),
         "confirm": [label, live],
     }
+
+
+def hint(state: GameState, ui: Ui) -> dict:
+    """The advisor's sends our orders don't already make, each with ``plus``
+    where we already send some down that lane, and the caption."""
+    planned = ui.planned_sends(state)
+    return {"sends": [[o.source_id, o.dest_id, o.ships, bool(planned.get((o.source_id, o.dest_id)))]
+                      for o in ui.hint_left(state) if o.source_id in state.systems and o.dest_id in state.systems],
+            "caption": {"keys": hud.hint_caption(state, ui, False), "touch": hud.hint_caption(state, ui, True)}}
+
+
+def card(state: GameState, ui: Ui) -> dict | None:
+    """The card over the board, if any: a star's lore, or the forecast's
+    breakdown (`render._draw_lore`, `_draw_odds_card`)."""
+    if ui.history or state.winner is not None:
+        return None
+    if ui.lore_sid in state.systems:
+        name = state.systems[ui.lore_sid].name
+        lore = starlore.LORE.get(name)
+        if lore is None:
+            return None
+        paras, close, notes = hud.lore_card(lore, False)
+        return {"kind": "lore", "title": name, "sub": lore.language, "paras": list(paras), "notes": list(notes),
+                "close": {"keys": close, "touch": hud.lore_card(lore, True)[1]}}
+    if ui.odds_card_up():
+        odds = hud.odds_card(state, ui)
+        line = hud.forecast(state, ui)
+        if odds is None or line is None:
+            return None
+        return {"kind": "odds", "title": odds[0], "label": line[0][0], "tone": line[1],
+                "items": [list(item) for item in odds[1]]}
+    return None
 
 
 def rules(state: GameState, ui: Ui) -> list[dict]:

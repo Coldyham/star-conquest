@@ -121,6 +121,7 @@ function show(view) {
   game.view = view;
   game.hud.draw(game.board.turn, view);
   game.hud.veil(view);
+  game.hud.overlays(view);
   redraw();
 }
 
@@ -162,8 +163,6 @@ function adopt(res) {
       act("ui.call", { method: "step_share", args: [delta] });
     },
     footer,
-    odds: () => {},
-    lore: () => {},
     action: actOn,
   });
   show(res.view);
@@ -239,7 +238,7 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo"]);
+  "undo", "hint", "take_hint"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -259,10 +258,24 @@ async function actOn(action) {
     if (!res) return;
     if (res.fresh) adopt(res);
     else show(res.view);
+    if (res.modal) ask(res.modal);
     clock(game.view.step_ms);
   } else {
     status(`${action.replace(/_/g, " ")}: not in this build yet`);
   }
+}
+
+/** A modal ask; the only one so far is the first hint of a game. */
+function ask(m) {
+  game.modal = m;
+  const close = () => {
+    game.modal = null;
+    game.hud.modal(null);
+  };
+  game.hud.modal(m, () => {
+    close();
+    actOn("take_hint");
+  }, close);
 }
 
 /** A footer button, by the `Ui` attribute pygame keeps its hit-rect in. */
@@ -295,6 +308,10 @@ async function press(event) {
     return;
   }
   if (!game.view) return;
+  if (game.view.card) {
+    act("ui.call", { method: "dismiss_card" });
+    return;
+  }
   try { $("map").setPointerCapture(event.pointerId); } catch { /* a synthetic press */ }
   const [x, y] = local(event);
   const bv = game.board_view;
@@ -398,6 +415,13 @@ function zoomButton(factor) {
 
 async function key(event) {
   if (!game.view || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (game.modal) {
+    const k = event.key.toLowerCase();
+    if (k === "y" || k === "enter") $("modal").querySelector(".btn.amber").click();
+    else if (k === "n" || k === "escape") $("modal").querySelector(".btn.green").click();
+    event.preventDefault();
+    return;
+  }
   if (event.target instanceof HTMLInputElement) return;
   if (game.film) {
     game.film.skip = true;

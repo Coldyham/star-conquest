@@ -189,3 +189,25 @@ def test_route_mode_plans_a_chain_and_confirms_it(session):
     assert _call(session, "ui.empty")["result"]["view"]["route"]["dest"] == nbr   # a stray tap keeps it
     view = _call(session, "ui.key", name="Enter")["result"]["view"]
     assert view["mode"] != "routing" and view["rules"][0]["src"] == home
+
+
+def test_a_hint_asks_first_then_draws_its_sends(session):
+    _human_game(session)
+    res = _call(session, "game.action", name="hint")["result"]
+    assert res["modal"]["kind"] == "hint" and res["view"]["hint"] is None
+    view = _call(session, "game.action", name="take_hint")["result"]["view"]
+    assert view["hint"] is not None and view["hint"]["caption"]["keys"].startswith("Hint")
+    assert "modal" not in _call(session, "game.action", name="hint")["result"]   # a second press hides it
+    res = _call(session, "game.action", name="hint")["result"]
+    assert "modal" not in res and res["view"]["hint"] is not None   # asked once per game
+
+
+def test_cards_open_and_any_key_puts_them_away(session):
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    view = _call(session, "ui.call", method="open_odds")["result"]["view"]
+    assert view["card"]["kind"] == "odds" and view["card"]["items"][0][0] == "row"
+    assert view["card"]["label"] == view["popup"]["forecast"]["forms"][0]
+    reply = _call(session, "ui.key", name="Enter")["result"]
+    assert reply["action"] is None and reply["view"]["card"] is None   # spent putting it away

@@ -727,3 +727,109 @@ def route_confirm(ui: Ui) -> tuple[str, bool]:
         # or on a pocket with nothing behind it
         return "Nothing to route", False
     return "Pick a target", False
+
+
+def odds_card(state: GameState, ui: Ui) -> tuple[str, list[tuple]] | None:
+    """The forecast's breakdown (`combat.forecast_landing`): ``(title, items)``.
+    An item is ``("row", label, value, total)``, ``("text", text, tone)`` (the
+    verdict, in `forecast`'s tone), ``("head", text)``, ``("note", text)`` or
+    ``("gap",)``. None unless the forecast row reads the target."""
+    src, dest = ui.selected, ui.dest
+    if src is None or dest is None or not ui.sees(dest):
+        return None
+    turns = state.travel_turns(src, dest)
+    if turns is None:
+        return None
+    node = state.systems[dest]
+    landing = ui.landing_at(state, dest, turns)
+    fc = combat.forecast_landing(state, ui.human_id, dest, turns, landing)
+    line = forecast(state, ui)
+    tone = line[1] if line is not None else "dim"
+    send = min(ui.chosen, landing)
+    plural = "s" if turns != 1 else ""
+    items: list[tuple] = [("row", "Your send", str(send), False)]
+    if landing > send:
+        items.append(("row", "Your other ships landing that turn", f"+{landing - send}", False))
+    items += [("row", "You land with", str(landing), True), ("gap",),
+              ("row", f"At {node.short} now", str(fc.held), False),
+              ("row", f"Built in the {turns} turn{plural} before you land", f"+{fc.built}", False)]
+    if fc.inbound:
+        whose = "Your" if fc.reinforce else f"{config.player_name(node.owner_id)}'s"
+        items.append(("row", f"{whose} fleets landing by then", f"+{fc.inbound}", False))
+    items.append(("row", "It will hold", str(fc.garrison), True))
+    if fc.reinforce:
+        items.append(("row", "There once you land", str(fc.garrison + landing), True))
+    items.append(("gap",))
+    if fc.odds is not None:
+        g, odds = fc.garrison, fc.odds
+        kept = round(odds.survivors)
+        if odds.sure:
+            verdict = f"{landing} against {g}: every roll takes it, and you keep about {kept}."
+        elif odds.capture > 0:
+            pct = min(99, max(1, round(odds.capture * 100)))
+            verdict = (f"{landing} against {g}: you take it on {pct}% of rolls, keeping about "
+                       f"{kept} when you do. {fc.sure_at} would take it on every roll.")
+        else:
+            verdict = f"{landing} against {g}: no roll takes it. {fc.sure_at} would take it on every roll."
+        items.append(("text", verdict, tone))
+    for owner, ships in fc.rivals:
+        items.append(("note", f"Not counted: {config.player_name(owner)}'s {ships} ships also land "
+                              f"there by then, and fight whoever holds it."))
+    items.append(("note", "Not known: what anyone else sends this turn."))
+    if fc.odds is not None:
+        jitter, adv = config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE
+        pct = round(jitter * 100)
+        items += [("gap",), ("head", "How a fight is rolled")]
+        if adv != 1:
+            # unrounded: the bonus is a multiplier on strength, not extra ships
+            items.append(("note", f"Defender advantage ×{adv:g}: the {fc.garrison} holding it fight "
+                                  f"like {round(fc.garrison * adv, 2):g}."))
+        else:
+            items.append(("note", "No defender advantage: the holder fights at its ship count."))
+        if jitter > 0:
+            items.append(("note", f"Jitter ±{pct}%: each side's strength is rolled up to {pct}% "
+                                  f"up or down, so a close fight can go either way."))
+        else:
+            items.append(("note", "Jitter is off: every fight goes exactly by the numbers."))
+        items.append(("note", "The setup menu's Combat tab plays out any fight: how many each "
+                              "side loses (Lanchester's square law), and the best and worst rolls."))
+    title = f"{'Reinforcing' if fc.reinforce else 'Attacking'} {node.short}"
+    return title, items
+
+
+def lore_card(lore, touch: bool) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+    """A star info card's paragraphs, close line and notes (`starlore.Lore`)."""
+    origin = lore.origin or "The IAU catalogue gives no origin for this name."
+    notes = (f"Source: {lore.reference}",) if lore.reference else ()
+    close = "Tap anywhere to close" if touch else "Press any key to close"
+    return (origin,), close, notes
+
+
+def hint_caption(state: GameState, ui: Ui, touch: bool) -> str:
+    """What the hint on the map amounts to: its sends left, and those our own
+    orders already make."""
+    left = ui.hint_left(state)
+    lanes = len({(o.source_id, o.dest_id) for o in ui.hint_orders})
+    covered = lanes - len(left)
+    if not lanes:
+        caption = "Hint: hold this turn"
+    elif not left:
+        caption = "Hint: your orders already make its sends"
+    else:
+        caption = f"Hint: {len(left)} send{'s' if len(left) != 1 else ''}"
+        if covered:
+            caption += f" · {covered} already yours"
+    if not touch:
+        caption += " · K hides, Shift+K applies" if left else " · K hides"
+    return caption
+
+
+def confirm_hint(ui: Ui, advisor: str) -> tuple[str, str, str]:
+    """The ask before a game's first hint: title, body and the confirm button's
+    word. A hinted game is never posted (`Ui.can_post`) or clears its stage."""
+    stake = "posting to the leaderboard" + (" or clearing this stage" if ui.in_stage else "")
+    return ("Show a hint?",
+            (f"Shows on the map the moves the {advisor} bot would make in your "
+             f"position this turn, leaving out any your orders already make."
+             f"\n\nUsing a hint makes this game ineligible for {stake}."),
+            "Show hint")

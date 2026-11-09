@@ -27,7 +27,8 @@ const SELECT = "rgb(250,240,150)";
 const FOG = [58, 62, 82];
 const DANGER = "rgb(200,96,104)";        // widgets.BTN_DANGER's edge
 const FORWARD = "rgb(110,205,195)";      // render._forward_accent
-const ROUTE = "rgb(250,120,200)";        // config.COLOR_ROUTE: route mode's uncommitted plan
+const ROUTE = "rgb(250,120,200)";
+const HINT = "rgb(235,240,250)";         // config.COLOR_HINT: the advisor's sends        // config.COLOR_ROUTE: route mode's uncommitted plan
 
 // config, in pixels: NODE_MIN_RADIUS / NODE_MAX_RADIUS for production 5 (poorest)
 // and 2 (richest), FLEET_SIZE, FILM_ARRIVAL_GAP, NODE_LABEL_GAP, the progress
@@ -371,6 +372,7 @@ export class BoardView {
       this.drawRules(view, human, now, badged);
       this.drawOrders(view, human, now);
       if (view.route) this.drawRoute(view.route, now);
+      if (view.hint) this.drawHint(view.hint);
     }
 
     for (const s of board.sys.values()) {
@@ -415,6 +417,26 @@ export class BoardView {
     this.drawNames(look, fogState);
     this.drawDrag(look, human);
     if (view?.route) this.drawRouteLabels(view.route, look.box);
+  }
+
+  /** The advisor's sends our orders don't make: dashed arrows in the hint
+   * colour, the count 60% along, "+N" where we already send some
+   * (`render._draw_hint`). */
+  drawHint(hint) {
+    for (const [src, dst, ships, plus] of hint.sends) {
+      const [ax, ay] = this.pos.get(src), [bx, by] = this.pos.get(dst);
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      const ux = (bx - ax) / len, uy = (by - ay) / len;
+      const inset = this.radius.get(dst) + ARROW_GAP;
+      const tx = bx - ux * inset, ty = by - uy * inset;
+      el("line", { x1: ax, y1: ay, x2: tx, y2: ty, stroke: HINT, "stroke-width": 2, "stroke-dasharray": "8 6" },
+        this.orderLayer);
+      chevron(this.orderLayer, tx, ty, ux, uy, ARROW, HINT, 2);
+      const label = plus ? `+${ships}` : String(ships);
+      const lx = ax + (bx - ax) * 0.6, ly = ay + (by - ay) * 0.6 - 10;
+      pill(this.orderLayer, lx, ly, label, HINT);
+      this.taken.push(pillRect(lx, ly, label));
+    }
   }
 
   /** Route mode's proposal (`render._draw_route_preview`): rules it would

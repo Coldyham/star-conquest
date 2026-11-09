@@ -154,7 +154,8 @@ export class Hud {
         const head = h("h2", { style, class: textWidth(text, 18) > 212 - (lore ? 26 : 0) ? "long" : "" }, text);
         if (i === 0 && lore) {
           return h("div", { class: "head-row" }, head,
-            h("button", { type: "button", class: "lore", "aria-label": "About this star", onclick: () => this.on.lore() },
+            h("button", { type: "button", class: "lore", "aria-label": "About this star",
+              onclick: () => this.on.call("open_lore", []) },
               "i"));
         }
         return head;
@@ -178,6 +179,57 @@ export class Hud {
     const left = view.footer.filter((b) => b[5] === "left").map(button);
     const right = view.footer.filter((b) => b[5] === "right").map(button);
     nav.replaceChildren(...left, h("span", { class: "spacer" }), ...right);
+  }
+
+  /** The hint's caption over the map, and the card over the board, if any. */
+  overlays(view) {
+    const touch = matchMedia("(hover: none)").matches;
+    const cap = this.$("hint-caption");
+    cap.hidden = !view.hint;
+    if (view.hint) cap.textContent = touch ? view.hint.caption.touch : view.hint.caption.keys;
+    const box = this.$("card");
+    const card = view.card;
+    if (!card) {
+      box.hidden = true;
+      return;
+    }
+    if (card.kind === "lore") {
+      box.style.borderColor = "rgb(110,140,200)";
+      box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: "color:rgb(110,140,200)" }, card.sub),
+        ...card.paras.map((t) => h("p", {}, t)), ...card.notes.map((t) => h("p", { class: "note" }, t)),
+        h("p", { class: "close" }, touch ? card.close.touch : card.close.keys));
+    } else {
+      const tone = `var(--${card.tone})`;
+      box.style.borderColor = tone;
+      const items = card.items.map(([kind, a, b, total]) => {
+        if (kind === "row") return h("div", { class: `row${total ? " total" : ""}` }, h("span", {}, a), h("span", {}, b));
+        if (kind === "text") return h("p", { style: `color:var(--${b})` }, a);
+        if (kind === "head") return h("h2", {}, a);
+        if (kind === "note") return h("p", { class: "note" }, a);
+        return h("div", { class: "gap" });
+      });
+      box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: `color:${tone}` }, card.label),
+        ...items, h("p", { class: "close" }, touch ? "Tap anywhere to close" : "Press any key to close"));
+    }
+    box.hidden = false;
+  }
+
+  /** A two-button ask (`widgets.draw_modal`): `onConfirm` or dismiss. */
+  modal(m, onConfirm, onCancel) {
+    const box = this.$("modal");
+    if (!m) {
+      box.hidden = true;
+      return;
+    }
+    const touch = matchMedia("(hover: none)").matches;
+    box.replaceChildren(h("div", { class: "stack" }, h("h1", {}, m.title),
+      ...m.body.split("\n\n").map((t) => h("p", {}, t)),
+      h("div", { class: "grid" },
+        h("button", { type: "button", class: "btn amber", onclick: onConfirm }, m.confirm,
+          touch ? null : h("span", { class: "key" }, " (Y/Enter)")),
+        h("button", { type: "button", class: "btn green", onclick: onCancel }, "Cancel",
+          touch ? null : h("span", { class: "key" }, " (N/Esc)")))));
+    box.hidden = false;
   }
 
   /** The game-over veil (`render._draw_win_overlay`): who won, the result,
@@ -338,7 +390,7 @@ export class Hud {
     if (pop.forecast) {
       ui.forecast = h("span");
       ui.odds = h("span", { class: "i" }, "i");
-      ui.forecastRow = h("button", { type: "button", class: "row forecast", onclick: () => this.on.odds() },
+      ui.forecastRow = h("button", { type: "button", class: "row forecast", onclick: () => this.on.call("open_odds", []) },
         ui.forecast, ui.odds);
       kids.push(ui.forecastRow);
     }

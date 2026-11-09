@@ -235,3 +235,32 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #panel .hint { margin-top: 12px; color: var(--dim); }
 #end-turn.route:disabled { opacity: 1; background: rgb(24, 28, 40); border-color: rgb(40, 46, 66); color: var(--dim);
   font-size: 18px; font-weight: normal; }
+
+/* --- the hint caption, cards and modals --------------------------------- */
+:root { --hint: rgb(235, 240, 250); }
+#hint-caption {
+  position: absolute; left: 50%; top: 8px; transform: translateX(-50%); margin: 0; padding: 2px 6px;
+  border-radius: 5px; background: var(--bg); color: var(--hint); white-space: nowrap; pointer-events: none;
+}
+#card {
+  position: absolute; z-index: 6; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; padding: 18px;
+  background: rgb(16, 18, 28); border: 2px solid; border-radius: 10px; box-shadow: 0 0 0 100vmax rgba(5, 6, 12, .6);
+}
+#card h1 { margin: 0; font-size: 30px; font-weight: bold; }
+#card h2 { margin: 8px 0 2px; font-size: 14px; font-weight: normal; color: var(--text); }
+#card p { margin: 6px 0 0; }
+#card .sub { margin: 2px 0 10px; }
+#card .note { color: var(--dim); }
+#card .close { color: var(--dim); text-align: center; margin-top: 14px; }
+#card .row { display: flex; justify-content: space-between; gap: 12px; line-height: 22px; color: var(--dim); }
+#card .row.total { color: var(--text); }
+#card .gap { height: 10px; }
+#modal {
+  position: fixed; inset: 0; z-index: 12; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 12, .78); text-align: center;
+}
+#modal .stack { max-width: min(760px, calc(100% - 48px)); }
+#modal h1 { margin: 0 0 10px; font-size: 30px; font-weight: bold; }
+#modal p { margin: 0 0 10px; color: var(--dim); }
+#modal .grid { display: flex; gap: 12px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }

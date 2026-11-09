@@ -22,11 +22,11 @@ import math
 import time
 import traceback
 
-from starconquest import ai, app, bench, engine, hostio, play, serial
+from starconquest import ai, app, bench, engine, hostio, hud, play, serial
 from starconquest.model import GameState
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
-from starconquest.viewstate import ROUTING, Ui
+from starconquest.viewstate import CHOOSING, ROUTING, Ui
 
 API_VERSION = 1
 
@@ -58,6 +58,9 @@ UI_CALLS = {
     "auto_rally": lambda ui, state: ui.auto_rally(state),
     "route_clear": lambda ui, state: play.route_clear(state, ui),
     "add_route_sids": lambda ui, state, sids: ui.add_route_sids(state, [int(s) for s in sids]),
+    "open_odds": lambda ui, state: setattr(ui, "odds_open", ui.mode == CHOOSING and not ui.forward_armed),
+    "open_lore": lambda ui, state: play.open_lore(state, ui, ui.selected),
+    "dismiss_card": lambda ui, state: play.dismiss_card(ui),
 }
 
 
@@ -182,6 +185,14 @@ class Session:
             ui.clear_pending()
         elif name == "toggle_fast_forward":
             app.toggle_fast_forward(state, ui)
+        elif name == "hint":
+            # The first hint in a game asks first: a hinted game is never posted.
+            if app.press_hint(state, ui, self.log):
+                title, body, confirm = hud.confirm_hint(ui, app.HINT_STRATEGY.title())
+                return {"fresh": False, "view": self._view(),
+                        "modal": {"kind": "hint", "title": title, "body": body, "confirm": confirm}}
+        elif name == "take_hint":
+            app.take_hint(state, ui, self.log)
         elif name == "toggle_route":
             # Leaving discards the plan: it is only ever committed by its confirm.
             if ui.mode == ROUTING:

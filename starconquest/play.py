@@ -259,8 +259,27 @@ def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
         tap_system(state, ui, node, shift)
 
 
+def card_up(state: GameState, ui: Ui) -> bool:
+    """Is a card over the board that any press puts away: a star's info card,
+    or the forecast's breakdown?"""
+    if not ui.odds_card_up():
+        ui.odds_open = False
+    lore = ui.lore_sid is not None and not ui.history and state.winner is None
+    return lore or ui.odds_open
+
+
+def dismiss_card(ui: Ui) -> None:
+    """Put away whichever card is up; the press that does it is spent on it."""
+    ui.lore_sid = None
+    ui.odds_open = False
+
+
 def press_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
-    """A key in whichever scene is up: the game-over veil, route mode, or live play."""
+    """A key in whichever scene is up: a card (which any key puts away), the
+    game-over veil, route mode, or live play."""
+    if card_up(state, ui):
+        dismiss_card(ui)
+        return None
     if state.winner is not None:
         return over_key(state, ui, name)
     if ui.mode == ROUTING:
