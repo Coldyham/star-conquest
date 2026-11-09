@@ -85,7 +85,7 @@ DUEL = {"players": 2, "nodes": 12}
 #   ["history", turn]       open history review at turn (-1: the latest)
 #   ["stage", gauntlet_id, stage_index]   the board is that gauntlet stage
 #   ["overlay", kind]       a confirm modal: quit, rewind, hint
-#   ["map", path]           settings.custom_map from a file
+#   ["map", path]           settings.custom_map from a file (resolved to the map itself)
 SCREENS: list[dict] = [
     # ---- setup menu ----
     {"name": "menu-basic", "surface": "menu", "sizes": FLAT, "steps": []},
@@ -237,10 +237,20 @@ def _settings(recipe: dict) -> Settings:
     s = Settings.from_dict(patch)
     for step in recipe["steps"]:
         if step[0] == "map":
-            cm = CustomMap.from_dict(json.loads((ROOT / step[1]).read_text()))
+            cm = CustomMap.from_dict(_map_data(step[1]))
             assert cm is not None, step
             s.custom_map = cm
     return s
+
+
+def _map_data(ref) -> dict:
+    """A map step's map: a path on a first draw, the map itself once resolved
+    (`maps/` is not committed, so the fixture carries the map)."""
+    return ref if isinstance(ref, dict) else json.loads((ROOT / ref).read_text())
+
+
+def _resolve_maps(steps: list) -> list:
+    return [["map", _map_data(s[1])] if s[0] == "map" else s for s in steps]
 
 
 def _play(state, ui, log, n: int, until_over: bool = False) -> None:
@@ -308,6 +318,8 @@ def run_game(recipe: dict, screen: pygame.Surface) -> list:
                 ui.history_turn = min(step[1], ui.history_max)
         elif kind == "overlay":
             overlay = step[1]
+        elif kind == "map":
+            step = ["map", _map_data(step[1])]
         resolved.append(step)
 
     if history is not None and history[0]:
@@ -340,7 +352,7 @@ def run_menu(recipe: dict, screen: pygame.Surface) -> list:
         ms.strategies = menu._strategy_options()
     menu._survey_lanes(ms, settings)   # what `menu.pump` works out ahead of a frame
     menu.draw(screen, ms, settings)
-    return recipe["steps"]
+    return _resolve_maps(recipe["steps"])
 
 
 def run_resume(recipe: dict, screen: pygame.Surface) -> list:
@@ -358,7 +370,7 @@ def run_maker(recipe: dict, screen: pygame.Surface) -> list:
     settings = _settings(recipe)
     ed = mapmaker.open_editor(settings, seed=1)
     mapmaker.draw(screen, ed, settings)
-    return recipe["steps"]
+    return _resolve_maps(recipe["steps"])
 
 
 RUNNERS = {"game": run_game, "menu": run_menu, "resume": run_resume, "maker": run_maker}
