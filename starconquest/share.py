@@ -70,7 +70,7 @@ from __future__ import annotations
 import json
 import threading
 
-from . import pbp, webstore
+from . import hostio, pbp, webstore
 from .paths import (
     LEADERBOARD_LOG_PATH,
     LEADERBOARD_POST_MODULE_PATH,
@@ -197,6 +197,9 @@ def post_log(log: GameLog, game_key: str) -> bool:
     # may actually write `game_logs` lives in that function's environment. There
     # is nothing to authenticate as from here.
     headers = {"Content-Type": "application/json"}
+    if hostio.in_worker():
+        hostio.emit("fire", url=log_url(), body=body)
+        return True
     return _post_web(body, headers) if is_web() else _post_desktop(body, headers)
 
 
@@ -294,6 +297,8 @@ def signed_in_name() -> pbp.Request | None:
     module = _quick_post_module()
     if not module:
         return None
+    if hostio.in_worker():
+        return pbp.bridge(module, "ownName", [])
     return pbp.settle(f"import({json.dumps(module)}).then(function(m){{return m.ownName()}})")
 
 
@@ -310,6 +315,8 @@ def quick_post(token: str, name: str) -> pbp.Request | None:
     module = webstore.leaderboard_url(LEADERBOARD_POST_MODULE_PATH)
     if not module or not name:
         return None
+    if hostio.in_worker():
+        return pbp.bridge(module, "quickPost", [token, name])
     return pbp.settle(
         f"import({json.dumps(module)}).then(function(m)"
         f"{{return m.quickPost({json.dumps(token)},{json.dumps(name)})}})"
@@ -441,6 +448,15 @@ def fetch_log(match_id: str) -> Download | None:
     # replay will not open — the URL is derived from the page's own host, so it
     # differs between production, a branch deploy and a preview.
     print(f"fetching replay: {url}")
+    if hostio.in_worker():
+        download = Download(web=False)
+
+        def deliver(state: str, text: str) -> None:
+            download._result.append((OK, text) if state == OK
+                                    else (MISSING if state == MISSING else ERROR, ""))
+
+        hostio.request(url, None, False, deliver)
+        return download
     return _fetch_web(url) if is_web() else _fetch_desktop(url)
 
 

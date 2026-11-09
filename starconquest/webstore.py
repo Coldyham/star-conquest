@@ -7,6 +7,10 @@ bridge, imported *locally* (so importing this module is safe off the web build)
 with every DOM call wrapped, so a missing or blocked API degrades to a no-op
 return rather than a crash.
 
+In the HTML build's worker (``hostio.in_worker``) there is no DOM to reach:
+storage is a mirror the page seeded at boot, and every write, copy, fragment
+and navigation is queued as an effect for the page to carry out.
+
 ``get``/``set`` are localStorage in the browser and a JSON file under
 ``data_dir()`` everywhere else, so features built on them (personal bests) work on
 desktop too rather than being web-only. ``share_token``/``url_token`` are
@@ -21,7 +25,7 @@ from __future__ import annotations
 
 import json
 
-from . import paths
+from . import hostio, paths
 from .paths import (
     WEB_ANIMATE_TURNS_KEY,
     WEB_BESTS_KEY,
@@ -52,6 +56,8 @@ def _read_file() -> dict:
 
 def get(key: str) -> str:
     """The stored string for ``key``, or ``""`` when absent or unavailable."""
+    if hostio.in_worker():
+        return hostio.store_get(key)
     if not is_web():
         value = _read_file().get(key)
         return value if isinstance(value, str) else ""
@@ -66,6 +72,9 @@ def get(key: str) -> str:
 
 def set(key: str, value: str) -> bool:
     """Store ``value`` under ``key``. True if it landed."""
+    if hostio.in_worker():
+        hostio.store_set(key, value)
+        return True
     if not is_web():
         try:
             data = _read_file()
@@ -236,7 +245,11 @@ def leaderboard_origin() -> str:
     configured production origin, ``paths.LEADERBOARD_ORIGIN``. (Localhost can
     call it: the functions' CORS allow-list admits a local server.)
     """
-    if is_web():
+    if hostio.in_worker():
+        host = hostio.page("hostname")
+        if host.endswith(paths.NETLIFY_SUFFIX):
+            return f"https://{host}"
+    elif is_web():
         import platform as _platform
 
         try:
@@ -257,6 +270,9 @@ def leaderboard_url(path: str) -> str:
 
 def link_url(token: str) -> str:
     """The full shareable URL carrying ``token``, or ``""`` off the web."""
+    if hostio.in_worker():
+        origin = hostio.page("origin")
+        return f"{origin}{hostio.page('pathname')}#{token}" if origin else ""
     if not is_web():
         return ""
     import platform as _platform
@@ -271,6 +287,10 @@ def link_url(token: str) -> str:
 def set_url_fragment(token: str) -> bool:
     """Web only: replace the address bar's ``#fragment``, no reload, no new
     history entry (``history.replaceState``)."""
+    if hostio.in_worker():
+        hostio.emit("fragment", token=token)
+        hostio.set_hash(token)
+        return True
     if not is_web():
         return False
     import platform as _platform
@@ -289,6 +309,9 @@ def copy_to_clipboard(text: str) -> bool:
     The text crosses the bridge as an ASCII-only JS literal (``json.dumps``
     escapes everything else): handed over as a ``str``, pygbag passes its UTF-8
     bytes as Latin-1, so a shared result's "·" pasted as "Â·"."""
+    if hostio.in_worker():
+        hostio.emit("clipboard", text=text)
+        return True
     if not is_web():
         return False
     import platform as _platform
@@ -312,6 +335,9 @@ def open_url(url: str) -> bool:
     """
     if not url:
         return False
+    if hostio.in_worker():
+        hostio.emit("navigate", url=url)
+        return True
     if is_web():
         import platform as _platform
 
@@ -377,7 +403,7 @@ def close_window() -> bool:
     player on a blank page with no way back, so a caller that can't verify the close
     must stay in the app instead (see ``main.leave_app``).
     """
-    if not is_web():
+    if hostio.in_worker() or not is_web():
         return False
     import platform as _platform
 
@@ -398,7 +424,7 @@ def trigger_resize() -> bool:
     synthetic resize once boot has (probably) settled nudges pygbag's own
     handler to recompute the fit itself, with no fix needed here beyond that.
     """
-    if not is_web():
+    if hostio.in_worker() or not is_web():
         return False
     import platform as _platform
 
@@ -431,7 +457,7 @@ def viewport() -> tuple[int, int, float] | None:
     has the shape it is shown at whatever the page's viewport meta says.
     None off the web or if the DOM can't be read; the caller keeps its size.
     """
-    if not is_web():
+    if hostio.in_worker() or not is_web():
         return None
     import platform as _platform
 
@@ -460,6 +486,8 @@ def viewport() -> tuple[int, int, float] | None:
 
 def url_token() -> str:
     """Web only: the ``#<token>`` fragment in the address bar, else ``""``."""
+    if hostio.in_worker():
+        return hostio.page("hash").lstrip("#")
     if not is_web():
         return ""
     import platform as _platform

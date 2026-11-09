@@ -186,8 +186,11 @@ def is_android() -> bool:
 
 
 def is_web() -> bool:
-    """True when running in the browser (pygbag/Emscripten WebAssembly build)."""
-    return sys.platform == "emscripten"
+    """True when running in the browser: pygbag's WebAssembly build, or the HTML
+    build's worker (``hostio``), which is Pyodide's Emscripten too."""
+    from . import hostio
+
+    return sys.platform == "emscripten" or hostio.in_worker()
 
 
 def data_dir() -> Path:

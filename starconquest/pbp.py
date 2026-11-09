@@ -53,7 +53,7 @@ import copy
 import json
 from dataclasses import dataclass, field, replace
 
-from . import engine, replay, webstore
+from . import engine, hostio, replay, webstore
 from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
@@ -818,7 +818,22 @@ def request(url: str, body: str | None = None, signed: bool = False) -> Request 
     mailbox-per-call request the game has, and ``campaign`` needs the same
     thing for a different endpoint rather than a third copy of it.
     """
+    if hostio.in_worker():
+        req = Request(web=False)
+        hostio.request(url, body, signed, lambda state, text: req._result.append((state, text)))
+        return req
     return _call_web(url, body, signed) if is_web() else _call_desktop(url, body)
+
+
+def bridge(module: str, fn: str, args: list) -> Request | None:
+    """Call ``fn`` of the board module at ``module`` in the page, parking how its
+    promise settles: ``settle`` for a host whose page Python can't hand JS to.
+    Worker only; None elsewhere (``share`` builds the pygbag call itself)."""
+    if not hostio.in_worker():
+        return None
+    req = Request(web=False)
+    hostio.bridge(module, fn, args, lambda state, text: req._result.append((state, text)))
+    return req
 
 
 def _auth_js() -> str:
