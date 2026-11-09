@@ -169,16 +169,23 @@ export class SetupMenu {
 
   // --- the settings panel ------------------------------------------------ //
   drawPanel(m) {
-    const seed = this.panelEl.querySelector("input.seed");
+    const seed = this.panelEl.querySelector(":scope > :not(.off) input.seed");
     const keepSeed = seed && document.activeElement === seed ? seed : null;
     const scroll = this.panelEl.scrollTop;
-    const body = h("div", { class: `tab-${m.tab}` }, ...m.panel.map((item) => this.item(item)));
-    this.panelEl.replaceChildren(body);
+    // A phone gets every tab, the others laid under the one shown, so the panel
+    // is as tall as the tallest and never moves as the tabs change.
+    const panes = m.panels
+      ? Object.entries(m.panels).map(([tab, items]) => h("div", {
+        class: `tab-${tab}${tab === m.tab ? "" : " off"}`, "aria-hidden": tab === m.tab ? null : "true",
+        inert: tab !== m.tab,
+      }, ...items.map((item) => this.item(item))))
+      : [h("div", { class: `tab-${m.tab}` }, ...m.panel.map((item) => this.item(item)))];
+    this.panelEl.replaceChildren(...panes);
     if (this.lastTab === m.tab) this.panelEl.scrollTop = scroll;
     this.lastTab = m.tab;
     if (keepSeed) {
       // The field being typed into keeps its caret: only its text follows the reply.
-      const fresh = this.panelEl.querySelector("input.seed");
+      const fresh = this.panelEl.querySelector(":scope > :not(.off) input.seed");
       if (fresh) {
         if (keepSeed.value !== fresh.value) keepSeed.value = fresh.value;
         fresh.replaceWith(keepSeed);
@@ -326,7 +333,7 @@ export class SetupMenu {
 
   // --- a slider's drag: the fraction along its track ----------------------- //
   fraction(key, x) {
-    const track = this.panelEl.querySelector(`.slider[data-key="${key}"] .track`);
+    const track = this.panelEl.querySelector(`:scope > :not(.off) .slider[data-key="${key}"] .track`);
     if (!track) return null;
     const r = track.getBoundingClientRect();
     return r.width ? Math.max(0, Math.min(1, (x - r.left) / r.width)) : 0;

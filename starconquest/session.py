@@ -165,7 +165,8 @@ class Session:
 
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
-        out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN)),
+        out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN),
+                                      every_tab=self.compact),
                "action": action, "status": None,
                "stale": not setupmenu.surveyed(ms, settings, self.compact)}
         if ms.status:   # said once; the page holds it on screen

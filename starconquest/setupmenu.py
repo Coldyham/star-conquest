@@ -911,9 +911,12 @@ def sketch_view(ms) -> dict | None:
     return out
 
 
-def view(ms, settings: Settings, touch: bool = False, board: bool = True) -> dict:
+def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_tab: bool = False) -> dict:
     """The menu on screen, for the page to draw as it stands. ``board`` says
-    there is a leaderboard to reach (the dailies, the board's lists)."""
+    there is a leaderboard to reach (the dailies, the board's lists).
+    ``every_tab`` adds the other tabs' rows too (``panels``), for a phone, whose
+    panel is as tall as its tallest tab so that it never moves as tabs change
+    (`menu._tallest_tab_h`)."""
     if settings.challenge is not None:
         subtitle = _lines(challenge_lines(settings))
     else:
@@ -927,6 +930,7 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True) -> dic
                   "changed": tab_changed(key, settings)} for key, label in TABS],
         "tab": ms.tab,
         "panel": TAB_VIEWS[ms.tab](ms, settings),
+        "panels": {key: TAB_VIEWS[key](ms, settings) for key, _label in TABS} if every_tab else None,
         "actions": {
             "tutorial": gauntlets_label(ms) if ms.gauntlets else None,
             "daily": DAILY_LABEL if board else None,
