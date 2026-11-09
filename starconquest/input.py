@@ -13,7 +13,7 @@ import copy
 
 import pygame
 
-from . import config, play, stats
+from . import config, play
 from .geometry import dist, point_segment_dist
 from .model import GameState
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SELECTED, Ui
@@ -88,58 +88,11 @@ def _handle_history_event(event, state: GameState, ui: Ui) -> str | None:
     around the map as in live play (drag to pan, wheel or −/+ to zoom, R to
     reset). Mutates only `Ui`; enter/exit and rewind are returned to main."""
     if event.type == pygame.KEYDOWN:
-        if event.key in (pygame.K_ESCAPE, pygame.K_h):
-            return "toggle_history"
-        if event.key == pygame.K_p:
-            return "toggle_play"  # play/pause the replay at sim speed
-        if event.key == pygame.K_r:
-            ui.reset_view(state)  # as in live play: the camera is free here too
+        action = play.history_key(state, ui, _key_name(event), shift=bool(getattr(event, "mod", 0) & pygame.KMOD_SHIFT))
+        if action == "reset_view":
+            ui.reset_view(state)
             return None
-        if event.key == pygame.K_g and ui.history_chart is not None:
-            ui.history_graph = not ui.history_graph
-            ui.dragging_graph = False
-            return None
-        if event.key == pygame.K_TAB and ui.history_graph:
-            # the chart tabs, then Coach (when there is one), round and round
-            step = -1 if event.mod & pygame.KMOD_SHIFT else 1
-            n = len(stats.METRICS) + (ui.coach_review is not None)
-            at = len(stats.METRICS) if ui.coach_open else ui.graph_metric % len(stats.METRICS)
-            at = (at + step) % n
-            ui.coach_open = at == len(stats.METRICS)
-            if not ui.coach_open:
-                ui.graph_metric = at
-            return None
-        if event.key in (pygame.K_UP, pygame.K_DOWN) and ui.history_graph and ui.coach_open:
-            ui.select_note(ui.coach_sel + (1 if event.key == pygame.K_DOWN else -1)
-                           if ui.coach_sel >= 0 else 0)
-            return None
-        if event.key == pygame.K_f and ui.history_graph:
-            ui.graph_full = not ui.graph_full
-            return None
-        if ui.history_graph and not ui.coach_open and pygame.K_1 <= event.key <= pygame.K_9:
-            # the legend's rows, top to bottom
-            seats = ui.graph_seats()
-            n = event.key - pygame.K_1
-            if n < len(seats):
-                ui.toggle_trace(seats[n])
-            return None
-        if event.key == pygame.K_LEFT:
-            ui.history_turn = max(0, ui.history_turn - 1)
-            ui.playing = False
-            ui.clear_fading_marks()   # jumping, not stepping: they'd be stale here
-        elif event.key == pygame.K_RIGHT:
-            ui.history_turn = min(ui.history_max, ui.history_turn + 1)
-            ui.playing = False
-            ui.clear_fading_marks()
-        elif event.key == pygame.K_HOME:
-            ui.history_turn = 0
-            ui.playing = False
-            ui.clear_fading_marks()
-        elif event.key == pygame.K_END:
-            ui.history_turn = ui.history_max
-            ui.playing = False
-            ui.clear_fading_marks()
-        return None
+        return action
     if event.type == pygame.MOUSEMOTION:
         # hover still drives the detail panel, wherever the map is showing
         if ui.history_graph and (ui.graph_full or _over_graph(ui, event.pos)):
@@ -615,7 +568,9 @@ def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
 
 # pygame's keys by the `KeyboardEvent.key` names `play.key` reads.
 _KEY_NAMES = {pygame.K_RETURN: "Enter", pygame.K_KP_ENTER: "Enter", pygame.K_SPACE: " ", pygame.K_TAB: "Tab",
-              pygame.K_BACKSPACE: "Backspace", pygame.K_DELETE: "Delete", pygame.K_ESCAPE: "Escape"}
+              pygame.K_BACKSPACE: "Backspace", pygame.K_DELETE: "Delete", pygame.K_ESCAPE: "Escape",
+              pygame.K_LEFT: "ArrowLeft", pygame.K_RIGHT: "ArrowRight", pygame.K_UP: "ArrowUp",
+              pygame.K_DOWN: "ArrowDown", pygame.K_HOME: "Home", pygame.K_END: "End"}
 
 
 def _key_name(event) -> str:

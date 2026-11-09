@@ -211,3 +211,27 @@ def test_cards_open_and_any_key_puts_them_away(session):
     assert view["card"]["label"] == view["popup"]["forecast"]["forms"][0]
     reply = _call(session, "ui.key", name="Enter")["result"]
     assert reply["action"] is None and reply["view"]["card"] is None   # spent putting it away
+
+
+def test_history_scrubs_plays_back_and_rewinds(session):
+    _human_game(session)
+    for _ in range(4):
+        _call(session, "turn.end")
+    res = _call(session, "game.action", name="toggle_history")["result"]
+    h = res["view"]["history"]
+    assert h["turn"] == h["max"] == 4 and not h["reveal"] and not res["view"]["can"]["end_turn"]
+    assert _call(session, "ui.key", name="Home")["result"]["view"]["history"]["turn"] == 0
+    res = _call(session, "history.seek", turn=2)["result"]
+    assert res["board"]["turn"] == 2 and res["view"]["history"]["label"].startswith("Turn 2/4")
+    assert res["held"] is None or isinstance(res["held"]["events"], list)
+    assert _call(session, "history.step")["result"]["board"]["turn"] == 2   # paused: stays put
+    _call(session, "game.action", name="toggle_play")
+    step = _call(session, "history.step")["result"]
+    assert step["board"]["turn"] == 3 and step["view"]["history"]["turn"] == 3
+    res = _call(session, "game.action", name="rewind")["result"]
+    assert res["modal"]["kind"] == "rewind" and res["modal"]["then"] == "rewind_confirmed"
+    res = _call(session, "game.action", name="rewind_confirmed")["result"]
+    assert res["fresh"] and res["board"]["turn"] == 3 and res["view"]["history"] is None
+    _call(session, "game.action", name="toggle_history")
+    res = _call(session, "game.action", name="toggle_history")["result"]
+    assert res["view"]["history"] is None and res["board"]["turn"] == 3

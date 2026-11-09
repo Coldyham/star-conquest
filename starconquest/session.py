@@ -22,7 +22,7 @@ import math
 import time
 import traceback
 
-from starconquest import ai, app, bench, engine, hostio, hud, play, serial
+from starconquest import ai, app, bench, engine, hostio, hud, play, serial, turnfilm
 from starconquest.model import GameState
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
@@ -71,6 +71,10 @@ class Session:
         self.ui: Ui | None = None
         self.log: GameLog | None = None
         self.seed: int | None = None
+        # History review: a board, the human's fog and the events per recorded
+        # turn (`app.build_history`), and the live fog to restore on leaving.
+        self.history: tuple[list, list, list] | None = None
+        self.live_fog: tuple | None = None
 
     def handle(self, raw: str) -> str:
         try:
@@ -193,6 +197,35 @@ class Session:
                         "modal": {"kind": "hint", "title": title, "body": body, "confirm": confirm}}
         elif name == "take_hint":
             app.take_hint(state, ui, self.log)
+        elif name == "toggle_history":
+            if ui.history:
+                self._leave_history()
+            elif self.log.turn_count > 0 and ui.can_review(state):
+                ui.clear_fading_marks()
+                states, fog, events, live = app.open_history(state, ui, self.log)
+                if states:
+                    self.history, self.live_fog = (states, fog, events), live
+            return self._whole(fresh=False)
+        elif name == "rewind" and ui.history and not ui.in_pbp:
+            if not ui.history_reveal:
+                title, body, confirm = hud.confirm_rewind(ui.history_turn)
+                return {"fresh": False, "view": self._view(),
+                        "modal": {"kind": "rewind", "title": title, "body": body, "confirm": confirm,
+                                  "then": "rewind_confirmed"}}
+            # A finished game: fork a new save so the completed record stays intact.
+            self.log = self.log.fork(ui.history_turn)
+            try:
+                self.log.save()
+            except OSError:
+                pass
+            self.seed = self.log.seed
+            self.history = self.live_fog = None
+            self.state, self.ui = app.resume_game(self.log, self.settings)
+            return self._whole()
+        elif name == "rewind_confirmed" and ui.history and not ui.in_pbp:
+            self.history = self.live_fog = None
+            self.state, self.ui = app.apply_rewind(self.log, self.settings, ui.history_turn)
+            return self._whole()
         elif name == "toggle_route":
             # Leaving discards the plan: it is only ever committed by its confirm.
             if ui.mode == ROUTING:
@@ -218,10 +251,86 @@ class Session:
             return self._whole()
         return {"fresh": False, "view": self._view()}
 
-    def _whole(self) -> dict:
-        state = self._state()
-        return {"fresh": True, "seed": self.seed, "static": serial.static(state), "board": serial.board(state),
-                "travel": serial.travel(state), "fog": self._fog(), "view": self._view()}
+    def _whole(self, fresh: bool = True) -> dict:
+        """The board on screen (a history turn while reviewing) and its view.
+        ``fresh`` says the match itself was replaced."""
+        state = self._shown()
+        view = self._view()
+        return {"fresh": fresh, "seed": self.seed, "static": serial.static(self._state()),
+                "board": serial.board(state), "travel": serial.travel(state), "fog": self._fog(), "view": view,
+                "held": self._held()}
+
+    def _leave_history(self) -> None:
+        """Back to the live board, with its fog exactly as it was (`main`)."""
+        ui = self._ui()
+        ui.history = False
+        ui.dragging_scrubber = False
+        ui.dragging_graph = False
+        ui.history_chart = None
+        ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
+        ui.history_graph = ui.graph_full = False
+        ui.playing = False   # replay playback must not carry into live play
+        ui.clear_fading_marks()
+        if self.live_fog is not None:
+            ui.visible, ui.seen, ui.player_intel = self.live_fog
+        self.history = self.live_fog = None
+
+    def _shown(self) -> GameState:
+        """The board on screen: the history turn under review, with the human's
+        fog as it was then (everything, once a decided game is revealed), else
+        the live board."""
+        ui = self._ui()
+        if not ui.history or self.history is None:
+            return self._state()
+        states, fog, _events = self.history
+        i = max(0, min(ui.history_turn, len(states) - 1))
+        if ui.history_reveal:
+            every = set(states[i].systems)
+            ui.visible, ui.seen, ui.player_intel = every, set(every), {}
+        else:
+            ui.visible, ui.seen, ui.player_intel = fog[i]
+        return states[i]
+
+    def _held(self) -> dict | None:
+        """The marks of the history turn on screen, held rather than fading:
+        its events, who held each system as it began, and what could be seen
+        across it (`app.hold_history_marks`)."""
+        ui = self._ui()
+        if not ui.history or self.history is None:
+            return None
+        states, fog, events = self.history
+        i = ui.history_turn
+        if i <= 0 or i >= len(events) or i >= len(states):
+            return None
+        board = states[i - 1]
+        visible = set(board.systems) if ui.history_reveal else set(fog[i - 1][0]) | set(fog[i][0])
+        return {"events": [serial.event(e) for e in events[i]],
+                "owners": {str(sid): s.owner_id for sid, s in board.systems.items()},
+                "visible": sorted(visible)}
+
+    def op_history_seek(self, turn: int) -> dict:
+        """Show history turn ``turn``."""
+        play.seek(self._ui(), int(turn))
+        return self._whole(fresh=False)
+
+    def op_history_step(self) -> dict:
+        """Playback's next turn: the film from the turn on screen to the next
+        (None for a quiet turn), then that turn whole. Past the last turn, or
+        once paused, it stays put and playback stops."""
+        ui = self._ui()
+        assert ui.history and self.history is not None, "not reviewing"
+        _states, fog, events = self.history
+        nxt = ui.history_turn + 1
+        if nxt > ui.history_max or not ui.playing:
+            ui.playing = False   # past the end, or paused since the last step
+            return {**self._whole(fresh=False), "film": None, "before": None}
+        before = {"visible": sorted(fog[ui.history_turn][0]), "seen": sorted(fog[ui.history_turn][1])}
+        film = turnfilm.film(events[nxt]) if nxt < len(events) and events[nxt] else None
+        ui.history_turn = nxt
+        if ui.history_turn >= ui.history_max:
+            ui.playing = False
+        return {**self._whole(fresh=False), "film": serial.film(film) if film is not None and film.plays else None,
+                "before": before}
 
     def op_ui_call(self, method: str, args: list | None = None) -> dict:
         """One of `UI_CALLS`, by name."""
@@ -258,7 +367,7 @@ class Session:
     def _view(self) -> dict | None:
         if self.ui is None or self.state is None:
             return None
-        return serial.view(self.state, self.ui)
+        return serial.view(self._shown(), self.ui)
 
     def _fog(self) -> dict | None:
         if self.ui is None or self.state is None:

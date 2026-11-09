@@ -833,3 +833,16 @@ def confirm_hint(ui: Ui, advisor: str) -> tuple[str, str, str]:
              f"position this turn, leaving out any your orders already make."
              f"\n\nUsing a hint makes this game ineligible for {stake}."),
             "Show hint")
+
+
+def confirm_rewind(turn: int) -> tuple[str, str, str]:
+    """The ask before a destructive mid-game rewind: title, body, and the
+    confirm button's word."""
+    return f"Rewind to turn {turn}?", "All turns after this one will be discarded.", "Rewind"
+
+
+def scrubber_label(ui: Ui, turn: int) -> str:
+    """History's turn readout: the turn on screen, the last, and whether the
+    board is shown as it was seen or revealed."""
+    tag = "revealed" if ui.history_reveal else "as seen"
+    return f"Turn {turn}/{ui.history_max}  ·  {tag}"

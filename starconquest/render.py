@@ -3138,7 +3138,7 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # slot is sized to the widest label this session could show (max digits, the
     # longer "revealed" tag) so a changing turn number never nudges the track.
     tag = "revealed" if ui.history_reveal else "as seen"
-    label = f"Turn {state.turn}/{ui.history_max}  ·  {tag}"
+    label = hud.scrubber_label(ui, state.turn)
     widest = f"Turn {ui.history_max}/{ui.history_max}  ·  revealed"
     if two_rows:
         label = f"{state.turn}/{ui.history_max} · {tag}"
@@ -3588,11 +3588,12 @@ def confirm_rewind_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
 
 def draw_confirm_rewind(surface, turn: int) -> None:
     """Modal confirm for a destructive mid-game rewind (discards later turns)."""
-    rewind, cancel = confirm_labels("Rewind")
+    title, body, confirm = hud.confirm_rewind(turn)
+    rewind, cancel = confirm_labels(confirm)
     _draw_modal(
         surface,
-        f"Rewind to turn {turn}?",
-        "All turns after this one will be discarded.",
+        title,
+        body,
         (
             (rewind, *_BTN_AMBER),
             (cancel, *_BTN_GREEN),

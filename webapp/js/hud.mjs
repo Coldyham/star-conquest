@@ -169,9 +169,14 @@ export class Hud {
     panel.replaceChildren(...parts);
   }
 
-  /** The footer strip's two clusters (`hud.footer`). */
+  /** The footer strip's two clusters (`hud.footer`), or history's scrubber. */
   footer(view) {
     const nav = this.$("footer");
+    if (view.history) {
+      this.scrubber(nav, view);
+      return;
+    }
+    this.scrub = null;
     const button = ([attr, label, key, colour]) => h("button", {
       type: "button", class: `btn ${colour}`, "data-attr": attr,
       onclick: () => this.on.footer(attr),
@@ -258,6 +263,41 @@ export class Hud {
     }
     veil.replaceChildren(h("div", { class: "stack" }, ...kids));
     veil.hidden = false;
+  }
+
+  /** History's bar (`render._draw_scrubber`): Exit, Play, ◀ the track ▶, the
+   * turn on screen, and Rewind to here before the last turn. The track is
+   * built once and updated, so a drag is never replaced under the pointer. */
+  scrubber(nav, view) {
+    const hv = view.history;
+    const key = (k) => h("span", { class: "key" }, ` (${k})`);
+    if (!this.scrub) {
+      const ui = {};
+      ui.exit = h("button", { type: "button", class: "btn blue", onclick: () => this.on.action("toggle_history") },
+        "Exit", key("Esc"));
+      ui.play = h("button", { type: "button", class: "btn blue", onclick: () => this.on.action("toggle_play") });
+      ui.prev = h("button", { type: "button", class: "btn blue arrow", "aria-label": "Previous turn",
+        onclick: () => this.on.seek(Math.max(0, this.view.history.turn - 1)) }, "◀");
+      ui.next = h("button", { type: "button", class: "btn blue arrow", "aria-label": "Next turn",
+        onclick: () => this.on.seek(this.view.history.turn + 1) }, "▶");
+      ui.track = h("input", { type: "range", min: 0, step: 1, class: "track", "aria-label": "Turn" });
+      ui.track.addEventListener("input", () => this.on.seek(Number(ui.track.value)));
+      ui.label = h("span", { class: "label" });
+      ui.rewind = h("button", { type: "button", class: "btn amber", onclick: () => this.on.action("rewind") },
+        "Rewind to here");
+      nav.replaceChildren(ui.exit, ui.play, ui.prev, ui.track, ui.next, ui.label, ui.rewind);
+      this.scrub = ui;
+    }
+    this.view = view;
+    const ui = this.scrub;
+    ui.play.replaceChildren(view.playing ? "Pause" : "Play", key("P"));
+    ui.play.className = `btn ${view.playing ? "active" : "blue"}`;
+    ui.prev.disabled = hv.turn <= 0;
+    ui.next.disabled = hv.turn >= hv.max;
+    ui.track.max = hv.max;
+    if (document.activeElement !== ui.track) ui.track.value = hv.turn;
+    ui.label.textContent = hv.label;
+    ui.rewind.hidden = !hv.rewind;
   }
 
   /** The send popup (`render._draw_send_popup`), or nothing. Returns its node

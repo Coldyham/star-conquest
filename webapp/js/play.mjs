@@ -11,7 +11,7 @@ import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
 import { Core, pageInfo } from "./core.mjs";
 import { Hud } from "./hud.mjs";
-import { Marks } from "./marks.mjs";
+import { FLASH_MS, Marks, readMarks } from "./marks.mjs";
 import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +23,7 @@ const params = new URLSearchParams(location.search);
 
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
-  hover: null, drag: null, pan: null, box: null, film: null, busy: false, looping: false, marks: new Marks(),
+  hover: null, drag: null, pan: null, box: null, film: null, held: new Marks(), busy: false, looping: false, marks: new Marks(),
 };
 
 function status(text, error = false) {
@@ -47,8 +47,8 @@ function look(view, before = null) {
   if (before) for (const id of before.visible) visible.add(id);
   const seen = new Set(view.seen);
   if (before) for (const id of before.seen) seen.add(id);
-  return { view, sees: (id) => visible.has(id), seen, hover: game.hover, drag: game.drag, marks: game.marks,
-    box: game.box };
+  const marks = view.history && !game.film ? game.held : game.marks;
+  return { view, sees: (id) => visible.has(id), seen, hover: game.hover, drag: game.drag, marks, box: game.box };
 }
 
 function redraw() {
@@ -117,8 +117,19 @@ function place(box) {
   box.style.top = `${best[1]}px`;
 }
 
+/** History's held marks for the turn on screen (`Ui.hold_marks`): read off
+ * its events, settled rather than fading. */
+function hold(held) {
+  game.held = new Marks();
+  if (!held) return;
+  const visible = new Set(held.visible);
+  [game.held.fights, game.held.hulls] = readMarks(held.events, (id) => visible.has(id),
+    (id) => held.owners[id], FLASH_MS);
+}
+
 function show(view) {
   game.view = view;
+  document.getElementById("app").classList.toggle("history", Boolean(view.history));
   game.hud.draw(game.board.turn, view);
   game.hud.veil(view);
   game.hud.overlays(view);
@@ -151,6 +162,7 @@ async function newGame(seed = null) {
 function adopt(res) {
   game.seed = res.seed;
   game.marks.clear();   // they belong to a playback this jumps away from
+  hold(res.held);
   const sameMap = game.map && JSON.stringify(game.map) === JSON.stringify(res.static);
   game.map = res.static;
   game.board = fromBoard(res.board);
@@ -164,6 +176,7 @@ function adopt(res) {
     },
     footer,
     action: actOn,
+    seek,
   });
   show(res.view);
 }
@@ -238,7 +251,7 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo", "hint", "take_hint"]);
+  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -256,16 +269,18 @@ async function actOn(action) {
       return null;
     });
     if (!res) return;
-    if (res.fresh) adopt(res);
+    if (res.board) adopt(res);
     else show(res.view);
     if (res.modal) ask(res.modal);
-    clock(game.view.step_ms);
+    if (game.view.history) replay();
+    else clock(game.view.step_ms);
   } else {
     status(`${action.replace(/_/g, " ")}: not in this build yet`);
   }
 }
 
-/** A modal ask; the only one so far is the first hint of a game. */
+/** A modal ask (the first hint of a game, a mid-game rewind): confirming
+ * runs the action it names. */
 function ask(m) {
   game.modal = m;
   const close = () => {
@@ -274,8 +289,52 @@ function ask(m) {
   };
   game.hud.modal(m, () => {
     close();
-    actOn("take_hint");
+    actOn(m.then || "take_hint");
   }, close);
+}
+
+/** Jump history to `turn`. */
+async function seek(turn) {
+  if (game.seeking) {
+    game.seekTo = turn;
+    return;
+  }
+  game.seeking = true;
+  try {
+    const res = await core.call("history.seek", { turn });
+    game.board = fromBoard(res.board);
+    game.board_view.setTravel(res.travel);
+    game.marks.clear();
+    hold(res.held);
+    show(res.view);
+  } finally {
+    game.seeking = false;
+  }
+  if (game.seekTo !== undefined && game.seekTo !== null) {
+    const next = game.seekTo;
+    game.seekTo = null;
+    if (next !== game.view.history?.turn) seek(next);
+  }
+}
+
+/** History's playback: one turn after another, each film straight into the
+ * next, a quiet turn after `PLAY_MS`, until the last turn or a pause. */
+async function replay() {
+  if (game.replaying) return;
+  game.replaying = true;
+  try {
+    while (game.view?.history && game.view.playing) {
+      const res = await core.call("history.step");
+      if (res.film) await playFilm(res.film, res.view, res.before);
+      else if (res.view.playing) await new Promise((r) => setTimeout(r, 350));
+      game.board = fromBoard(res.board);
+      game.board_view.setTravel(res.travel);
+      hold(res.held);
+      show(res.view);
+    }
+  } finally {
+    game.replaying = false;
+  }
 }
 
 /** A footer button, by the `Ui` attribute pygame keeps its hit-rect in. */
@@ -423,13 +482,19 @@ async function key(event) {
     return;
   }
   if (event.target instanceof HTMLInputElement) return;
-  if (game.film) {
+  const name = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  // Any key skips a film, but Play/Pause (which pauses it), Autoplay (the one
+  // way to stop autoplay) and the camera's own key (`input._toggles_play`,
+  // `_toggles_autoplay`, `_moves_camera`).
+  if (game.film && !["p", "a", "r"].includes(name)) {
     game.film.skip = true;
     event.preventDefault();
     return;
   }
-  const name = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-  if (name === " " || name === "Enter" || (name === "Tab" && game.view.mode === "routing")) event.preventDefault();
+  const tabbed = name === "Tab" && (game.view.mode === "routing" || game.view.history);
+  if (name === " " || name === "Enter" || tabbed || (game.view.history && /^(Arrow|Home|End)/.test(name))) {
+    event.preventDefault();
+  }
   const res = await act("ui.key", { name, shift: event.shiftKey });
   actOn(res?.action);
 }

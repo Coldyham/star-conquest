@@ -143,8 +143,13 @@ def view(state: GameState, ui: Ui) -> dict:
         "route": route(state, ui) if ui.mode == ROUTING else None,
         "hint": hint(state, ui) if ui.hint_live(state) else None,
         "card": card(state, ui),
+        "history": {"turn": ui.history_turn, "max": ui.history_max, "reveal": ui.history_reveal,
+                    "label": hud.scrubber_label(ui, state.turn), "graphs": ui.history_chart is not None,
+                    "graph_on": ui.history_graph,
+                    "rewind": ui.history_turn < ui.history_max and not ui.in_pbp} if ui.history else None,
         "can": {
-            "end_turn": state.winner is None and not ui.awaiting_others(state) and not ui.spectating,
+            "end_turn": (state.winner is None and not ui.awaiting_others(state) and not ui.spectating
+                         and not ui.history),
             "undo": ui.can_undo(state),
             "retry": ui.can_retry,
             "hint": ui.can_hint(state),

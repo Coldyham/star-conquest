@@ -9,7 +9,7 @@ action string for the caller to act on, or None, as `input` always has.
 
 from __future__ import annotations
 
-from . import starlore
+from . import starlore, stats
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 
@@ -259,6 +259,58 @@ def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
         tap_system(state, ui, node, shift)
 
 
+def history_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
+    """A key in history review: scrub the turn, play it back, the graphs and the
+    coach, or leave. ``"reset_view"`` asks the caller to fit the camera."""
+    if name in ("Escape", "h"):
+        return "toggle_history"
+    if name == "p":
+        return "toggle_play"  # play/pause the replay at sim speed
+    if name == "r":
+        return "reset_view"   # as in live play: the camera is free here too
+    if name == "g" and ui.history_chart is not None:
+        ui.history_graph = not ui.history_graph
+        ui.dragging_graph = False
+        return None
+    if name == "Tab" and ui.history_graph:
+        # the chart tabs, then Coach (when there is one), round and round
+        step = -1 if shift else 1
+        n = len(stats.METRICS) + (ui.coach_review is not None)
+        at = len(stats.METRICS) if ui.coach_open else ui.graph_metric % len(stats.METRICS)
+        at = (at + step) % n
+        ui.coach_open = at == len(stats.METRICS)
+        if not ui.coach_open:
+            ui.graph_metric = at
+        return None
+    if name in ("ArrowUp", "ArrowDown") and ui.history_graph and ui.coach_open:
+        ui.select_note(ui.coach_sel + (1 if name == "ArrowDown" else -1)
+                       if ui.coach_sel >= 0 else 0)
+        return None
+    if name == "f" and ui.history_graph:
+        ui.graph_full = not ui.graph_full
+        return None
+    if ui.history_graph and not ui.coach_open and len(name) == 1 and "1" <= name <= "9":
+        # the legend's rows, top to bottom
+        seats = ui.graph_seats()
+        n = int(name) - 1
+        if n < len(seats):
+            ui.toggle_trace(seats[n])
+        return None
+    turn = {"ArrowLeft": ui.history_turn - 1, "ArrowRight": ui.history_turn + 1,
+            "Home": 0, "End": ui.history_max}.get(name)
+    if turn is not None:
+        seek(ui, turn)
+    return None
+
+
+def seek(ui: Ui, turn: int) -> None:
+    """Show history turn ``turn`` (clamped): a jump, not a step, so playback
+    stops and the marks of the turn left behind go."""
+    ui.history_turn = max(0, min(ui.history_max, turn))
+    ui.playing = False
+    ui.clear_fading_marks()   # jumping, not stepping: they'd be stale here
+
+
 def card_up(state: GameState, ui: Ui) -> bool:
     """Is a card over the board that any press puts away: a star's info card,
     or the forecast's breakdown?"""
@@ -275,11 +327,13 @@ def dismiss_card(ui: Ui) -> None:
 
 
 def press_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
-    """A key in whichever scene is up: a card (which any key puts away), the
-    game-over veil, route mode, or live play."""
+    """A key in whichever scene is up: a card (which any key puts away),
+    history, the game-over veil, route mode, or live play."""
     if card_up(state, ui):
         dismiss_card(ui)
         return None
+    if ui.history:
+        return history_key(state, ui, name, shift)
     if state.winner is not None:
         return over_key(state, ui, name)
     if ui.mode == ROUTING:

@@ -264,3 +264,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #modal h1 { margin: 0 0 10px; font-size: 30px; font-weight: bold; }
 #modal p { margin: 0 0 10px; color: var(--dim); }
 #modal .grid { display: flex; gap: 12px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+
+/* --- history: the scrubber takes the whole bottom bar ------------------- */
+#app.history #footer { grid-column: 1 / -1; gap: 10px; }
+#app.history #side { grid-row: 2 / 3; }
+#app.history #end-turn { display: none; }
+#footer .track { flex: 1; min-width: 60px; accent-color: rgb(110, 140, 200); }
+#footer .label { color: var(--dim); white-space: nowrap; }
+#footer .arrow { width: 40px; padding: 0; font-size: 16px; }
+#app.history #footer .btn { font-size: 14px; }
