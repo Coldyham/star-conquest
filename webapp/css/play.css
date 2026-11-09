@@ -324,7 +324,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .compact #top { grid-column: 1; }
 .compact #scores { gap: 14px; }
 .compact #side { grid-row: 1 / 4; }
-.compact #panel { padding: 12px; }
+.compact #panel { padding: 12px; overflow-y: auto; }
 .compact #end-turn { border-radius: 8px; }
 .compact #popup.docked {
   position: fixed; left: auto; top: 0; right: 0; bottom: var(--end-h); width: var(--side-w);
@@ -342,13 +342,19 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :root.portrait { --end-h: 92px; }
 .portrait #app {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--top-h) minmax(0, 1fr) 118px var(--foot-h) var(--end-h);
+  grid-template-rows: var(--top-h) minmax(0, 1fr) minmax(118px, auto) var(--foot-h) var(--end-h);
 }
 .portrait #top { grid-column: 1; grid-row: 1; }
 .portrait #mapbox { grid-column: 1; grid-row: 2; }
 .portrait #side { display: contents; }
-.portrait #panel { grid-column: 1; grid-row: 3; border-left: none; border-top: 1px solid var(--rule); padding: 10px 12px; }
-.portrait #panel .band { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* The band grows with what it holds (a rule list, route mode's directions),
+   up to a share of the screen, then scrolls. */
+.portrait #panel {
+  grid-column: 1; grid-row: 3; border-left: none; border-top: 1px solid var(--rule); padding: 10px 12px;
+  max-height: calc(36dvh / var(--zoom, 1)); overflow-y: auto;
+}
+.portrait #panel .band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.portrait #panel p { white-space: pre-wrap; }
 .portrait #panel h2 { font-size: 14px; }
 .portrait #footer { grid-column: 1; grid-row: 4; }
 .portrait #end-turn { grid-column: 1; grid-row: 5; width: auto; margin: 7px 12px 26px; height: auto; }
@@ -356,6 +362,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .portrait #popup.docked { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 60vh; }
 .portrait #graph { left: 6px; right: 6px; }
 .portrait #graph .legend { width: 160px; }
+.compact #graph .head .note { order: 1; flex-basis: 100%; text-align: left; white-space: normal; }
 
 /* History's bar: one row (Exit, Play, Graphs, ◀ track ▶, the turn, Rewind),
    or on a portrait phone two, the track over the buttons. */

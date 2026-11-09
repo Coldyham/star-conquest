@@ -108,6 +108,21 @@ def test_a_lane_press_reopens_the_order_on_it(session):
     assert view["pending"] == []
 
 
+def test_a_pinch_puts_back_what_its_first_finger_pressed(session):
+    """The first finger's press reaches the session before a second makes it a
+    pinch; ``ui.unpress`` takes that press back, once."""
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    before = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    assert before["mode"] == "choosing"
+    view = _call(session, "ui.empty")["result"]["view"]   # the first finger: Done
+    assert view["mode"] == "idle"
+    view = _call(session, "ui.unpress")["result"]["view"]
+    assert view["mode"] == "choosing" and view["popup"]["dest"] == nbr
+    assert view["pending"] == before["pending"]
+    assert _call(session, "ui.unpress")["result"]["view"]["mode"] == "choosing"   # nothing left to undo
+
+
 def test_keys_answer_actions_and_only_listed_ui_methods_are_callable(session):
     _, home, _ = _human_game(session)
     assert _call(session, "ui.key", name="Enter")["result"]["action"] == "end_turn"

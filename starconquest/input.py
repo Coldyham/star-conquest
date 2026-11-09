@@ -9,8 +9,6 @@ None.
 
 from __future__ import annotations
 
-import copy
-
 import pygame
 
 from . import config, play
@@ -316,18 +314,6 @@ def _track_score_hover(event, ui: Ui) -> None:
     ui.score_hover = next((pid for pid, rect in ui.score_rects if _point_in_rect(event.pos, rect)), None)
 
 
-# What a press can change that a pinch must be able to put back (`_pinch`): the
-# selection and the popup, and the orders and rules a tap can create.
-_PRESS_FIELDS = ("mode", "selected", "dest", "chosen", "sel_order", "sel_forward",
-                 "forward_armed", "forward_replaced", "editing_existing", "popup_pos",
-                 "route_sel", "route_dest", "lore_sid", "odds_open")
-
-
-def _press_snapshot(ui: Ui) -> tuple:
-    return ({name: copy.copy(getattr(ui, name)) for name in _PRESS_FIELDS},
-            list(ui.pending), copy.deepcopy(ui.auto_forward))
-
-
 def _pinch(event, state: GameState, ui: Ui) -> bool:
     """Two fingers zoom and pan the map. True if ``event`` was spent on it.
 
@@ -354,12 +340,7 @@ def _pinch(event, state: GameState, ui: Ui) -> bool:
         mid = ((x0 + x1) / 2, (y0 + y1) / 2)
         if ui.pinch_last is None:
             if not ui.pinch_lock and ui.press_undo is not None:
-                fields, pending, rules = ui.press_undo
-                for name, value in fields.items():
-                    setattr(ui, name, value)
-                ui.pending[:] = pending
-                ui.auto_forward.clear()
-                ui.auto_forward.update(rules)
+                play.press_restore(ui, ui.press_undo)
             ui.press_undo = None
             ui.pinch_lock = True
             ui.drag_src, ui.drag_active, ui.pan_active = None, False, False
@@ -375,7 +356,7 @@ def _pinch(event, state: GameState, ui: Ui) -> bool:
                                         pygame.MOUSEMOTION):
         return True
     if event.type == pygame.MOUSEBUTTONDOWN and config.touch_ui:
-        ui.press_undo = _press_snapshot(ui)
+        ui.press_undo = play.press_snapshot(ui)
     return False
 
 

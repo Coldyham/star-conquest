@@ -146,12 +146,14 @@ class Session:
     # The play screen's presses, hit-tested by the page (`play`).
     def op_ui_tap(self, sid: int, shift: bool = False) -> dict:
         """A press on system ``sid``."""
+        self._ui().press_undo = play.press_snapshot(self._ui())
         play.tap(self._state(), self._ui(), int(sid), bool(shift))
         return {"view": self._view()}
 
     def op_ui_lane(self, hits: list) -> dict:
         """A press near lanes carrying orders or rules: ``hits`` nearest first,
         each ``[kind, a, b]`` as `play.LaneTag`."""
+        self._ui().press_undo = play.press_snapshot(self._ui())
         tag = play.lane_pick(self._ui(), [(str(k), int(a), int(b)) for k, a, b in hits])
         if tag is not None:
             play.tap_lane(self._state(), self._ui(), tag)
@@ -160,8 +162,18 @@ class Session:
     def op_ui_empty(self) -> dict:
         """A press on empty map, or the popup's Done. Route mode keeps its group:
         it confirms and cancels explicitly, so a stray tap must not undo the work."""
+        self._ui().press_undo = play.press_snapshot(self._ui())
         if self._ui().mode != ROUTING:
             play.cancel(self._ui())
+        return {"view": self._view()}
+
+    def op_ui_unpress(self) -> dict:
+        """A second finger made the last press a pinch: put back what that
+        press (`op_ui_tap`, `op_ui_lane`, `op_ui_empty`) changed, once."""
+        ui = self._ui()
+        if ui.press_undo is not None:
+            play.press_restore(ui, ui.press_undo)
+            ui.press_undo = None
         return {"view": self._view()}
 
     def op_ui_drag(self, src: int, dest: int | None, shift: bool = False) -> dict:

@@ -24,7 +24,7 @@ const params = new URLSearchParams(location.search);
 
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
-  hover: null, drag: null, pan: null, box: null, film: null, held: new Marks(), busy: false, looping: false, marks: new Marks(),
+  hover: null, drag: null, pan: null, box: null, film: null, fingers: new Map(), pinch: null, pressed: false, held: new Marks(), busy: false, looping: false, marks: new Marks(),
 };
 
 function status(text, error = false) {
@@ -367,8 +367,47 @@ function local(event) {
   return [(event.clientX - r.left) / k, (event.clientY - r.top) / k];
 }
 
+/** The two fingers on the map: how far apart, and their midpoint. */
+function fingerSpan() {
+  const [[x0, y0], [x1, y1]] = game.fingers.values();
+  return { spread: Math.max(1, Math.hypot(x1 - x0, y1 - y0)), mid: [(x0 + x1) / 2, (y0 + y1) / 2] };
+}
+
+/** Two fingers zoom and pan the map (`input._pinch`). The first finger's press
+ * reached the session before the second landed, so a pinch starts by putting
+ * back what it changed (`ui.unpress`), and the fingers do nothing else until
+ * every one is up. A finger landing again picks the pinch up from there. */
+function pinchStart() {
+  if (!game.pinch) {
+    game.drag = game.pan = game.box = null;
+    if (game.pressed && game.view) act("ui.unpress");
+    game.pressed = false;
+  }
+  game.pinch = fingerSpan();
+}
+
+function pinchMove() {
+  const bv = game.board_view;
+  const { spread, mid } = fingerSpan();
+  bv.camera.pan(mid[0] - game.pinch.mid[0], mid[1] - game.pinch.mid[1]);
+  bv.camera.zoomAt(mid[0], mid[1], spread / game.pinch.spread);
+  game.pinch = { spread, mid };
+  bv.layout();
+  redraw();
+}
+
 async function press(event) {
   if (event.button === 2) return;
+  if (event.pointerType === "touch") {
+    game.fingers.set(event.pointerId, local(event));
+    try { $("map").setPointerCapture(event.pointerId); } catch { /* a synthetic press */ }
+    if (game.fingers.size === 2 && game.board_view) {
+      pinchStart();
+      return;
+    }
+    if (game.pinch || game.fingers.size > 2) return;
+  }
+  game.pressed = false;
   if (game.hud?.moreOpen) {   // any press closes the "more" list, and is spent doing it
     game.hud.moreOpen = false;
     game.hud.footer(game.view);
@@ -390,8 +429,10 @@ async function press(event) {
   game.drag = null;
   game.pan = null;
   if (sid !== null) {
+    game.pressed = true;
     const res = await act("ui.tap", { sid, shift: event.shiftKey });
     const v = res?.view;
+    if (game.pinch || !game.pressed) return;   // a second finger landed meanwhile
     if (v && v.mode === "selected" && v.selected === sid && game.board.sys.get(sid).owner === v.human) {
       game.drag = { src: sid, x0: x, y0: y, x, y, active: false };
     }
@@ -405,6 +446,7 @@ async function press(event) {
     return;
   }
   const hits = bv.laneHits(x, y, game.view);
+  game.pressed = true;
   if (hits.length) {
     act("ui.lane", { hits });
     return;
@@ -414,6 +456,13 @@ async function press(event) {
 }
 
 function move(event) {
+  if (game.fingers.has(event.pointerId)) {
+    game.fingers.set(event.pointerId, local(event));
+    if (game.pinch) {
+      if (game.fingers.size === 2 && game.board_view) pinchMove();
+      return;
+    }
+  }
   if (!game.board_view || game.film) return;
   const [x, y] = local(event);
   const bv = game.board_view;
@@ -445,6 +494,12 @@ function move(event) {
 }
 
 function release(event) {
+  if (game.fingers.delete(event.pointerId) && game.pinch) {
+    // One finger left holds the pinch still (it moves the map only with two);
+    // none, and fingers tap and pan again.
+    if (!game.fingers.size) game.pinch = null;
+    return;
+  }
   const drag = game.drag, box = game.box;
   game.drag = null;
   game.pan = null;

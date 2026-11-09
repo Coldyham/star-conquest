@@ -9,6 +9,8 @@ action string for the caller to act on, or None, as `input` always has.
 
 from __future__ import annotations
 
+import copy
+
 from . import starlore, stats
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
@@ -16,6 +18,30 @@ from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 # A queued order or a standing rule's lane, as ``("order", index, -1)`` or
 # ``("rule", source_id, dest_id)``.
 LaneTag = tuple[str, int, int]
+
+# What a press can change that a pinch must be able to put back: the selection
+# and the popup, and the orders and rules a tap can create.
+PRESS_FIELDS = ("mode", "selected", "dest", "chosen", "sel_order", "sel_forward",
+                "forward_armed", "forward_replaced", "editing_existing", "popup_pos",
+                "route_sel", "route_dest", "lore_sid", "odds_open")
+
+
+def press_snapshot(ui: Ui) -> tuple:
+    """What `press_restore` needs to undo the press about to be handled. A
+    finger reaches the board before a second one turns the touch into a pinch,
+    so each shell takes this before a touch press and puts it back on a pinch."""
+    return ({name: copy.copy(getattr(ui, name)) for name in PRESS_FIELDS},
+            list(ui.pending), copy.deepcopy(ui.auto_forward))
+
+
+def press_restore(ui: Ui, snapshot: tuple) -> None:
+    """Put back the selection, popup, orders and rules from `press_snapshot`."""
+    fields, pending, rules = snapshot
+    for name, value in fields.items():
+        setattr(ui, name, value)
+    ui.pending[:] = pending
+    ui.auto_forward.clear()
+    ui.auto_forward.update(rules)
 
 
 def open_lore(state: GameState, ui: Ui, sid: int | None) -> None:
