@@ -238,6 +238,19 @@ export function dailyMark(entry, today) {
 }
 
 /**
+ * The spoiler-free lines a daily win copies, in the game's words
+ * (`starconquest/daily.py`'s `result_line`; tests/test_daily.py keeps the two
+ * alike): the day's number and the result, then a link that opens today's daily
+ * of the kind, never this day's. `origin` is the site's ("" leaves the link off,
+ * as the game does with no board configured).
+ */
+export function resultLine(day, turns, lost, kind, origin) {
+  const puzzle = kind === "puzzle";
+  const head = `Star Conquest ${puzzle ? "puzzle" : "daily"} #${dayNumber(day)} - ${turns} turns, ${lost} ships`;
+  return origin ? `${head}\n${origin.replace(/\/+$/, "")}/play/#${puzzle ? "puzzle" : "daily"}` : head;
+}
+
+/**
  * The congratulation for a puzzle score that met its par, in the game's words
  * (`starconquest/daily.py`'s `par_note`; the two are kept alike by
  * tests/test_daily.py). `par` is `{turns, lost, status, turns_only}`; "" for a

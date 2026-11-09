@@ -836,7 +836,8 @@ test bot within a turn cap that grows from 80 to 110.
   the menu's Daily ▸ Daily map or a `#daily` / `#daily=<day>` link puts the setup on
   the menu. A daily follows the player's ironman preference (so Undo can take a
   turn back), and its win offers *Copy daily result*, a
-  spoiler-free line, where other maps offer *Challenge a friend*.
+  spoiler-free line, where other maps offer *Challenge a friend*. The daily
+  page offers the same line again to a signed-in player with a win posted that day.
 - **Embargoed until the day ends** (`game_embargoes`, as a campaign node is
   for its week): replays and every score but the leader stay hidden, so the
   best score posted on the day is the day's winner. The map page marks it *Led

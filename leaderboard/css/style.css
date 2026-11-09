@@ -716,6 +716,21 @@ div.card-body { position: relative; }
   color: var(--gold);
   font-weight: 600;
 }
+/* A signed-in player's own daily result, ready to copy as the game's end screen
+ * words it (daily-page.mjs's drawOwnResult). */
+.own-result { margin: 0.8rem 0; }
+.own-result .share-text {
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.own-result-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; margin-top: 0.5rem; }
+.share-status { color: var(--dim); }
 .own-scores h2 {
   margin: 0 0 0.6rem;
   font-family: var(--pixel);

@@ -396,6 +396,13 @@ create table if not exists public.dailies (
   The line carries no setup and no moves. The link opens today's daily, not
   the poster's game.
 
+  The board's daily pages offer it again (the author, 2026-11-09), since the
+  overlay is easy to leave without it: a signed-in player with a counted win
+  on the day sees their best score there as the line and a *Copy daily
+  result* button (`daily-page.mjs`'s `drawOwnResult`; `daily.mjs`'s
+  `resultLine`, kept word for word by `test_the_boards_result_line_is_the_games`).
+  It reads only their own score, so an embargoed day gives nothing away.
+
 ## On the board
 
 `daily.html` (joins `render_board.PAGES`), on `base.html` like every page:
