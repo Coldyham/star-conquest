@@ -591,15 +591,16 @@ def _draw_route_preview(surface, state: GameState, ui: Ui) -> None:
     reason; only committed rules hold still (and then only the unselected ones, so
     a board full of them doesn't shimmer).
 
-    A rule the plan would overwrite is drawn underneath in a muted danger tint, so
-    the overwrite is visible before it happens rather than after.
+    A rule the plan would overwrite — or, in rally, delete (`route_clears`) — is
+    drawn underneath in a muted danger tint, so the overwrite is visible before it
+    happens rather than after.
     """
     if ui.mode != ROUTING:
         return
     accent = config.COLOR_ROUTE
 
-    # 1. rules about to be overwritten, under everything else
-    for src in ui.route_replaces:
+    # 1. rules about to be overwritten or cleared, under everything else
+    for src in ui.route_replaces | ui.route_clears:
         old = ui.auto_forward.get(src)
         if old is None or src not in state.systems:
             continue
@@ -680,6 +681,13 @@ def _draw_route_overlay(surface, state: GameState, ui: Ui) -> None:
         sp = ui.view.to_screen(sys.pos)
         _label_pill(surface, small, "loop", _BTN_DANGER[1],
                     (sp[0], sp[1] + config.node_radius(sys.production) + config.s(11)))
+    # A smart hold the plan arms, above the disc where "no route" would go (a
+    # planned system never has one) — the name, and a committed badge, sit below.
+    for sid in ui.route_newly_smart():
+        sys = state.systems[sid]
+        sp = ui.view.to_screen(sys.pos)
+        _label_pill(surface, small, f"smart {combat.smart_hold(state, sid, ui.human_id)}",
+                    config.COLOR_ROUTE, (sp[0], sp[1] - config.node_radius(sys.production) - config.s(15)))
     if ui.route_box:
         x0, y0 = ui.drag_start
         x1, y1 = ui.drag_pos
@@ -2875,6 +2883,10 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
             lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
     if ui.route_replaces:
         lines.append((f"{len(ui.route_replaces)} replaced", _BTN_AMBER[1]))
+    if ui.route_clears:
+        lines.append((f"{len(ui.route_clears)} cleared", _BTN_AMBER[1]))
+    if smart := ui.route_newly_smart():
+        lines.append((f"{len(smart)} smart hold{'' if len(smart) == 1 else 's'}", config.COLOR_TEXT))
     if ui.route_unroutable:
         lines.append((f"{len(ui.route_unroutable)} unreachable", _BTN_DANGER[1]))
     if ui.route_cycles:
@@ -2886,8 +2898,9 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
 
     if rally:
         hint = ("Tap the systems ships should gather at — tap again to drop one. "
-                "Everything else you hold forwards to the nearest of them. "
-                "Auto-route picks your threatened systems.")
+                "Everything else you hold forwards to the nearest of them, and every "
+                "other rule is cleared. Auto-route picks your front line; a system "
+                "under attack behind it keeps what it needs and passes the rest on.")
     else:
         hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
                 "un-aim, and to drop it from the group.")
