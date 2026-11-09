@@ -171,11 +171,17 @@ function show(view) {
   redraw();
 }
 
-/** Send one command whose reply carries a fresh view, and draw it. */
+/** Send one command whose reply carries a fresh view, and draw it. One that
+ * moves history to another turn (a coach note, an arrow key) fetches that
+ * turn's board too, as the scrubber does: a view alone would draw the new
+ * turn's rules and panel over the old turn's map. */
 async function act(op, args = {}) {
   try {
+    const was = game.view?.history?.turn;
     const res = await core.call(op, args);
     if (res.view) show(res.view);
+    const now = res.view?.history?.turn;
+    if (was !== undefined && now !== undefined && now !== was) seek(now);
     return res;
   } catch (err) {
     status(`${op} failed: ${err.message}`, true);

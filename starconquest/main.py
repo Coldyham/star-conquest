@@ -970,6 +970,7 @@ async def main() -> None:
                     if live_fog is not None:
                         ui.visible, ui.seen, ui.player_intel = live_fog
                         live_fog = None
+                    ui.leave_history_rules()
                 elif log is not None and log.turn_count > 0 and ui.can_review(state):
                     ui.clear_fading_marks()   # entering fresh: nothing from live play carries in
                     history_states, history_fog, history_events, entered = open_history(state, ui, log)
@@ -1138,6 +1139,7 @@ async def main() -> None:
                     ui.visible, ui.seen, ui.player_intel = all_ids, set(all_ids), {}
                 else:
                     ui.visible, ui.seen, ui.player_intel = history_fog[i]
+                ui.show_history_rules()
                 if reel is None:
                     hold_history_marks(ui, history_states, history_fog, history_events)
                 render.draw(screen, view_state, ui)

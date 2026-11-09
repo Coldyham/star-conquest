@@ -1127,6 +1127,14 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     # should start on, and the one that makes the first turn's changes visible as
     # changes rather than as a position already arrived at.
     ui.history_turn = 0 if ui.watched else ui.history_max
+    # Each board's standing rules, the latest's being the live ones
+    # (`Ui.show_history_rules`). Not in a shared match: its log carries no
+    # rules (`pbp.shareable`), and a turn can resolve, and save the seat's
+    # rules, while it is being reviewed.
+    if not ui.in_pbp:
+        ui.live_rules = ui.auto_forward
+        ui.history_rules = [log.rules_for(i) for i in range(log.turn_count)] + [ui.auto_forward]
+        ui.show_history_rules()
     ui.history_reveal = state.winner is not None
     # The end-of-game graphs: read once off the boards just built, and open by
     # default on a finished game, where they are the summary the review is for.
@@ -1288,6 +1296,9 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
     resolved either way, and completely, before this returns: a film is a report on
     a turn already finished, never on one in progress.
     """
+    # A turn is played with the live rules, never a reviewed board's
+    # (`Ui.show_history_rules`); review blocks End Turn, so this is a backstop.
+    ui.leave_history_rules()
     was_over = state.winner is not None
     was_defeated = state.is_defeated(ui.human_id)
     # A match begun in autoplay has no human seat at all (`settings.build_state`),

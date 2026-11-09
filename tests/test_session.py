@@ -257,6 +257,30 @@ def test_history_scrubs_plays_back_and_rewinds(session):
     assert res["view"]["history"] is None and res["board"]["turn"] == 3
 
 
+def test_history_shows_the_rules_standing_on_the_board_on_screen(session):
+    from starconquest.model import ForwardRule
+    _, home, nbr = _human_game(session)
+    _call(session, "turn.end")
+    session.ui.auto_forward[home] = ForwardRule({nbr: 100}, hold=50)   # standing on turns 1-2
+    _call(session, "turn.end")
+    _call(session, "turn.end")
+    session.ui.auto_forward.clear()   # ...and gone by the end
+    _call(session, "turn.end")
+    live = session.ui.auto_forward
+
+    def srcs(view):
+        return [r["src"] for r in view["rules"]]
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["history"]["turn"] == 4 and srcs(view) == []
+    assert srcs(_call(session, "history.seek", turn=2)["result"]["view"]) == [home]
+    assert srcs(_call(session, "ui.key", name="ArrowLeft")["result"]["view"]) == [home]   # turn 1
+    assert srcs(_call(session, "ui.key", name="ArrowLeft")["result"]["view"]) == []       # turn 0
+    _call(session, "history.seek", turn=2)
+    res = _call(session, "game.action", name="toggle_history")["result"]
+    assert res["view"]["history"] is None and srcs(res["view"]) == []
+    assert session.ui.auto_forward is live and session.ui.live_rules is None
+
+
 def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
     _call(session, "boot", page=PAGE, store={})
     _call(session, "game.start", settings={"players": 2, "nodes": 8}, seed=3)
