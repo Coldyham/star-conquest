@@ -27,6 +27,8 @@ line gives only the verdict. Ideas that lost are in
 ## html-frontend.md
 - html-frontend.md · **Why** and **How it is staged.** One HTML frontend over the core in Pyodide replaces the pygame shell on web and desktop; pygbag stays live until parity at `/next/`; Python returns effects and does no I/O.
 - html-frontend.md · **Parity checks.** Replays: 24 cases, a digest per turn, reconstructed and replayed live with bots deciding afresh, must match in Pyodide. Screens: 42 recipes drawn from pygame as the web variant, reviewed side by side, never pixel-diffed; redrawable from any pre-cutover commit.
+- html-frontend.md · **The seams (phase A).** `app`, `pbpclient`, `hostio`, `serial`, the JS `Reel` mirror, `Ui`'s pure halves; screens stayed byte-identical.
+- html-frontend.md · **The Pyodide spike (phase 0).** Gate passed 2026-11-09: replays identical in Pyodide, bot time 1.03× pygbag, startup 1.21 s vs pygbag's 1.58 s, download about half; a real phone not yet measured.
 
 ## shell.md
 - shell.md · **Text sizing** and **`config.touch_ui`.** Measured layout; the send popup is where the tap floor gives way.

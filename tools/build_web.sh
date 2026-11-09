@@ -77,6 +77,14 @@ uv run --project "$ROOT" python "$ROOT/tools/pwa/inject.py" "$ROOT/web/play/inde
 # published by accident.
 uv run --project "$ROOT" python "$ROOT/tools/render_board.py" --out "$ROOT/web/board"
 
+# The HTML build, in progress beside the game at /next/ (docs/design/html-frontend.md):
+# the page, the pinned Pyodide (downloaded and checksum-checked) and the game's
+# Python as one hashed zip. Never fails the build: /play/ is what players use.
+if ! uv run --project "$ROOT" python "$ROOT/tools/build_next.py" --out "$ROOT/web/next"; then
+    echo "WARNING: could not stage /next/ — the deploy goes out without it." >&2
+    rm -rf "$ROOT/web/next"
+fi
+
 # pygbag fetches the pygame-ce WASM wheel from <origin>/cdn/ at runtime. Mirror it
 # into the build so the deployment is fully self-contained — works on any static
 # host and on a phone over LAN, with no dependency on the pygame-web CDN at run

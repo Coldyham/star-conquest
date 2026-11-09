@@ -75,3 +75,56 @@ Drawing is deterministic: two full runs come out byte-identical, with the clock
 pinned and preferences read from an empty store. So any commit before pygame
 is deleted can redraw them exactly. The first baseline was drawn at the commit
 that added these tools.
+
+## The seams (phase A)
+
+- `app`: `main`'s pygame-free logic, moved verbatim. The nine functions that
+  wrote into `MenuState` answer an `app.MenuNote` instead, and `main` applies it.
+- `pbpclient.PbpClient`: the play-by-post machine. `step()` returns an
+  `Outcome` for the frontend to apply.
+- `hostio`: the worker host. It keeps the page's address and a storage mirror,
+  queues effects (`http`, `fire`, `bridge`, `store.set`, `clipboard`,
+  `navigate`, `fragment`), and takes replies.
+- `serial`: JSON shapes for the map, the board, fog, events and films. Board
+  fleets keep `state.fleets` order.
+- `webapp/js/reel.mjs` mirrors `turnfilm.Reel`; `webapp/tests/reel.test.mjs`
+  holds it to the history-path rule.
+- `Ui`'s three pixel-reading methods each gained a pure half (`snap_points`,
+  `set_slider_fraction`, `add_route_sids`).
+
+Every step left the full suite passing and the 98 parity screens
+byte-identical.
+
+## The Pyodide spike (phase 0)
+
+`uv run python -m starconquest.serve` serves `/next/` locally: an all-bot game
+on an SVG board, each turn's film played by the JS `Reel` and checked against
+the board Python returns. `tools/build_web.sh` stages the same tree at
+`web/next/` for deploy previews, never failing the build over it. Pyodide
+0.27.7 (CPython 3.12.7) is self-hosted, downloaded by `tools/fetch_pyodide.py`
+and checked against its published SHA-256.
+
+**The gate, measured 2026-11-09** (`tools/spike_bench.py`,
+`tools/spike_pygbag.py`; ledgers and `report.md` in `results/next-spike/`):
+
+- **Replays: pass.** In Pyodide all 24 corpus games reconstruct, and the 14 bot
+  games replay, to identical boards: 2,326 boards, none different. Every timing
+  case also ended on the same board natively, in Pyodide under Node, in Pyodide
+  in Chrome, and in pygbag in Chrome.
+- **Bot time: pass.** Pyodide's decide time in Chrome is a median 1.03× pygbag's
+  (range 0.98–1.05×) over the cases above 0.5 ms. Both are about 2.1× native.
+  The costliest case is knower at Council: 57 ms a turn at 40 systems.
+- **Startup: pass.** In headless Chrome, served locally, Python is ready 1.21 s
+  after navigation cold and 0.98 s warm. pygbag reached a bench script's
+  `main` at 1.58 s cold, before the real game would import its shell, and
+  1.23–1.52 s warm.
+- **Download: about half.** 6.0 MB gzipped (Pyodide 5.6 MB plus the 227 KB game
+  zip), against pygbag's 10.6 MB runtime plus its 427 KB archive.
+
+**Not measured:** a real phone (the phone screenshot is an emulated viewport on
+desktop CPU), and download time over a real network. Both sides were served
+from localhost.
+
+**Caveat:** the service worker (scope `/`) caches `/next/` like any other path.
+That is safe, because the zip's name is its hash, but `/next/` gets its own
+rules in phase 7.

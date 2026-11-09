@@ -15,7 +15,7 @@ ships or is dropped, delete its line here (and add it to
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
-- html-frontend.md · The HTML frontend after the parity baselines: Python seams (`app`, session, effects), the Pyodide spike and its gate, then each screen to parity at `/next/` and cutover. *How it is staged.*
+- html-frontend.md · The HTML frontend past the spike: each screen to parity at `/next/` (play screen, menu, sharing, play-by-post, daily and gauntlets, map maker), the local launcher and service worker, then cutover; a real-phone startup measurement. *How it is staged*, *The Pyodide spike (phase 0)*.
 - leaderboard.md · Watch links on an owner's own scores while their map is embargoed: `replay.mjs` asking Auth who calls, as `pbp.mjs` does, and serving that owner's logs past `public_replays`. *Claimed names.*
 - training.md · Drill stages and a tutorial stage each for rusherplus, evolved and knower; choosing the hint's advisor. *Proposed, not built.*
 - gauntlet.md · The roguelite run beyond the linear run built in *Runs*: branching, lane gates, lives and boons (`graphical-gauntlet-maker.md`), and a seeded run graph with stages dealt like the campaign's. *The gauntlet: proposed, not built.*

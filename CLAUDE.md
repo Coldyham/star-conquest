@@ -53,6 +53,8 @@ uv run python tools/verify_scores.py --dry-run  # check each posted score's log
 uv run python tools/admin.py matches            # moderation (dry run until --yes)
 uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots column
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
+node --test webapp/tests/*.test.mjs             # the HTML build's JS suite
+uv run python -m starconquest.serve             # the HTML build (in progress) at 127.0.0.1:8000/next/
 ```
 
 Measurement, tuning and generator tools (benches, censuses, CMA-ES, par
@@ -94,8 +96,16 @@ the game is testable headlessly. The boundaries are load-bearing:
 
 - **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run` (`test_no_core_module_imports_pygame`). `fog`
-  and `turnfilm` are presentation-only: the engine and AI never consult them.
+  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run`,
+  and the HTML build's `app`, `hostio`, `pbpclient`, `serial`, `session`, `bench`
+  (`test_no_core_module_imports_pygame`). `fog` and `turnfilm` are
+  presentation-only: the engine and AI never consult them.
+- **The HTML build (in progress, `docs/design/html-frontend.md`)** runs the core in
+  Pyodide in a Web Worker behind `session` (JSON in, JSON out). **Python does no
+  I/O there**: `hostio` queues effects for the page and takes its replies;
+  `sc_auth` never reaches Python. The pygame shell stays the live game until
+  `/next/` reaches parity; check a shell change against the parity screens
+  (`tools/parity_shots.py --out`).
 - **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
   `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
   shim for pygbag).
