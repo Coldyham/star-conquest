@@ -505,6 +505,14 @@ soaking up everything nearer to it than the front is; one that can't is a sink, 
 ships gather to save it. With no front at all there is nowhere to pass ships on to, so
 every threatened system is a rally point, as before.
 
+**With nothing threatened, auto-route rallies on the neutral border.** Before any rival
+is in reach — the opening, or a quiet corner of a big map — the button used to vanish,
+yet "gather where the empire meets the unclaimed" is the same one-press question with
+the expansion front as the answer: every system we hold next to a neutral one
+(`Ui.border_systems`). A rival front, or any threat, still outranks it entirely; the
+button is gone only when there is no border of either kind (`Ui.auto_rally_picks`
+being empty is the one gate for drawing it and for pressing it).
+
 **The sub-mode is sticky; the proposal is not.** `reset_route` runs every turn from
 `main.resolve_turn`, so clearing `route_rally` there would drag the player back to
 chain routing between one plan and the next. `set_route_rally` does clear the

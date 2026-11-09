@@ -1500,8 +1500,18 @@ class Ui:
                 threatened.add(f.dest_id)
         return threatened
 
-    def auto_rally(self, state: GameState) -> None:
-        """Rally on the threatened systems at once — the front line as one gesture.
+    def border_systems(self, state: GameState) -> set[int]:
+        """The systems we hold next to a neutral one: where we expand from, and so
+        auto-route's front when no rival is in reach yet."""
+        return {
+            sid for sid, sys in state.systems.items()
+            if sys.owner_id == self.human_id
+            and any(state.systems[n].owner_id == 0 and n in self.visible for n in sys.neighbors)
+        }
+
+    def auto_rally_picks(self, state: GameState) -> set[int]:
+        """The rally points auto-route would pick — empty when it has nothing to do,
+        which is also when render leaves its button out.
 
         Every system on the front (`frontier_systems`) is a rally point. One behind
         it with rival ships inbound is one only if it can't keep them off by itself
@@ -1509,20 +1519,28 @@ class Ui:
         smart hold (`_plan_rally`) — it keeps what the attack needs and passes the
         rest on to the front, rather than soaking up everything nearer to it than
         the front is. With no front at all to pass ships on to, every threatened
-        system is a rally point.
-
-        Replaces the picks rather than adding to them: it is a "do the obvious thing"
-        button, and what it means has to be the same whatever was picked before. Tap
-        from there to adjust. A no-op when nothing is threatened, which is also when
-        render leaves the button out.
+        system is a rally point. With nothing threatened either, the front is the
+        expansion one: every system bordering a neutral (`border_systems`).
         """
         threatened = self.threatened_systems(state)
         if not threatened:
-            return
+            return self.border_systems(state)
         frontier = self.frontier_systems(state)
         weak = {sid for sid in threatened - frontier
                 if not combat.holds_unaided(state, sid, self.human_id)}
-        self.route_sel = (frontier | weak) if frontier else threatened
+        return (frontier | weak) if frontier else threatened
+
+    def auto_rally(self, state: GameState) -> None:
+        """Rally on `auto_rally_picks` at once — the front line as one gesture.
+
+        Replaces the picks rather than adding to them: it is a "do the obvious thing"
+        button, and what it means has to be the same whatever was picked before. Tap
+        from there to adjust. A no-op when there is nothing to pick.
+        """
+        picks = self.auto_rally_picks(state)
+        if not picks:
+            return
+        self.route_sel = picks
         self.recompute_route(state)
 
     def route_sources(self) -> set[int]:

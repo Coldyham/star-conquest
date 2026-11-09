@@ -2004,9 +2004,10 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
         # losing this makes the sub-mode unreachable on a touch build.
         mode_label = _key_hint("Mode: Rally" if ui.route_rally else "Mode: Chain", "Tab")
         specs.append(("route_mode_rect", mode_label, *_BTN_TEAL, 6, "right"))
-        # Rally only, and only when there is a front to pick: drawn exactly when it
-        # would do something, the same gate `can_fast_forward` earns its button by.
-        if ui.route_rally and ui.threatened_systems(state):
+        # Rally only, and only when there is a front (or a neutral border) to pick:
+        # drawn exactly when it would do something, the same gate
+        # `can_fast_forward` earns its button by.
+        if ui.route_rally and ui.auto_rally_picks(state):
             specs.append(("route_auto_rect", _key_hint("Auto-route", "T"), *_BTN_VIOLET, 5, "right"))
         specs.append(("route_cancel_rect", _key_hint("Cancel", "Esc"), *_BTN_RED, 4, "right"))
         specs.append(("menu_button_rect", _key_hint("Menu", "M"), *_BTN_BLUE, 2, "right"))
@@ -2899,8 +2900,9 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     if rally:
         hint = ("Tap the systems ships should gather at — tap again to drop one. "
                 "Everything else you hold forwards to the nearest of them, and every "
-                "other rule is cleared. Auto-route picks your front line; a system "
-                "under attack behind it keeps what it needs and passes the rest on.")
+                "other rule is cleared. Auto-route picks your front line (or, with no "
+                "rival in reach, your border with neutral systems); a system under "
+                "attack behind it keeps what it needs and passes the rest on.")
     else:
         hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
                 "un-aim, and to drop it from the group.")

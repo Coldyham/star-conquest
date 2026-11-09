@@ -1256,11 +1256,30 @@ def test_auto_rally_replaces_the_picks_rather_than_adding_to_them():
     assert ui.route_sel == {2}
 
 
-def test_auto_rally_does_nothing_when_nothing_is_threatened():
-    s = _line(3, owned={0, 1})
+def test_auto_rally_does_nothing_with_nothing_to_pick():
+    """No rival in reach and no neutral left to border: no front of any kind."""
+    s = _line(3, owned=range(3))
     ui = _rally(s, {0})
+    assert ui.auto_rally_picks(s) == set()
     ui.auto_rally(s)
     assert ui.route_sel == {0}             # the player's own picks are left alone
+
+
+def test_auto_rally_with_nothing_threatened_picks_the_neutral_border():
+    """Before any rival is in reach, the front is the one we expand across."""
+    s = _graph([(0, 1), (1, 2), (1, 3), (3, 4)], {0: 1, 1: 1, 3: 1})   # 2 and 4 neutral
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1, 3}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0)}
+
+
+def test_a_rival_front_outranks_the_neutral_border():
+    s = _line(5, owned={1, 2, 3})
+    s.systems[4].owner_id = 2              # 3 faces a rival; 1 borders neutral 0
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {3}
 
 
 def _inbound(s, dest, ships, turns=1, owner=2):
@@ -1340,7 +1359,24 @@ def test_the_auto_route_button_is_drawn_only_in_rally_mode_with_a_front():
         assert ui.route_auto_rect == (0, 0, 0, 0)      # chain mode never offers it
         ui.set_route_rally(state, True)
         render.draw(_screen(), state, ui)
-        assert bool(ui.route_auto_rect[2]) == bool(ui.threatened_systems(state))
+        assert bool(ui.route_auto_rect[2]) == bool(ui.auto_rally_picks(state))
+    finally:
+        pygame.quit()
+
+
+def test_the_auto_route_button_is_drawn_with_only_a_neutral_border():
+    state, ui = _rally_setup()
+    try:
+        for s in state.systems.values():   # no rivals anywhere: only neutral borders
+            if s.owner_id not in (0, 1):
+                s.owner_id = 0
+        state.fleets.clear()
+        assert ui.threatened_systems(state) == set() and ui.border_systems(state)
+        render.draw(_screen(), state, ui)
+        assert ui.route_auto_rect[2] > 0
+        ax, ay, aw, ah = ui.route_auto_rect
+        _press(state, ui, (ax + aw // 2, ay + ah // 2))
+        assert ui.route_sel == ui.border_systems(state)
     finally:
         pygame.quit()
 
