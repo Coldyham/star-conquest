@@ -16,7 +16,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 
-from starconquest import app, campaign, config, mapgen, menu, pbp, render
+from starconquest import app, campaign, config, mapgen, menu, pbp, render, setupmenu
 from starconquest.geometry import WorldView
 from starconquest.menu import MenuState
 from starconquest.settings import Settings
@@ -252,7 +252,7 @@ def _click(screen, ms, settings, key):
 
 
 def test_start_on_a_node_that_wouldnt_count_asks_first(monkeypatch):
-    monkeypatch.setattr(menu, "setup_warnings", lambda settings, people=None: [])
+    monkeypatch.setattr(setupmenu, "setup_warnings", lambda settings, people=None: [])
     screen, ms, settings = _menu()
     try:
         ms.campaign_watch.status = status(why="not-adjacent", can=False)
@@ -265,7 +265,7 @@ def test_start_on_a_node_that_wouldnt_count_asks_first(monkeypatch):
 
 
 def test_start_on_an_open_node_just_starts(monkeypatch):
-    monkeypatch.setattr(menu, "setup_warnings", lambda settings, people=None: [])
+    monkeypatch.setattr(setupmenu, "setup_warnings", lambda settings, people=None: [])
     screen, ms, settings = _menu()
     try:
         ms.campaign_watch.status = status()
@@ -275,7 +275,7 @@ def test_start_on_an_open_node_just_starts(monkeypatch):
 
 
 def test_a_campaign_confirm_and_a_slow_warning_share_one_modal(monkeypatch):
-    monkeypatch.setattr(menu, "setup_warnings",
+    monkeypatch.setattr(setupmenu, "setup_warnings",
                         lambda settings, people=None: ["Knower would search 3 turns deep, not 12"])
     screen, ms, settings = _menu()
     try:

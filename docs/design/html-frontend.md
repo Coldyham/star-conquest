@@ -132,13 +132,12 @@ from localhost.
 That is safe, because the zip's name is its hash, but `/next/` gets its own
 rules in phase 7.
 
-## The play screen (phase 1, in progress)
+## The play screen (phase 1)
 
-`/next/` is now the play screen: `webapp/index.html` and `css/play.css`, laid
-out as pygame's desktop screen, driven by `js/play.mjs`. Until the menu is
-built a setup comes from the address: `?players=3&nodes=30&seed=7&mode=symmetric&fog=1`
-(fog is sight in hops). `window.scNext` exposes the page's state for headless
-runs (`tools/chrome.mjs --eval`).
+`/next/` plays a game: `webapp/index.html` and `css/play.css`, laid out as
+pygame's desktop screen, driven by `js/play.mjs`. It opens on the setup menu
+(phase 2, below). `window.scNext` exposes the page's state for headless runs
+(`tools/chrome.mjs --eval`).
 
 **Who decides what.** Python decides every rule and writes every word; the
 page hit-tests, draws, and keeps what is only about looking.
@@ -196,6 +195,66 @@ the page fits names, the footer and the forecast with its own font metrics,
 so a squeeze can fall a button differently at the exact boundary (portrait
 `game-footer-more` folds Play, which pygame fits by a fifth of a unit).
 
-**Phase 1 is complete** at every size. Left for later phases: the menu (Menu
-and Setup menu only say so for now), sharing, play-by-post, gauntlet stages,
-and the map maker.
+**Phase 1 is complete** at every size. Left for later phases: sharing,
+play-by-post, gauntlet stages, and the map maker.
+
+## The setup menu (phase 2)
+
+`/next/` opens on the setup menu (`js/menu.mjs`, `css/menu.css`), laid out as
+pygame's: on a desktop its 1440x960 canvas, on a phone the compact menu, the
+panel scrolling, a sketch of the map and the actions in a grid along the foot,
+sideways the title, map and actions in a column beside the panel. The address
+pre-fills it as the command line pre-fills pygame's
+(`?players=3&nodes=30&seed=7&mode=symmetric&fog=1`, fog as sight in hops), then
+a shared link (`#<token>`) does; `&go` skips the menu and plays it. Start
+plays the menu's setup (`game.start` with no settings), and the game's Menu
+and Setup menu come back to it, the match left behind.
+
+**Who decides what.** `setupmenu` is the menu apart from its drawing, read by
+both shells, as `play` and `hud` are for the play screen:
+
+- What a press means, by the widget's key (`setupmenu.press`): the tabs and
+  seats, every stepper, toggle and die, the strategy list, and the three
+  preferences on the Basic tab. A slider takes the fraction along its track
+  (`apply_slider`), the seed field its text (`set_seed_text`). Start goes
+  through `setupmenu.start` (a hand map's blockers, then the slow-setup
+  confirm); a challenge link's setup asks before an edit drops its score
+  (`before_edit`, `after_edit`, `answer_unchallenge`). `menu` hit-tests in
+  pygame's pixels and hands the key over; its rules were moved, not copied,
+  and its tests pass unchanged but for where they patch.
+- Every word, and `setupmenu.view`: the whole menu as plain JSON (the tabs and
+  their changed-dots, each tab's rows, the Combat tab's readout and jitter
+  matrix, the actions, the open list, the confirm, the phone's sketch).
+- The session's `menu.*` ops: `menu.open` (at boot, `first`, which may offer
+  to resume), `menu.press`, `menu.key`, `menu.slide` (`start`, `move`, `end`),
+  `menu.seed`, `menu.survey` and `menu.resume`. A reply carries `menu`, an
+  `action` for the page (`start`, `quit`), a status line said once, and
+  `stale` while the lane readout (and on a phone the sketch) describe an
+  older setup. The page asks `menu.survey` once nothing has moved for 250 ms,
+  never mid-drag, as `menu.pump` waits for a slider's release.
+
+**Saved games persist.** The worker mounts the games folder (`replay.GAMES_DIR`,
+`/game/games`) on IndexedDB and writes it back 400 ms after a command, so a
+match's log survives a reload and the boot prompt can offer to resume it, as
+pygame's does from `games/` on a desktop. The pygbag build kept no games
+across a reload.
+
+**Left for their phases, and saying so:** Tutorial (and gauntlets and runs),
+the Daily list's two items, Play by post and its roster prompt, and Create map
+answer "Not in this build yet" in the status line. Get Link, Shared matches
+and Recently played work, through the same `webstore` calls as pygame's
+footer. Quit asks the browser to close the window and says to close the tab
+when it can't, as `main.leave_app` does on the web.
+
+**Differences kept on purpose:** no Game UI size stepper (the browser's own
+zoom does that job, and the plan drops `ui_scale`); the desktop footer is
+pygame's web footer (Get Link and the board's lists, not Save and Load, which
+wait for files in phase 7); the slow-setup confirm does not yet add the
+weekly campaign's lines, which need the board (phase 3); a slider on a phone
+grabs on touch rather than waiting for a sideways move, so the panel scrolls
+from anywhere else.
+
+**Phase 2 is complete** at the desktop and phone sizes: every menu parity
+recipe but the play-by-post prompt (phase 4) shoots (`tools/parity_next.py`),
+and a headless run sets players, a seed and a slider, starts, plays three
+turns, goes back to the menu, reloads and resumes the match.

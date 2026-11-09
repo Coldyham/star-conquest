@@ -15,7 +15,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 import pytest
 
-from starconquest import ai, combat, config, mapgen, menu
+from starconquest import ai, combat, config, mapgen, menu, setupmenu
 from starconquest.menu import MenuState
 from starconquest.settings import RANDOM_STRATEGY, Challenge, Settings, seed_top
 
@@ -791,7 +791,7 @@ def test_ai_tab_per_seat_and_copy_reset():
         assert settings.ai[2].reserve_fraction == 0.0
         # reset all restores defaults
         _click_key(screen, ms, settings, "reset_all")
-        assert settings.ai[1].reserve_fraction == menu.AiParams().reserve_fraction
+        assert settings.ai[1].reserve_fraction == setupmenu.AiParams().reserve_fraction
     finally:
         pygame.quit()
 
@@ -1529,7 +1529,7 @@ def _warns(monkeypatch, lines=("Knower would search 3 turns deep, not 12",)):
         asked.append(people)
         return list(lines)
 
-    monkeypatch.setattr(menu, "setup_warnings", fake)
+    monkeypatch.setattr(setupmenu, "setup_warnings", fake)
     return asked
 
 

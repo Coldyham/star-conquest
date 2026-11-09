@@ -282,3 +282,114 @@ def test_every_game_parity_recipe_loads_as_the_match_on_screen(session):
         reply = _call(session, "parity.load", recipe=r)
         assert reply["ok"], (r["name"], reply.get("trace"))
         assert json.loads(json.dumps(reply["result"])) == reply["result"]
+
+
+# --------------------------------------------------------------------------- #
+# The setup menu (`setupmenu`, `Session.op_menu_*`)
+@pytest.fixture
+def games(monkeypatch, tmp_path):
+    from starconquest import replay
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    return tmp_path
+
+
+def _menu(s: Session, op: str, **args) -> dict:
+    reply = _call(s, op, **args)
+    assert reply["ok"], reply.get("trace")
+    return reply["result"]
+
+
+def test_the_menu_opens_prefilled_and_starts_its_own_setup(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    res = _menu(session, "menu.open", first=True, prefill={"players": 4, "seed": 11})
+    assert json.loads(json.dumps(res)) == res
+    rows = {r["label"]: r["control"] for r in res["menu"]["panel"] if r["kind"] == "row"}
+    assert rows["Players"]["value"] == "4" and rows["Seed"]["text"] == "11"
+    assert res["stale"] and "resume" not in res
+    assert not _menu(session, "menu.survey")["stale"]
+    res = _menu(session, "menu.press", key="tab_combat")
+    assert res["action"] is None and res["stale"] is False   # nothing moved that shapes the lanes
+    res = _menu(session, "menu.press", key="players_dec")
+    assert res["stale"]
+    res = _menu(session, "menu.key", name="Enter")
+    assert res["action"] == "start"
+    game = _menu(session, "game.start")
+    assert game["seed"] == 11 and len(game["static"]["players"]) == 3 + 1
+
+
+def test_a_slider_drag_measures_the_lanes_only_once_let_go(session):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    _menu(session, "menu.survey")
+    assert _menu(session, "menu.slide", key="adv_extra_edges", t=0.9, phase="start")["menu"]["dragging"]
+    res = _menu(session, "menu.slide", key="adv_extra_edges", t=0.95, phase="move")
+    assert res["stale"]
+    res = _menu(session, "menu.slide", key="adv_extra_edges", t=1.0, phase="end")
+    assert res["menu"]["dragging"] is None and res["stale"]
+    assert not _menu(session, "menu.survey")["stale"]
+
+
+def test_the_seed_field_filters_what_is_typed(session):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    res = _menu(session, "menu.seed", text="4x2")
+    seed = next(r for r in res["menu"]["panel"] if r["kind"] == "row" and r["label"] == "Seed")
+    assert seed["control"]["text"] == "42" and session.settings.seed == 42
+    _menu(session, "menu.seed", text="", done=True)
+    assert session.settings.seed is None
+
+
+def test_a_preference_is_written_through_to_the_page(session):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    reply = _call(session, "menu.press", key="share_games")
+    assert {"t": "store.set", "key": "sc_share_games", "value": "1"} in reply["effects"]
+
+
+def test_quit_and_later_screens_say_why_they_stay(session):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    res = _menu(session, "menu.press", key="create_map")
+    assert res["action"] is None and not res["status"]["ok"]
+    res = _menu(session, "menu.key", name="Escape")
+    assert res["action"] == "quit" and res["status"]["text"].startswith("Close the tab")
+    reply = _call(session, "menu.press", key="no_such_control")
+    assert not reply["ok"]
+
+
+def test_get_link_puts_the_setup_in_the_address_and_the_clipboard(session):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    reply = _call(session, "menu.press", key="get_link")
+    kinds = {e["t"] for e in reply["effects"]}
+    assert {"fragment", "clipboard"} <= kinds
+    assert reply["result"]["status"]["ok"]
+
+
+def test_an_unfinished_match_is_offered_at_boot_and_resumes(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True, prefill={"autoplay": True})
+    _menu(session, "game.start", seed=3)
+    for _ in range(3):
+        _menu(session, "turn.end")
+    fresh = Session()
+    _call(fresh, "boot", page=PAGE, store={})
+    res = _menu(fresh, "menu.open", first=True)
+    assert res["resume"]["detail"].startswith("turn 3")
+    game = _menu(fresh, "menu.resume", accept=True)["game"]
+    assert game["seed"] == 3 and game["board"]
+    assert "resume" not in _menu(fresh, "menu.open")
+
+
+def test_every_menu_parity_recipe_loads(session, games):
+    recipes = json.loads((Path(__file__).parent / "fixtures" / "parity_screens.json").read_text())["screens"]
+    _call(session, "boot", page=PAGE, store={})
+    for r in recipes:
+        if r["surface"] not in ("menu", "resume"):
+            continue
+        res = _menu(session, "parity.menu", recipe=r)
+        assert json.loads(json.dumps(res)) == res
+        if r["name"] == "menu-slow-confirm":
+            assert res["menu"]["modal"]["title"] == "This setup is slow"
+        if r["surface"] == "resume":
+            assert res["resume"]

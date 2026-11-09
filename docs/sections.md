@@ -30,6 +30,7 @@ line gives only the verdict. Ideas that lost are in
 - html-frontend.md · **The seams (phase A).** `app`, `pbpclient`, `hostio`, `serial`, the JS `Reel` mirror, `Ui`'s pure halves; screens stayed byte-identical.
 - html-frontend.md · **The Pyodide spike (phase 0).** Gate passed 2026-11-09: replays identical in Pyodide, bot time 1.03× pygbag, startup 1.21 s vs pygbag's 1.58 s, download about half; a real phone not yet measured.
 - html-frontend.md · **The play screen (phase 1).** `/next/` plays a solo game at desktop and phone sizes: `play` says what a press means and `hud` words the screen, for both shells; `serial.view` and the session's `ui.*`, `game.action` and `history.*` ops drive the page; the page keeps the camera, hover, drag, marks and film clock; phones size as pygame's shell does (CSS zoom, compact and portrait classes). Every phase-1 parity recipe shoots at all three sizes (`tools/parity_next.py`).
+- html-frontend.md · **The setup menu (phase 2).** `/next/` opens on the menu: `setupmenu` says what each press means, holds the words and `view` (plain JSON), read by pygame's `menu` too; the session's `menu.*` ops; the page asks for the lane survey once the setup settles; saved games persist in IndexedDB so a reload can resume; the later phases' buttons say so.
 
 ## shell.md
 - shell.md · **Text sizing** and **`config.touch_ui`.** Measured layout; the send popup is where the tap floor gives way.
