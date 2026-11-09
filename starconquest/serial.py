@@ -16,8 +16,9 @@ Two shapes are load-bearing for the page's `Reel` mirror:
 from __future__ import annotations
 
 import dataclasses
+import math
 
-from starconquest import app, hud, mapgen, paths, starlore, turnfilm
+from starconquest import app, hud, mapgen, paths, starlore, stats, turnfilm
 from starconquest.model import GameState, lane_key
 from starconquest.viewstate import CHOOSING, ROUTING, Ui
 
@@ -147,6 +148,7 @@ def view(state: GameState, ui: Ui) -> dict:
                     "label": hud.scrubber_label(ui, state.turn), "graphs": ui.history_chart is not None,
                     "graph_on": ui.history_graph,
                     "rewind": ui.history_turn < ui.history_max and not ui.in_pbp} if ui.history else None,
+        "graph": graph(state, ui) if ui.history and ui.history_graph and ui.history_chart is not None else None,
         "can": {
             "end_turn": (state.winner is None and not ui.awaiting_others(state) and not ui.spectating
                          and not ui.history),
@@ -295,6 +297,45 @@ def card(state: GameState, ui: Ui) -> dict | None:
         return {"kind": "odds", "title": odds[0], "label": line[0][0], "tone": line[1],
                 "items": [list(item) for item in odds[1]]}
     return None
+
+
+def graph(state: GameState, ui: Ui) -> dict:
+    """History's graphs (`render._draw_history_graph`): the tabs, the metric on
+    show with each drawn seat's series (None for a turn it was out of sight),
+    the legend's rows with their figures at the turn on screen, and the
+    coach's notes when its tab is open."""
+    chart = ui.history_chart
+    assert chart is not None
+    seats, traces = ui.graph_seats(), ui.graph_traces()
+    key, _title, unit = stats.METRICS[ui.graph_metric % len(stats.METRICS)]
+    turn = max(0, min(ui.history_turn, chart.turns))
+
+    def at(pid: int) -> float:
+        series = chart.series(key, pid)
+        return series[min(turn, len(series) - 1)] if series else 0.0
+
+    def plain(series) -> list:
+        return [None if math.isnan(v) else round(v, 3) for v in series]   # NaN: out of sight
+
+    review = ui.coach_review
+    shown = list(traces) + ([stats.NEUTRAL] if key in stats.AREA else [])
+    return {
+        "full": ui.graph_full,
+        "tabs": [label for _k, label, _u in stats.METRICS] + (["Coach"] if review is not None else []),
+        "tab": len(stats.METRICS) if ui.coach_open and review is not None else ui.graph_metric % len(stats.METRICS),
+        "note": {"keys": hud.graph_note(ui, False), "touch": hud.graph_note(ui, True)},
+        "metric": key, "unit": unit, "stacked": key in stats.STACKED, "area": key in stats.AREA,
+        "turns": chart.turns, "turn": turn,
+        "series": {str(pid): plain(chart.series(key, pid)) for pid in shown},
+        "colors": {str(pid): list(state.players[pid].color) if pid in state.players else [70, 74, 90]
+                   for pid in shown},
+        "rows": [[pid, state.players[pid].name if pid in state.players else str(pid), hud.seat_who(state, ui, pid),
+                  hud.graph_value(key, at(pid)), pid in ui.graph_hidden] for pid in seats],
+        "unclaimed": hud.graph_value(key, at(stats.NEUTRAL)) if key in stats.AREA else None,
+        "coach": {"summary": review.summary, "sel": ui.coach_sel,
+                  "notes": [[n.turn, hud.COACH_ROLE.get(n.kind, "text"), n.text] for n in review.notes]}
+        if review is not None and ui.coach_open else None,
+    }
 
 
 def rules(state: GameState, ui: Ui) -> list[dict]:

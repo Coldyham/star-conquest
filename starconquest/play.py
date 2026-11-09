@@ -303,6 +303,13 @@ def history_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str
     return None
 
 
+def graph_tab(ui: Ui, i: int) -> None:
+    """Pick the graphs' tab ``i``: a metric, or Coach after them."""
+    ui.coach_open = ui.coach_review is not None and i >= len(stats.METRICS)
+    if not ui.coach_open:
+        ui.graph_metric = i % len(stats.METRICS)
+
+
 def seek(ui: Ui, turn: int) -> None:
     """Show history turn ``turn`` (clamped): a jump, not a step, so playback
     stops and the marks of the turn left behind go."""

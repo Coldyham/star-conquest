@@ -273,3 +273,35 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #footer .label { color: var(--dim); white-space: nowrap; }
 #footer .arrow { width: 40px; padding: 0; font-size: 16px; }
 #app.history #footer .btn { font-size: 14px; }
+
+/* --- history's graphs --------------------------------------------------- */
+#graph {
+  position: absolute; z-index: 3; left: 10px; right: 10px; bottom: 8px; height: min(320px, 45%);
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: rgb(14, 16, 26); border: 1px solid rgb(60, 66, 90); border-radius: 6px;
+}
+#graph.full { position: fixed; left: 0; right: 0; top: var(--top-h); bottom: var(--foot-h); height: auto; border-radius: 0; }
+#graph .head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+#graph .head .btn { height: 28px; font-size: 14px; padding: 0 12px; }
+#graph .head .note { flex: 1; text-align: right; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#graph .head .caret { width: 28px; padding: 0; }
+#graph .chart { flex: 1; min-height: 0; display: flex; gap: 16px; }
+#graph .plot { flex: 1; min-width: 0; height: 100%; cursor: pointer; touch-action: none; }
+#graph .legend { width: 290px; flex: none; display: flex; flex-direction: column; gap: 0; }
+#graph .legend .unit { display: flex; justify-content: space-between; color: var(--dim); height: 22px; }
+#graph .legend .all { border: none; background: none; color: var(--text); padding: 0; font-size: 14px; }
+#graph .seat { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0; border: none; background: none;
+  color: var(--text); font-size: 14px; text-align: left; }
+#graph .seat.off { opacity: .45; }
+#graph .seat .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+#graph .seat .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#graph .seat .value { min-width: 40px; text-align: right; }
+#graph .dim { color: var(--dim); }
+#graph .coach { flex: 1; min-height: 0; overflow: auto; }
+#graph .coach p { margin: 0 0 8px; }
+#graph .note-row { display: flex; gap: 12px; width: 100%; padding: 6px 4px; border: none; background: none;
+  color: var(--text); font-size: 14px; text-align: left; border-radius: 4px; }
+#graph .note-row.on { background: rgb(30, 34, 50); }
+#graph .note-row .turn { flex: none; min-width: 34px; }
+:root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); }
+#app.graphing #camera { bottom: calc(min(320px, 45%) + 18px); }

@@ -6,14 +6,16 @@ sends them to the HTML page, so a line is worded in one place. A colour goes
 as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, ``"route"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
 colour; the win overlay adds ``"teal"``, ``"beat"``, ``"tie"``, ``"miss"``,
-``"par"`` and ``"failed"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
+``"par"`` and ``"failed"``, and the coach ``"violet"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
 star name in it, so it may need the small font), ``"row"`` for one line, and
 ``"wrap"`` for a line to reflow to the panel's width.
 """
 
 from __future__ import annotations
 
-from . import combat, config, fog
+import math
+
+from . import coach, combat, config, fog, stats
 from .model import GameState, System, lane_key, shares_even
 from .viewstate import CHOOSING, ROUTING, Ui
 
@@ -846,3 +848,30 @@ def scrubber_label(ui: Ui, turn: int) -> str:
     board is shown as it was seen or revealed."""
     tag = "revealed" if ui.history_reveal else "as seen"
     return f"Turn {turn}/{ui.history_max}  ·  {tag}"
+
+
+def graph_value(metric: str, v: float) -> str:
+    """A graph's figure for a seat at a turn: a dash for one out of sight."""
+    if math.isnan(v):
+        return "–"   # a rival out of sight that turn (`stats.masked`)
+    if metric == "income":
+        return f"{v:.1f}"
+    if metric in stats.AREA:
+        return f"{v:.0f}%"
+    return str(round(v))
+
+
+def graph_note(ui: Ui, touch: bool) -> str:
+    """The graphs' header line: that rivals are charted only while seen, else
+    (with keys) how to drive the panel."""
+    note = "" if ui.history_reveal else "Rivals only while in sight"
+    if not note and not touch:
+        note = ("Up/Down: step notes  ·  Tab: graphs" if ui.coach_open else
+                "Tab: next graph  ·  1-9 or click a seat: show/hide") + "  ·  F: " + (
+            "dock" if ui.graph_full else "full screen")
+    return note
+
+
+# A coach note's turn label, coloured by what kind of lesson it is.
+COACH_ROLE = {coach.GAMBLE: "gamble", coach.SURPRISE: "likely", coach.EMPTIED: "gamble",
+              coach.EVACUATED: "teal", coach.IDLE: "likely", coach.TURN: "violet"}

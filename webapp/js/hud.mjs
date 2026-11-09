@@ -4,6 +4,22 @@
 // picks the longest wording that fits, and turns presses into calls.
 
 const NEUTRAL = [122, 128, 140];
+const SVG = "http://www.w3.org/2000/svg";
+
+function sv(tag, attrs = {}, parent = null) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (parent) parent.appendChild(node);
+  return node;
+}
+
+/** `render._nice_ceil`: `v` up to 1, 2 or 5 times a power of ten, at least 1. */
+function niceCeil(v) {
+  if (v <= 1) return 1;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  for (const step of [1, 2, 5, 10]) if (v <= step * mag) return step * mag;
+  return 10 * mag;
+}
 const FONT = "DejaVu Sans Mono, monospace";
 
 function h(tag, attrs = {}, ...kids) {
@@ -186,8 +202,10 @@ export class Hud {
     nav.replaceChildren(...left, h("span", { class: "spacer" }), ...right);
   }
 
-  /** The hint's caption over the map, and the card over the board, if any. */
+  /** The hint's caption over the map, the card over the board, and
+   * history's graphs. */
   overlays(view) {
+    this.graph(view);
     const touch = matchMedia("(hover: none)").matches;
     const cap = this.$("hint-caption");
     cap.hidden = !view.hint;
@@ -285,7 +303,9 @@ export class Hud {
       ui.label = h("span", { class: "label" });
       ui.rewind = h("button", { type: "button", class: "btn amber", onclick: () => this.on.action("rewind") },
         "Rewind to here");
-      nav.replaceChildren(ui.exit, ui.play, ui.prev, ui.track, ui.next, ui.label, ui.rewind);
+      ui.graphs = h("button", { type: "button", class: "btn violet", onclick: () => this.on.call("toggle_graph", []) },
+        "Graphs", key("G"));
+      nav.replaceChildren(ui.exit, ui.play, ui.graphs, ui.prev, ui.track, ui.next, ui.label, ui.rewind);
       this.scrub = ui;
     }
     this.view = view;
@@ -298,6 +318,133 @@ export class Hud {
     if (document.activeElement !== ui.track) ui.track.value = hv.turn;
     ui.label.textContent = hv.label;
     ui.rewind.hidden = !hv.rewind;
+    ui.graphs.hidden = !hv.graphs;
+    ui.graphs.className = `btn ${hv.graph_on ? "active" : "violet"}`;
+  }
+
+  /** History's graphs (`render._draw_history_graph`): the tabs, a line per
+   * seat (a stacked bar per turn for Lost/turn, stacked bands for Map share)
+   * with a cursor on the turn shown, and the legend, which shows or hides a
+   * seat's line; or the coach's notes, each a jump to its turn. */
+  graph(view) {
+    const box = this.$("graph");
+    const g = view.graph;
+    if (!g) {
+      box.hidden = true;
+      return;
+    }
+    const touch = matchMedia("(hover: none)").matches;
+    box.classList.toggle("full", g.full);
+    const tabs = g.tabs.map((label, i) => h("button", { type: "button", class: `btn ${i === g.tab ? "active" : "blue"}`,
+      onclick: () => this.on.call("graph_tab", [i]) }, label));
+    const head = h("div", { class: "head" }, ...tabs, h("span", { class: "note" }, touch ? g.note.touch : g.note.keys),
+      h("button", { type: "button", class: "btn blue caret", "aria-label": g.full ? "Dock the graphs" : "Full screen",
+        onclick: () => this.on.call("graph_full", []) }, g.full ? "⌄" : "⌃"));
+    let body;
+    if (g.coach) {
+      body = h("div", { class: "coach" }, h("p", { class: "dim" }, g.coach.summary),
+        ...(g.coach.notes.length ? g.coach.notes.map(([turn, role, text], i) => h("button", {
+          type: "button", class: `note-row${i === g.coach.sel ? " on" : ""}`, onclick: () => this.on.call("select_note", [i]),
+        }, h("span", { class: "turn", style: `color:${this.color(role)}` }, `T${turn}`), h("span", {}, text)))
+          : [h("p", {}, "Nothing to flag: no failed attacks, emptied systems or idle ships.")]));
+    } else {
+      const plot = sv("svg", { class: "plot" });
+      const legend = h("div", { class: "legend" }, h("div", { class: "unit" },
+        g.rows.some((r) => r[4]) ? h("button", { type: "button", class: "all", onclick: () => this.on.call("show_all_traces", []) },
+          "Show all") : h("span"), h("span", {}, g.unit)),
+      ...g.rows.map(([pid, name, who, value, hidden]) => h("button", { type: "button", class: `seat${hidden ? " off" : ""}`,
+        onclick: () => this.on.call("toggle_trace", [pid]) },
+      h("span", { class: "swatch", style: `background:${this.color(pid)}` }), h("span", { class: "name" }, name,
+        h("span", { class: "dim" }, ` · ${who}`)), h("span", { class: "value" }, value))),
+      g.unclaimed !== null ? h("div", { class: "seat" }, h("span", { class: "swatch", style: "background:rgb(70,74,90)" }),
+        h("span", { class: "name dim" }, "Unclaimed"), h("span", { class: "value" }, g.unclaimed)) : null);
+      body = h("div", { class: "chart" }, plot, legend);
+      this.plotData = { g, plot };
+    }
+    box.replaceChildren(head, body);
+    box.hidden = false;
+    if (!g.coach) this.plot();
+  }
+
+  /** Draw the plot into its SVG at the size the layout gave it. */
+  plot() {
+    const { g, plot } = this.plotData;
+    const W = plot.clientWidth || 600, H = plot.clientHeight || 200;
+    const left = 24, right = 8, top = 8, bottom = 22;
+    const pw = Math.max(1, W - left - right), ph = Math.max(1, H - top - bottom);
+    plot.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const ids = Object.keys(g.series);
+    const val = (pid, t) => g.series[pid][t] ?? null;
+    let peak;
+    if (g.area) peak = 100;
+    else if (g.stacked) {
+      peak = 0;
+      for (let t = 0; t <= g.turns; t++) peak = Math.max(peak, ids.reduce((s, pid) => s + (val(pid, t) ?? 0), 0));
+    } else peak = Math.max(0, ...ids.flatMap((pid) => g.series[pid].filter((v) => v !== null)));
+    const ymax = g.area ? 100 : niceCeil(peak);
+    const x = (t) => left + (g.turns > 0 ? (t / g.turns) * pw : 0);
+    const y = (v) => top + ph - (v / ymax) * ph;
+    const grid = sv("g", { stroke: "rgb(40,44,60)", "stroke-width": 1 }, plot);
+    const labels = sv("g", { fill: "rgb(140,148,165)", "font-size": 14, "font-family": FONT }, plot);
+    const steps = ymax <= 5 ? ymax : 5;
+    for (let i = 0; i <= steps; i++) {
+      const v = (ymax / steps) * i;
+      sv("line", { x1: left, x2: left + pw, y1: y(v), y2: y(v) }, grid);
+      const t = sv("text", { x: 2, y: y(v) + 5 }, labels);
+      t.textContent = g.area ? `${Math.round(v)}` : `${+v.toFixed(1)}`;
+    }
+    const room = Math.max(1, Math.floor(pw / 110));
+    const tick = Math.max(1, niceCeil(g.turns / room));
+    for (let t = 0; t <= g.turns; t += tick) {
+      const lab = sv("text", { x: x(t), y: H - 4, "text-anchor": t === 0 ? "start" : "middle" }, labels);
+      lab.textContent = t === 0 ? "Turn 0" : String(t);
+    }
+    const color = (pid) => `rgb(${g.colors[pid].join(",")})`;
+    if (g.stacked || g.area) {
+      const bw = Math.max(1, pw / (g.turns + 1));
+      const base = new Array(g.turns + 1).fill(0);
+      for (const pid of ids) {
+        if (g.area) {
+          const pts = [];
+          for (let t = 0; t <= g.turns; t++) pts.push([x(t), y(base[t] + (val(pid, t) ?? 0))]);
+          const back = [];
+          for (let t = g.turns; t >= 0; t--) back.push([x(t), y(base[t])]);
+          sv("polygon", { points: pts.concat(back).map((p) => p.join(",")).join(" "), fill: color(pid), opacity: 0.85 }, plot);
+        } else {
+          for (let t = 0; t <= g.turns; t++) {
+            const v = val(pid, t) ?? 0;
+            if (v > 0) sv("rect", { x: x(t) - bw / 2, y: y(base[t] + v), width: bw * 0.8, height: y(base[t]) - y(base[t] + v),
+              fill: color(pid) }, plot);
+          }
+        }
+        for (let t = 0; t <= g.turns; t++) base[t] += val(pid, t) ?? 0;
+      }
+    } else {
+      for (const pid of ids) {
+        let run = [];
+        const flush = () => {
+          if (run.length > 1) sv("polyline", { points: run.join(" "), fill: "none", stroke: color(pid), "stroke-width": 2 }, plot);
+          run = [];
+        };
+        g.series[pid].forEach((v, t) => (v === null ? flush() : run.push(`${x(t)},${y(v)}`)));
+        flush();
+        const v = val(pid, g.turn);
+        if (v !== null) sv("circle", { cx: x(g.turn), cy: y(v), r: 4, fill: color(pid) }, plot);
+      }
+    }
+    sv("line", { x1: x(g.turn), x2: x(g.turn), y1: top, y2: top + ph, stroke: "rgb(200,206,220)", "stroke-width": 1 }, plot);
+    const seekAt = (event) => {
+      const r = plot.getBoundingClientRect();
+      const t = Math.round(((event.clientX - r.left - left) / pw) * g.turns);
+      this.on.seek(Math.max(0, Math.min(g.turns, t)));
+    };
+    plot.onpointerdown = (event) => {
+      plot.setPointerCapture?.(event.pointerId);
+      seekAt(event);
+    };
+    plot.onpointermove = (event) => {
+      if (event.buttons & 1) seekAt(event);
+    };
   }
 
   /** The send popup (`render._draw_send_popup`), or nothing. Returns its node

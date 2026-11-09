@@ -130,6 +130,7 @@ function hold(held) {
 function show(view) {
   game.view = view;
   document.getElementById("app").classList.toggle("history", Boolean(view.history));
+  document.getElementById("app").classList.toggle("graphing", Boolean(view.graph && !view.graph.full));
   game.hud.draw(game.board.turn, view);
   game.hud.veil(view);
   game.hud.overlays(view);

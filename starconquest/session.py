@@ -61,6 +61,13 @@ UI_CALLS = {
     "open_odds": lambda ui, state: setattr(ui, "odds_open", ui.mode == CHOOSING and not ui.forward_armed),
     "open_lore": lambda ui, state: play.open_lore(state, ui, ui.selected),
     "dismiss_card": lambda ui, state: play.dismiss_card(ui),
+    "toggle_graph": lambda ui, state: play.history_key(state, ui, "g"),
+    "graph_full": lambda ui, state: setattr(ui, "graph_full", not ui.graph_full),
+    "graph_tab": lambda ui, state, i: play.graph_tab(ui, int(i)),
+    "toggle_trace": lambda ui, state, pid: ui.toggle_trace(int(pid)),
+    "show_all_traces": lambda ui, state: ui.graph_hidden.clear(),
+    "select_note": lambda ui, state, i: ui.select_note(int(i)),
+    "seek_turn": lambda ui, state, turn: play.seek(ui, int(turn)),
 }
 
 

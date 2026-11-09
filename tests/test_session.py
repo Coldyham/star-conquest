@@ -235,3 +235,23 @@ def test_history_scrubs_plays_back_and_rewinds(session):
     _call(session, "game.action", name="toggle_history")
     res = _call(session, "game.action", name="toggle_history")["result"]
     assert res["view"]["history"] is None and res["board"]["turn"] == 3
+
+
+def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
+    _call(session, "boot", page=PAGE, store={})
+    _call(session, "game.start", settings={"players": 2, "nodes": 8}, seed=3)
+    _call(session, "game.action", name="toggle_autoplay")
+    for _ in range(300):
+        if _call(session, "turn.end")["result"]["board"]["winner"] is not None:
+            break
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    g = view["graph"]
+    assert view["history"]["reveal"] and g is not None and g["tabs"][-1] == "Coach"
+    assert json.loads(json.dumps(view)) == view
+    view = _call(session, "ui.call", method="graph_tab", args=[2])["result"]["view"]
+    assert view["graph"]["metric"] == "ships" and view["graph"]["coach"] is None
+    assert len(view["graph"]["series"]["1"]) == view["graph"]["turns"] + 1
+    view = _call(session, "ui.call", method="graph_tab", args=[len(g["tabs"]) - 1])["result"]["view"]
+    assert view["graph"]["coach"]["summary"]
+    view = _call(session, "ui.call", method="toggle_trace", args=[2])["result"]["view"]
+    assert [r[4] for r in view["graph"]["rows"] if r[0] == 2] == [True]

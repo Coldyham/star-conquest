@@ -3185,14 +3185,7 @@ def _nice_ceil(v: float) -> float:
     return 10 * mag
 
 
-def _graph_value(metric: str, v: float) -> str:
-    if math.isnan(v):
-        return "–"   # a rival out of sight that turn (`stats.masked`)
-    if metric == "income":
-        return f"{v:.1f}"
-    if metric in stats.AREA:
-        return f"{v:.0f}%"
-    return str(round(v))
+_graph_value = hud.graph_value
 
 
 def _turn_ticks(turns: int, width: int, label_w: int) -> list[int]:
@@ -3417,11 +3410,7 @@ def _draw_history_graph(surface, state: GameState, ui: Ui) -> pygame.Rect | None
     caret = pygame.Rect(box.right - pad - tab_h, ty, tab_h, tab_h)
     _draw_caret(surface, caret, up=not ui.graph_full)
     ui.graph_full_rect = (caret.x, caret.y, caret.w, caret.h)
-    note = ("" if ui.history_reveal else "Rivals only while in sight")
-    if not note and not config.touch_ui:
-        note = ("Up/Down: step notes  ·  Tab: graphs" if ui.coach_open else
-                "Tab: next graph  ·  1-9 or click a seat: show/hide") + "  ·  F: " + (
-            "dock" if ui.graph_full else "full screen")
+    note = hud.graph_note(ui, config.touch_ui)
     if note and line == 0 and box.x + pad + tx + font.size(note)[0] <= caret.x - pad:
         _text(surface, font, note, config.COLOR_TEXT_DIM, midright=(caret.x - pad, ty + tab_h // 2))
 
