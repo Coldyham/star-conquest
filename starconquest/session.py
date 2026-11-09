@@ -26,7 +26,7 @@ from starconquest import ai, app, bench, engine, hostio, play, serial
 from starconquest.model import GameState
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
-from starconquest.viewstate import Ui
+from starconquest.viewstate import ROUTING, Ui
 
 API_VERSION = 1
 
@@ -52,6 +52,12 @@ UI_CALLS = {
     "clear_dangerous_forward": lambda ui, state: ui.clear_dangerous_forward(state),
     "clear_selected": lambda ui, state: play.clear_selected(ui),
     "apply_hint": lambda ui, state: ui.apply_hint(state),
+    "confirm_route": lambda ui, state: ui.confirm_route(state),
+    "reset_route": lambda ui, state: ui.reset_route(),
+    "set_route_rally": lambda ui, state, rally: ui.set_route_rally(state, bool(rally)),
+    "auto_rally": lambda ui, state: ui.auto_rally(state),
+    "route_clear": lambda ui, state: play.route_clear(state, ui),
+    "add_route_sids": lambda ui, state, sids: ui.add_route_sids(state, [int(s) for s in sids]),
 }
 
 
@@ -125,7 +131,7 @@ class Session:
     # The play screen's presses, hit-tested by the page (`play`).
     def op_ui_tap(self, sid: int, shift: bool = False) -> dict:
         """A press on system ``sid``."""
-        play.tap_system(self._state(), self._ui(), int(sid), bool(shift))
+        play.tap(self._state(), self._ui(), int(sid), bool(shift))
         return {"view": self._view()}
 
     def op_ui_lane(self, hits: list) -> dict:
@@ -137,8 +143,10 @@ class Session:
         return {"view": self._view()}
 
     def op_ui_empty(self) -> dict:
-        """A press on empty map, or the popup's Done."""
-        play.cancel(self._ui())
+        """A press on empty map, or the popup's Done. Route mode keeps its group:
+        it confirms and cancels explicitly, so a stray tap must not undo the work."""
+        if self._ui().mode != ROUTING:
+            play.cancel(self._ui())
         return {"view": self._view()}
 
     def op_ui_drag(self, src: int, dest: int | None, shift: bool = False) -> dict:
@@ -174,6 +182,12 @@ class Session:
             ui.clear_pending()
         elif name == "toggle_fast_forward":
             app.toggle_fast_forward(state, ui)
+        elif name == "toggle_route":
+            # Leaving discards the plan: it is only ever committed by its confirm.
+            if ui.mode == ROUTING:
+                ui.reset_route()
+            elif ui.can_route(state):
+                ui.begin_route()
         elif name == "restart" and not ui.in_stage:
             self.seed += 1
             self.state, self.ui, self.log = app.start_game(self.settings, self.seed, app.carry_autoplay(ui))

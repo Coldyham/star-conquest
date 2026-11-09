@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from . import starlore
 from .model import GameState
-from .viewstate import CHOOSING, IDLE, SELECTED, Ui
+from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 
 # A queued order or a standing rule's lane, as ``("order", index, -1)`` or
 # ``("rule", source_id, dest_id)``.
@@ -211,8 +211,58 @@ def over_key(state: GameState, ui: Ui, name: str) -> str | None:
     return None
 
 
+def route_clear(state: GameState, ui: Ui) -> None:
+    """Clear route mode's group but stay in the mode, as Clear does elsewhere."""
+    ui.route_sel = set()
+    ui.route_dest = None
+    ui.route_press = False
+    ui.route_box = False
+    ui.recompute_route(state)
+
+
+def route_key(state: GameState, ui: Ui, name: str) -> str | None:
+    """Keys in route mode. Enter confirms rather than ending the turn — the turn
+    can't be ended from here at all, so the most obvious key keeps pointing at
+    the most obvious action."""
+    if name in ("Enter", " "):
+        if ui.route_plan:
+            ui.confirm_route(state)
+        return None
+    if name in ("g", "Escape"):
+        ui.reset_route()
+        return None
+    if name == "Tab":
+        # switch sub-mode, the keyboard half of the footer's Mode button
+        ui.set_route_rally(state, not ui.route_rally)
+        return None
+    if name == "t" and ui.route_rally:
+        ui.auto_rally(state)
+        return None
+    if name in ("x", "Backspace", "Delete"):
+        route_clear(state, ui)
+        return None
+    if name == "m":
+        return "menu"
+    if name == "n":
+        return None if ui.in_stage else "restart"
+    if name == "r":
+        return "reset_view"
+    return None
+
+
+def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
+    """A press on system ``node`` in whichever scene is up: route mode's pick,
+    else live play's."""
+    if ui.mode == ROUTING:
+        ui.route_tap(state, node)
+    else:
+        tap_system(state, ui, node, shift)
+
+
 def press_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
-    """A key in whichever scene is up: the game-over veil, else live play."""
+    """A key in whichever scene is up: the game-over veil, route mode, or live play."""
     if state.winner is not None:
         return over_key(state, ui, name)
+    if ui.mode == ROUTING:
+        return route_key(state, ui, name)
     return key(state, ui, name, shift)

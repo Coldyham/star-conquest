@@ -27,6 +27,7 @@ const SELECT = "rgb(250,240,150)";
 const FOG = [58, 62, 82];
 const DANGER = "rgb(200,96,104)";        // widgets.BTN_DANGER's edge
 const FORWARD = "rgb(110,205,195)";      // render._forward_accent
+const ROUTE = "rgb(250,120,200)";        // config.COLOR_ROUTE: route mode's uncommitted plan
 
 // config, in pixels: NODE_MIN_RADIUS / NODE_MAX_RADIUS for production 5 (poorest)
 // and 2 (richest), FLEET_SIZE, FILM_ARRIVAL_GAP, NODE_LABEL_GAP, the progress
@@ -369,6 +370,7 @@ export class BoardView {
     if (view) {
       this.drawRules(view, human, now, badged);
       this.drawOrders(view, human, now);
+      if (view.route) this.drawRoute(view.route, now);
     }
 
     for (const s of board.sys.values()) {
@@ -412,6 +414,70 @@ export class BoardView {
     this.drawMarks(look?.marks ?? null);
     this.drawNames(look, fogState);
     this.drawDrag(look, human);
+    if (view?.route) this.drawRouteLabels(view.route, look.box);
+  }
+
+  /** Route mode's proposal (`render._draw_route_preview`): rules it would
+   * overwrite in a muted danger tint underneath, the planned rules crawling in
+   * the route colour, one ring per source pick (danger on anything that can't
+   * be served), and a double ring on each sink. */
+  drawRoute(route, now) {
+    const layer = this.orderLayer;
+    for (const { src, lanes } of route.replaces) {
+      for (const [dst] of lanes) {
+        ruleFlow(layer, this.pos.get(src), this.pos.get(dst), this.radius.get(src), this.radius.get(dst), DANGER, 2, 0);
+      }
+    }
+    const phase = (now % FLOW_MS) / FLOW_MS;
+    for (const { src, lanes } of route.plan) {
+      const a = this.pos.get(src);
+      for (const [dst, pct] of lanes) {
+        const b = this.pos.get(dst);
+        ruleFlow(layer, a, b, this.radius.get(src), this.radius.get(dst), ROUTE, 3, phase);
+        if (pct < 100) {
+          const [x, y] = ruleLabelAt(a, b, null, `${pct}%`);
+          pill(layer, x, y, `${pct}%`, rgb(TEXT));
+          this.taken.push(pillRect(x, y, `${pct}%`));
+        }
+      }
+    }
+    const ring = (id, r, color, width) => {
+      const [x, y] = this.pos.get(id);
+      el("circle", { cx: x, cy: y, r: this.radius.get(id) + r, fill: "none", stroke: color, "stroke-width": width },
+        layer);
+    };
+    const bad = new Set(route.unroutable);
+    const sources = route.rally ? [] : route.sel;
+    for (const id of new Set([...sources, ...route.unroutable])) ring(id, RING_PAD, bad.has(id) ? DANGER : ROUTE, 3);
+    const sinks = route.rally ? route.sel : route.dest !== null ? [route.dest] : [];
+    for (const id of sinks) {
+      ring(id, 10, ROUTE, 2);
+      ring(id, RING_PAD, ROUTE, 3);
+    }
+  }
+
+  /** Route mode's "no route" and "loop" labels, and the box being dragged,
+   * over the systems (`render._draw_route_overlay`). */
+  drawRouteLabels(route, box) {
+    for (const id of route.unroutable) {
+      const [x, y] = this.pos.get(id);
+      pill(this.dragLayer, x, y - this.radius.get(id) - 15, "no route", DANGER);
+    }
+    for (const id of route.cycles) {
+      const [x, y] = this.pos.get(id);
+      pill(this.dragLayer, x, y + this.radius.get(id) + 11, "loop", DANGER);
+    }
+    if (box?.active) {
+      el("rect", { x: Math.min(box.x0, box.x), y: Math.min(box.y0, box.y), width: Math.abs(box.x - box.x0),
+        height: Math.abs(box.y - box.y0), rx: 3, fill: "none", stroke: ROUTE, "stroke-width": 2 }, this.dragLayer);
+    }
+  }
+
+  /** The systems inside a screen box, for route mode's group pick. */
+  inBox(box) {
+    const [x0, x1] = [Math.min(box.x0, box.x), Math.max(box.x0, box.x)];
+    const [y0, y1] = [Math.min(box.y0, box.y), Math.max(box.y0, box.y)];
+    return [...this.pos].filter(([, [x, y]]) => x >= x0 && x <= x1 && y >= y0 && y <= y1).map(([id]) => id);
   }
 
   /** Every fading fight's burst, and the numbers over the map: each side's

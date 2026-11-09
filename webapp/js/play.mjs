@@ -23,7 +23,7 @@ const params = new URLSearchParams(location.search);
 
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
-  hover: null, drag: null, pan: null, film: null, busy: false, looping: false, marks: new Marks(),
+  hover: null, drag: null, pan: null, box: null, film: null, busy: false, looping: false, marks: new Marks(),
 };
 
 function status(text, error = false) {
@@ -47,7 +47,8 @@ function look(view, before = null) {
   if (before) for (const id of before.visible) visible.add(id);
   const seen = new Set(view.seen);
   if (before) for (const id of before.seen) seen.add(id);
-  return { view, sees: (id) => visible.has(id), seen, hover: game.hover, drag: game.drag, marks: game.marks };
+  return { view, sees: (id) => visible.has(id), seen, hover: game.hover, drag: game.drag, marks: game.marks,
+    box: game.box };
 }
 
 function redraw() {
@@ -62,7 +63,8 @@ function redraw() {
  * (`render._flow_phase`), and a film's marks keep dissolving after it. */
 function moving() {
   const v = game.view;
-  return game.marks.any || Boolean(v && (v.editing_rule !== null || (v.mode === "choosing" && v.popup?.forward)));
+  return game.marks.any || Boolean(v && (v.editing_rule !== null || v.route?.plan.length
+    || (v.mode === "choosing" && v.popup?.forward)));
 }
 
 /** Redraw every frame while the map is moving; a film runs its own loop. */
@@ -236,7 +238,8 @@ function playFilm(film, view, before) {
   });
 }
 
-const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "restart", "retry", "undo"]);
+const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
+  "undo"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -270,7 +273,10 @@ function footer(attr) {
     hint_button_rect: "hint", autoplay_button_rect: "toggle_autoplay", play_pause_rect: "toggle_play",
     fast_forward_rect: "toggle_fast_forward",
   };
-  if (attr === "clear_button_rect") act("ui.call", { method: "clear_selected" });
+  const route = { route_mode_rect: ["set_route_rally", [!game.view.route?.rally]], route_auto_rect: ["auto_rally", []],
+    route_cancel_rect: ["reset_route", []] };
+  if (route[attr]) act("ui.call", { method: route[attr][0], args: route[attr][1] });
+  else if (attr === "clear_button_rect") act("ui.call", { method: "clear_selected" });
   else if (attr === "hint_apply_rect") act("ui.call", { method: "apply_hint" });
   else actOn(actions[attr]);
 }
@@ -303,6 +309,13 @@ async function press(event) {
     }
     return;
   }
+  if (game.view.mode === "routing") {
+    // Empty space: a box in chain mode, a pan in rally mode, which has no box.
+    // Neither clears the group: the mode confirms and cancels explicitly.
+    if (game.view.route.rally) game.pan = { x, y };
+    else game.box = { x0: x, y0: y, x, y, active: false };
+    return;
+  }
   const hits = bv.laneHits(x, y, game.view);
   if (hits.length) {
     act("ui.lane", { hits });
@@ -323,6 +336,12 @@ function move(event) {
     redraw();
     return;
   }
+  if (game.box && event.buttons & 1) {
+    if (Math.hypot(x - game.box.x0, y - game.box.y0) > DRAG_THRESHOLD) game.box.active = true;
+    Object.assign(game.box, { x, y });
+    redraw();
+    return;
+  }
   if (game.pan && event.buttons & 1) {
     bv.camera.pan(x - game.pan.x, y - game.pan.y);
     game.pan = { x, y };
@@ -338,9 +357,14 @@ function move(event) {
 }
 
 function release(event) {
-  const drag = game.drag;
+  const drag = game.drag, box = game.box;
   game.drag = null;
   game.pan = null;
+  game.box = null;
+  if (box?.active) {
+    act("ui.call", { method: "add_route_sids", args: [game.board_view.inBox(box)] });
+    return;
+  }
   if (drag?.active) {
     const [x, y] = local(event);
     act("ui.drag", { src: drag.src, dest: game.board_view.pick(x, y), shift: event.shiftKey });
@@ -381,7 +405,7 @@ async function key(event) {
     return;
   }
   const name = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-  if (name === " " || name === "Enter") event.preventDefault();
+  if (name === " " || name === "Enter" || (name === "Tab" && game.view.mode === "routing")) event.preventDefault();
   const res = await act("ui.key", { name, shift: event.shiftKey });
   actOn(res?.action);
 }
@@ -414,7 +438,13 @@ async function boot() {
     }
   });
   document.addEventListener("keydown", key);
-  $("end-turn").addEventListener("click", endTurn);
+  $("end-turn").addEventListener("click", () => {
+    if (game.view?.route) {
+      if (game.view.route.confirm[1]) act("ui.call", { method: "confirm_route" });
+    } else {
+      endTurn();
+    }
+  });
   $("reset-view").addEventListener("click", () => actOn("reset_view"));
   $("zoom-in").addEventListener("click", () => zoomButton(BUTTON_STEP));
   $("zoom-out").addEventListener("click", () => zoomButton(1 / BUTTON_STEP));

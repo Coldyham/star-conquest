@@ -3,7 +3,7 @@ lines and the forecast, apart from how they are drawn.
 
 Both shells read these: `render` lays them out in pygame and `serial.view`
 sends them to the HTML page, so a line is worded in one place. A colour goes
-as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, a
+as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, ``"route"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
 colour; the win overlay adds ``"teal"``, ``"beat"``, ``"tie"``, ``"miss"``,
 ``"par"`` and ``"failed"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
@@ -674,3 +674,56 @@ def share_label(ui: Ui) -> tuple[str, str]:
     """The win overlay's share button and its key: a daily's result goes out as
     a line, not a link, since everyone has its map."""
     return ("Copy daily result" if ui.daily_day else "Challenge a friend"), "C"
+
+
+def route_lines(state: GameState, ui: Ui) -> list[tuple[str, Role]]:
+    """What route mode is holding, and what confirming it would do: counts rather
+    than a list of hops, since the map shows every hop and the numbers are what
+    isn't obvious from looking."""
+    lines: list[tuple[str, Role]] = []
+    if ui.route_rally:
+        n = len(ui.route_sel)
+        lines.append((f"{n} rally point{'' if n == 1 else 's'}", "route"))
+        if not n:
+            lines.append(("tap systems to gather at", "dim"))
+        else:
+            lines.append((f"{len(ui.route_plan)} rules", "text"))
+    else:
+        dest = ui.route_dest
+        lines.append((f"{len(ui.route_sources())} selected", "route"))
+        if dest is None:
+            lines.append(("no destination yet", "dim"))
+        elif dest in state.systems:
+            sys = state.systems[dest]
+            lines.append((f"to {sys.short}", sys.owner_id))
+            lines.append((f"{len(ui.route_plan)} rules", "text"))
+    if ui.route_replaces:
+        lines.append((f"{len(ui.route_replaces)} replaced", "likely"))
+    if ui.route_unroutable:
+        lines.append((f"{len(ui.route_unroutable)} unreachable", "gamble"))
+    if ui.route_cycles:
+        lines.append((f"{len(ui.route_cycles)} would loop", "gamble"))
+    return lines
+
+
+def route_hint(ui: Ui) -> str:
+    """How route mode's current sub-mode is driven."""
+    if ui.route_rally:
+        return ("Tap the systems ships should gather at — tap again to drop one. "
+                "Everything else you hold forwards to the nearest of them. "
+                "Auto-route picks your threatened systems.")
+    return ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
+            "un-aim, and to drop it from the group.")
+
+
+def route_confirm(ui: Ui) -> tuple[str, bool]:
+    """End Turn's place in route mode: confirm the plan, or say what it lacks."""
+    if ui.route_plan:
+        return f"Confirm {len(ui.route_plan)}", True
+    if not ui.route_sel:
+        return ("Rally" if ui.route_rally else "Route"), False
+    if ui.route_rally:
+        # picked, but the field is empty: rallying on the only system we hold,
+        # or on a pocket with nothing behind it
+        return "Nothing to route", False
+    return "Pick a target", False

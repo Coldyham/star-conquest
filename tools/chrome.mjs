@@ -38,7 +38,10 @@ const chrome = spawn(binary, [
 
 const done = (code) => {
   chrome.kill("SIGKILL");
-  if (!keep) rmSync(profile, { recursive: true, force: true });
+  // Chrome may still be writing into its profile as it dies: retry, never fail on it.
+  if (!keep) {
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* left in /tmp */ }
+  }
   process.exit(code);
 };
 setTimeout(() => { console.error(`timed out after ${timeout / 1000}s`); done(1); }, timeout + 15000).unref();

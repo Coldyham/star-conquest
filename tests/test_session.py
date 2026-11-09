@@ -174,3 +174,18 @@ def test_a_decided_game_shows_its_veil_and_answers_its_keys(session):
     assert not res["view"]["can"]["end_turn"]
     assert _call(session, "ui.key", name="t")["result"]["action"] == "retry"
     assert _call(session, "ui.key", name="Escape")["result"]["action"] == "menu"
+
+
+def test_route_mode_plans_a_chain_and_confirms_it(session):
+    _, home, nbr = _human_game(session)
+    view = _call(session, "game.action", name="toggle_route")["result"]["view"]
+    assert view["mode"] == "routing" and view["route"]["rally"] and view["route"]["confirm"] == ["Rally", False]
+    view = _call(session, "ui.key", name="Tab")["result"]["view"]
+    assert not view["route"]["rally"] and view["route"]["confirm"] == ["Route", False]
+    _call(session, "ui.call", method="add_route_sids", args=[[home]])
+    view = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    route = view["route"]
+    assert route["dest"] == nbr and route["confirm"][1] and route["plan"][0]["src"] == home
+    assert _call(session, "ui.empty")["result"]["view"]["route"]["dest"] == nbr   # a stray tap keeps it
+    view = _call(session, "ui.key", name="Enter")["result"]["view"]
+    assert view["mode"] != "routing" and view["rules"][0]["src"] == home

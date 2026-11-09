@@ -19,7 +19,7 @@ import dataclasses
 
 from starconquest import app, hud, mapgen, paths, starlore, turnfilm
 from starconquest.model import GameState, lane_key
-from starconquest.viewstate import CHOOSING, Ui
+from starconquest.viewstate import CHOOSING, ROUTING, Ui
 
 # Derived figures an event's class computes, sent alongside its fields.
 _DERIVED = {
@@ -140,6 +140,7 @@ def view(state: GameState, ui: Ui) -> dict:
         "fast_forward": ui.fast_forward,
         "step_ms": app.step_delay(ui, app.PLAY_MS),
         "over": over(state, ui) if state.winner is not None and not ui.history else None,
+        "route": route(state, ui) if ui.mode == ROUTING else None,
         "can": {
             "end_turn": state.winner is None and not ui.awaiting_others(state) and not ui.spectating,
             "undo": ui.can_undo(state),
@@ -231,6 +232,29 @@ def over(state: GameState, ui: Ui) -> dict:
         "share": list(hud.share_label(ui)) if share else None,
         "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
         "notes": ui.share_msg if share else "",
+    }
+
+
+def route(state: GameState, ui: Ui) -> dict:
+    """Route mode's proposal: the picks, the sinks, the rules it would lay and
+    the ones it would replace, what can't be served or would loop, and the
+    panel's words and the confirm button's label."""
+    def lanes(plan) -> list[dict]:
+        return [{"src": src, "lanes": [[d, pct] for d, pct in rule.shares.items() if d in state.systems]}
+                for src, rule in plan.items() if src in state.systems]
+    label, live = hud.route_confirm(ui)
+    return {
+        "rally": ui.route_rally,
+        "sel": sorted(ui.route_sel),
+        "dest": ui.route_dest,
+        "plan": lanes(ui.route_plan),
+        "replaces": lanes({src: ui.auto_forward[src] for src in ui.route_replaces if src in ui.auto_forward}),
+        "unroutable": sorted(ui.route_unroutable),
+        "cycles": sorted(ui.route_cycles),
+        "title": "Rally" if ui.route_rally else "Route",
+        "lines": [list(line) for line in hud.route_lines(state, ui)],
+        "hint": hud.route_hint(ui),
+        "confirm": [label, live],
     }
 
 

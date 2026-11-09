@@ -69,7 +69,16 @@ export class Hud {
     this.top(turn, view);
     this.panel(view);
     this.footer(view);
-    this.$("end-turn").disabled = !view.can.end_turn;
+    const end = this.$("end-turn");
+    if (view.route) {
+      end.replaceChildren(view.route.confirm[0]);
+      end.disabled = !view.route.confirm[1];
+      end.classList.toggle("route", true);
+    } else {
+      end.replaceChildren("End Turn ", h("span", { class: "key" }, "⏎"));
+      end.disabled = !view.can.end_turn;
+      end.classList.toggle("route", false);
+    }
   }
 
   /** The turn counter, our ships lost, and the scoreboard at the most detail
@@ -123,6 +132,13 @@ export class Hud {
     if (p.clear.dangerous) {
       clears.push(h("button", { type: "button", class: "clear danger",
         onclick: () => this.on.call("clear_dangerous_forward", []) }, p.clear.dangerous));
+    }
+    if (view.route) {
+      const r = view.route;
+      panel.replaceChildren(h("section", {}, h("h2", {}, r.title),
+        ...r.lines.map(([text, role]) => h("p", { style: `color:${this.color(role)}` }, text)),
+        h("p", { class: "wrap hint" }, r.hint)));
+      return;
     }
     if (p.focus === null) {
       const set = this.legends[p.legend];

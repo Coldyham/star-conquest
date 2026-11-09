@@ -172,7 +172,8 @@ def _role(role: hud.Role) -> tuple[int, int, int]:
     if isinstance(role, int):
         return config.player_color(role)
     return {"text": config.COLOR_TEXT, "dim": config.COLOR_TEXT_DIM, "select": config.COLOR_SELECT,
-            "fog": config.COLOR_FOG, "forward": _forward_accent(), "sure": _BTN_GREEN[1],
+            "fog": config.COLOR_FOG, "forward": _forward_accent(), "route": config.COLOR_ROUTE,
+            "sure": _BTN_GREEN[1],
             "likely": _BTN_AMBER[1], "gamble": _BTN_DANGER[1], "teal": _BTN_TEAL[1],
             "beat": _VERDICT_BEAT, "tie": _VERDICT_TIE, "miss": _VERDICT_MISS, "par": _PAR_GOLD,
             "failed": (214, 130, 110)}[role]
@@ -1858,19 +1859,11 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
             pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
             pygame.draw.rect(surface, edge, br, config.s(3), border_radius=config.s(8))
             ui.route_confirm_rect = (hit.x, hit.y, hit.w, hit.h)
-            label = f"Confirm {len(ui.route_plan)}"
         else:
             pygame.draw.rect(surface, (24, 28, 40), br, border_radius=config.s(8))
             pygame.draw.rect(surface, (40, 46, 66), br, config.s(3), border_radius=config.s(8))
             ui.route_confirm_rect = (0, 0, 0, 0)
-            if not ui.route_sel:
-                label = "Rally" if ui.route_rally else "Route"
-            elif ui.route_rally:
-                # picked, but the field is empty: rallying on the only system we
-                # hold, or on a pocket with nothing behind it
-                label = "Nothing to route"
-            else:
-                label = "Pick a target"
+        label, _live = hud.route_confirm(ui)
         colour = config.COLOR_TEXT if ui.route_plan else config.COLOR_TEXT_DIM
         _text(surface, _fonts()["big" if ui.route_plan else "normal"], label, colour,
               center=br.center)
@@ -2551,47 +2544,13 @@ def _panel_route(surface, state: GameState, ui: Ui, x, y, bottom: int) -> int:
     the numbers are the part that isn't obvious from looking — how many rules this
     replaces, and how much of the selection can't actually be served.
     """
-    rally = ui.route_rally
-    y = _head(surface, x, y, "Rally" if rally else "Route", config.COLOR_TEXT)
-    font = _fonts()["small"]
-    width = _panel_w()
-    dest = ui.route_dest
-    lines: list[tuple[str, tuple[int, int, int]]] = []
-    if rally:
-        n = len(ui.route_sel)
-        lines.append((f"{n} rally point{'' if n == 1 else 's'}", config.COLOR_ROUTE))
-        if not n:
-            lines.append(("tap systems to gather at", config.COLOR_TEXT_DIM))
-        else:
-            lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
-    else:
-        lines.append((f"{len(ui.route_sources())} selected", config.COLOR_ROUTE))
-        if dest is None:
-            lines.append(("no destination yet", config.COLOR_TEXT_DIM))
-        elif dest in state.systems:
-            sys = state.systems[dest]
-            lines.append((f"to {sys.short}", config.player_color(sys.owner_id)))
-            lines.append((f"{len(ui.route_plan)} rules", config.COLOR_TEXT))
-    if ui.route_replaces:
-        lines.append((f"{len(ui.route_replaces)} replaced", _BTN_AMBER[1]))
-    if ui.route_unroutable:
-        lines.append((f"{len(ui.route_unroutable)} unreachable", _BTN_DANGER[1]))
-    if ui.route_cycles:
-        lines.append((f"{len(ui.route_cycles)} would loop", _BTN_DANGER[1]))
-    for text, colour in lines:
+    y = _head(surface, x, y, "Rally" if ui.route_rally else "Route", config.COLOR_TEXT)
+    for text, role in hud.route_lines(state, ui):
         if y + _row_h() > bottom:
             break
-        y = _row(surface, x, y, text, colour)
-
-    if rally:
-        hint = ("Tap the systems ships should gather at — tap again to drop one. "
-                "Everything else you hold forwards to the nearest of them. "
-                "Auto-route picks your threatened systems.")
-    else:
-        hint = ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
-                "un-aim, and to drop it from the group.")
+        y = _row(surface, x, y, text, _role(role))
     y += config.ROW_GAP * 2
-    for line in _wrap(font, hint, width):
+    for line in _wrap(_fonts()["small"], hud.route_hint(ui), _panel_w()):
         if y + _row_h() > bottom:
             break
         y = _row(surface, x, y, line, config.COLOR_TEXT_DIM)

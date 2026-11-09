@@ -614,7 +614,7 @@ def _commit_drag(state: GameState, ui: Ui, pos, shift: bool) -> None:
 
 
 # pygame's keys by the `KeyboardEvent.key` names `play.key` reads.
-_KEY_NAMES = {pygame.K_RETURN: "Enter", pygame.K_KP_ENTER: "Enter", pygame.K_SPACE: " ",
+_KEY_NAMES = {pygame.K_RETURN: "Enter", pygame.K_KP_ENTER: "Enter", pygame.K_SPACE: " ", pygame.K_TAB: "Tab",
               pygame.K_BACKSPACE: "Backspace", pygame.K_DELETE: "Delete", pygame.K_ESCAPE: "Escape"}
 
 
@@ -727,36 +727,11 @@ def _handle_route_key(event, state: GameState, ui: Ui) -> str | None:
     """Keys in route mode. Enter confirms rather than ending the turn — the turn
     can't be ended from here at all (render records no end_turn_rect), so the most
     obvious key keeps pointing at the most obvious action."""
-    if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-        if ui.route_plan:
-            ui.confirm_route(state)
-        return None
-    if event.key in (pygame.K_g, pygame.K_ESCAPE):
-        ui.reset_route()
-        return None
-    if event.key == pygame.K_TAB:
-        # switch sub-mode, the keyboard half of the footer's Mode button
-        ui.set_route_rally(state, not ui.route_rally)
-        return None
-    if event.key == pygame.K_t and ui.route_rally:
-        ui.auto_rally(state)
-        return None
-    if event.key in (pygame.K_x, pygame.K_BACKSPACE, pygame.K_DELETE):
-        # clear the group but stay in the mode, mirroring Clear elsewhere
-        ui.route_sel = set()
-        ui.route_dest = None
-        ui.route_press = False
-        ui.route_box = False
-        ui.recompute_route(state)
-        return None
-    if event.key == pygame.K_m:
-        return "menu"
-    if event.key == pygame.K_n:
-        return None if ui.in_stage else "restart"
-    if event.key == pygame.K_r:
+    action = play.route_key(state, ui, _key_name(event))
+    if action == "reset_view":
         ui.reset_view(state)
         return None
-    return None
+    return action
 
 
 def _handle_global_buttons(state: GameState, ui: Ui, pos) -> tuple[bool, str | None]:
