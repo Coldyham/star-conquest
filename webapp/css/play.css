@@ -83,7 +83,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-radius: 6px;
   color: var(--dim);
 }
-#tip p { margin: 0; }
+#tip p { margin: 0; white-space: normal; }
 #tip p:first-child { color: var(--text); }
 
 /* --- the map ------------------------------------------------------------ */
