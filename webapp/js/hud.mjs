@@ -38,6 +38,51 @@ function h(tag, attrs = {}, ...kids) {
 
 const measure = document.createElement("canvas").getContext("2d");
 
+/** Size the page as pygame's shell sizes itself (`main.ui_scale_for`,
+ * `config.apply_ui_scale`): on a touch screen one baseline unit is up to a CSS
+ * pixel, less where that would leave fewer than 600 x 480 units to lay out in;
+ * a touch screen under 1100 x 720 units is compact, and compact held upright
+ * is portrait. Sets `--zoom` and the `touch`, `compact` and `portrait` classes
+ * on the root, which the stylesheet lays out by. */
+export function fitLayout() {
+  const finger = matchMedia("(hover: none)").matches;
+  const cw = innerWidth, ch = innerHeight;
+  let zoom = 1;
+  if (finger) {
+    const fit = Math.max(1, Math.min(cw / 1440, ch / 960));   // config.BASE_SCREEN_W/H
+    const room = Math.min(cw / 600, ch / 480);                  // config.TOUCH_MIN_W/H
+    zoom = fit * Math.max(0.5, Math.min(1, room));              // TOUCH_CSS_MIN, TOUCH_CSS_SCALE
+  }
+  const lw = cw / zoom, lh = ch / zoom;
+  const small = finger && (lw < 1100 || lh < 720);              // COMPACT_MAX_W/H
+  const root = document.documentElement;
+  root.style.setProperty("--zoom", String(zoom));
+  root.classList.toggle("touch", finger);
+  root.classList.toggle("compact", small);
+  root.classList.toggle("portrait", small && lh > lw);
+  return zoom;
+}
+
+/** No pointer that hovers: a finger (`config.touch_ui`). */
+export function touch() {
+  return document.documentElement.classList.contains("touch");
+}
+
+/** A touch screen too small for the desktop layout (`config.compact`). */
+export function compact() {
+  return document.documentElement.classList.contains("compact");
+}
+
+/** A compact screen held upright (`config.portrait`). */
+export function portrait() {
+  return document.documentElement.classList.contains("portrait");
+}
+
+/** Screen pixels per layout unit inside the app (`--zoom`). */
+export function zoom() {
+  return Number(getComputedStyle(document.documentElement).getPropertyValue("--zoom")) || 1;
+}
+
 /** Width of `text` in px at `size` in the shell's font. */
 function textWidth(text, size = 14) {
   measure.font = `${size}px ${FONT}`;
@@ -157,8 +202,12 @@ export class Hud {
       return;
     }
     if (p.focus === null) {
+      if (portrait()) {
+        panel.replaceChildren(...clears, h("p", { class: "wrap dim" }, p.portrait));
+        return;
+      }
       const set = this.legends[p.legend];
-      const text = matchMedia("(hover: none)").matches ? set.touch : set.keys;
+      const text = compact() ? set.compact : touch() ? set.touch : set.keys;
       const title = p.legend === "history" ? "History" : "Star Conquest";
       panel.replaceChildren(...clears, h("div", { class: "legend" }, h("h2", {}, title),
         ...text.split("\n\n").map((para) => h("p", {}, para.replace(/\n/g, " ")))));
@@ -178,10 +227,17 @@ export class Hud {
       }
       return h("p", { style, class: kind === "wrap" ? "wrap" : "" }, text);
     });
+    const finger = touch();
+    if (portrait()) {
+      // A full-width band a few rows tall: the system on the left, its lane
+      // and rule on the right (`render._draw_side_panel_body`).
+      const right = [...(p.lane.length ? rows(p.lane) : []), ...(p.rule.length ? rows(p.rule_touch) : [])];
+      panel.replaceChildren(h("div", { class: "band" }, h("section", {}, rows(p.compact, p.lore)), h("section", {}, right)));
+      return;
+    }
     const parts = [...clears, h("section", {}, rows(p.system, p.lore))];
     if (p.lane.length) parts.push(h("section", {}, rows(p.lane)));
-    const touch = matchMedia("(hover: none)").matches;
-    if (p.rule.length) parts.push(h("section", {}, rows(touch ? p.rule_touch : p.rule)));
+    if (p.rule.length) parts.push(h("section", {}, rows(finger ? p.rule_touch : p.rule)));
     panel.replaceChildren(...parts);
   }
 
@@ -193,23 +249,75 @@ export class Hud {
       return;
     }
     this.scrub = null;
-    const button = ([attr, label, key, colour]) => h("button", {
-      type: "button", class: `btn ${colour}`, "data-attr": attr,
-      onclick: () => this.on.footer(attr),
-    }, label, key ? h("span", { class: "key" }, ` (${key})`) : null);
-    const left = view.footer.filter((b) => b[5] === "left").map(button);
-    const right = view.footer.filter((b) => b[5] === "right").map(button);
-    nav.replaceChildren(...left, h("span", { class: "spacer" }), ...right);
+    // Squeeze as `render._lay_out_footer` does: the least essential button
+    // folds first, from either cluster, behind a "more" button whose list
+    // offers it again; a phone folds the ways out of this game from the start.
+    const finger = touch();
+    const text = (b) => b[1] + (b[2] && !finger ? ` (${b[2]})` : "");
+    const fbh = 40, gap = 10;
+    const width = (b) => Math.max(fbh, textWidth(text(b), 18) + 2 * 14);   // widgets.btn_w
+    const avail = nav.clientWidth - 28;
+    let shown = [...view.footer];
+    const folded = compact() ? shown.filter((b) => b[5] === "left") : [];
+    shown = shown.filter((b) => !folded.includes(b));
+    const need = (items) => items.reduce((sum, b) => sum + width(b), 0) + gap * (items.length - 1)
+      + (folded.length ? fbh + gap : 0);
+    while (shown.length && need(shown) > avail) {
+      const least = shown.reduce((a, b) => (b[4] < a[4] ? b : a));
+      shown.splice(shown.indexOf(least), 1);
+      folded.push(least);
+    }
+    const button = (b) => h("button", { type: "button", class: `btn ${b[3]}`, "data-attr": b[0],
+      onclick: () => this.on.footer(b[0]) }, b[1], b[2] ? h("span", { class: "key" }, ` (${b[2]})`) : null);
+    const kids = [];
+    if (folded.length) {
+      kids.push(h("button", { type: "button", class: `btn ${this.moreOpen ? "active" : "blue"} more`, "aria-label": "More",
+        onclick: (e) => {
+          e.stopPropagation();
+          this.moreOpen = !this.moreOpen;
+          this.footer(view);
+        } }, "☰"));
+    } else {
+      this.moreOpen = false;
+    }
+    kids.push(...shown.filter((b) => b[5] === "left").map(button), h("span", { class: "spacer" }),
+      ...shown.filter((b) => b[5] === "right").map(button));
+    nav.replaceChildren(...kids);
+    this.moreList(view, view.footer.filter((b) => folded.includes(b)));
+  }
+
+  /** The "more" button's list (`render._draw_more_menu`): the folded buttons
+   * again, in strip order, a glyph spelled out. Any press closes it. */
+  moreList(view, items) {
+    const box = this.$("more");
+    if (!this.moreOpen || !items.length) {
+      box.hidden = true;
+      return;
+    }
+    const labels = view.more_labels;
+    box.replaceChildren(...items.map((b) => {
+      const [old, fresh] = labels[b[0]] || [null, null];
+      return h("button", { type: "button", class: `btn ${b[3]}`, "data-attr": b[0], onclick: () => {
+        this.moreOpen = false;
+        box.hidden = true;
+        this.on.footer(b[0]);
+      } }, old ? b[1].replace(old, fresh) : b[1], b[2] ? h("span", { class: "key" }, ` (${b[2]})`) : null);
+    }));
+    const more = this.$("footer").querySelector(".more").getBoundingClientRect();
+    const k = zoom();
+    box.style.left = `${more.left / k}px`;
+    box.style.bottom = `${(innerHeight - more.top) / k + 6}px`;
+    box.hidden = false;
   }
 
   /** The hint's caption over the map, the card over the board, and
    * history's graphs. */
   overlays(view) {
     this.graph(view);
-    const touch = matchMedia("(hover: none)").matches;
+    const finger = touch();
     const cap = this.$("hint-caption");
     cap.hidden = !view.hint;
-    if (view.hint) cap.textContent = touch ? view.hint.caption.touch : view.hint.caption.keys;
+    if (view.hint) cap.textContent = finger ? view.hint.caption.touch : view.hint.caption.keys;
     const box = this.$("card");
     const card = view.card;
     if (!card) {
@@ -220,7 +328,7 @@ export class Hud {
       box.style.borderColor = "rgb(110,140,200)";
       box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: "color:rgb(110,140,200)" }, card.sub),
         ...card.paras.map((t) => h("p", {}, t)), ...card.notes.map((t) => h("p", { class: "note" }, t)),
-        h("p", { class: "close" }, touch ? card.close.touch : card.close.keys));
+        h("p", { class: "close" }, finger ? card.close.touch : card.close.keys));
     } else {
       const tone = `var(--${card.tone})`;
       box.style.borderColor = tone;
@@ -232,7 +340,7 @@ export class Hud {
         return h("div", { class: "gap" });
       });
       box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: `color:${tone}` }, card.label),
-        ...items, h("p", { class: "close" }, touch ? "Tap anywhere to close" : "Press any key to close"));
+        ...items, h("p", { class: "close" }, finger ? "Tap anywhere to close" : "Press any key to close"));
     }
     box.hidden = false;
   }
@@ -244,14 +352,14 @@ export class Hud {
       box.hidden = true;
       return;
     }
-    const touch = matchMedia("(hover: none)").matches;
+    const finger = touch();
     box.replaceChildren(h("div", { class: "stack" }, h("h1", {}, m.title),
       ...m.body.split("\n\n").map((t) => h("p", {}, t)),
       h("div", { class: "grid" },
         h("button", { type: "button", class: "btn amber", onclick: onConfirm }, m.confirm,
-          touch ? null : h("span", { class: "key" }, " (Y/Enter)")),
+          finger ? null : h("span", { class: "key" }, " (Y/Enter)")),
         h("button", { type: "button", class: "btn green", onclick: onCancel }, "Cancel",
-          touch ? null : h("span", { class: "key" }, " (N/Esc)")))));
+          finger ? null : h("span", { class: "key" }, " (N/Esc)")))));
     box.hidden = false;
   }
 
@@ -305,7 +413,9 @@ export class Hud {
         "Rewind to here");
       ui.graphs = h("button", { type: "button", class: "btn violet", onclick: () => this.on.call("toggle_graph", []) },
         "Graphs", key("G"));
-      nav.replaceChildren(ui.exit, ui.play, ui.graphs, ui.prev, ui.track, ui.next, ui.label, ui.rewind);
+      // Two rows on a portrait phone (the track above the buttons), one elsewhere.
+      nav.replaceChildren(h("div", { class: "scrub-track" }, ui.prev, ui.track, ui.next, ui.label),
+        h("div", { class: "scrub-buttons" }, ui.exit, ui.play, ui.graphs, h("span", { class: "spacer" }), ui.rewind));
       this.scrub = ui;
     }
     this.view = view;
@@ -316,7 +426,9 @@ export class Hud {
     ui.next.disabled = hv.turn >= hv.max;
     ui.track.max = hv.max;
     if (document.activeElement !== ui.track) ui.track.value = hv.turn;
-    ui.label.textContent = hv.label;
+    const upright = portrait();
+    ui.label.textContent = upright ? hv.label_short : hv.label;
+    ui.rewind.textContent = upright ? "Rewind" : "Rewind to here";
     ui.rewind.hidden = !hv.rewind;
     ui.graphs.hidden = !hv.graphs;
     ui.graphs.className = `btn ${hv.graph_on ? "active" : "violet"}`;
@@ -333,11 +445,11 @@ export class Hud {
       box.hidden = true;
       return;
     }
-    const touch = matchMedia("(hover: none)").matches;
+    const finger = touch();
     box.classList.toggle("full", g.full);
     const tabs = g.tabs.map((label, i) => h("button", { type: "button", class: `btn ${i === g.tab ? "active" : "blue"}`,
       onclick: () => this.on.call("graph_tab", [i]) }, label));
-    const head = h("div", { class: "head" }, ...tabs, h("span", { class: "note" }, touch ? g.note.touch : g.note.keys),
+    const head = h("div", { class: "head" }, ...tabs, h("span", { class: "note" }, finger ? g.note.touch : g.note.keys),
       h("button", { type: "button", class: "btn blue caret", "aria-label": g.full ? "Dock the graphs" : "Full screen",
         onclick: () => this.on.call("graph_full", []) }, g.full ? "⌄" : "⌃"));
     let body;
@@ -438,7 +550,8 @@ export class Hud {
     sv("line", { x1: x(g.turn), x2: x(g.turn), y1: top, y2: top + ph, stroke: "rgb(200,206,220)", "stroke-width": 1 }, plot);
     const seekAt = (event) => {
       const r = plot.getBoundingClientRect();
-      const t = Math.round(((event.clientX - r.left - left) / pw) * g.turns);
+      const k = r.width / (plot.clientWidth || r.width);
+      const t = Math.round((((event.clientX - r.left) / k - left) / pw) * g.turns);
       this.on.seek(Math.max(0, Math.min(g.turns, t)));
     };
     plot.onpointerdown = (event) => {
@@ -463,15 +576,25 @@ export class Hud {
       this.pop = null;
       return null;
     }
-    const shape = [pop.src, pop.dest, pop.forward, Boolean(pop.forecast),
+    const shape = [pop.src, pop.dest, pop.forward, Boolean(pop.forecast), compact(),
       pop.split ? pop.split.lanes.map((l) => l[0]).join("+") : ""].join();
     if (this.pop?.shape !== shape) this.pop = this.buildPopup(box, view, shape);
     const ui = this.pop;
-    ui.ships.textContent = pop.dest_ships === null ? "?sh" : `${pop.dest_ships}sh`;
-    ui.ships.style.color = pop.dest_ships === null ? "var(--fog)" : this.color(pop.dest_owner);
+    if (pop.split) {
+      ui.ships.textContent = `${pop.garrison}sh`;
+      ui.ships.style.color = this.color(view.human);
+    } else {
+      ui.ships.textContent = pop.dest_ships === null ? "?sh" : `${pop.dest_ships}sh`;
+      ui.ships.style.color = pop.dest_ships === null ? "var(--fog)" : this.color(pop.dest_owner);
+    }
     ui.effect.textContent = pop.effect;
+    box.classList.toggle("docked", compact());
+    box.hidden = false;
+    // the title and the forecast in the longest wording that fits the popup
+    const inner = box.clientWidth - 18;
+    ui.title.textContent = fit(pop.split ? pop.splits : pop.route, inner - textWidth(ui.ships.textContent) - 5);
     if (pop.forecast) {
-      ui.forecast.textContent = fit(pop.forecast.forms, 168 - (pop.forecast.odds ? 17 : 0));
+      ui.forecast.textContent = fit(pop.forecast.forms, inner - (pop.forecast.odds ? 17 : 0));
       ui.forecast.className = `tone-${pop.forecast.tone}`;
       ui.odds.hidden = !pop.forecast.odds;
       ui.forecastRow.disabled = !pop.forecast.odds;
@@ -505,7 +628,6 @@ export class Hud {
       });
     }
     ui.discard.textContent = pop.discard;
-    box.hidden = false;
     return box;
   }
 
@@ -513,12 +635,11 @@ export class Hud {
     const pop = view.popup;
     const call = (method, ...args) => () => this.on.call(method, args);
     box.className = [pop.forward ? "forward" : "", pop.split ? "split" : ""].join(" ").trim();
-    const src = this.map.systems.find((s) => s.id === pop.src);
-    const dest = this.map.systems.find((s) => s.id === pop.dest);
     const ui = { shape, dragging: false, range: [0, 0] };
     const step = (label, onclick) => h("button", { type: "button", class: "step", "aria-label": label, onclick },
       label === "Fewer" ? "−" : "+");
     ui.ships = h("span");
+    ui.title = h("span");
     ui.effect = h("div", { class: "row dim" });
     ui.value = h("span");
     ui.slider = h("input", { type: "range", step: 1, "aria-label": pop.forward ? "Share to forward" : "Ships to send" });
@@ -533,17 +654,24 @@ export class Hud {
       onclick: pop.forward ? call("set_share", i === 0 ? 50 : 100) : call(i === 0 ? "send_half" : "send_all"),
     }));
     ui.discard = h("button", { type: "button", class: "pb danger", onclick: call("cancel_send") });
+    // Docked on a phone, the popup is a panel rather than a card on the map, and
+    // closing it by tapping the map isn't something a panel says: Done says it.
+    const docked = compact();
+    const discardRow = docked
+      ? h("div", { class: "pair" }, ui.discard, h("button", { type: "button", class: "pb done", onclick: () => this.on.done() },
+        "Done"))
+      : h("div", { class: "pair" }, ui.discard);
+    const laneRow = docked && !pop.split && pop.lane
+      ? h("div", { class: "row dim" }, `${pop.lane[0]} ly  ·  ${pop.lane[1]} turns`) : null;
     const kids = [
       h("div", { class: "row tabs" },
         h("button", { type: "button", class: `tab${pop.forward ? "" : " on"}`, onclick: call("set_forward_mode", false) },
           "Send"),
         h("button", { type: "button", class: `tab${pop.forward ? " on" : ""}`, onclick: call("set_forward_mode", true) },
           "Forward")),
-      pop.split
-        ? h("div", { class: "row title" }, h("span", {}, `${src.name} splits`),
-          h("span", { style: `color:${this.color(view.human)}` }, `${pop.garrison}sh`))
-        : h("div", { class: "row title" }, h("span", {}, `${src.name} -> ${dest.name}`), ui.ships),
+      h("div", { class: "row title" }, ui.title, ui.ships),
     ];
+    if (laneRow) kids.push(laneRow);
     if (pop.hold) {
       ui.holdValue = h("span", { class: "value" });
       ui.smart = h("button", { type: "button", class: "pb chip", onclick: call("toggle_smart_hold") }, "smart");
@@ -572,7 +700,7 @@ export class Hud {
         ui.effect,
         h("div", { class: "pair" }, ui.even,
           h("button", { type: "button", class: "pb danger", onclick: call("delete_all_forward") }, "Delete all")),
-        h("div", { class: "pair" }, ui.discard));
+        discardRow);
       box.replaceChildren(...kids);
       return ui;
     }
@@ -591,7 +719,7 @@ export class Hud {
         h("button", { type: "button", class: "step", "aria-label": "More", onclick: call("step_count", 1) }, "+")),
       h("div", { class: "row" }, ui.slider),
       h("div", { class: "pair" }, ...ui.presets),
-      h("div", { class: "pair" }, ui.discard),
+      discardRow,
     );
     box.replaceChildren(...kids);
     return ui;

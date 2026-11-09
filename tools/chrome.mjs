@@ -4,6 +4,9 @@
 //   node tools/chrome.mjs URL --until "JS expr" [--timeout 60] [--shot out.png]
 //        [--size 1400x900] [--mobile] [--profile DIR] [--eval "JS expr"]
 //
+// The page sees a mouse (`hover: hover`, `pointer: fine`), or with --mobile a
+// phone: touch, `hover: none`, and a 2.625 device pixel ratio.
+//
 // Exits 0 once `--until` is truthy (or straight after load without it), 1 on
 // timeout or a page error. `--profile` keeps a browser profile between runs, so
 // a second run is a warm cache; without it each run starts cold. `--eval`
@@ -99,6 +102,15 @@ await page("Emulation.setDeviceMetricsOverride", {
   width, height, deviceScaleFactor: mobile ? 2.625 : 1, mobile,
 });
 if (mobile) await page("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+// Headless Chrome has no pointer, so it answers `hover: none`: say outright
+// which input this is, a mouse or a finger, so a page's media queries match
+// the device being stood in for.
+await page("Emulation.setEmulatedMedia", { features: [
+  { name: "hover", value: mobile ? "none" : "hover" },
+  { name: "pointer", value: mobile ? "coarse" : "fine" },
+  { name: "any-hover", value: mobile ? "none" : "hover" },
+  { name: "any-pointer", value: mobile ? "coarse" : "fine" },
+] });
 const started = Date.now();
 await page("Page.navigate", { url });
 

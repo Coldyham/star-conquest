@@ -136,6 +136,8 @@ def view(state: GameState, ui: Ui) -> dict:
         "panel": panel(state, ui),
         "scores": scores(state, ui),
         "footer": [list(b) for b in hud.footer(state, ui)],
+        "more_open": ui.more_open,
+        "more_labels": {attr: list(pair) for attr, pair in hud.MORE_LABELS.items()},
         "lost": me.ships_lost if me is not None and not ui.spectating else None,
         "autoplay": ui.autoplay,
         "playing": ui.playing,
@@ -146,7 +148,9 @@ def view(state: GameState, ui: Ui) -> dict:
         "hint": hint(state, ui) if ui.hint_live(state) else None,
         "card": card(state, ui),
         "history": {"turn": ui.history_turn, "max": ui.history_max, "reveal": ui.history_reveal,
-                    "label": hud.scrubber_label(ui, state.turn), "graphs": ui.history_chart is not None,
+                    "label": hud.scrubber_label(ui, state.turn),
+                    "label_short": hud.scrubber_label(ui, state.turn, short=True),
+                    "graphs": ui.history_chart is not None,
                     "graph_on": ui.history_graph,
                     "rewind": ui.history_turn < ui.history_max and not ui.in_pbp} if ui.history else None,
         "graph": graph(state, ui) if ui.history and ui.history_graph and ui.history_chart is not None else None,
@@ -184,6 +188,9 @@ def popup(state: GameState, ui: Ui) -> dict | None:
     return {
         "src": src.id,
         "dest": dest.id,
+        # the title's wordings, longest first (`render._fit_route`); a split's is its source's
+        "route": [f"{src.label} -> {dest.label}", f"{src.short} -> {dest.short}", f"{src.id} -> {dest.id}"],
+        "splits": [f"{src.label} splits", f"{src.short} splits", f"{src.id} splits"],
         "forward": ui.forward_armed,
         "editing": ui.editing_existing,
         "garrison": src.ships,
@@ -213,7 +220,7 @@ def panel(state: GameState, ui: Ui) -> dict:
                  "dangerous": hud.clear_dangerous_label(dangerous) if dangerous else None}
     if focus not in state.systems:
         return {"focus": None, "legend": "history" if ui.history else "spectating" if ui.spectating else "live",
-                "clear": clear}
+                "clear": clear, "portrait": hud.portrait_hint(ui)}
     sys = state.systems[focus]
     dest = hud.lane_target(state, ui, focus)
     ruled = focus in ui.auto_forward

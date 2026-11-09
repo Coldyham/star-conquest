@@ -41,10 +41,13 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 body { overflow: hidden; }
 button { font: inherit; color: inherit; cursor: pointer; }
 
+/* One layout unit is pygame's baseline pixel: on a phone, a little under a
+   CSS pixel (`hud.fitLayout` sets --zoom and the layout classes). */
 #app {
+  zoom: var(--zoom, 1);
   display: grid;
-  height: 100vh;
-  height: 100dvh;
+  height: calc(100vh / var(--zoom, 1));
+  height: calc(100dvh / var(--zoom, 1));
   grid-template-columns: minmax(0, 1fr) var(--side-w);
   grid-template-rows: var(--top-h) minmax(0, 1fr) var(--foot-h);
 }
@@ -113,7 +116,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn.teal { background: rgb(44, 62, 74); border-color: rgb(120, 180, 200); }
 .btn.gold { background: rgb(92, 76, 36); border-color: rgb(210, 180, 80); }
 .btn:disabled { opacity: .45; cursor: default; }
-@media (hover: none) { .key { display: none; } }
+.touch .key { display: none; }
 
 /* --- the side panel and End Turn ---------------------------------------- */
 #side { grid-column: 2; grid-row: 2 / 4; display: flex; flex-direction: column; min-height: 0; }
@@ -305,3 +308,73 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #graph .note-row .turn { flex: none; min-width: 34px; }
 :root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); }
 #app.graphing #camera { bottom: calc(min(320px, 45%) + 18px); }
+
+/* --- the footer's "more" list -------------------------------------------- */
+#footer .more { width: 40px; padding: 0; font-size: 20px; }
+#more {
+  position: fixed; z-index: 8; display: flex; flex-direction: column; gap: 8px; padding: 6px;
+  background: rgb(24, 28, 40); border: 1px solid rgb(70, 80, 104); border-radius: 6px;
+}
+#more .btn { height: 34px; font-size: 18px; }
+
+/* --- a phone (`config.compact`): a touch screen too small for the desktop
+   layout. Sideways it keeps the side column, running to the screen's top
+   beside a top bar over the map alone; the popup docks in the column's place. */
+:root.compact { --side-w: 236px; --end-h: 64px; }
+.compact #top { grid-column: 1; }
+.compact #scores { gap: 14px; }
+.compact #side { grid-row: 1 / 4; }
+.compact #panel { padding: 12px; }
+.compact #end-turn { border-radius: 8px; }
+.compact #popup.docked {
+  position: fixed; left: auto; top: 0; right: 0; bottom: var(--end-h); width: var(--side-w);
+  border-radius: 0; border-width: 2px; z-index: 6; overflow: auto;
+}
+.compact #popup .row, .compact #popup .pb, .compact #popup .tab { min-height: 40px; }
+.compact #popup .step { width: 40px; height: 40px; font-size: 20px; }
+.compact #popup .pb.done { background: rgb(28, 58, 38); border-color: rgb(96, 190, 120); color: var(--text); }
+.compact #camera .btn { height: 40px; }
+.compact #graph .head .btn { height: 34px; }
+
+/* Upright, a side column would leave the map a sliver: the panel becomes a
+   band under the map, then the strip, then End Turn across the foot, stood
+   clear of the gesture bar; the popup docks as a sheet over all three. */
+:root.portrait { --end-h: 92px; }
+.portrait #app {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--top-h) minmax(0, 1fr) 118px var(--foot-h) var(--end-h);
+}
+.portrait #top { grid-column: 1; grid-row: 1; }
+.portrait #mapbox { grid-column: 1; grid-row: 2; }
+.portrait #side { display: contents; }
+.portrait #panel { grid-column: 1; grid-row: 3; border-left: none; border-top: 1px solid var(--rule); padding: 10px 12px; }
+.portrait #panel .band { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.portrait #panel h2 { font-size: 14px; }
+.portrait #footer { grid-column: 1; grid-row: 4; }
+.portrait #end-turn { grid-column: 1; grid-row: 5; width: auto; margin: 7px 12px 26px; height: auto; }
+.portrait #app.history #footer { grid-row: 4 / 6; }
+.portrait #popup.docked { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 60vh; }
+.portrait #graph { left: 6px; right: 6px; }
+.portrait #graph .legend { width: 160px; }
+
+/* History's bar: one row (Exit, Play, Graphs, ◀ track ▶, the turn, Rewind),
+   or on a portrait phone two, the track over the buttons. */
+#footer .scrub-track, #footer .scrub-buttons { display: contents; }
+#footer .scrub-buttons > :nth-child(1) { order: 1; }
+#footer .scrub-buttons > :nth-child(2) { order: 2; }
+#footer .scrub-buttons > :nth-child(3) { order: 3; }
+#footer .scrub-track > * { order: 4; }
+#footer .scrub-track > .label { order: 5; }
+#footer .scrub-buttons > .spacer { display: none; }
+#footer .scrub-buttons > :last-child { order: 6; }
+.portrait #app.history #footer { flex-direction: column; justify-content: center; align-items: stretch; gap: 6px; }
+.portrait #app.history #footer .scrub-track, .portrait #app.history #footer .scrub-buttons {
+  display: flex; align-items: center; gap: 10px;
+}
+.portrait #app.history #footer .scrub-buttons > .spacer { display: block; flex: 1; order: 5; }
+.portrait #graph { height: 58%; }
+.portrait #app.graphing #camera { bottom: calc(58% + 18px); }
+.portrait #graph .chart { flex-direction: column; gap: 6px; }
+.portrait #graph .legend { width: auto; flex-direction: row; flex-wrap: wrap; column-gap: 18px; }
+.portrait #graph .legend .unit { width: 100%; }
+.portrait #graph .seat .name { flex: none; }

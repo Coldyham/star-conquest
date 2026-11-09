@@ -206,7 +206,8 @@ function planned(parent, a, b, destR, color, width) {
 }
 
 export class BoardView {
-  constructor(svg, map) {
+  /** `small` draws systems at `config.COMPACT_NODE_SCALE`, as on a phone. */
+  constructor(svg, map, small = false) {
     this.svg = svg;
     this.map = map;
     svg.replaceChildren();
@@ -220,12 +221,13 @@ export class BoardView {
     this.nbrs = new Map(map.systems.map((s) => [s.id, new Set(s.nbrs)]));
     this.radius = new Map(map.systems.map((s) => {
       const t = Math.min(1, Math.max(0, (s.prod - PROD_LO) / (PROD_HI - PROD_LO)));
-      return [s.id, Math.round(R_MAX + t * (R_MIN - R_MAX))];
+      const k = small ? 0.8 : 1;
+      return [s.id, Math.round(R_MAX * k + t * (R_MIN - R_MAX) * k)];
     }));
     this.pos = new Map();
     this.travel = map.lanes.map(() => 1);
-    const box = svg.getBoundingClientRect();
-    this.camera = new Camera(map.world, [0, 0, Math.max(1, box.width), Math.max(1, box.height)], FIT_PAD);
+    // Layout units, not screen pixels: under the page's `zoom` they differ.
+    this.camera = new Camera(map.world, [0, 0, Math.max(1, svg.clientWidth), Math.max(1, svg.clientHeight)], FIT_PAD);
 
     const laneLayer = el("g", {}, svg);
     const plates = el("g", { "font-family": MONO, "text-anchor": "middle", "font-size": FONT_SMALL }, svg);
@@ -267,8 +269,7 @@ export class BoardView {
 
   /** The SVG's box changed: refit the camera to it. */
   resize() {
-    const box = this.svg.getBoundingClientRect();
-    this.camera.resize([0, 0, Math.max(1, box.width), Math.max(1, box.height)]);
+    this.camera.resize([0, 0, Math.max(1, this.svg.clientWidth), Math.max(1, this.svg.clientHeight)]);
     this.layout();
   }
 

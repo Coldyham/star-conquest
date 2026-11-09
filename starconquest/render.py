@@ -1954,9 +1954,7 @@ def _lay_out_footer(surface, ui: Ui, specs, y: int, fbh: int, font) -> None:
 
 # The strip's Menu means the setup screen; in a list under a menu button of its
 # own, it needs saying which menu.
-_MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu"),
-                "hint_button_rect": ("✗", "✗ Hide hint"),
-                "hint_apply_rect": ("✓", "✓ Apply hint")}
+_MORE_LABELS = hud.MORE_LABELS
 
 
 def _draw_more_button(surface, rect: pygame.Rect, lit: bool) -> None:
@@ -2255,13 +2253,7 @@ def _draw_side_panel_body(surface, state: GameState, ui: Ui, px, py, pw, ph) -> 
         _panel_rule(surface, state, ui, x, y + gap, focus)
 
 
-def _portrait_hint(ui: Ui) -> str:
-    """The portrait band's line while nothing is in focus."""
-    if ui.history:
-        return "Reviewing played turns. Drag the scrubber or step a turn; tap a system to see it."
-    if ui.spectating:
-        return "Watching: tap a system to see it. Drag to pan, pinch to zoom."
-    return "Tap one of your systems, then a neighbour, to send its ships. Drag to pan, pinch to zoom."
+_portrait_hint = hud.portrait_hint
 
 
 def _draw_clear_row(surface, ui: Ui, px: int, y: int, pw: int, dangerous: int) -> int:
@@ -3137,11 +3129,10 @@ def _draw_scrubber(surface, state: GameState, ui: Ui) -> None:
     # Turn / fog-mode label, right-aligned just left of the rewind button. Its
     # slot is sized to the widest label this session could show (max digits, the
     # longer "revealed" tag) so a changing turn number never nudges the track.
-    tag = "revealed" if ui.history_reveal else "as seen"
     label = hud.scrubber_label(ui, state.turn)
     widest = f"Turn {ui.history_max}/{ui.history_max}  ·  revealed"
     if two_rows:
-        label = f"{state.turn}/{ui.history_max} · {tag}"
+        label = hud.scrubber_label(ui, state.turn, short=True)
         widest = f"{ui.history_max}/{ui.history_max} · revealed"
     label_x = right_limit - font.size(widest)[0]
     _text(surface, font, label, config.COLOR_TEXT_DIM, midright=(right_limit, cy))

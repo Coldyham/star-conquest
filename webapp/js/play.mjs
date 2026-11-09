@@ -10,7 +10,7 @@
 import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
 import { Core, pageInfo } from "./core.mjs";
-import { Hud } from "./hud.mjs";
+import { compact, fitLayout, Hud } from "./hud.mjs";
 import { FLASH_MS, Marks, readMarks } from "./marks.mjs";
 import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
 
@@ -89,6 +89,10 @@ function wake() {
 /** Put the popup beside its lane, on whichever side covers the fewest systems
  * (`render._popup_anchor`). */
 function place(box) {
+  if (compact()) {   // docked: the stylesheet places it
+    box.style.left = box.style.top = "";
+    return;
+  }
   const pop = game.view.popup;
   const bv = game.board_view;
   const [ax, ay] = bv.pos.get(pop.src);
@@ -167,7 +171,7 @@ function adopt(res) {
   const sameMap = game.map && JSON.stringify(game.map) === JSON.stringify(res.static);
   game.map = res.static;
   game.board = fromBoard(res.board);
-  if (!sameMap) game.board_view = new BoardView($("map"), game.map);
+  if (!sameMap) game.board_view = new BoardView($("map"), game.map, compact());
   game.board_view.setTravel(res.travel);
   if (!sameMap) game.board_view.rest(res.view.snap);   // `Ui.reset_view` on a fresh game
   game.hud = new Hud(game.map, game.legends, {
@@ -179,6 +183,7 @@ function adopt(res) {
     footer,
     action: actOn,
     seek,
+    done: () => act("ui.empty"),
   });
   show(res.view);
 }
@@ -353,13 +358,21 @@ function footer(attr) {
 
 // --- the pointer on the map ---------------------------------------------- //
 
+/** A pointer event's position on the map, in layout units. */
 function local(event) {
-  const r = $("map").getBoundingClientRect();
-  return [event.clientX - r.left, event.clientY - r.top];
+  const map = $("map");
+  const r = map.getBoundingClientRect();
+  const k = r.width / (map.clientWidth || r.width);
+  return [(event.clientX - r.left) / k, (event.clientY - r.top) / k];
 }
 
 async function press(event) {
   if (event.button === 2) return;
+  if (game.hud?.moreOpen) {   // any press closes the "more" list, and is spent doing it
+    game.hud.moreOpen = false;
+    game.hud.footer(game.view);
+    return;
+  }
   if (game.film) {
     game.film.skip = true;
     return;
@@ -497,6 +510,9 @@ async function key(event) {
   actOn(res?.action);
 }
 
+fitLayout();
+addEventListener("resize", fitLayout);
+
 async function boot() {
   try {
     await core.ready;
@@ -551,6 +567,8 @@ async function loadRecipe(recipe) {
   game.legends = res.legends;
   adopt(res);
   game.hover = res.view.hover;
+  game.hud.moreOpen = res.view.more_open;
+  game.hud.footer(res.view);
   redraw();
   if (res.modal) ask(res.modal);
   status("");

@@ -843,10 +843,13 @@ def confirm_rewind(turn: int) -> tuple[str, str, str]:
     return f"Rewind to turn {turn}?", "All turns after this one will be discarded.", "Rewind"
 
 
-def scrubber_label(ui: Ui, turn: int) -> str:
+def scrubber_label(ui: Ui, turn: int, short: bool = False) -> str:
     """History's turn readout: the turn on screen, the last, and whether the
-    board is shown as it was seen or revealed."""
+    board is shown as it was seen or revealed. ``short`` for a portrait
+    phone's two-row bar."""
     tag = "revealed" if ui.history_reveal else "as seen"
+    if short:
+        return f"{turn}/{ui.history_max} · {tag}"
     return f"Turn {turn}/{ui.history_max}  ·  {tag}"
 
 
@@ -875,3 +878,20 @@ def graph_note(ui: Ui, touch: bool) -> str:
 # A coach note's turn label, coloured by what kind of lesson it is.
 COACH_ROLE = {coach.GAMBLE: "gamble", coach.SURPRISE: "likely", coach.EMPTIED: "gamble",
               coach.EVACUATED: "teal", coach.IDLE: "likely", coach.TURN: "violet"}
+
+
+def portrait_hint(ui: Ui) -> str:
+    """A portrait phone's panel band while nothing is in focus: a reminder,
+    since the rules in full are the tutorial's to teach."""
+    if ui.history:
+        return "Reviewing played turns. Drag the scrubber or step a turn; tap a system to see it."
+    if ui.spectating:
+        return "Watching: tap a system to see it. Drag to pan, pinch to zoom."
+    return "Tap one of your systems, then a neighbour, to send its ships. Drag to pan, pinch to zoom."
+
+
+# A folded footer button's row in the "more" list, where it differs from the
+# button: the list has room to say what a glyph or a short word means.
+MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu"),
+               "hint_button_rect": ("✗", "✗ Hide hint"),
+               "hint_apply_rect": ("✓", "✓ Apply hint")}

@@ -8,7 +8,7 @@ pygame side draws from) and screenshots it in headless Chrome to
 `results/parity/next/<size>/<name>.png`. `tools/parity_sheet.py` then sets
 each beside its baseline. A shot already taken is kept unless ``--force``.
 
-    uv run python tools/parity_next.py                 # every game screen, desktop
+    uv run python tools/parity_next.py                 # every game screen, every size
     uv run python tools/parity_next.py --only game-hint --force
 """
 
@@ -28,8 +28,8 @@ from starconquest import serve
 RECIPES = ROOT / "tests" / "fixtures" / "parity_screens.json"
 OUT = ROOT / "results" / "parity" / "next"
 PORT = 8011
-# The sizes the HTML build lays out so far, as CSS pixels (`parity_shots.SIZES`).
-SIZES = {"desktop": "1440x960"}
+# The sizes, as CSS pixels (`parity_shots.SIZES`), and whether each is a phone.
+SIZES = {"desktop": ("1440x960", False), "phone": ("412x870", True), "phone-land": ("870x412", True)}
 # Recipes on the game surface whose screen belongs to a later phase.
 LATER = ("stage-", "pbp-", "confirm-quit")
 
@@ -48,7 +48,8 @@ def shoot(recipe: dict, size: str) -> str:
     proc = subprocess.run(
         ["node", str(ROOT / "tools" / "chrome.mjs"), f"http://127.0.0.1:{PORT}/next/",
          "--until", "window.scNext && window.scNext.game.view", "--timeout", "60",
-         "--size", SIZES[size], "--shot", str(path), "--eval", SCRIPT % json.dumps(recipe)],
+         "--size", SIZES[size][0], *(["--mobile"] if SIZES[size][1] else []),
+         "--shot", str(path), "--eval", SCRIPT % json.dumps(recipe)],
         capture_output=True, text=True, check=False)
     lines = [ln for ln in proc.stdout.splitlines() if ln and not ln.startswith(("reached", "screenshot"))]
     said = json.loads(lines[-1]) if lines else ""
@@ -62,6 +63,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--only", nargs="*", help="these recipes only")
     ap.add_argument("--force", action="store_true", help="shoot again over an existing shot")
+    ap.add_argument("--size", nargs="*", choices=list(SIZES), help="these sizes only (default: all)")
     args = ap.parse_args()
     recipes = [r for r in json.loads(RECIPES.read_text())["screens"]
                if r["surface"] == "game" and not r["name"].startswith(LATER)
@@ -69,7 +71,7 @@ def main() -> None:
     server = serve.start(PORT)
     try:
         for r in recipes:
-            for size in SIZES:
+            for size in args.size or SIZES:
                 if size not in r["sizes"]:
                     continue
                 if (OUT / size / f"{r['name']}.png").exists() and not args.force:

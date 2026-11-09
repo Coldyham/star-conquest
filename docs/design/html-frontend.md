@@ -176,10 +176,26 @@ lore and odds cards, history (scrubber, playback, held marks, rewind), and
 its graphs and coach. Every phase-1 parity recipe shoots at the desktop size
 (`tools/parity_next.py`, 22 screens).
 
+**Phones.** The page sizes itself as pygame's shell does (`hud.fitLayout`
+after `main.ui_scale_for` and `config.apply_ui_scale`): on a touch screen one
+baseline unit is up to a CSS pixel, less where that would leave under 600 x 480
+units, applied as CSS `zoom` on the app; a touch screen under 1100 x 720 units
+is compact, and compact held upright is portrait. The stylesheet lays out by
+the `touch`, `compact` and `portrait` classes this sets, and the board and the
+graphs work in layout units, dividing a pointer's screen position by the zoom.
+Compact draws systems at 0.8, docks the popup (in the side column sideways, a
+sheet across the foot upright) with its lane row and Done, folds the footer's
+ways out of the game behind the "more" list from the start, and upright puts
+the panel in a band under the map (the system on the left, its lane and rule
+on the right), End Turn across the foot, the scrubber in two rows and the
+graphs' legend under the plot. Every phase-1 recipe shoots at all three sizes.
+
 **Differences kept on purpose:** a recipe loaded mid-game frames what has
 been seen by then, where pygame's camera was framed at turn 0 and never moved;
-a page fits names around what is on screen with its own font metrics.
+the page fits names, the footer and the forecast with its own font metrics,
+so a squeeze can fall a button differently at the exact boundary (portrait
+`game-footer-more` folds Play, which pygame fits by a fifth of a unit).
 
-**Still to do in phase 1:** the compact layout (a phone, either way up: the
-docked popup as a bottom sheet, the footer's "more" list, the portrait panel
-band) and its parity shots.
+**Phase 1 is complete** at every size. Left for later phases: the menu (Menu
+and Setup menu only say so for now), sharing, play-by-post, gauntlet stages,
+and the map maker.
