@@ -41,7 +41,7 @@ const isToday = day === today;
 const dayHref = (d) => (d === today ? page : `${page}?day=${d}`);
 const playHref = (d) => (d === today ? `../play/#${fragment}` : `../play/#${fragment}=${d}`);
 
-/** The Board/Puzzle tabs keep the day being looked at. */
+/** The Map/Puzzle tabs keep the day being looked at. */
 function keepDayInTabs() {
   if (isToday) return;
   for (const a of document.querySelectorAll('nav[aria-label="Dailies"] a')) {

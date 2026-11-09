@@ -75,8 +75,8 @@ them.
 | **run** | a gauntlet played in order, with one life | `run.py` |
 | **campaign** | the weekly contest map of **nodes** (each node is a map) | `campaign.py`, `campaign_games` |
 | **node** (campaign only) | one map on the campaign's graph: a **home** you claim, or a **field** node | `graph["nodes"]`, `kind` |
-| **the daily** | one day's pair of dailies: the daily map (**"Daily board"**, still to be renamed) and the **puzzle** (a small duel) | `daily.py` `BOARD`, `PUZZLE`; `dailies` |
-| **Daily challenge** | the board's heading for the daily page; renamed along with "Daily board" | |
+| **the daily** | one day's pair: the **daily map** ("Daily map", the Map tab, "Monday's map") and the **daily puzzle** (a small duel) | `daily.py` `BOARD`/`PUZZLE` (kind `"board"`/`"puzzle"`, link `#daily`/`#puzzle`); `dailies` |
+| **Daily challenge** | the heading over both dailies on the board's daily pages | `daily.html`, `puzzle.html` |
 | **par** | a puzzle's best known result, told only to players who meet it | `puzzle_pars` |
 | **streak** | consecutive daily wins of one kind | |
 

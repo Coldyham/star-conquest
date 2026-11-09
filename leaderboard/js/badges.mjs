@@ -256,12 +256,12 @@ export const BADGES = [
     how: "Win all seven puzzles of one Monday-to-Sunday week (days won later from the archive count).",
     has: (f) => atLeastOne(f.puzzleWeeks) },
 
-  { id: "daily", group: "Daily board", title: "Board done",
-    how: "Win a daily board, any day's, and post the score.", has: (f) => atLeastOne(f.dailyDays) },
-  { id: "daily-winner", group: "Daily board", title: "Board winner of the day",
-    how: "Post the best score on a daily board before its day ends.", has: (f) => atLeastOne(f.dailyWon) },
-  { id: "full-week", group: "Daily board", title: "Full board week",
-    how: "Win all seven boards of one Monday-to-Sunday week (days won later from the archive count).",
+  { id: "daily", group: "Daily map", title: "Map done",
+    how: "Win a daily map, any day's, and post the score.", has: (f) => atLeastOne(f.dailyDays) },
+  { id: "daily-winner", group: "Daily map", title: "Map winner of the day",
+    how: "Post the best score on a daily map before its day ends.", has: (f) => atLeastOne(f.dailyWon) },
+  { id: "full-week", group: "Daily map", title: "Full map week",
+    how: "Win all seven maps of one Monday-to-Sunday week (days won later from the archive count).",
     has: (f) => atLeastOne(f.dailyWeeks) },
 
   { id: "graduate", group: "Gauntlets", title: "Graduate",

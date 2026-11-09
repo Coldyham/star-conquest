@@ -833,7 +833,7 @@ test bot within a turn cap that grows from 80 to 110.
   `dailies`; the secret key is its only writer). The policy hides a day until it
   starts, so tomorrow's map can't be practised.
 - **The game fetches it** (`/api/daily`, read-only with the publishable key):
-  the menu's Daily ▸ Daily board or a `#daily` / `#daily=<day>` link puts the setup on
+  the menu's Daily ▸ Daily map or a `#daily` / `#daily=<day>` link puts the setup on
   the menu. A daily follows the player's ironman preference (so Undo can take a
   turn back), and its win offers *Copy daily result*, a
   spoiler-free line, where other maps offer *Challenge a friend*.
@@ -880,7 +880,7 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
 | Bots | a win with each `LADDER_ORDER` bot in a seat |
 | Daily puzzle | a daily puzzle won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
-| Daily board | the same three, on the daily board |
+| Daily map | the same three, on the daily map |
 | Play-by-post | a turn played in a match · a match won |
 
 **Derived, never stored**, like crowns and the campaign. Wins count only through

@@ -44,7 +44,7 @@ uv run python -m tests.sim --ladder --trials 50  # rank every models/ bot pairwi
 uv run python -m tests.sim --swap --trials 50    # ...or as one free-for-all
 uv run python -m tests.sim --ladder --ai knower thinker --aux knower=2   # set a bot's aux knob
 
-uv run python tools/daily.py --dry-run          # deal today's and tomorrow's dailies (board, puzzle), store nothing
+uv run python tools/daily.py --dry-run          # deal today's and tomorrow's dailies (map, puzzle), store nothing
 uv run python tools/try_daily.py sat            # play a fresh Saturday daily map (--puzzle, --probe, --seed, --week)
 uv run python tools/puzzle_par.py --daily FILE  # a puzzle's par, stored nothing (with SUPABASE_*: today's and tomorrow's)
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot
@@ -251,7 +251,7 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
   rule.
 - **The daily is made by the worker and stored, never made by the game**
   (`tools/daily.py` into `dailies`, a day ahead, readable once its day starts;
-  the game asks `/api/daily`). A day has two kinds, the board and the puzzle,
+  the game asks `/api/daily`). A day has two kinds, the map (`daily.BOARD`) and the puzzle,
   each with its own streaks and badges. A day is never remade. A day's map is embargoed
   until the day ends (`game_embargoes`); its winner, standings and streaks
   (mended, and true) are derived. `docs/design/daily.md`.

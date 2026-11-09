@@ -2049,7 +2049,7 @@ def _seed_control(surface, ms: MenuState, settings: Settings, right: int, y: int
 # of the puzzle and the board, puzzle first as on the board site, each item the
 # key its click is handled as.
 _DAILY_LABEL = "Daily"
-_DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily board"))
+_DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily map"))
 
 
 def _daily_button(surface, ms: MenuState, x: int, y: int) -> None:
