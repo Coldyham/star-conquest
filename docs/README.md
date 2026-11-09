@@ -48,6 +48,7 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/core.md`](design/core.md) | Settings tokens, the random seat, challenge links and stable digests, ship-speed growth, in-lane battles, the replay log and dice streams, star names, symmetric layouts |
 | [`design/shell.md`](design/shell.md) | Text sizing and touch, viewport margins, the send popup, forwarding rules, the Combat page, spectating, ironman, graphs, route mode |
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn |
+| [`design/html-frontend.md`](design/html-frontend.md) | The move from the pygame shell to an HTML frontend over Pyodide (in progress), and the parity checks that hold it to the old build |
 | [`design/training.md`](design/training.md) | Training help: the send popup's odds forecast, the bot hint (K) that takes a game off the board, and the post-game coach |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, generated gauntlets, stage targets, the proposed run and carry-over |
@@ -119,6 +120,8 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md |
 | `playstyle.py --baseline`, `playstyle_worker.py` | Regenerate the Playstyle bots column; the readings worker | leaderboard.md |
 | `render_board.py` | Render the board's Jinja2 pages | leaderboard.md |
+| `parity_replays.py` | Record the replay-parity corpus: seeded bot games and stored logs, a digest per turn | html-frontend.md |
+| `parity_shots.py`, `parity_sheet.py` | Draw every pygame screen as the visual baseline; contact sheets pairing it with the HTML build's shots | html-frontend.md |
 | `slim_web.py` | Slim the web build's stage: strip comments, subset the fonts (`build_web.sh` runs it) | shell.md |
 | `campaign.py` | Generate this week's campaign map into `public.campaigns` | campaign.md |
 | `daily.py` | Deal and probe today's and tomorrow's daily challenge and puzzle into `public.dailies` | daily.md |

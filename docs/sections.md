@@ -24,6 +24,10 @@ line gives only the verdict. Ideas that lost are in
 - core.md · **Symmetric layouts** (under "Past a standard board the box grows"). Hub, ring, wheel, core; why `hub` is pinned rather than a `RULES_VERSION` bump; where `layout` is inert.
 - core.md · **Rules in full:** in-lane battles; pile-up resolution; replay and history; an all-bot game has no human seat; whole-number floats don't survive the browser; past a standard board the box grows; settings, links and keys; star names.
 
+## html-frontend.md
+- html-frontend.md · **Why** and **How it is staged.** One HTML frontend over the core in Pyodide replaces the pygame shell on web and desktop; pygbag stays live until parity at `/next/`; Python returns effects and does no I/O.
+- html-frontend.md · **Parity checks.** Replays: 24 cases, a digest per turn, reconstructed and replayed live with bots deciding afresh, must match in Pyodide. Screens: 42 recipes drawn from pygame as the web variant, reviewed side by side, never pixel-diffed; redrawable from any pre-cutover commit.
+
 ## shell.md
 - shell.md · **Text sizing** and **`config.touch_ui`.** Measured layout; the send popup is where the tap floor gives way.
 - shell.md · **Phones: the compact layout (`config.compact`).** CSS-pixel scale on a touch browser, shrunk to leave a phone 600x480 units; footer folds into a list; popup docks; portrait panel under the map; the menu's own canvas and scrolling panel, and a map sketch under the title (landscape) or panel (portrait), hidden under fog; a closed send finishes its source (every screen), pinch to zoom, no text selection.
