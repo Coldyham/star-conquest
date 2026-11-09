@@ -116,6 +116,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn.teal { background: rgb(44, 62, 74); border-color: rgb(120, 180, 200); }
 .btn.gold { background: rgb(92, 76, 36); border-color: rgb(210, 180, 80); }
 .btn:disabled { opacity: .45; cursor: default; }
+.btn.queued { outline: 2px solid var(--text); outline-offset: 2px; }   /* pressed, waiting on the turn */
 .touch .key { display: none; }
 
 /* --- the side panel and End Turn ---------------------------------------- */

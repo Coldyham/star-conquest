@@ -28,6 +28,7 @@ const params = new URLSearchParams(location.search);
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
   hover: null, drag: null, pan: null, box: null, film: null, fingers: new Map(), pinch: null, pressed: false, held: new Marks(), busy: false, looping: false, marks: new Marks(),
+  queued: [],   // game actions pressed while a turn was resolving or filming (`actOn`)
 };
 
 function status(text, error = false) {
@@ -62,6 +63,7 @@ async function openMenu(first = false) {
   clearTimeout(game.timer);
   game.film = null;
   game.busy = false;
+  game.queued = [];
   game.map = null;   // the next board is drawn afresh, the camera fitted to it
   if (game.modal) {
     game.modal = null;
@@ -214,6 +216,7 @@ async function newGame() {
 function adopt(res) {
   game.seed = res.seed;
   game.marks.clear();   // they belong to a playback this jumps away from
+  game.queued = [];   // ...as do presses waiting on its turn
   hold(res.held);
   const sameMap = game.map && JSON.stringify(game.map) === JSON.stringify(res.static);
   game.map = res.static;
@@ -251,14 +254,58 @@ async function endTurn(byHand = true) {
     if (res.snap) game.board_view.rest(res.view.snap);
     show(res.view);
     game.busy = false;
-    clock(res.film ? 0 : res.view.step_ms);
+    if (!runQueued()) clock(res.film ? 0 : res.view.step_ms);
   } catch (err) {
     clearTimeout(thinking);
     status(`End turn failed: ${err.message}`, true);
     console.error(err.trace || err);
   } finally {
     game.busy = false;
+    runQueued();
   }
+}
+
+/** Is Pause waiting on the turn in flight? Its film stands still meanwhile, as
+ * pygame's does (`app.apply_toggle_play`); pressing Play again lets it run on. */
+function pausing() {
+  return Boolean(game.view?.playing && !game.view.history && game.queued.includes("toggle_play"));
+}
+
+/** A game action pressed while a turn is resolving or playing its film is
+ * kept, not dropped, and carried out the moment the turn lands, before the
+ * next one can start: Pause and Take control must always take. A second press
+ * of the same toggle takes it back. Any but Pause skips the film to its end. */
+function queue(action) {
+  const at = game.queued.indexOf(action);
+  if (at >= 0 && action.startsWith("toggle_")) game.queued.splice(at, 1);
+  else if (at < 0) game.queued.push(action);
+  if (game.film && game.queued.some((a) => a !== "toggle_play")) game.film.skip = true;
+  markQueued();
+}
+
+/** Outline the footer buttons whose press is waiting on the turn. */
+function markQueued() {
+  for (const b of document.querySelectorAll("#footer .btn[data-attr]")) {
+    b.classList.toggle("queued", game.queued.includes(FOOTER_ACTIONS[b.dataset.attr]));
+  }
+  // a waiting Pause already looks paused: the colour Play is drawn in when stopped
+  const pp = document.querySelector('#footer .btn[data-attr="play_pause_rect"]');
+  if (pp && game.view?.playing) {
+    pp.classList.toggle("active", !pausing());
+    pp.classList.toggle("blue", pausing());
+  }
+}
+
+/** Carry out what was pressed while the turn was in flight; true if anything was. */
+function runQueued() {
+  const todo = game.queued;
+  if (!todo.length) return false;
+  game.queued = [];
+  markQueued();
+  (async () => {
+    for (const action of todo) await actOn(action);
+  })();
+  return true;
 }
 
 /** Autoplay's and Play's clock: the next turn `ms` from now (straight on
@@ -276,15 +323,16 @@ function playFilm(film, view, before) {
   return new Promise((resolve) => {
     const reel = new Reel(game.board, film);
     const seeing = look(view, before);
-    let start = null, last = null;
-    game.film = { skip: false };
+    let start = null, last = null, still = 0;
+    game.film = { skip: game.queued.some((a) => a !== "toggle_play") };
     game.hud.popup(view);
     game.marks.archive(reel.board, reel.runTo(0), seeing.sees);   // `app._primed`
     const frame = (now) => {
       start ??= now;
+      if (pausing() && !game.film?.skip) still += now - (last ?? now);   // held while Pause waits
       game.marks.age(last === null ? 0 : now - last);
       last = now;
-      const ms = game.film?.skip ? film.total : now - start;
+      const ms = game.film?.skip ? film.total : Math.min(now - start - still, film.total);
       game.marks.archive(reel.board, reel.runTo(ms), seeing.sees);
       game.board_view.draw(reel.board, travelAt(film, ms), seeing, now);
       $("caption").textContent = label(film, ms);
@@ -314,7 +362,10 @@ async function actOn(action) {
     game.board_view.rest(game.view.snap);
     redraw();
   } else if (GAME_ACTIONS.has(action)) {
-    if (game.busy) return;
+    if (game.busy) {
+      queue(action);
+      return;
+    }
     clearTimeout(game.timer);
     const res = await core.call("game.action", { name: action }).catch((err) => {
       status(`${action} failed: ${err.message}`, true);
@@ -389,20 +440,23 @@ async function replay() {
   }
 }
 
-/** A footer button, by the `Ui` attribute pygame keeps its hit-rect in. */
+/** The game action behind each footer button, by the `Ui` attribute pygame
+ * keeps its hit-rect in. */
+const FOOTER_ACTIONS = {
+  menu_button_rect: "menu", retry_live_button_rect: "retry", restart_live_button_rect: "restart",
+  undo_button_rect: "undo", history_button_rect: "toggle_history", route_button_rect: "toggle_route",
+  hint_button_rect: "hint", autoplay_button_rect: "toggle_autoplay", play_pause_rect: "toggle_play",
+  fast_forward_rect: "toggle_fast_forward",
+};
+
+/** A footer button, by its `Ui` attribute. */
 function footer(attr) {
-  const actions = {
-    menu_button_rect: "menu", retry_live_button_rect: "retry", restart_live_button_rect: "restart",
-    undo_button_rect: "undo", history_button_rect: "toggle_history", route_button_rect: "toggle_route",
-    hint_button_rect: "hint", autoplay_button_rect: "toggle_autoplay", play_pause_rect: "toggle_play",
-    fast_forward_rect: "toggle_fast_forward",
-  };
   const route = { route_mode_rect: ["set_route_rally", [!game.view.route?.rally]], route_auto_rect: ["auto_rally", []],
     route_cancel_rect: ["reset_route", []] };
   if (route[attr]) act("ui.call", { method: route[attr][0], args: route[attr][1] });
   else if (attr === "clear_button_rect") act("ui.call", { method: "clear_selected" });
   else if (attr === "hint_apply_rect") act("ui.call", { method: "apply_hint" });
-  else actOn(actions[attr]);
+  else actOn(FOOTER_ACTIONS[attr]);
 }
 
 // --- the pointer on the map ---------------------------------------------- //
