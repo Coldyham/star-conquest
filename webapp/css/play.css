@@ -339,19 +339,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* Upright, a side column would leave the map a sliver: the panel becomes a
    band under the map, then the strip, then End Turn across the foot, stood
    clear of the gesture bar; the popup docks as a sheet over all three. */
-:root.portrait { --end-h: 92px; }
+:root.portrait {
+  --end-h: 92px;
+  /* The band's height is fixed, as pygame's is (`config.PORTRAIT_PANEL_H`), so the
+     map above it never moves as the selection, the popup or route mode change what
+     it holds; room for a system's readout beside its lane, and route mode's
+     directions, then it scrolls. */
+  --band-h: max(150px, calc(22dvh / var(--zoom, 1)));
+}
 .portrait #app {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--top-h) minmax(0, 1fr) minmax(118px, auto) var(--foot-h) var(--end-h);
+  grid-template-rows: var(--top-h) minmax(0, 1fr) var(--band-h) var(--foot-h) var(--end-h);
 }
 .portrait #top { grid-column: 1; grid-row: 1; }
 .portrait #mapbox { grid-column: 1; grid-row: 2; }
 .portrait #side { display: contents; }
-/* The band grows with what it holds (a rule list, route mode's directions),
-   up to a share of the screen, then scrolls. */
 .portrait #panel {
   grid-column: 1; grid-row: 3; border-left: none; border-top: 1px solid var(--rule); padding: 10px 12px;
-  max-height: calc(36dvh / var(--zoom, 1)); overflow-y: auto;
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
 }
 .portrait #panel .band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .portrait #panel p { white-space: pre-wrap; }
