@@ -1960,8 +1960,9 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     button (`_lay_out_footer`) rather than drawn overlapping. The ranking matters because a touch player has
     no keys to fall back on, and runs in three tiers, kept longest first:
 
-    - acting in this game: Clear, Route, Hint (its ✗/✓ pair alike);
-    - looking at or handing it over: History, Play, Autoplay;
+    - acting in this game: Clear, Route, Undo;
+    - looking at or handing it over: History, Play, then Hint (its ✗/✓ pair
+      alike: training help, so it folds before Play), Autoplay;
     - leaving it: Menu, Retry, New map — Menu last of these to go, since it
       reaches everything else (Esc goes there too).
 
@@ -2027,7 +2028,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if ui.can_undo(state):
         specs.append(("undo_button_rect", _key_hint("Undo", "U"), *_BTN_AMBER, 9, "right"))
     if ui.can_review(state):
-        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 7, "right"))
+        specs.append(("history_button_rect", _key_hint("History", "H"), *_BTN_VIOLET, 8, "right"))
     # clear/cancel mirrors X (and Backspace/Delete): discards the send being
     # adjusted, or drops the highlighted order/rule; a no-op when nothing is.
     if not ui.spectating:   # a spectator has nothing to clear
@@ -2045,11 +2046,11 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
         if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 10, "right"))
+            specs.append(("hint_button_rect", "✗", *_BTN_ACTIVE, 6, "right"))
             if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 10, "right"))
+                specs.append(("hint_apply_rect", "✓", *_BTN_GREEN, 6, "right"))
         else:
-            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 10, "right"))
+            specs.append(("hint_button_rect", _key_hint("Hint", "K"), *_BTN_GOLD, 6, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -2060,7 +2061,7 @@ def _draw_footer_buttons(surface, state: GameState, ui: Ui, by: int) -> None:
     if not ui.in_pbp:
         specs.append(("autoplay_button_rect", _key_hint("Take control" if ui.autoplay else "Autoplay", "A"), *(_BTN_ACTIVE if ui.autoplay else _BTN_BLUE), 5, "right"))
         if not ui.autoplay:
-            specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 6, "right"))
+            specs.append(("play_pause_rect", _key_hint("Pause" if ui.playing else "Play", "P"), *(_BTN_ACTIVE if ui.playing else _BTN_BLUE), 7, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
     # the rest of it can be watched at speed rather than a turn every 350ms. Same
     # gate the F key goes through, so the button is drawn exactly when it means
