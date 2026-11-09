@@ -33,6 +33,17 @@ export function fit(forms, width, size = 14) {
   return forms.find((f) => textWidth(f, size) <= width) ?? forms[forms.length - 1];
 }
 
+/** `render._lane_swatches`: one colour per lane of a split, light to dark teal. */
+function laneSwatches(n) {
+  if (n <= 1) return ["var(--forward)"];
+  const light = [190, 240, 234], dark = [40, 112, 106];
+  return Array.from({ length: n }, (_, i) => {
+    const t = i / (n - 1);
+    const [r, g, b] = light.map((c, k) => Math.round(c + (dark[k] - c) * t));
+    return `rgb(${r},${g},${b})`;
+  });
+}
+
 export class Hud {
   /** `on` holds the page's handlers: `call(method, args)`, `action(name)`,
    * `done()` (the popup's Done, or a press on empty map), `lore()`. */
@@ -104,11 +115,20 @@ export class Hud {
   panel(view) {
     const panel = this.$("panel");
     const p = view.panel;
+    const clears = [];
+    if (p.clear.all) {
+      clears.push(h("button", { type: "button", class: "clear", onclick: () => this.on.call("clear_all_forward", []) },
+        p.clear.all));
+    }
+    if (p.clear.dangerous) {
+      clears.push(h("button", { type: "button", class: "clear danger",
+        onclick: () => this.on.call("clear_dangerous_forward", []) }, p.clear.dangerous));
+    }
     if (p.focus === null) {
       const set = this.legends[p.legend];
       const text = matchMedia("(hover: none)").matches ? set.touch : set.keys;
       const title = p.legend === "history" ? "History" : "Star Conquest";
-      panel.replaceChildren(h("div", { class: "legend" }, h("h2", {}, title),
+      panel.replaceChildren(...clears, h("div", { class: "legend" }, h("h2", {}, title),
         ...text.split("\n\n").map((para) => h("p", {}, para.replace(/\n/g, " ")))));
       return;
     }
@@ -125,8 +145,10 @@ export class Hud {
       }
       return h("p", { style, class: kind === "wrap" ? "wrap" : "" }, text);
     });
-    const parts = [h("section", {}, rows(p.system, p.lore))];
+    const parts = [...clears, h("section", {}, rows(p.system, p.lore))];
     if (p.lane.length) parts.push(h("section", {}, rows(p.lane)));
+    const touch = matchMedia("(hover: none)").matches;
+    if (p.rule.length) parts.push(h("section", {}, rows(touch ? p.rule_touch : p.rule)));
     panel.replaceChildren(...parts);
   }
 
@@ -155,8 +177,9 @@ export class Hud {
       this.pop = null;
       return null;
     }
-    const shape = [pop.src, pop.dest, pop.forward, Boolean(pop.forecast)].join();
-    if (this.pop?.shape !== shape) this.pop = this.buildPopup(box, pop, shape);
+    const shape = [pop.src, pop.dest, pop.forward, Boolean(pop.forecast),
+      pop.split ? pop.split.lanes.map((l) => l[0]).join("+") : ""].join();
+    if (this.pop?.shape !== shape) this.pop = this.buildPopup(box, view, shape);
     const ui = this.pop;
     ui.ships.textContent = pop.dest_ships === null ? "?sh" : `${pop.dest_ships}sh`;
     ui.ships.style.color = pop.dest_ships === null ? "var(--fog)" : this.color(pop.dest_owner);
@@ -167,28 +190,48 @@ export class Hud {
       ui.odds.hidden = !pop.forecast.odds;
       ui.forecastRow.disabled = !pop.forecast.odds;
     }
-    ui.value.textContent = pop.value;
-    const [lo, hi, value] = pop.slider;
-    ui.range = [lo, hi];
-    if (!ui.dragging) {
-      Object.assign(ui.slider, { min: lo, max: hi });
-      ui.slider.value = value;
+    if (pop.hold) {
+      ui.holdValue.textContent = String(pop.hold.value);
+      ui.holdValue.style.color = pop.hold.value || pop.hold.smart ? "var(--text)" : "var(--dim)";
+      ui.smart.classList.toggle("on", pop.hold.smart);
     }
-    pop.presets.forEach(([label, on], i) => {
-      ui.presets[i].textContent = label;
-      ui.presets[i].classList.toggle("on", on);
-    });
+    if (pop.split) {
+      pop.split.lanes.forEach(([dest, pct, hostile], i) => {
+        const row = ui.lanes[i];
+        row.pct.textContent = `${pct}%`;
+        row.name.style.color = hostile ? "var(--gamble)" : "var(--text)";
+        row.node.classList.toggle("on", dest === view.dest);
+        row.seg.style.width = `${pct}%`;
+      });
+      ui.stays.textContent = `${pop.split.stays}%`;
+      ui.even.classList.toggle("on", pop.split.even);
+    } else {
+      ui.value.textContent = pop.value;
+      const [lo, hi, value] = pop.slider;
+      ui.range = [lo, hi];
+      if (!ui.dragging) {
+        Object.assign(ui.slider, { min: lo, max: hi });
+        ui.slider.value = value;
+      }
+      pop.presets.forEach(([label, on], i) => {
+        ui.presets[i].textContent = label;
+        ui.presets[i].classList.toggle("on", on);
+      });
+    }
     ui.discard.textContent = pop.discard;
     box.hidden = false;
     return box;
   }
 
-  buildPopup(box, pop, shape) {
+  buildPopup(box, view, shape) {
+    const pop = view.popup;
     const call = (method, ...args) => () => this.on.call(method, args);
-    box.className = pop.forward ? "forward" : "";
+    box.className = [pop.forward ? "forward" : "", pop.split ? "split" : ""].join(" ").trim();
     const src = this.map.systems.find((s) => s.id === pop.src);
     const dest = this.map.systems.find((s) => s.id === pop.dest);
     const ui = { shape, dragging: false, range: [0, 0] };
+    const step = (label, onclick) => h("button", { type: "button", class: "step", "aria-label": label, onclick },
+      label === "Fewer" ? "−" : "+");
     ui.ships = h("span");
     ui.effect = h("div", { class: "row dim" });
     ui.value = h("span");
@@ -210,9 +253,44 @@ export class Hud {
           "Send"),
         h("button", { type: "button", class: `tab${pop.forward ? " on" : ""}`, onclick: call("set_forward_mode", true) },
           "Forward")),
-      h("div", { class: "row title" }, h("span", {}, `${src.name} -> ${dest.name}`), ui.ships),
-      ui.effect,
+      pop.split
+        ? h("div", { class: "row title" }, h("span", {}, `${src.name} splits`),
+          h("span", { style: `color:${this.color(view.human)}` }, `${pop.garrison}sh`))
+        : h("div", { class: "row title" }, h("span", {}, `${src.name} -> ${dest.name}`), ui.ships),
     ];
+    if (pop.hold) {
+      ui.holdValue = h("span", { class: "value" });
+      ui.smart = h("button", { type: "button", class: "pb chip", onclick: call("toggle_smart_hold") }, "smart");
+      kids.push(h("div", { class: "row well" }, h("span", { class: "dim" }, "holds"), ui.smart,
+        h("span", { class: "spacer" }),
+        step("Fewer", call("step_hold", -1)), ui.holdValue, step("More", call("step_hold", 1))));
+    }
+    if (pop.split) {
+      const swatches = laneSwatches(pop.split.lanes.length);
+      ui.lanes = pop.split.lanes.map(([d], i) => {
+        const sys = this.map.systems.find((x) => x.id === d);
+        const row = { name: h("span", { class: "name" }, sys.name), pct: h("span", { class: "value" }),
+          seg: h("span", { class: "seg", style: `background:${swatches[i]}` }) };
+        row.node = h("div", { class: "row lane", onclick: (e) => {
+          if (!e.target.closest(".step")) this.on.call("focus_lane", [d]);
+        } }, h("span", { class: "swatch", style: `background:${swatches[i]}` }), row.name,
+        step("Fewer", () => this.on.lane(d, -1)), row.pct, step("More", () => this.on.lane(d, 1)));
+        return row;
+      });
+      ui.stays = h("span", { class: "value dim" });
+      ui.even = h("button", { type: "button", class: "pb", onclick: call("even_split") }, "Even split");
+      kids.push(...ui.lanes.map((r) => r.node),
+        h("div", { class: "row lane" }, h("span", { class: "swatch home" }), h("span", { class: "name dim" }, "stays"),
+          h("span", { class: "step-gap" }), ui.stays, h("span", { class: "step-gap" })),
+        h("div", { class: "row" }, h("div", { class: "bar" }, ...ui.lanes.map((r) => r.seg))),
+        ui.effect,
+        h("div", { class: "pair" }, ui.even,
+          h("button", { type: "button", class: "pb danger", onclick: call("delete_all_forward") }, "Delete all")),
+        h("div", { class: "pair" }, ui.discard));
+      box.replaceChildren(...kids);
+      return ui;
+    }
+    kids.push(ui.effect);
     if (pop.forecast) {
       ui.forecast = h("span");
       ui.odds = h("span", { class: "i" }, "i");

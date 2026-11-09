@@ -124,6 +124,8 @@ def view(state: GameState, ui: Ui) -> dict:
         "sel_order": ui.sel_order,
         "sel_forward": ui.sel_forward,
         "pending": [[o.source_id, o.dest_id, o.ships] for o in ui.pending],
+        "rules": rules(state, ui),
+        "editing_rule": ui.selected if ui.mode == CHOOSING and ui.forward_armed else ui.sel_forward,
         "available": {str(sid): ui.available(state, sid) for sid, s in sorted(state.systems.items())
                       if s.owner_id == ui.human_id},
         "visible": sorted(ui.visible),
@@ -159,11 +161,17 @@ def popup(state: GameState, ui: Ui) -> dict | None:
     seen = ui.sees(dest.id)
     line = None if ui.forward_armed else hud.forecast(state, ui)
     lo, hi, value = ui.slider_range(state)
+    hold = split = None
+    if rule is not None:
+        hold = {"value": ui.hold_of(state, src.id), "smart": rule.smart}
+    if rule is not None and len(rule.shares) > 1:
+        split = {"lanes": [[d, pct, ui.lane_is_hostile(state, d)] for d, pct in rule.shares.items()
+                           if d in state.systems],
+                 "stays": max(0, 100 - rule.total()), "even": hud.even_split(ui)}
     return {
         "src": src.id,
         "dest": dest.id,
         "forward": ui.forward_armed,
-        "split": rule is not None and len(rule.shares) > 1,
         "editing": ui.editing_existing,
         "garrison": src.ships,
         "dest_ships": dest.ships if seen else None,
@@ -175,6 +183,8 @@ def popup(state: GameState, ui: Ui) -> dict | None:
         "slider": [lo, hi, value],
         "presets": [list(p) for p in hud.popup_presets(state, ui)],
         "discard": hud.popup_discard(ui),
+        "hold": hold,
+        "split": split,
     }
 
 
@@ -183,17 +193,42 @@ def panel(state: GameState, ui: Ui) -> dict:
     the legend's scene when nothing is in focus."""
     editing_rule = ui.sel_forward if ui.sel_forward in ui.auto_forward else None
     focus = editing_rule if editing_rule is not None else (ui.selected if ui.selected is not None else ui.hover)
+    clear = {"all": None, "dangerous": None}
+    if ui.auto_forward and not ui.history:
+        dangerous = sum(1 for sid in ui.auto_forward if ui.rule_is_hostile(state, sid))
+        clear = {"all": hud.clear_forward_label(ui),
+                 "dangerous": hud.clear_dangerous_label(dangerous) if dangerous else None}
     if focus not in state.systems:
-        return {"focus": None, "legend": "history" if ui.history else "spectating" if ui.spectating else "live"}
+        return {"focus": None, "legend": "history" if ui.history else "spectating" if ui.spectating else "live",
+                "clear": clear}
     sys = state.systems[focus]
     dest = hud.lane_target(state, ui, focus)
+    ruled = focus in ui.auto_forward
     return {
         "focus": focus,
+        "clear": clear,
+        "rule": [list(r) for r in hud.rule_rows(state, ui, focus, False)] if ruled else [],
+        "rule_touch": [list(r) for r in hud.rule_rows(state, ui, focus, True)] if ruled else [],
         "system": [list(r) for r in hud.system_rows(state, ui, sys)],
         "compact": [list(r) for r in hud.system_rows_compact(state, ui, sys)],
         "lane": [list(r) for r in hud.lane_rows(state, ui, focus, dest)] if dest is not None else [],
         "lore": focus == ui.selected and sys.name in starlore.LORE and not ui.history,
     }
+
+
+def rules(state: GameState, ui: Ui) -> list[dict]:
+    """Our standing rules as the map draws them: each source's lanes with their
+    share and whether they charge a system we don't hold, its hold badge, and
+    whether it will fire (only a live rule is picked off its lanes)."""
+    out = []
+    for src, rule in ui.auto_forward.items():
+        s = state.systems.get(src)
+        if s is None or s.owner_id != ui.human_id:
+            continue
+        out.append({"src": src, "live": ui.rule_is_live(state, src), "badge": hud.hold_badge(state, ui, src),
+                    "lanes": [[d, pct, ui.lane_is_hostile(state, d)] for d, pct in rule.shares.items()
+                              if d in state.systems]})
+    return out
 
 
 def scores(state: GameState, ui: Ui) -> list[dict]:

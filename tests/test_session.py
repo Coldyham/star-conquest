@@ -124,3 +124,22 @@ def test_the_view_is_plain_json_through_a_game(session):
         res = _call(session, "turn.end")["result"]
         assert json.loads(json.dumps(res["view"])) == res["view"]
         assert {s["id"] for s in res["view"]["scores"]} == {1, 2}
+
+
+def test_a_forward_rule_is_armed_shown_and_reopened(session):
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    view = _call(session, "ui.tap", sid=nbr, shift=True)["result"]["view"]
+    pop = view["popup"]
+    assert pop["forward"] and pop["hold"] == {"value": 0, "smart": False} and pop["split"] is None
+    assert view["editing_rule"] == home and pop["forecast"] is None
+    view = _call(session, "ui.call", method="step_hold", args=[2])["result"]["view"]
+    assert view["popup"]["hold"]["value"] == 2
+    view = _call(session, "ui.empty")["result"]["view"]
+    assert view["rules"] == [{"src": home, "live": True, "badge": "hold 2", "lanes": [[nbr, 100, True]]}]
+    assert view["panel"]["clear"]["all"].startswith("Clear all forwarding")
+    view = _call(session, "ui.lane", hits=[["rule", home, nbr]])["result"]["view"]
+    assert view["editing_rule"] == home and view["popup"]["discard"] == "Delete rule"
+    assert view["panel"]["rule"][0][0] == "Auto-forward"
+    view = _call(session, "ui.call", method="clear_all_forward")["result"]["view"]
+    assert view["rules"] == []

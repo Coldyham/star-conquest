@@ -22,7 +22,7 @@ const params = new URLSearchParams(location.search);
 
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
-  hover: null, drag: null, pan: null, film: null, busy: false,
+  hover: null, drag: null, pan: null, film: null, busy: false, crawling: false,
 };
 
 function status(text, error = false) {
@@ -51,9 +51,29 @@ function look(view, before = null) {
 
 function redraw() {
   if (!game.board_view || game.film) return;
-  game.board_view.draw(game.board, 1, look(game.view));
+  game.board_view.draw(game.board, 1, look(game.view), performance.now());
   const box = game.hud.popup(game.view);
   if (box) place(box);
+  crawl();
+}
+
+/** Keep redrawing while a rule being edited crawls (`render._flow_phase`). */
+function crawl() {
+  const v = game.view;
+  const moving = v && (v.editing_rule !== null || (v.mode === "choosing" && v.popup?.forward));
+  if (!moving || game.crawling) return;
+  game.crawling = true;
+  const frame = (now) => {
+    const still = game.view && (game.view.editing_rule !== null
+      || (game.view.mode === "choosing" && game.view.popup?.forward));
+    if (!still || game.film || !game.board_view) {
+      game.crawling = false;
+      return;
+    }
+    game.board_view.draw(game.board, 1, look(game.view), now);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 /** Put the popup beside its lane, on whichever side covers the fewest systems
@@ -116,6 +136,10 @@ async function newGame(seed = null) {
   game.board_view.setTravel(res.travel);
   game.hud = new Hud(game.map, res.legends, {
     call: (method, args) => act("ui.call", { method, args }),
+    lane: async (dest, delta) => {
+      await core.call("ui.call", { method: "focus_lane", args: [dest] });
+      act("ui.call", { method: "step_share", args: [delta] });
+    },
     footer,
     odds: () => {},
     lore: () => {},

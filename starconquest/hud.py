@@ -3,7 +3,7 @@ lines and the forecast, apart from how they are drawn.
 
 Both shells read these: `render` lays them out in pygame and `serial.view`
 sends them to the HTML page, so a line is worded in one place. A colour goes
-as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, a
+as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
 colour. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
 star name in it, so it may need the small font), ``"row"`` for one line, and
@@ -483,3 +483,51 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
         )
 
     return specs
+
+
+def rule_rows(state: GameState, ui: Ui, src: int, touch: bool) -> list[Row]:
+    """The focused system's standing rule: its hold, then each lane with its share
+    and the ships that share sends this turn. The lane the popup is on is picked
+    out in the select colour."""
+    rule = ui.auto_forward[src]
+    editing = src == ui.sel_forward or (ui.mode == CHOOSING and ui.forward_armed and src == ui.selected)
+    rows: list[Row] = [("Auto-forward", "select" if editing else ui.human_id, "head")]
+    if rule.smart:
+        rows.append((f"holds {ui.hold_of(state, src)} (smart)", "forward", "row"))
+    elif rule.hold:
+        rows.append((f"holds {rule.hold}", "forward", "row"))
+    this_turn = ui.forward_this_turn(state, src)
+    for dest, pct in rule.shares.items():
+        # a rule can outlive its destination for a frame (the system was taken and
+        # the map rebuilt); name it when it is still there, fall back to the bare id
+        d = state.systems.get(dest)
+        line = f"-> {d.label if d else f'System {dest}'}  {pct}% · {this_turn.get(dest, 0)}"
+        lit = editing and (dest == ui.dest or ui.mode != CHOOSING)
+        rows.append((line, "select" if lit else "text", "wrap"))
+    if touch:
+        hint = "−/+: share · Delete: remove" if editing else "tap a lane to edit"
+    else:
+        hint = "wheel: share · X: remove" if editing else "click a lane · X: clear"
+    rows.append((hint, "dim", "wrap"))
+    return rows
+
+
+def hold_badge(state: GameState, ui: Ui, sid: int) -> str | None:
+    """A holding system's badge under its disc: "hold N", or "smart N" for a hold
+    that sizes itself (shown even at nothing, so it is seen to be armed). None
+    for a system holding nothing, or not ours."""
+    rule = ui.auto_forward.get(sid)
+    sys = state.systems.get(sid)
+    if rule is None or not (rule.hold or rule.smart) or sys is None or sys.owner_id != ui.human_id:
+        return None
+    return f"{'smart' if rule.smart else 'hold'} {ui.hold_of(state, sid)}"
+
+
+def clear_forward_label(ui: Ui) -> str:
+    """The panel's button that clears every standing rule."""
+    return f"Clear all forwarding ({ui.forward_lanes()})"
+
+
+def clear_dangerous_label(count: int) -> str:
+    """The panel's button that clears the rules pointed at systems we don't hold."""
+    return f"Clear dangerous ({count})"

@@ -24,6 +24,8 @@ const TEXT_DARK = [12, 14, 22];
 const TEXT_DIM = "rgb(140,148,165)";
 const SELECT = "rgb(250,240,150)";
 const FOG = [58, 62, 82];
+const DANGER = "rgb(200,96,104)";        // widgets.BTN_DANGER's edge
+const FORWARD = "rgb(110,205,195)";      // render._forward_accent
 
 // config, in pixels: NODE_MIN_RADIUS / NODE_MAX_RADIUS for production 5 (poorest)
 // and 2 (richest), FLEET_SIZE, FILM_ARRIVAL_GAP, NODE_LABEL_GAP, the progress
@@ -34,6 +36,9 @@ const FLEET = 9, ARRIVAL_GAP = 4, LABEL_GAP = 5, RING_GAP = 4, RING_PAD = 6;
 export const FIT_PAD = Math.max(50, R_MAX + RING_PAD + 4);
 const TAP_MIN = 22, LANE_PICK = 10;
 const ARROW = 13, ARROW_GAP = 6, ARROW_WING = 0.6;
+// config.RULE_*: a rule's conveyor, its crawl, and where its share label sits.
+const CHEVRON = 8, CHEVRON_GAP = 16, FLOW_MS = 700, RULE_LABEL_GAP = 16, RULE_LABEL_FRAC = 0.35;
+const CLEARANCE = R_MAX + RING_PAD + 4;   // config.node_clearance()
 const FONT = 18, FONT_SMALL = 14;
 const CHAR_W = 0.602;          // DejaVu Sans Mono's advance, in ems
 const LINE_H = 1.17;           // ...and its line height
@@ -99,17 +104,89 @@ function segmentDist(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
+/** An open chevron with its tip at (tx, ty), pointing along (ux, uy). */
+function chevron(parent, tx, ty, ux, uy, size, color, width) {
+  const backX = tx - ux * size, backY = ty - uy * size;
+  const wing = size * ARROW_WING;
+  el("polyline", { points: `${backX - uy * wing},${backY + ux * wing} ${tx},${ty} ${backX + uy * wing},${backY - ux * wing}`,
+    fill: "none", stroke: color, "stroke-width": width, "stroke-linejoin": "round" }, parent);
+}
+
+/** `render._rule_chevron_dists`: where along a rule's lane its chevrons sit,
+ * walked one spacing forward over a cycle by `phase` (0..1). */
+function chevronDists(length, srcR, destR, phase) {
+  const start = srcR + ARROW_GAP + CHEVRON;
+  const span = length - (destR + ARROW_GAP) - start;
+  if (span <= CHEVRON) return [length / 2];
+  const count = Math.max(2, Math.round(span / CHEVRON_GAP));
+  const step = span / count;
+  const out = [];
+  for (let i = 0; i <= count; i++) if (i + phase <= count) out.push(start + (i + phase) * step);
+  return out;
+}
+
+/** A standing rule's lane: a conveyor of small chevrons toward the destination. */
+function ruleFlow(parent, a, b, srcR, destR, color, width, phase) {
+  const [ax, ay] = a, [bx, by] = b;
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  const ux = (bx - ax) / len, uy = (by - ay) / len;
+  for (const d of chevronDists(len, srcR, destR, phase)) {
+    chevron(parent, ax + ux * d, ay + uy * d, ux, uy, CHEVRON, color, width);
+  }
+}
+
+const PILL_H = FONT_SMALL * LINE_H + 4;
+
+function pillWidth(text) {
+  return text.length * FONT_SMALL * CHAR_W + 8;
+}
+
+/** Text on a small dark plate, centred on (x, y) (`widgets.label_pill`). */
+function pill(parent, x, y, text, color) {
+  const w = pillWidth(text);
+  el("rect", { x: x - w / 2, y: y - PILL_H / 2, width: w, height: PILL_H, rx: 5, fill: BG }, parent);
+  const t = el("text", { x, y, fill: color, "dominant-baseline": "central" }, parent);
+  t.textContent = text;
+}
+
+function overlaps(a, b) {
+  return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
+/** `render._rule_label_center`: a rule's share label, just past the sending
+ * system and off the lane, trying the other side and further along to clear
+ * `avoid` (the source's hold badge). */
+function ruleLabelAt(a, b, avoid, text) {
+  const [ax, ay] = a, [bx, by] = b;
+  const length = Math.hypot(bx - ax, by - ay) || 1;
+  const ux = (bx - ax) / length, uy = (by - ay) / length;
+  const [px, py] = ux >= 0 ? [-uy, ux] : [uy, -ux];
+  const base = Math.min(CLEARANCE + RULE_LABEL_GAP, length * RULE_LABEL_FRAC);
+  const clear = CLEARANCE + RULE_LABEL_GAP;
+  const lift = FONT_SMALL * LINE_H + 8;
+  const at = (along, side) => {
+    const off = Math.max(lift, Math.sqrt(Math.max(0, clear * clear - along * along)));
+    return [ax + ux * along + side * px * off, ay + uy * along + side * py * off];
+  };
+  const first = at(base, 1);
+  if (!avoid) return first;
+  const w = pillWidth(text);
+  for (const along of [base, base * 1.6, base * 2.2]) {
+    for (const side of [1, -1]) {
+      const [x, y] = at(Math.min(along, length / 2), side);
+      if (!overlaps([x - w / 2, y - PILL_H / 2, w, PILL_H], avoid)) return [x, y];
+    }
+  }
+  return first;
+}
+
 /** A planned send: the lane as a line, an open chevron short of the destination. */
 function planned(parent, a, b, destR, color, width) {
   const [ax, ay] = a, [bx, by] = b;
   const len = Math.hypot(bx - ax, by - ay) || 1;
   const ux = (bx - ax) / len, uy = (by - ay) / len;
-  const tx = bx - ux * (destR + ARROW_GAP), ty = by - uy * (destR + ARROW_GAP);
-  const backX = tx - ux * ARROW, backY = ty - uy * ARROW;
-  const wing = ARROW * ARROW_WING;
   el("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: color, "stroke-width": width }, parent);
-  el("polyline", { points: `${backX - uy * wing},${backY + ux * wing} ${tx},${ty} ${backX + uy * wing},${backY - ux * wing}`,
-    fill: "none", stroke: color, "stroke-width": width, "stroke-linejoin": "round" }, parent);
+  chevron(parent, bx - ux * (destR + ARROW_GAP), by - uy * (destR + ARROW_GAP), ux, uy, ARROW, color, width);
 }
 
 export class BoardView {
@@ -227,6 +304,15 @@ export class BoardView {
       const d = segmentDist(px, py, ax, ay, bx, by);
       if (d <= LANE_PICK) hits.push([d, ["order", i, -1]]);
     });
+    for (const rule of view.rules) {
+      if (!rule.live) continue;   // only the rules that fire are pickable
+      const [ax, ay] = this.pos.get(rule.src);
+      for (const [dst] of rule.lanes) {
+        const [bx, by] = this.pos.get(dst);
+        const d = segmentDist(px, py, ax, ay, bx, by);
+        if (d <= LANE_PICK) hits.push([d, ["rule", rule.src, dst]]);
+      }
+    }
     return hits.sort((a, b) => a[0] - b[0]).map(([, tag]) => tag);
   }
 
@@ -234,7 +320,7 @@ export class BoardView {
    * `look` is what the player sees and is doing: `sees(id)`, `seen` (a Set),
    * and the session's `view` (selection, orders, the popup) plus the page's
    * own `hover` and `drag`; without it, everything is in plain sight. */
-  draw(board, travel, look = null) {
+  draw(board, travel, look = null, now = 0) {
     const view = look?.view ?? null;
     const sees = look?.sees ?? (() => true);
     const fogState = (id) => (sees(id) ? "visible" : look?.seen?.has(id) ? "fogged" : "hidden");
@@ -258,13 +344,18 @@ export class BoardView {
     });
 
     this.orderLayer.replaceChildren();
-    if (view) this.drawOrders(view, human);
+    const badged = new Set();
+    if (view) {
+      this.drawRules(view, human, now, badged);
+      this.drawOrders(view, human, now);
+    }
 
     for (const s of board.sys.values()) {
       const node = this.nodes.get(s.id);
       const state = fogState(s.id);
       node.g.style.display = state === "hidden" ? "none" : "";
       const r = node.r;
+      node.name.setAttribute("y", r + LABEL_GAP + FONT_SMALL * LINE_H / 2 + (badged.has(s.id) ? PILL_H + 4 : 0));
       if (view && s.id === view.selected) {
         set(node.mark, { r: r + RING_PAD, stroke: SELECT, "stroke-width": 3, display: "" });
       } else if (valid.has(s.id)) {
@@ -301,9 +392,43 @@ export class BoardView {
     this.drawDrag(look, human);
   }
 
+  /** Standing rules as a chevron conveyor in our colour, the one being edited
+   * in the select colour with its focused lane crawling, a lane into a system
+   * we don't hold tinted as dangerous; each lane's share where less than
+   * everything, and a hold badge under its source (`render._draw_forward_rules`).
+   * Adds each badged source to `badged`, whose name then goes under the badge. */
+  drawRules(view, human, now, badged) {
+    const own = rgb(this.colors.get(human) || NEUTRAL);
+    const editing = view.editing_rule;
+    for (const rule of view.rules) {
+      const selected = rule.src === editing;
+      const a = this.pos.get(rule.src);
+      const r = this.radius.get(rule.src);
+      let avoid = null;
+      if (rule.badge) {
+        const w = pillWidth(rule.badge);
+        const y = a[1] + r + LABEL_GAP + PILL_H / 2;
+        avoid = [a[0] - w / 2, y - PILL_H / 2, w, PILL_H];
+        badged.add(rule.src);
+      }
+      for (const [dst, pct, hostile] of rule.lanes) {
+        const focused = selected && (dst === view.dest || view.mode !== "choosing");
+        const color = selected ? SELECT : hostile ? DANGER : own;
+        const phase = focused ? (now % FLOW_MS) / FLOW_MS : 0;
+        const b = this.pos.get(dst);
+        ruleFlow(this.orderLayer, a, b, r, this.radius.get(dst), color, focused ? 3 : 2, phase);
+        if (pct < 100) {
+          const [x, y] = ruleLabelAt(a, b, avoid, `${pct}%`);
+          pill(this.orderLayer, x, y, `${pct}%`, selected ? rgb(TEXT) : TEXT_DIM);
+        }
+      }
+      if (rule.badge) pill(this.orderLayer, a[0], avoid[1] + PILL_H / 2, rule.badge, selected ? rgb(TEXT) : FORWARD);
+    }
+  }
+
   /** Queued sends, the order being edited in the select colour, and the move
    * the popup is editing (`render._draw_pending`, `_draw_choosing_preview`). */
-  drawOrders(view, human) {
+  drawOrders(view, human, now) {
     const own = rgb(this.colors.get(human) || NEUTRAL);
     view.pending.forEach(([src, dst, ships], i) => {
       const a = this.pos.get(src), b = this.pos.get(dst);
@@ -315,8 +440,12 @@ export class BoardView {
     });
     if (view.mode === "choosing" && view.selected !== null && view.dest !== null) {
       const a = this.pos.get(view.selected), b = this.pos.get(view.dest);
-      const line = el("g", view.popup?.forward ? { "stroke-dasharray": "8 6" } : {}, this.orderLayer);
-      planned(line, a, b, this.radius.get(view.dest), SELECT, 3);
+      if (view.popup?.forward) {
+        ruleFlow(this.orderLayer, a, b, this.radius.get(view.selected), this.radius.get(view.dest), SELECT, 3,
+          (now % FLOW_MS) / FLOW_MS);
+      } else {
+        planned(this.orderLayer, a, b, this.radius.get(view.dest), SELECT, 3);
+      }
     }
   }
 

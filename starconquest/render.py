@@ -172,8 +172,8 @@ def _role(role: hud.Role) -> tuple[int, int, int]:
     if isinstance(role, int):
         return config.player_color(role)
     return {"text": config.COLOR_TEXT, "dim": config.COLOR_TEXT_DIM, "select": config.COLOR_SELECT,
-            "fog": config.COLOR_FOG, "sure": _BTN_GREEN[1], "likely": _BTN_AMBER[1],
-            "gamble": _BTN_DANGER[1]}[role]
+            "fog": config.COLOR_FOG, "forward": _forward_accent(), "sure": _BTN_GREEN[1],
+            "likely": _BTN_AMBER[1], "gamble": _BTN_DANGER[1]}[role]
 
 
 # --------------------------------------------------------------------------- #
@@ -561,11 +561,10 @@ def _hold_badge(font, state: GameState, ui: Ui, sid: int) -> tuple[str, tuple[in
     where its star name would go, so `_draw_node_names` moves the name down a slot.
     A smart hold reads "smart N" even at nothing, so it is seen to be armed. None
     for a system holding nothing (or not ours)."""
-    rule = ui.auto_forward.get(sid)
-    sys = state.systems.get(sid)
-    if rule is None or not (rule.hold or rule.smart) or sys is None or sys.owner_id != ui.human_id:
+    text = hud.hold_badge(state, ui, sid)
+    if text is None:
         return None
-    text = f"{'smart' if rule.smart else 'hold'} {ui.hold_of(state, sid)}"
+    sys = state.systems[sid]
     pos = ui.view.to_screen(sys.pos)
     half = _pill_rect(font, text, (0, 0)).h // 2
     return text, (pos[0], pos[1] + config.node_radius(sys.production) + config.NODE_LABEL_GAP + half)
@@ -2371,7 +2370,7 @@ def _draw_clear_forward_button(surface, ui: Ui, px: int, y: int) -> int:
     """A slim panel-top button that clears every standing forward rule; records
     its hit-rect on ``ui``. Returns the y below it for the details that follow."""
     font = _fonts()["small"]
-    label = f"Clear all forwarding ({ui.forward_lanes()})"
+    label = hud.clear_forward_label(ui)
     h = font.get_height() + config.s(10)
     r = pygame.Rect(px + config.s(12), y, _panel_w() + config.PANEL_PAD * 2 - config.s(24), h)
     pygame.draw.rect(surface, (58, 38, 42), r, border_radius=config.s(5))
@@ -2386,7 +2385,7 @@ def _draw_clear_dangerous_button(surface, ui: Ui, px: int, y: int, count: int) -
     rules currently tinted dangerous (`_draw_forward_rules`) — pointed at a system
     we don't hold. Records its hit-rect on ``ui``. Returns the y below it."""
     font = _fonts()["small"]
-    label = f"Clear dangerous ({count})"
+    label = hud.clear_dangerous_label(count)
     h = font.get_height() + config.s(10)
     r = pygame.Rect(px + config.s(12), y, _panel_w() + config.PANEL_PAD * 2 - config.s(24), h)
     pygame.draw.rect(surface, _BTN_DANGER[0], r, border_radius=config.s(5))
@@ -2513,28 +2512,7 @@ def _panel_rule(surface, state: GameState, ui: Ui, x, y, src) -> int:
     """The focused system's standing rule: its hold, then each lane with its share
     and the ships that share sends this turn. The lane the popup is on is picked
     out in the select colour."""
-    rule = ui.auto_forward[src]
-    editing = src == ui.sel_forward or (ui.mode == CHOOSING and ui.forward_armed and src == ui.selected)
-    color = config.COLOR_SELECT if editing else config.player_color(ui.human_id)
-    y = _head(surface, x, y, "Auto-forward", color)
-    if rule.smart:
-        y = _row(surface, x, y, f"holds {ui.hold_of(state, src)} (smart)", _forward_accent())
-    elif rule.hold:
-        y = _row(surface, x, y, f"holds {rule.hold}", _forward_accent())
-    this_turn = ui.forward_this_turn(state, src)
-    for dest, pct in rule.shares.items():
-        # a rule can outlive its destination for a frame (the system was taken and
-        # the map rebuilt); name it when it is still there, fall back to the bare id
-        d = state.systems.get(dest)
-        line = f"-> {d.label if d else f'System {dest}'}  {pct}% · {this_turn.get(dest, 0)}"
-        lit = editing and (dest == ui.dest or ui.mode != CHOOSING)
-        y = _rows_named(surface, x, y, line, config.COLOR_SELECT if lit else config.COLOR_TEXT)
-    if config.touch_ui:
-        hint = "−/+: share · Delete: remove" if editing else "tap a lane to edit"
-    else:
-        hint = "wheel: share · X: remove" if editing else "click a lane · X: clear"
-    y = _rows_named(surface, x, y, hint, config.COLOR_TEXT_DIM)
-    return y
+    return _draw_rows(surface, x, y, hud.rule_rows(state, ui, src, config.touch_ui))
 
 
 # What the panel says when nothing is selected: how the game is actually played,
