@@ -308,7 +308,7 @@ function renderStage(stage, i, dupes) {
   return el("fieldset", { class: "stage" }, [
     el("legend", { text: `Stage ${i + 1}` }),
     tools,
-    el("label", { for: id("link"), text: "Game link" }), link, summary,
+    el("label", { for: id("link"), text: "Map link" }), link, summary,
     el("label", { for: id("title"), text: "Title" }), title, titleCount,
     el("label", { for: id("brief-0"), text: "Briefing (shown on a card as the stage starts)" }),
     ...paragraphs,

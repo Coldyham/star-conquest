@@ -231,7 +231,7 @@ difficulty.
 
 ## Gauntlets made on the board
 
-The board's gauntlet page builds a gauntlet from game links: one pasted link
+The board's gauntlet page builds a gauntlet from map links: one pasted link
 per stage (the menu's Get Link, or a challenge link with its score dropped),
 each with a title, briefing paragraphs and a hint. Saving stores it and gives
 the link `/play/#g=<id>`. A `.json` download of the same file is for desktop.
@@ -627,7 +627,7 @@ every seed.
 ### On the board
 
 The generate form sits on `gauntlet.html`, one of two ways under the page's
-shared name, author and listing box (Generate, or Build from game links; the
+shared name, author and listing box (Generate, or Build from map links; the
 page remembers which it showed, and a `#<id>` remix opens on Build).
 `leaderboard/js/gauntlet-spec.mjs` turns it into a spec (`buildSpec`, pure,
 `leaderboard/tests/gauntlet-spec.test.mjs`) and `gauntlet-gen-page.mjs` is the

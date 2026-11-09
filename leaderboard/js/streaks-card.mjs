@@ -16,7 +16,7 @@ const CHUNK = 80;
 
 const KIND_ROWS = [
   { kind: "puzzle", title: "Daily puzzle", href: "puzzle.html" },
-  { kind: "board", title: "Daily board", href: "daily.html" },
+  { kind: "board", title: "Daily map", href: "daily.html" },
 ];
 
 const STATE_TEXT = {

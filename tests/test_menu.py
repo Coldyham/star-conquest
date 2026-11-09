@@ -71,7 +71,7 @@ def test_web_file_row_is_get_link_and_recently_played():
 
 def test_recently_played_opens_the_leaderboards_main_list(monkeypatch):
     """Clicking 'Recently played' opens the board's main list, newest activity
-    first, not its "By config" grouping — the button names that list. A Save/Load
+    first, not its "By setup" grouping — the button names that list. A Save/Load
     row could never have offered it on the web, where a saved file silently
     vanishes on reload."""
     opened = []

@@ -7,7 +7,7 @@ import test from "node:test";
 import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
   addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parNote, playerDays, playerStreaks,
-  postedOn, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
+  postedOn, resultLine, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -243,4 +243,13 @@ test("the par's congratulation is only for a score that met it, in the game's wo
   assert.equal(parNote(likely, 10, 4), "");
   assert.equal(parNote(likely, 11, 0), "");
   assert.equal(parNote(null, 10, 3), "");
+});
+
+test("a daily's result line is the game's, word for word", () => {
+  // tests/test_daily.py checks the game says these same strings.
+  assert.equal(resultLine("2026-11-08", 12, 3, "board", "https://example.org/"),
+    "Star Conquest daily #12 - 12 turns, 3 ships\nhttps://example.org/play/#daily");
+  assert.equal(resultLine("2026-11-08", 7, 0, "puzzle", "https://example.org"),
+    "Star Conquest puzzle #12 - 7 turns, 0 ships\nhttps://example.org/play/#puzzle");
+  assert.equal(resultLine("2026-10-28", 9, 1, "board", ""), "Star Conquest daily #1 - 9 turns, 1 ships");
 });

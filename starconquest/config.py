@@ -565,7 +565,7 @@ def travel_turns_at_length(length_ly: float, turn: int) -> int:
     """Turns to cross a lane of ``length_ly`` if launched on ``turn``.
 
     Derives straight from the lane's real length and the current speed, so it
-    matches what's shown alongside it (length, "Fleet speed") exactly — unlike
+    matches what's shown alongside it (length, "Ship speed") exactly — unlike
     ``travel_turns_at``, there's no previously-rounded-up figure to double-round.
     """
     return max(1, math.ceil(length_ly / ship_speed(turn)))

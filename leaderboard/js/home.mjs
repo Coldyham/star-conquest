@@ -62,7 +62,7 @@ function showMore(list, { kind, query }, render, offset, { keep, prepare }) {
   return wrap;
 }
 
-/** By game, by config or by family, styled like game.mjs's turns/lost ranking toggle.
+/** By map, by setup or by family (`?group=game|config|family`), styled like game.mjs's turns/lost ranking toggle.
  * Hidden once already narrowed to one config — there is nothing left to
  * group there. Every other filter rides along. */
 function groupToggle(filters) {
@@ -72,7 +72,7 @@ function groupToggle(filters) {
     href: urlFor({ ...filters, group: value }),
     text: label,
   });
-  const children = [linkFor("game", "By game"), linkFor("config", "By config"), linkFor("family", "By family")];
+  const children = [linkFor("game", "By map"), linkFor("config", "By setup"), linkFor("family", "By family")];
   if (filters.group === "config") children.push(randomSetupButton(filters));
   return el("div", { class: "sorts" }, children);
 }
@@ -167,7 +167,7 @@ function controls(filters) {
     dirPicker(filters),
     picker("players", "Players", filters.players || "",
       [["", "Any"], ...PLAYER_COUNTS.map((n) => [n, `${n}`])]),
-    picker("mode", "Map", filters.mode, [["", "Any"], ...MODES.map((m) => [m, m[0].toUpperCase() + m.slice(1)])]),
+    picker("mode", "Map type", filters.mode, [["", "Any"], ...MODES.map((m) => [m, m[0].toUpperCase() + m.slice(1)])]),
     picker("fog", "Fog", filters.fog, [["", "Any"], ["on", "On"], ["off", "Off"]]),
   ]);
   form.append(picks);
@@ -490,7 +490,7 @@ function familyCard(family, matches) {
   const configs = family.members.length;
   const maps = family.members.reduce((sum, m) => sum + (m.config.game_count || 0), 0);
   const meta = [
-    `${configs} ${configs === 1 ? "config" : "configs"}`,
+    `${configs} ${configs === 1 ? "setup" : "setups"}`,
     `${maps} ${maps === 1 ? "map" : "maps"}`,
     relativeTime(family.lastActivity),
   ].join(" · ");

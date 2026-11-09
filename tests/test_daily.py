@@ -301,3 +301,15 @@ def test_the_board_says_it_in_the_games_words():
         assert f'"{text}"' in tests, text
         assert text.split("!")[0] + "!" in js
 
+
+
+def test_the_boards_result_line_is_the_games(monkeypatch):
+    """`leaderboard/js/daily.mjs`'s `resultLine` (the daily page's "Copy daily
+    result") copies what the end screen copies: the JS test pins these strings."""
+    tests = (Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "daily.test.mjs").read_text()
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_origin", lambda: "https://example.org/")
+    for day, turns, lost, kind in (("2026-11-08", 12, 3, game_daily.BOARD), ("2026-11-08", 7, 0, game_daily.PUZZLE)):
+        text = game_daily.result_line(day, turns, lost, kind)
+        assert '"' + text.replace("\n", "\\n") + '"' in tests, text
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_origin", lambda: "")
+    assert f'"{game_daily.result_line("2026-10-28", 9, 1)}"' in tests

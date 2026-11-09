@@ -205,7 +205,7 @@ a blocker that says exactly what is wrong and a one-press **Renumber seats** tha
 fixes it — undoable, like every other edit.
 
 The same instinct governs painting: a seat colour never rewrites the numbers.
-**Make homeworld** is the explicit version, and it lives in the Owners sidebar so
+**Make home system** is the explicit version, and it lives in the Owners sidebar so
 the common "give this one a real garrison" case is not a round trip back to the
 Systems tool.
 
@@ -435,7 +435,7 @@ leaderboard and the offline bot column all carry it with no new plumbing.
   pressing the seat a system already holds arms the pick and stops there — Neutral
   is its own swatch in both rows, so that stays the map tap's job, where there is
   nothing else to press.
-- **Painting a seat never rewrites the numbers.** *Make homeworld* is the explicit
+- **Painting a seat never rewrites the numbers.** *Make home system* is the explicit
   version, stamping `HOME_PRODUCTION`/`HOME_START_SHIPS` in one press, so the
   common "give this one a real garrison" case isn't a two-tool round trip.
 - **The Owners tool's *Auto* is `mapgen.peripheral_starts`, not a second copy of

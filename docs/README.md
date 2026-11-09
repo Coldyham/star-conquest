@@ -14,6 +14,7 @@ its design file and section, so a grep hit is enough to know where to read:
 | [`sections.md`](sections.md) | Every design-file section, one line each: what it covers and its verdict |
 | [`decided-against.md`](decided-against.md) | Every idea built or proposed and then dropped, with its outcome |
 | [`open.md`](open.md) | Work measured or proposed but neither shipped nor rejected, and decisions left to the author |
+| [`glossary.md`](glossary.md) | The words players see, and the code and table names for the same things |
 
 1. **Before proposing a mechanism, a bot tactic or a re-tune**, grep
    `decided-against.md` and `open.md` for the constant, function or idea.

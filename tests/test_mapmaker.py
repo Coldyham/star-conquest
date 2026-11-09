@@ -1177,7 +1177,7 @@ def test_make_homeworld_stamps_both_numbers_in_one_press(scene):
 
 
 def test_painting_a_seat_never_rewrites_the_numbers(scene):
-    """Explicit, never implicit — Make homeworld is the deliberate version."""
+    """Explicit, never implicit — Make home system is the deliberate version."""
     screen, ed, settings = _owners(scene)
     ed.owner_pick = 2
     before = (ed.recipe.nodes[1].production, ed.recipe.nodes[1].ships)
