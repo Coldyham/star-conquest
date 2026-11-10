@@ -90,7 +90,11 @@ html.compact { --mk-tap: 40px; }   /* config.COMPACT_TOUCH_MIN_TARGET */
 }
 .mkside .slider { margin: 0 0 6px; }
 .mkside .slider input { width: 100%; margin: 0; accent-color: rgb(110, 140, 200); }
-.mkside .check { display: flex; gap: 8px; align-items: center; color: var(--dim); margin: 0 0 6px; min-height: var(--mk-tap); }
+/* `width`..`justify-content` undo the setup menu's square `.check` box (menu.css). */
+.mkside .check {
+  display: flex; gap: 8px; align-items: center; color: var(--dim); margin: 0 0 6px; min-height: var(--mk-tap);
+  width: auto; height: auto; padding: 0; border: none; border-radius: 0; background: none; justify-content: flex-start;
+}
 .mkside .check input { width: 18px; height: 18px; margin: 0; accent-color: rgb(110, 140, 200); }
 .mkside .buttons { display: flex; gap: 10px; margin: 5px 0 10px; }
 .mkside .buttons .btn { flex: 1; min-width: 0; }
@@ -153,6 +157,7 @@ html.portrait .mkside {
 /* A band the screen's width: two sliders to a row (`mapmaker._draw_sliders`). */
 html.portrait .mkside > * { grid-column: 1 / -1; }
 html.portrait .mkside > .slider:not(.bare) { grid-column: auto; }
+html.portrait .mkside > .check { grid-column: auto; line-height: 18px; }
 html.portrait .mkpalette { min-height: 0; padding: 6px 8px; gap: 4px; }
 /* A phone on its side under a browser's bars: the palette's discs at two
    thirds, so the map keeps what height there is (its systems shrink too). */
