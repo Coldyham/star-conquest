@@ -768,7 +768,8 @@ def test_a_daily_link_fetches_the_day_onto_the_menu(session, games):
     body = json.dumps({"day": "2026-11-10", "kind": "board",
                        "settings": _S(players=3, nodes=14, seed=4242).to_dict()})
     pushed = _menu(session, "net.reply", req=http["req"], state="ok", body=body)["pushed"]
-    assert pushed["menu"]["status"]["ok"] and session.settings.seed == 4242
+    assert pushed["menu"]["status"] is None and session.settings.seed == 4242
+    assert pushed["menu"]["menu"]["subtitle"][0]["text"] == "DAILY MAP #14 · Tue 10 Nov"
     _menu(session, "game.start")
     assert session.ui.daily_day == "2026-11-10"
 

@@ -1559,7 +1559,7 @@ def land_daily(settings: Settings, state: str, body: str, kind: str = daily.BOAR
     settings.copy_from(setup)
     daily.remember(day, settings, kind)
     webstore.set(paths.WEB_SHARED_SETTINGS_KEY, settings.to_token())
-    return MenuNote(status=(daily.label(day, settings, kind), True))
+    return MenuNote()
 
 
 def start_generation(fragment: str) -> tuple[gauntletgen.Job | None, MenuNote]:

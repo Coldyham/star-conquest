@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from . import ai, combat, config, gauntlet, hud, mapgen, pbp, webstore
+from . import ai, combat, config, daily, gauntlet, hud, mapgen, pbp, webstore
 from . import run as gauntlet_run
 from .model import AiParams
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -414,6 +414,20 @@ def challenge_lines(settings: Settings) -> list[tuple[str, tuple[int, int, int]]
     if mine is not None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
     return [first, ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
+
+
+def daily_lines(settings: Settings) -> list[tuple[str, tuple[int, int, int]]]:
+    """The daily banner's two lines and their colours while the setup is a
+    daily's (`daily.daily_of`), or none: one knob moved and it is gone."""
+    day, kind = daily.daily_of(settings)
+    if not day:
+        return []
+    head, detail = daily.banner(day, settings, kind)
+    bits = [detail]
+    mine = webstore.best(*settings.challenge_keys())
+    if mine is not None:
+        bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
+    return [(head, START_BORDER), ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
 
 
 def gauntlets_label(ms) -> str:
@@ -971,7 +985,7 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
     elif ms.stage_at is not None:
         subtitle = _lines(stage_lines(ms, settings))
     else:
-        subtitle = [{"text": SUBTITLE, "color": _hex(config.COLOR_TEXT_DIM)}]
+        subtitle = _lines(daily_lines(settings)) or [{"text": SUBTITLE, "color": _hex(config.COLOR_TEXT_DIM)}]
     drawn = settings.custom_map is not None
     shared = pbp.configured()
     return {

@@ -359,9 +359,13 @@ create table if not exists public.dailies (
   set; blank disables it) and a **`#daily` launch link** (`#daily=<day>` for a
   past one). Either fetches the day (`main.open_daily`, polled like a gauntlet
   fetch, `main.land_daily`) and applies it to the menu as a setup, as a pasted
-  challenge link does, stashing it as a shared link's setup is. The status line
-  reads "Daily · Wed 28 Oct: Symmetric · 4 players · 16 systems · fog · vs
-  thinker, rusherplus". A
+  challenge link does, stashing it as a shared link's setup is. While the
+  setup is still the daily's, the menu's subtitle carries a banner, as a
+  challenge link's and a gauntlet stage's do (`setupmenu.daily_lines`,
+  `daily.banner`): "DAILY MAP #14 · Tue 10 Nov", then "Symmetric · 4 players ·
+  16 systems · fog · vs thinker, rusherplus" and your best. It is derived from
+  the setup's key, so it stays until a knob moves, and never flashes on the
+  status line (which on a phone shares the side column with the map sketch). A
   best on it is `webstore.best` on its key, derived as every best is.
 - **Known by its key** (`daily.remember`, `WEB_DAILIES_KEY`, a fortnight of
   keys): `main.new_ui` stamps `Ui.daily_day` on a game whose setup is a
@@ -388,8 +392,8 @@ create table if not exists public.dailies (
   Wordle-short since 2026-11-07: the day's number (`daily.number`, 1 on
   `FIRST_DAY`, 2026-10-28, for both kinds) and the result, nothing about the
   map. It named the date, the board's size and a puzzle's opponent before;
-  less said makes a reader curious. The same number heads the menu's line for
-  a daily just opened ("Puzzle #11 · Sat 7 Nov: …") and the board's daily
+  less said makes a reader curious. The same number heads the menu's banner on
+  a daily's setup ("DAILY PUZZLE #11 · Sat 7 Nov") and the board's daily
   pages (day picker, card and standings; `daily.mjs`'s `FIRST_DAY`, kept equal
   by `test_leaderboard_sync`). Days before the first carry none.
 
