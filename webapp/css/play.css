@@ -417,3 +417,19 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #pbp.invite .row .btn { min-width: 64px; height: 30px; font-size: 14px; }
 #pbp.invite .done { align-self: center; min-width: 140px; margin-top: 10px; }
 
+
+/* --- the loading screen ------------------------------------------------------ */
+/* Over everything until the first screen is up (`play.boot`): the home-screen
+   icon's constellation (`tools/pwa/make_icons.py`), the title, and what is
+   loading. The page under it is not yet usable. */
+#loading {
+  position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px; padding: 16px;
+  background: radial-gradient(circle at 50% 42%, rgb(22, 30, 56), var(--bg) 60%);
+}
+#loading svg { width: min(160px, 36vmin); height: auto; animation: loading-pulse 1.8s ease-in-out infinite; }
+#loading h1 { margin: 6px 0 0; font-size: clamp(22px, 6vmin, 34px); letter-spacing: .08em; font-weight: bold; }
+#loading p { margin: 0; color: var(--dim); text-align: center; }
+#loading p.error { color: var(--gamble); white-space: pre-wrap; }
+@keyframes loading-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { #loading svg { animation: none; } }

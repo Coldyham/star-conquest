@@ -42,6 +42,10 @@ const game = {
 function status(text, error = false) {
   $("status").textContent = text;
   $("status").className = error ? "error" : "";
+  if (!game.ready && text) {   // the loading screen is still up: say it there
+    $("loading-status").textContent = text;
+    $("loading-status").className = error ? "error" : "";
+  }
 }
 
 /** The setup the address asks for, as `Settings` fields: the menu's pre-fill. */
@@ -807,10 +811,16 @@ async function boot() {
     throw err;
   }
   status("Starting…");
-  await core.call("boot", pageInfo());
+  try {
+    await core.call("boot", pageInfo());
+  } catch (err) {
+    status(`The game failed to start: ${err.message}`, true);
+    throw err;
+  }
   status("");
   await openMenu(true);
   if (params.has("go")) await newGame();
+  $("loading").hidden = true;
   const map = $("map");
   map.addEventListener("pointerdown", press);
   map.addEventListener("pointermove", move);
