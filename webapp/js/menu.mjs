@@ -4,6 +4,8 @@
 // about looking: where a slider's finger is along its track, the seed field's
 // caret, the status line's clock, and when to ask for the lanes to be measured.
 
+import { pickFile } from "./files.mjs";
+
 const SURVEY_MS = 250;   // the setup has settled once nothing moved for this long
 
 function h(tag, attrs = {}, ...kids) {
@@ -124,6 +126,9 @@ export class SetupMenu {
   }
 
   async press(key) {
+    if (key === "load_file") {   // the picker opens on the press itself
+      pickFile(async (name, text) => this.after(await this.send("file.open", { name, text })));
+    }
     const res = await this.send("menu.press", { key });
     this.after(res);
   }
@@ -440,7 +445,8 @@ export class SetupMenu {
       a.get_link ? btn("get_link", "Get Link", "plain") : null,
       a.shared ? btn("browse_matches", "Shared matches", "plain") : null,
       a.recent ? btn("browse_configs", "Recently played", "plain") : null,
-      a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null);
+      a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null,
+      a.files ? listBtn("files_menu", a.files, "plain", m.lists.files) : null);
     // Start stays centred: the map creator to its left, the rest to its right.
     const row2 = h("div", { class: "row2" },
       h("span", { class: "lead" },
@@ -458,6 +464,7 @@ export class SetupMenu {
       a.get_link ? btn("get_link", "Get Link", "plain") : null,
       a.board ? listBtn("board_menu", a.board, "plain", m.lists.board)
         : a.recent ? btn("browse_configs", "Recently played", "plain") : null,
+      a.files ? listBtn("files_menu", a.files, "plain", m.lists.files) : null,
       h("span", { class: "create" }, btn("create_map", a.create, "blue"),
         a.clear_map ? btn("clear_map", "x", "plain corner", { "aria-label": "Clear the drawn map" }) : null));
     this.actionsEl.replaceChildren(h("div", { class: "wide" }, row1, row2),

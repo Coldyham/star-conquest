@@ -128,9 +128,9 @@ and checked against its published SHA-256.
 desktop CPU), and download time over a real network. Both sides were served
 from localhost.
 
-**Caveat:** the service worker (scope `/`) caches `/next/` like any other path.
-That is safe, because the zip's name is its hash, but `/next/` gets its own
-rules in phase 7.
+**Caveat:** the service worker (scope `/`) cached `/next/` like any other path.
+That was safe, because the zip's name is its hash; phase 7 gave `/next/` its
+own rules.
 
 ## The play screen (phase 1)
 
@@ -306,8 +306,8 @@ part (`main`'s ``pending_*`` polls).
 to a fresh `/next/`; a decided match is not offered to resume, so nothing is
 lost.
 
-**Left for later:** a link pasted into an open page (`hashchange`) is not read
-until a reload, and the daily's buttons and par wait for phase 5 with the daily.
+**Left for later:** the daily's buttons and par waited for phase 5 with the
+daily. (A link pasted into an open page is read since phase 7.)
 
 ## Play by post (phase 4)
 
@@ -353,8 +353,8 @@ screens stayed byte-identical.
 to show than in pygame, which polls once a frame; against a five-second read
 cadence that is not felt.
 
-**Left for later:** a seat link pasted into an open page (`hashchange`) is
-not read until a reload, as with phase 3's links.
+**Left for later:** nothing; a seat link pasted into an open page is read
+since phase 7.
 
 ## The daily and gauntlets (phase 5)
 
@@ -402,8 +402,8 @@ pygame's game, menu and stage screens stayed byte-identical.
 card's own type, as the lore card's are, rather than pygame's fitted fonts,
 and the board behind it is not veiled.
 
-**Left for later:** a link pasted into an open page is not read until a
-reload, as with phase 3's links.
+**Left for later:** nothing; a link pasted into an open page is read since
+phase 7.
 
 ## The map maker (phase 6)
 
@@ -446,4 +446,69 @@ desktop's radius on a phone, where pygame's follow the UI scale.
 
 **Left for later:** nothing of the editor; its files on disk are the browser's
 own, not a folder the player can open (phase 7's Save and Load files).
+
+## Files, the launcher and the service worker (phase 7)
+
+The last of what pygame's shell does that `/next/` did not.
+
+- **Save and Open are files** (`files`, a core module: what a saved setup,
+  match or map holds, and what a picked file is, by its shape, never its
+  name). The menu's Files list saves the setup (pygame's Save, as
+  `Settings.save` writes it, less any challenge: a challenge travels by
+  clipboard only) and the last match (its log, from the games folder), each a
+  ``download`` effect the page hands the browser as a file. Open a file is
+  the page's file picker, opened on the press itself, as a browser requires;
+  its text goes to `file.open`: a setup loads onto the menu, a map becomes the
+  setup's hand map, and a match opens in history from its first turn as
+  someone else's game, as pygame's ``--watch FILE`` opens one. The map maker
+  keeps its library (Save and Open, the maps folder in IndexedDB) and gains
+  Export and Import (`maker.FILE_CONTROLS`, only in this build's footer).
+- **Quitting asks first.** Quit and Esc on the menu raise the quit confirm
+  (`setupmenu.modal` kind ``quit``, its words `hud.confirm_quit`, read by
+  `render` too); over a game it is `game.action` ``quit``, whose confirm is
+  the parity screen `confirm-quit`. Confirmed, the session asks the browser to
+  close the window (the ``close`` effect, as `main.leave_app` does on the
+  web) and, should it stay open, says how to leave on the menu.
+- **A link opened in an open page is read** (`page.hash`, on the page's
+  ``hashchange``): any match is left and the link opens as at boot (a setup,
+  a replay, a seat or a spectator's link, a daily, a gauntlet). Our own
+  address edits use ``history.replaceState``, which fires none.
+- **The local launcher.** ``uv run python main.py --html`` (or
+  ``python -m starconquest.serve``) serves the build on 127.0.0.1:8000 and
+  opens the browser; the menu's flags (``--players``, ``--nodes``,
+  ``--seed``, ``--mode``, ``--autoplay``, ``--no-menu``) become the address's
+  query, which pre-fills the menu as they pre-fill pygame's. Games and maps
+  persist in the browser's IndexedDB there as on the site. The default launch
+  stays pygame's until cutover.
+- **The service worker gives `/next/` its own rules** (`tools/pwa/sw.js`):
+  what its name fixes (the hashed game zip, Pyodide's versioned files, the
+  fonts) is cache-first; the page, its scripts and `js/build.mjs`, which names
+  the zip, are network-first like `/board/`, the cache answering only offline.
+  `/api/` stays untouched. The page registers it, except from the local
+  server, which serves none.
+
+Every parity recipe now shoots at every size it lists (`tools/parity_next.py`
+has no later phase left).
+
+**Differences kept on purpose:** a setup is saved as a download named
+`starconquest_settings.json` rather than into a named file under `saves/`, since
+the browser asks where it goes; "Save last match" replaces a games folder the
+player could open. Closing the tab needs no confirm, as nothing is lost: every
+match is kept as it is played.
+
+**Ready for cutover.** What remains, and only that:
+
+1. Point `/play/` at the HTML build (`tools/build_web.sh` stages `web/next`
+   at `web/play`, and `tools/pwa/root.html`'s router and the manifest's start
+   URL follow), with the manifest linked from its page.
+2. Make `main.py`'s default launch the HTML one (``--html`` today), keeping a
+   flag for pygame only until it is deleted.
+3. Delete the pygame shell (`render`, `input`, `menu`, `widgets`, `mapmaker`,
+   `main`'s loop, `softkeyboard`, `uifont`) and its tests, the wrappers it
+   kept in `setupmenu`, `maker` and `hud`, and the `is_web()` branches only it
+   reached; drop pygbag, its runtime mirror and cache rules from
+   `tools/build_web.sh` and `tools/pwa/sw.js`; retire the parity screen tools
+   once the baseline is no longer needed.
+4. Measure startup on a real phone over a real network, which this work could
+   not (*The Pyodide spike (phase 0)*, "Not measured").
 

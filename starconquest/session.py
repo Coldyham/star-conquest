@@ -23,8 +23,8 @@ import time
 import traceback
 from collections.abc import Callable
 
-from starconquest import (ai, app, bench, campaign, daily, engine, gauntletgen, hostio, hud, maker, paths, pbp,
-                          play, replay, serial, setupmenu, share, turnfilm, webstore)
+from starconquest import (ai, app, bench, campaign, daily, engine, files, gauntletgen, hostio, hud, maker, paths,
+                          pbp, play, replay, serial, setupmenu, share, turnfilm, webstore)
 from starconquest import recipe as recipes
 from starconquest import run as gauntlet_run
 from starconquest.model import GameState
@@ -324,7 +324,7 @@ class Session:
         if self.opened is not None:
             out["game"], self.opened = self.opened, None
         if action == "create_map" and self.maker is not None:
-            out["maker"] = maker.view(self.maker, settings, self.touch)
+            out["maker"] = maker.view(self.maker, settings, self.touch, files=True)
         if self.resume_log is not None:
             go, stay = setupmenu.resume_labels(self.touch)
             out["resume"] = {"title": "Resume last game?", "detail": setupmenu.resume_detail(self.resume_log),
@@ -337,7 +337,7 @@ class Session:
     def op_menu_press(self, key: str) -> dict:
         """A press on the menu's control ``key`` (`setupmenu.view` names them)."""
         ms, settings, key = self.menu, self._settings(), str(key)
-        if ms.confirm_unchallenge or ms.confirm_slow or ms.confirm_clear_map:
+        if ms.confirm_unchallenge or ms.confirm_slow or ms.confirm_clear_map or ms.confirm_quit:
             return self._menu(self._then(self._answer(key)))
         if ms.pbp_prompt:
             # Modal: only its own controls answer.
@@ -354,8 +354,8 @@ class Session:
             ms.editing_seed = False
         if not (key == "strategy" or key.startswith("strategy_opt_")):
             ms.strategy_open = False
-        daily_was, board_was = ms.daily_open, ms.board_open
-        ms.daily_open = ms.board_open = False
+        daily_was, board_was, files_was = ms.daily_open, ms.board_open, ms.files_open
+        ms.daily_open = ms.board_open = ms.files_open = False
         setupmenu.before_edit(ms, settings)
         action = None
         if key == "start":
@@ -368,6 +368,14 @@ class Session:
             ms.daily_open = not daily_was
         elif key == "board_menu":
             ms.board_open = not board_was
+        elif key == "files_menu":
+            ms.files_open = not files_was
+        elif key == "save_settings":
+            self._download(files.setup_file(settings))
+        elif key == "save_game":
+            self._save_last_match()
+        elif key == "load_file":
+            pass   # the page opens its file picker on the press itself (`file.open`)
         elif setupmenu.press(ms, settings, key, self._say):
             pass
         elif key == "get_link":
@@ -388,9 +396,7 @@ class Session:
         elif key == "clear_map":
             ms.confirm_clear_map = settings.custom_map is not None
         elif key == "quit":
-            # The page asks the browser to close it, which a tab rarely allows.
-            self._say(setupmenu.CANT_CLOSE_MSG, False)
-            action = key
+            ms.confirm_quit = True
         elif key == "create_map":
             action = self._then(setupmenu.open_creator(ms, settings))
         else:
@@ -447,6 +453,96 @@ class Session:
         else:
             self._say(failed, False)
 
+    # ------------------------------------------------------------------ #
+    # Files (`files`): Save hands the browser a file (a ``download`` effect);
+    # Open is the page's file picker, whose file comes back as `file.open`.
+    def _download(self, file: files.Download) -> None:
+        hostio.emit("download", **file.effect())
+        self._say(f"Saved {file.name}", True)
+
+    def _save_last_match(self) -> None:
+        """The newest match in the games folder, as its log."""
+        for path in replay.list_logs():
+            try:
+                log = replay.load(path)
+            except (OSError, ValueError):
+                continue
+            if log.turn_count:
+                self._download(files.match_file(log))
+                return
+        self._say("No match to save yet", False)
+
+    def op_file_open(self, name: str, text: str, where: str = "menu") -> dict:
+        """The player picked file ``name`` holding ``text``: in the map maker
+        (``where`` ``maker``) a map to edit, on the menu a setup to load, a map
+        to play or edit, or a match to watch from its first turn (as pygame's
+        ``--watch FILE``). Anything else says what it is not."""
+        name = str(name)[:120]
+        opened = files.read(str(text))
+        if where == "maker" and self.maker is not None:
+            ed = self.maker
+            if opened.kind == "map":
+                maker.push_undo(ed)
+                maker.adopt(ed, opened.value)
+                maker.set_status(ed, f"Opened {name}", True)
+            else:
+                maker.set_status(ed, f"{name} isn't a map: {opened.why or 'it is a ' + str(opened.kind)}", False)
+            return self._maker()
+        ms, settings = self.menu, self._settings()
+        if opened.kind is None:
+            self._say(f"Couldn't open {name}: {opened.why}", False)
+        elif opened.kind == "setup":
+            setupmenu.before_edit(ms, settings)
+            settings.copy_from(opened.value)
+            ms.seed_text = "" if settings.seed is None else str(settings.seed)
+            setupmenu.after_edit(ms, settings)
+            self._say(f"Loaded {name}", True)
+        elif opened.kind == "map":
+            setupmenu.before_edit(ms, settings)
+            maker.apply_map(settings, opened.value)
+            setupmenu.after_edit(ms, settings)
+            self._say(f"Opened {name}: Edit map to change it", True)
+        else:
+            result = self._open_watched(share.OK, opened.value.encoded())
+            if "game" not in result:
+                return result["menu"]
+            self.opened = result["game"]
+        return self._menu()
+
+    def _leave(self) -> str:
+        """A confirmed quit (`main.leave_app`): ask the browser to close the
+        window, and say how to leave if it won't, back on the menu."""
+        webstore.close_window()
+        if self.ui is not None and self.ui.in_pbp:
+            self.pbp.leave()
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.maker = None
+        self._say(setupmenu.CANT_CLOSE_MSG, False)
+        return "quit"
+
+    def op_page_hash(self, hash: str) -> dict:
+        """The page's address took a new ``#fragment`` (a link opened in an
+        installed app, or pasted into an open tab): open it as boot does, on
+        the menu, leaving any match behind. A blank one changes nothing."""
+        hostio.set_hash(str(hash).lstrip("#"))
+        if not hostio.page("hash"):
+            return {}
+        if self.ui is not None and self.ui.in_pbp:
+            self.pbp.leave()
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.maker = None
+        self.settings = Settings()
+        app._apply_shared_link(self.settings)
+        self.menu = setupmenu.Menu()
+        self.menu.strategies = setupmenu.strategy_options()
+        self.resume_log = None
+        self._watch_link()
+        self._match_link()
+        self._menu_links()
+        return {"menu": self._menu()}
+
     def _answer(self, key: str) -> str | None:
         """A press while a confirm is up: only its two buttons answer it."""
         ms, settings = self.menu, self._settings()
@@ -454,6 +550,11 @@ class Session:
             return setupmenu.answer_unchallenge(ms, settings, key == "unchallenge_change", self._say)
         if ms.confirm_slow and key in ("slow_go", "slow_back"):
             return setupmenu.answer_slow(ms, key == "slow_go")
+        if ms.confirm_quit and key in ("quit_yes", "quit_no"):
+            ms.confirm_quit = False
+            if key == "quit_yes":
+                return self._leave()
+            return None
         if ms.confirm_clear_map and key in ("clear_map_yes", "clear_map_no"):
             ms.confirm_clear_map = False
             if key == "clear_map_yes":
@@ -486,9 +587,9 @@ class Session:
             if name in ("n", "N", "Escape"):
                 return self.op_menu_press(modal["stay"]["key"])
             return self._menu()
-        if ms.strategy_open or ms.daily_open or ms.board_open:
+        if ms.strategy_open or ms.daily_open or ms.board_open or ms.files_open:
             if name == "Escape":
-                ms.strategy_open = ms.daily_open = ms.board_open = False
+                ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
             return self._menu()
         if name in ("Enter", " "):
             return self.op_menu_press("start")
@@ -502,7 +603,7 @@ class Session:
         only once it is let go."""
         ms, settings = self.menu, self._settings()
         if phase == "start":
-            ms.strategy_open = ms.daily_open = ms.board_open = False
+            ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
             setupmenu.before_edit(ms, settings)
             ms.drag_key = str(key)
         setupmenu.apply_slider(str(key), ms, settings, float(t))
@@ -726,6 +827,13 @@ class Session:
                 app.stamp_campaign(self.ui, self.campaign)
                 self._stage_again()
             return self._whole()
+        elif name == "quit":
+            title, body, confirm = hud.confirm_quit()
+            return {"fresh": False, "view": self._view(),
+                    "modal": {"kind": "quit", "title": title, "body": body, "confirm": confirm, "tone": "red",
+                              "then": "quit_confirmed"}}
+        elif name == "quit_confirmed":
+            return {"quit": True, "menu": self._menu(self._leave())}
         elif name == "undo" and ui.can_undo(state):
             self.state, self.ui = app.apply_rewind(self.log, self.settings, max(self.log.turn_count - 1, 0))
             self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
@@ -888,6 +996,10 @@ class Session:
         elif built.overlay == "hint":
             title, body, confirm = hud.confirm_hint(self.ui, app.HINT_STRATEGY.title())
             out["modal"] = {"kind": "hint", "title": title, "body": body, "confirm": confirm}
+        elif built.overlay == "quit":
+            title, body, confirm = hud.confirm_quit()
+            out["modal"] = {"kind": "quit", "title": title, "body": body, "confirm": confirm, "tone": "red",
+                            "then": "quit_confirmed"}
         return out
 
     # ------------------------------------------------------------------ #
@@ -907,7 +1019,7 @@ class Session:
         if action == "menu":
             self.maker = None
             return {"back": self._menu()}
-        out = {"maker": maker.view(self._ed(), self._settings(), self.touch), **extra}
+        out = {"maker": maker.view(self._ed(), self._settings(), self.touch, files=True), **extra}
         if action is not None:
             out["action"] = action
         return out
@@ -980,8 +1092,17 @@ class Session:
         return self._maker()
 
     def op_maker_control(self, key: str) -> dict:
-        """A press on a control by its key (`maker.control`)."""
-        return self._maker(maker.control(self._ed(), self._settings(), str(key)))
+        """A press on a control by its key (`maker.control`). Export hands the
+        browser the map as a file; Import is the page's file picker (`file.open`)."""
+        ed, key = self._ed(), str(key)
+        if key == "export":
+            file = files.map_file(ed.recipe, ed.filename or maker.DEFAULT_FILENAME)
+            hostio.emit("download", **file.effect())
+            maker.set_status(ed, f"Exported {file.name}", True)
+            return self._maker()
+        if key == "import":
+            return self._maker()
+        return self._maker(maker.control(ed, self._settings(), key))
 
     def op_maker_slide(self, key: str, t: float, phase: str = "move") -> dict:
         """Slider ``key`` pressed (``start``), dragged, or let go at fraction

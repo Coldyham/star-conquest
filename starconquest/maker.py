@@ -100,9 +100,16 @@ def confirm_words(which: str | None) -> tuple[str, str, str]:
 # history, then the file cluster and *Play now*. *Menu* is not here — it sits in
 # the tool strip: drawing a map is a setup step, and going back to the seats,
 # strategies, fog and seed behind it is the stage after the three tools.
-def footer(ed: Editor | None) -> list[tuple[str, str, str, int, str]]:
+# The HTML build's file pair (`files`): the map as a file the browser keeps,
+# and one picked to edit. pygame's footer has neither; its Save and Open are
+# its maps folder, which the player can open.
+FILE_CONTROLS = (("export", "Export", "blue", 48, "right"), ("import", "Import", "blue", 47, "right"))
+
+
+def footer(ed: Editor | None, files: bool = False) -> list[tuple[str, str, str, int, str]]:
     """The strip's controls; ``ed`` only colours *Play now* (None: measuring),
-    ``"dead"`` until the map can be played."""
+    ``"dead"`` until the map can be played. ``files`` adds Export and Import
+    before *Play now*."""
     playable = ed is not None and ed.can_play()
     return [
         ("generate", "Generate", "amber", 35, "left"),
@@ -112,6 +119,7 @@ def footer(ed: Editor | None) -> list[tuple[str, str, str, int, str]]:
         ("filename", "", "field", 45, "right"),
         ("open", "Open", "blue", 50, "right"),
         ("save", "Save", "blue", 55, "right"),
+        *(FILE_CONTROLS if files else ()),
         ("play", "Play now", "blue" if playable else "dead", 100, "right"),
     ]
 
@@ -300,7 +308,13 @@ def commit(ed: Editor, settings: Settings) -> None:
     start, which is what opening the creator and leaving straight away would
     otherwise do now that a blank canvas is where it opens.
     """
-    recipe = ed.recipe.normalised()
+    apply_map(settings, ed.recipe)
+
+
+def apply_map(settings: Settings, recipe: CustomMap) -> None:
+    """``recipe`` as the setup's hand map, ``players`` and ``nodes`` with it
+    (`commit`); an empty one clears it."""
+    recipe = recipe.normalised()
     if not recipe.nodes:
         settings.custom_map = None
         return
@@ -1274,7 +1288,7 @@ def _rgb(color) -> list[int]:
     return [int(c) for c in color]
 
 
-def view(ed: Editor, settings: Settings, touch: bool = False) -> dict:
+def view(ed: Editor, settings: Settings, touch: bool = False, files: bool = False) -> dict:
     """The whole editor as plain JSON: the map (each system's position,
     production, garrison and owner, each lane's travel time), the tool strip, the palette band, the sidebar's
     blocks, the problems, the footer, the confirm and the status line (said
@@ -1296,7 +1310,7 @@ def view(ed: Editor, settings: Settings, touch: bool = False) -> dict:
         "colors": {str(pid): _rgb(config.player_color(pid)) for pid in range(config.MAX_PLAYERS + 1)},
         "palette": _palette_view(ed),
         "side": _side_view(ed, settings, touch),
-        "footer": [list(spec) for spec in footer(ed)],
+        "footer": [list(spec) for spec in footer(ed, files)],
         "filename": ed.filename,
         "filename_shown": ed.filename or DEFAULT_FILENAME,
         "can_play": ed.can_play(),

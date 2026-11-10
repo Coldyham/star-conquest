@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from . import ai, combat, config, gauntlet, mapgen, pbp, webstore
+from . import ai, combat, config, gauntlet, hud, mapgen, pbp, webstore
 from . import run as gauntlet_run
 from .model import AiParams
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -87,6 +87,10 @@ DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily map"))
 # A phone's one button for the board's two lists.
 BOARD_LABEL = "Leaderboard"
 BOARD_ITEMS = (("browse_configs", "Recently played"), ("browse_matches", "Shared matches"))
+# The HTML build's Save and Load (`files`): the setup and the last match saved
+# as files the browser keeps, and any of them, or a map, opened again.
+FILES_LABEL = "Files"
+FILES_ITEMS = (("save_settings", "Save setup"), ("save_game", "Save last match"), ("load_file", "Open a file…"))
 
 # The lane-battle toggle's caveat: a lane fight is the page's fight minus the
 # ground, so the advantage slider applies to neither side.
@@ -128,6 +132,8 @@ class Menu:
     strategy_open: bool = False
     daily_open: bool = False
     board_open: bool = False
+    files_open: bool = False
+    confirm_quit: bool = False
     strategies: list[str] = field(default_factory=lambda: strategy_options())
     seed_text: str = ""
     editing_seed: bool = False
@@ -736,6 +742,10 @@ def clear_map_labels(touch: bool) -> tuple[str, str]:
     return ("Clear the map", "Keep it") if touch else ("Clear the map (Y)", "Keep it (Esc)")
 
 
+def quit_labels(touch: bool) -> tuple[str, str]:
+    return ("Quit", "Cancel") if touch else ("Quit (Y)", "Cancel (Esc)")
+
+
 def slow_labels(touch: bool) -> tuple[str, str]:
     return ("Play anyway", "Change settings") if touch else ("Play anyway (Y)", "Change settings (Esc)")
 
@@ -928,6 +938,10 @@ def modal(ms, settings: Settings, touch: bool) -> dict | None:
                 "lines": [{"text": "Maps come from the seed again — this one is not saved", "color": warn},
                           {"text": "Save it from the creator first if you want to keep it", "color": dim}],
                 "go": {"key": "clear_map_yes", "label": go}, "stay": {"key": "clear_map_no", "label": stay}}
+    if ms.confirm_quit:
+        go, stay = quit_labels(touch)
+        return {"kind": "quit", "title": hud.confirm_quit()[0], "lines": [],
+                "go": {"key": "quit_yes", "label": go}, "stay": {"key": "quit_no", "label": stay}}
     return None
 
 
@@ -978,11 +992,14 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
             "play_by_post": shared,
             "create": "Edit map" if drawn else "Create map",
             "clear_map": drawn,
+            "files": FILES_LABEL,
         },
         "lists": {"daily": {"open": ms.daily_open,
                             "items": [{"key": k, "label": label} for k, label in DAILY_ITEMS]},
                   "board": {"open": ms.board_open,
-                            "items": [{"key": k, "label": label} for k, label in BOARD_ITEMS]}},
+                            "items": [{"key": k, "label": label} for k, label in BOARD_ITEMS]},
+                  "files": {"open": ms.files_open,
+                            "items": [{"key": k, "label": label} for k, label in FILES_ITEMS]}},
         "hint": None if touch else KEY_HINT,
         "modal": modal(ms, settings, touch),
         "pbp_prompt": pbp_prompt_view(ms, settings, touch),

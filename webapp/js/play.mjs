@@ -25,6 +25,11 @@ const THINKING_MS = 150;    // a turn slower than this says so
 const TICK_MS = 1000;       // the session's clock (`Session.op_tick`): the campaign's lookup and its grace
 
 const core = new Core(new URL("../worker.mjs", import.meta.url));
+// The site's service worker (scope "/", `tools/pwa/sw.js`), which gives /next/
+// its own rules; never from the local server, which has none to serve.
+if ("serviceWorker" in navigator && !["127.0.0.1", "localhost"].includes(location.hostname)) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 const params = new URLSearchParams(location.search);
 
 const game = {
@@ -46,12 +51,13 @@ function setup() {
   if (params.has("mode")) settings.mode = params.get("mode");
   if (params.has("fog")) settings.fog_sight = Number(params.get("fog"));
   if (params.has("ai")) settings.ai_strategy = params.get("ai").split(",");
+  if (params.has("autoplay")) settings.autoplay = true;
   return settings;
 }
 
 const menu = new SetupMenu($("setup"), core, {
   start: () => newGame(),
-  quit: () => window.close(),
+  quit: () => {},   // the session asked the browser to close the window (the `close` effect)
   resumed: (res) => {
     menu.hide();
     game.film = null;
@@ -154,6 +160,34 @@ async function openMenu(first = false) {
   }
   await menu.open({ first, prefill: first ? setup() : null, touch: touch(), compact: compact() });
 }
+
+/** Leave the play screen (or the map maker) for the menu reply `reply`. */
+function toMenu(reply) {
+  clearTimeout(game.timer);
+  game.film = null;
+  game.busy = false;
+  game.queued = [];
+  game.map = null;
+  if (game.modal) {
+    game.modal = null;
+    game.hud.modal(null);
+  }
+  if (maker.shown) maker.hide();
+  menu.root.hidden = false;
+  menu.draw(reply);
+  menu.after(reply);
+}
+
+// A link opened in an open page (pasted, or handed to an installed app) is
+// read as at boot (`Session.op_page_hash`); our own address edits use
+// `history.replaceState`, which fires no `hashchange`.
+window.addEventListener("hashchange", async () => {
+  const res = await core.call("page.hash", { hash: location.hash }).catch((err) => {
+    status(`Couldn't open that link: ${err.message}`, true);
+    return null;
+  });
+  if (res && res.menu) toMenu(res.menu);
+});
 
 /** What the board draws through: the view, fog, and the pointer. A film
  * draws the union of what was seen before and after (`Ui.sees`). */
@@ -435,7 +469,7 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "share", "leaderboard"]);
+  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -457,6 +491,10 @@ async function actOn(action) {
       return null;
     });
     if (!res) return;
+    if (res.quit) {   // the browser kept the window open: back to the menu, saying how to leave
+      toMenu(res.menu);
+      return;
+    }
     if (res.board) adopt(res);
     else show(res.view);
     if (res.modal) ask(res.modal);
@@ -841,6 +879,6 @@ async function loadRecipe(recipe) {
 }
 
 // For headless runs (`tools/chrome.mjs --eval`): the page's state and its verbs.
-window.scNext = { game, act, endTurn, loadRecipe };
+window.scNext = { game, core, act, endTurn, loadRecipe };
 
 boot();

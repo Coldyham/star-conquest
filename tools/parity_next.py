@@ -31,10 +31,8 @@ OUT = ROOT / "results" / "parity" / "next"
 PORT = 8011
 # The sizes, as CSS pixels (`parity_shots.SIZES`), and whether each is a phone.
 SIZES = {"desktop": ("1440x960", False), "phone": ("412x870", True), "phone-land": ("870x412", True)}
-# The surfaces the HTML build draws, and the recipes on them whose screen
-# belongs to a later phase.
+# The surfaces the HTML build draws: every recipe on them shoots.
 SURFACES = ("game", "menu", "resume", "maker")
-LATER = ("confirm-quit",)
 
 SCRIPT = """(async () => {
   try {
@@ -70,7 +68,7 @@ def main() -> None:
     ap.add_argument("--size", nargs="*", choices=list(SIZES), help="these sizes only (default: all)")
     args = ap.parse_args()
     recipes = [r for r in json.loads(RECIPES.read_text())["screens"]
-               if r["surface"] in SURFACES and not r["name"].startswith(LATER)
+               if r["surface"] in SURFACES
                and (not args.only or r["name"] in args.only)]
     server = serve.start(PORT)
     try:

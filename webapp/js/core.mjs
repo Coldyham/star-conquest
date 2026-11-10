@@ -1,6 +1,8 @@
 // The page's side of the session: send a command, await its reply, and carry
 // out the effects Python asked for (`starconquest.hostio.EFFECTS`).
 
+import { download } from "./files.mjs";
+
 const AUTH_KEY = "sc_auth"; // paths.WEB_AUTH_KEY: the board's sign-in session
 const BRIDGED = { ownName: (r) => r, quickPost: (r) => JSON.stringify(r) };
 
@@ -64,6 +66,8 @@ export class Core {
           fetch(e.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: e.body })
             .catch(() => {});
           break;
+        case "download": download(e); break;
+        case "close": window.close(); break;
         case "http": this.http(e); break;
         case "bridge": this.bridge(e); break;
         default: console.warn("unknown effect", e);

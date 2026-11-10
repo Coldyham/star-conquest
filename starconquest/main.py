@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
 import pygame
 
@@ -1200,7 +1201,13 @@ def _crash_screen(exc_text: str) -> None:
 
 
 def run() -> None:
-    """Run the game to exit; what the root ``main.py`` calls."""
+    """Run the game to exit; what the root ``main.py`` calls. ``--html`` runs
+    the HTML build instead: served here and opened in a browser
+    (`serve.main`, which takes the menu's flags)."""
+    if "--html" in sys.argv[1:]:
+        from . import serve
+        serve.main([a for a in sys.argv[1:] if a != "--html"])
+        return
     # pygbag patches asyncio.run to drive the browser event loop; on desktop this
     # is the ordinary asyncio entry point. (In the browser, code after this line
     # may run before the game finishes, so all shutdown lives inside main().)

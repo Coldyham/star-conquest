@@ -374,11 +374,9 @@ def test_a_preference_is_written_through_to_the_page(session):
     assert {"t": "store.set", "key": "sc_share_games", "value": "1"} in reply["effects"]
 
 
-def test_quit_says_why_it_stays(session):
+def test_an_unknown_menu_control_is_refused(session):
     _call(session, "boot", page=PAGE, store={})
     _menu(session, "menu.open", first=True)
-    res = _menu(session, "menu.key", name="Escape")
-    assert res["action"] == "quit" and res["status"]["text"].startswith("Close the tab")
     reply = _call(session, "menu.press", key="no_such_control")
     assert not reply["ok"]
 
@@ -935,3 +933,116 @@ def test_every_maker_parity_recipe_loads(session):
     for recipe in (r for r in recipes if r["surface"] == "maker"):
         view = _menu(session, "parity.maker", recipe=recipe)["maker"]
         assert (len(view["nodes"]) > 0) == (recipe["name"] == "maker-map")
+
+
+# --------------------------------------------------------------------------- #
+# Files, quitting and links opened in an open page (phase 7)
+def test_the_setup_is_saved_as_a_file_without_its_challenge(session, games):
+    from starconquest import files
+    from starconquest.settings import Challenge
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True, prefill={"players": 3, "seed": 9})
+    session.settings.challenge = Challenge(turns=12, lost=3, hand=12, key=session.settings.challenge_key(), log="")
+    assert _menu(session, "menu.press", key="files_menu")["menu"]["lists"]["files"]["open"]
+    reply = _call(session, "menu.press", key="save_settings")
+    [dl] = _effects(reply, "download")
+    assert dl["name"] == "starconquest_settings.json" and dl["type"] == "application/json"
+    saved = json.loads(dl["text"])
+    assert saved["players"] == 3 and saved["seed"] == 9 and not saved.get("challenge")
+    assert reply["result"]["status"]["text"] == "Saved starconquest_settings.json"
+    assert not reply["result"]["menu"]["lists"]["files"]["open"]
+    assert files.read(dl["text"]).kind == "setup"
+
+
+def test_a_setup_file_loads_onto_the_menu(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    text = json.dumps({"players": 5, "nodes": 30, "seed": 77})
+    res = _menu(session, "file.open", name="mine.json", text=text)
+    rows = {r["label"]: r["control"] for r in res["menu"]["panel"] if r["kind"] == "row"}
+    assert rows["Players"]["value"] == "5" and rows["Seed"]["text"] == "77"
+    assert res["status"]["text"] == "Loaded mine.json"
+    bad = _menu(session, "file.open", name="x.json", text="[1, 2]")
+    assert bad["status"]["text"] == "Couldn't open x.json: not a Star Conquest file" and not bad["status"]["ok"]
+
+
+def test_the_last_match_is_saved_and_opens_again_to_watch(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    assert _menu(session, "menu.press", key="save_game")["status"]["text"] == "No match to save yet"
+    _menu(session, "game.start", settings={"players": 2, "nodes": 8, "autoplay": True}, seed=3)
+    for _ in range(3):
+        _menu(session, "turn.end")
+    _menu(session, "menu.open")
+    [dl] = _effects(_call(session, "menu.press", key="save_game"), "download")
+    assert dl["name"] == f"game_{session_log_id(games)}.json"
+    res = _menu(session, "file.open", name=dl["name"], text=dl["text"])
+    assert res["game"]["view"]["history"]["turn"] == 0 and session.ui.watched
+
+
+def session_log_id(games) -> str:
+    [path] = list(games.glob("game_*.json"))
+    return json.loads(path.read_text())["match_id"]
+
+
+def test_a_map_file_opens_on_the_menu_and_in_the_maker(session, games):
+    from starconquest.custommap import CustomMap, MapNode
+    recipe = CustomMap(nodes=[MapNode(100, 100, 2, 10, 1), MapNode(400, 100, 2, 10, 2),
+                              MapNode(250, 300, 1, 5, 0)], lanes=[(0, 1), (1, 2), (0, 2)])
+    text = json.dumps(recipe.to_dict())
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    res = _menu(session, "file.open", name="tri.json", text=text)
+    assert res["menu"]["actions"]["create"] == "Edit map" and session.settings.custom_map is not None
+    view = _menu(session, "menu.press", key="create_map")["maker"]
+    assert len(view["nodes"]) == 3
+    assert [f[0] for f in view["footer"]][-3:] == ["export", "import", "play"]
+    reply = _call(session, "maker.control", key="export")
+    [dl] = _effects(reply, "download")
+    assert dl["name"] == "map.json" and json.loads(dl["text"]) == recipe.to_dict()
+    _menu(session, "maker.control", key="new")
+    _menu(session, "maker.confirm", yes=True)
+    view = _menu(session, "file.open", name="tri.json", text=text, where="maker")["maker"]
+    assert len(view["nodes"]) == 3 and view["status"]["text"] == "Opened tri.json"
+    view = _menu(session, "file.open", name="s.json", text=json.dumps({"players": 2}), where="maker")["maker"]
+    assert "isn't a map" in view["status"]["text"]
+
+
+def test_quit_asks_first_then_asks_the_browser_to_close(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    res = _menu(session, "menu.key", name="Escape")
+    modal = res["menu"]["modal"]
+    assert modal["kind"] == "quit" and modal["title"] == "Quit Star Conquest?"
+    assert _menu(session, "menu.key", name="Escape")["menu"]["modal"] is None   # Cancel
+    _menu(session, "menu.press", key="quit")
+    reply = _call(session, "menu.press", key="quit_yes")
+    assert _effects(reply, "close") and reply["result"]["action"] == "quit"
+    assert reply["result"]["status"]["text"].startswith("Close the tab")
+
+
+def test_the_quit_confirm_over_a_game_leaves_it_for_the_menu(session, games):
+    _human_game(session)
+    modal = _menu(session, "game.action", name="quit")["modal"]
+    assert modal["title"] == "Quit Star Conquest?" and modal["then"] == "quit_confirmed" and modal["tone"] == "red"
+    reply = _call(session, "game.action", name="quit_confirmed")
+    assert _effects(reply, "close") and reply["result"]["quit"]
+    assert reply["result"]["menu"]["status"]["text"].startswith("Close the tab") and session.state is None
+
+
+def test_a_link_opened_in_an_open_page_is_read_as_at_boot(session, games):
+    from starconquest.settings import Settings
+    blob, match_id = _played_log()
+    hostio.reset()
+    _human_game(session)
+    assert _menu(session, "page.hash", hash="") == {}
+    assert session.state is not None   # a blank fragment leaves the game alone
+    reply = _call(session, "page.hash", hash=f"#log={match_id}")
+    assert session.state is None and reply["result"]["menu"]["status"]["text"] == "Loading replay..."
+    [http] = [e for e in _effects(reply, "http") if f"id={match_id}" in e["url"]]
+    game = _menu(session, "net.reply", req=http["req"], state="ok", body=blob)["pushed"]["game"]
+    assert game["view"]["history"]["turn"] == 0
+    token = Settings.from_dict({"players": 4, "seed": 123}).to_token()
+    res = _menu(session, "page.hash", hash=f"#{token}")["menu"]
+    rows = {r["label"]: r["control"] for r in res["menu"]["panel"] if r["kind"] == "row"}
+    assert rows["Players"]["value"] == "4" and rows["Seed"]["text"] == "123"

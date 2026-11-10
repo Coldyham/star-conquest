@@ -880,7 +880,7 @@ def test_no_core_module_imports_pygame():
             "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
             "campaign", "gauntlet", "stats", "dealer", "gauntletgen", "daily", "coach", "run",
             "app", "hostio", "pbpclient", "serial", "session", "bench", "play", "hud", "recipe", "setupmenu",
-            "maker")
+            "maker", "files")
     pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
     for name in core:
         tree = ast.parse((pkg / f"{name}.py").read_text())

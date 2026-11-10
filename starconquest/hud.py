@@ -879,6 +879,11 @@ def confirm_hint(ui: Ui, advisor: str) -> tuple[str, str, str]:
             "Show hint")
 
 
+def confirm_quit() -> tuple[str, str, str]:
+    """The ask before quitting: title, body (none) and the confirm button's word."""
+    return "Quit Star Conquest?", "", "Quit"
+
+
 def confirm_rewind(turn: int) -> tuple[str, str, str]:
     """The ask before a destructive mid-game rewind: title, body, and the
     confirm button's word."""

@@ -54,3 +54,23 @@ def test_only_the_shell_fonts_are_served():
     assert all(build_next.font_path(f).is_file() for f in build_next.FONTS)
     assert not build_next.font_path("../main.py").exists()
     assert not build_next.font_path("gauntlets/tutorial.json").exists()
+
+
+def test_the_launcher_puts_the_menus_flags_in_the_address(monkeypatch):
+    """`main.py --html` hands its flags to `serve.main`, which opens the page
+    with them as its query (`js/play.mjs`'s ``setup``), so they pre-fill the
+    menu as they pre-fill pygame's."""
+    from starconquest import main as game_main
+    from starconquest import serve
+
+    opened, started = [], []
+    monkeypatch.setattr(serve, "start", lambda port: started.append(port) or type("S", (), {"shutdown": lambda s: None})())
+    monkeypatch.setattr(serve.webbrowser, "open", opened.append)
+    monkeypatch.setattr(serve.threading.Event, "wait", lambda self: (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr(sys, "argv", ["main.py", "--html", "--players", "4", "--seed", "42", "--no-menu"])
+    game_main.run()
+    assert started == [serve.PORT]
+    assert opened == ["http://127.0.0.1:8000/next/?players=4&seed=42&go"]
+    monkeypatch.setattr(sys, "argv", ["main.py", "--html", "--autoplay", "--mode", "symmetric"])
+    game_main.run()
+    assert opened[-1] == "http://127.0.0.1:8000/next/?mode=symmetric&autoplay"

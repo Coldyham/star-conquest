@@ -2669,11 +2669,12 @@ def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
 
 def draw_confirm_quit(surface) -> None:
     """Modal 'are you sure?' veil, overlaid on whichever scene is beneath it."""
-    quit_label, cancel = confirm_labels("Quit")
+    title, body, confirm = hud.confirm_quit()
+    quit_label, cancel = confirm_labels(confirm)
     _draw_modal(
         surface,
-        "Quit Star Conquest?",
-        "",
+        title,
+        body,
         (
             (quit_label, *_BTN_DANGER),
             (cancel, *_BTN_GREEN),

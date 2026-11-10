@@ -8,6 +8,7 @@
 // map, the palette band under it, the sidebar (a band under the palette on an
 // upright phone) and the footer strip.
 
+import { pickFile } from "./files.mjs";
 import { laneStyle, segmentDist, textOn } from "./board.mjs";
 import { BUTTON_STEP, Camera, WHEEL_STEP } from "./camera.mjs";
 
@@ -203,6 +204,10 @@ export class MapMaker {
 
   // --- chrome ------------------------------------------------------------ //
   control(key) {
+    if (key === "import") {   // the picker opens on the press itself
+      pickFile((name, text) => this.send("file.open", { name, text, where: "maker" }));
+      return null;
+    }
     return this.send("maker.control", { key });
   }
 

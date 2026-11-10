@@ -432,9 +432,9 @@ export class Hud {
     }
     const finger = touch();
     box.replaceChildren(h("div", { class: "stack" }, h("h1", {}, m.title),
-      ...m.body.split("\n\n").map((t) => h("p", {}, t)),
+      ...(m.body ? m.body.split("\n\n").map((t) => h("p", {}, t)) : []),
       h("div", { class: "grid" },
-        h("button", { type: "button", class: "btn amber", onclick: onConfirm }, m.confirm,
+        h("button", { type: "button", class: `btn ${m.tone || "amber"}`, onclick: onConfirm }, m.confirm,
           finger ? null : h("span", { class: "key" }, " (Y/Enter)")),
         h("button", { type: "button", class: "btn green", onclick: onCancel }, "Cancel",
           finger ? null : h("span", { class: "key" }, " (N/Esc)")))));

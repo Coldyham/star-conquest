@@ -2,6 +2,12 @@
 
     uv run python -m starconquest.serve            # http://127.0.0.1:8000/next/
     uv run python -m starconquest.serve --no-open
+    uv run python main.py --html --players 4 --seed 42   # the same, its menu pre-filled
+
+The local launcher of the HTML build: the menu's flags (``--players``,
+``--nodes``, ``--seed``, ``--mode``, ``--autoplay``, ``--no-menu``) go into the
+page's address, which pre-fills its menu as they pre-fill pygame's
+(``--no-menu`` plays at once). ``main.py --html`` hands its other arguments here.
 
 Straight from the sources, so an edit shows on reload: `webapp/` at ``/next/``,
 the pinned Pyodide from `.cache/` (fetched on first run), the game zip built on
@@ -161,14 +167,32 @@ def start(port: int = PORT) -> ThreadingHTTPServer:
     return server
 
 
-def main() -> None:
+def page_query(args: argparse.Namespace) -> str:
+    """The address's query for the menu's flags (`js/play.mjs`'s ``setup``),
+    ``""`` when none is given."""
+    parts = [f"{key}={value}" for key, value in (("players", args.players), ("nodes", args.nodes),
+                                                 ("seed", args.seed), ("mode", args.mode)) if value is not None]
+    if args.autoplay:
+        parts.append("autoplay")
+    if args.no_menu:
+        parts.append("go")
+    return "?" + "&".join(parts) if parts else ""
+
+
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--no-open", action="store_true", help="don't open a browser")
     ap.add_argument("--verbose", action="store_true", help="log every request")
-    args = ap.parse_args()
+    ap.add_argument("--players", type=int, default=None)
+    ap.add_argument("--nodes", type=int, default=None)
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--mode", choices=["random", "symmetric"], default=None)
+    ap.add_argument("--autoplay", action="store_true", help="AI plays all seats")
+    ap.add_argument("--no-menu", action="store_true", help="skip the setup menu and start straight away")
+    args = ap.parse_args(argv)
     server = start(args.port)
-    url = f"http://127.0.0.1:{args.port}/next/"
+    url = f"http://127.0.0.1:{args.port}/next/{page_query(args)}"
     print(f"serving {url}  (Ctrl+C to stop)", flush=True)
     if args.port != PORT:
         print("note: the leaderboard only answers pages on port 8000", flush=True)
