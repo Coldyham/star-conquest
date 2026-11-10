@@ -86,19 +86,20 @@ assistant, which then interviews you and writes the bot.
 | Send ships | click one of your systems, then a neighbour (or drag between them) |
 | Set the count | the popup's slider, −/+, Half/All, or the mouse wheel |
 | Standing forward rule | the popup's **Forward** tab (or Shift-click the neighbour): keep N ships and send the rest down that lane every turn |
-| Re-edit a queued fleet or rule | click its arrow, or its row in the side panel |
+| Re-edit a queued fleet or rule | click/tap its arrow, tap again to cycle through multiple orders/rules on the same lane |
 | Delete the selected order or rule | the popup's Delete button, **Clear**, or `X` / `Backspace` |
-| Route many systems at once | **Route** (`G`): box or tap systems, then pick a destination. `Tab` switches to **Rally**: everything flows to the nearest rally point. `Enter` confirms |
+| Route many systems at once | **Route** (`G`): Choose one or more rally points and everything flows to the nearest point. `Tab` switches to **Chain**: drag-box or tap to select source systems, then pick a destination. `Enter` confirms |
 | Cancel / back | right-click or `Esc` |
 | End the turn | **End Turn**, `Enter` or `Space` |
-| Play / pause turns on a timer | **Play** (`P`) |
+| Play / pause turns on a timer with no player input (to skip ahead) | **Play** (`P`) |
 | Let the AI play your seat | **Autoplay** / **Take control** (`A`) |
 | Review past turns | **History** (`H`): scrub with `←`/`→`/`Home`/`End`, `P` to replay, or rewind and play on from any turn |
-| Zoom / pan | mouse wheel or the on-map −/+; drag empty space to pan; `R` resets the view |
-| Fast forward once you're knocked out | **Fast forward** (`F`) |
-| New map / back to the menu | `N` / `M` |
+| Undo one turn | **Undo** (`U`): a quick-action which rewinds one turn |
+| Zoom / pan | mouse wheel, touch pinch or the on-map −/+; drag empty space to pan; `R` resets the view to fit all visible systems |
+| Fast forward if you're knocked out before game end | **Fast forward** (`F`) |
+| Retry this map / New map / back to the menu | `T` / `N` / `M` |
 
-When the game ends: `T` retries the same map, `C` copies a challenge link, `L`
+From the game end screen `T` retries the same map, `C` copies a challenge link, `L`
 enters it on the leaderboard, and `H` reviews the whole game.
 
 Your queued fleets show as arrows and standing rules as chevrons along their
