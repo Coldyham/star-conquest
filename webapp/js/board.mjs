@@ -82,13 +82,13 @@ function contrast(a, b) {
 }
 
 /** config.text_on: dark or light text, whichever reads better on `bg`. */
-function textOn(bg) {
+export function textOn(bg) {
   return contrast(TEXT_DARK, bg) >= contrast(TEXT, bg) ? TEXT_DARK : TEXT;
 }
 
 /** widgets.lane_style: a lane's width (px) and colour from its travel time;
  * fast lanes thin and bright, slow ones thick and dim. */
-function laneStyle(turns) {
+export function laneStyle(turns) {
   const width = Math.max(2, Math.min(6, turns));
   const f = (Math.min(6, Math.max(1, turns)) - 1) / 5;
   const scale = 1.3 - 0.6 * f;
@@ -102,7 +102,7 @@ function arcPath(r, frac) {
   return `M 0 ${-r} A ${r} ${r} 0 ${frac > 0.5 ? 1 : 0} 0 ${x} ${y}`;
 }
 
-function segmentDist(px, py, ax, ay, bx, by) {
+export function segmentDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const len2 = dx * dx + dy * dy;
   const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));

@@ -14,6 +14,7 @@ import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
 import { Core, pageInfo } from "./core.mjs";
 import { compact, fitLayout, Hud, touch } from "./hud.mjs";
+import { MapMaker } from "./maker.mjs";
 import { FLASH_MS, Marks, readMarks } from "./marks.mjs";
 import { SetupMenu } from "./menu.mjs";
 import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
@@ -58,13 +59,39 @@ const menu = new SetupMenu($("setup"), core, {
     adopt(res);
     clock(game.view.step_ms);
   },
+  maker: (view) => {
+    menu.hide();
+    maker.open(view);
+  },
 });
+
+/** The map maker (`maker.mjs`): Play starts its map, Menu goes back to the setup. */
+const maker = new MapMaker($("maker"), core, {
+  play: (res) => {
+    game.film = null;
+    game.map = null;   // a new map: the camera starts fitted
+    game.legends = res.legends;
+    adopt(res);
+    status("");
+    clock(game.view.step_ms);
+  },
+  back: (res) => {
+    menu.root.hidden = false;
+    menu.draw(res);
+  },
+});
+
+/** Is a screen other than the play screen up (the menu, the map maker)? */
+function away() {
+  return menu.shown || maker.shown;
+}
 
 /** What an answer from the board changed, drawn unasked (`Session.op_net_reply`):
  * a fetched replay opens in history, one that would not open says why on the
  * menu, and anything else redraws the play screen, once no turn is in flight. */
 function pushed(p) {
   if (p.game) {
+    maker.hide();
     // A match opened (or a replay fetched) draws its map afresh; a shared
     // match rebuilt from its log (`map_fresh` false) keeps the camera.
     menu.hide();
@@ -77,7 +104,7 @@ function pushed(p) {
     landTurn(p.turn);
   } else if (p.menu) {
     if (menu.shown) menu.draw(p.menu);
-  } else if (p.view && game.view && !menu.shown) {
+  } else if (p.view && game.view && !away()) {
     if (game.busy || game.film || game.seeking || game.replaying) game.stale = true;
     else show(p.view);
   }
@@ -91,7 +118,7 @@ setInterval(() => {
 /** A shared match's turn, resolved by the last seat in (`Session._step_match`):
  * its film played onto the board the page has, as End Turn's is. */
 async function landTurn(res) {
-  if (menu.shown) return;
+  if (away()) return;
   game.busy = true;
   try {
     const before = game.view;
@@ -297,7 +324,7 @@ function adopt(res) {
 
 /** End the turn, and play its film onto the board the page already has. */
 async function endTurn(byHand = true) {
-  if (game.busy || menu.shown || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
+  if (game.busy || away() || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
   game.busy = true;
   const thinking = setTimeout(() => { $("caption").textContent = "Thinking…"; }, THINKING_MS);
   try {
@@ -372,7 +399,7 @@ function runQueued() {
 function clock(ms) {
   clearTimeout(game.timer);
   const v = game.view;
-  if (!v || menu.shown || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
+  if (!v || away() || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
   game.timer = setTimeout(() => endTurn(false), ms);
 }
 
@@ -702,7 +729,7 @@ function zoomButton(factor) {
 }
 
 async function key(event) {
-  if (menu.shown || !game.view || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (away() || !game.view || event.ctrlKey || event.metaKey || event.altKey) return;
   if (game.modal) {
     const k = event.key.toLowerCase();
     if (k === "y" || k === "enter") $("modal").querySelector(".btn.amber").click();
@@ -785,6 +812,15 @@ async function boot() {
 /** Put a parity screen's recipe on screen (`tools/parity_next.py`): the menu's
  * through `parity.menu`, the game's through `parity.load`. */
 async function loadRecipe(recipe) {
+  if (recipe.surface === "maker") {
+    menu.hide();
+    clearTimeout(game.timer);
+    const res = await core.call("parity.maker", { recipe });
+    maker.open(res.maker);
+    status("");
+    return;
+  }
+  maker.hide();
   if (recipe.surface === "menu" || recipe.surface === "resume") {
     await openMenu();
     await menu.send("parity.menu", { recipe });

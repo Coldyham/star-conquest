@@ -8,6 +8,7 @@ export const LIVE_ROOM = 0.5;       // config.LIVE_ROOM
 export const WHEEL_STEP = 1.15;     // config.ZOOM_WHEEL_STEP
 export const BUTTON_STEP = 1.25;    // config.ZOOM_BUTTON_STEP
 export const PAN_PADDING = 110;     // config.MAP_PAN_PADDING
+export const ZOOM_MIN = 1;          // config.ZOOM_MIN
 
 /** geometry.room_zoom_min: the zoom at which `room` of the fitted map shows past each side. */
 export function roomZoomMin(room) {
@@ -15,7 +16,9 @@ export function roomZoomMin(room) {
 }
 
 export class Camera {
-  /** `world` [x0, y0, x1, y1]; `screen` [x, y, w, h]; `padding` px around the fit. */
+  /** `world` [x0, y0, x1, y1]; `screen` [x, y, w, h]; `padding` px around the fit.
+   * `room` null is `WorldView`'s own camera, as the map maker's: no further out
+   * than the fit, and `PAN_PADDING` kept past the map's edge (`clampStrict`). */
   constructor(world, screen, padding, room = LIVE_ROOM) {
     this.world = world;
     this.room = room;
@@ -65,7 +68,8 @@ export class Camera {
   /** Multiply the zoom by `factor`, keeping the world point under (px, py) fixed. */
   zoomAt(px, py, factor) {
     const [wx, wy] = this.toWorld(px, py);
-    this.zoom = Math.max(roomZoomMin(this.room), Math.min(ZOOM_MAX, this.zoom * factor));
+    const least = this.room === null ? ZOOM_MIN : roomZoomMin(this.room);
+    this.zoom = Math.max(least, Math.min(ZOOM_MAX, this.zoom * factor));
     this.offX = px - wx * this.scale;
     this.offY = py - wy * this.scale;
     this.clamp();
@@ -114,8 +118,12 @@ export class Camera {
     this.offY = axis(this.offY, sy, sh, wy0, wy1);
   }
 
-  /** `WorldView._clamp_room`. */
+  /** `WorldView._clamp_room` (or `_clamp` with no room). */
   clamp() {
+    if (this.room === null) {
+      this.clampStrict();
+      return;
+    }
     const s = this.scale;
     const [wx0, wy0, wx1, wy1] = this.world;
     const [sx, sy, sw, sh] = this.screen;

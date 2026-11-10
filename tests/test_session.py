@@ -374,11 +374,9 @@ def test_a_preference_is_written_through_to_the_page(session):
     assert {"t": "store.set", "key": "sc_share_games", "value": "1"} in reply["effects"]
 
 
-def test_quit_and_later_screens_say_why_they_stay(session):
+def test_quit_says_why_it_stays(session):
     _call(session, "boot", page=PAGE, store={})
     _menu(session, "menu.open", first=True)
-    res = _menu(session, "menu.press", key="create_map")
-    assert res["action"] is None and not res["status"]["ok"]
     res = _menu(session, "menu.key", name="Escape")
     assert res["action"] == "quit" and res["status"]["text"].startswith("Close the tab")
     reply = _call(session, "menu.press", key="no_such_control")
@@ -815,3 +813,125 @@ def test_a_spec_link_generates_a_gauntlet_a_slice_at_a_time(session, games):
     assert not res.get("generating")
     tut = res["menu"]["tutorial"]
     assert tut is not None and len(tut["stages"]) >= 1
+
+
+# --------------------------------------------------------------------------- #
+# The map maker (`maker`, `Session.op_maker_*`)
+def _maker(session) -> dict:
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    res = _menu(session, "menu.press", key="create_map")
+    assert res["action"] == "create_map"
+    return res["maker"]
+
+
+def test_create_map_opens_a_blank_canvas_as_plain_json(session):
+    view = _maker(session)
+    assert json.loads(json.dumps(view)) == view
+    assert view["nodes"] == [] and view["tool"] == "systems" and not view["can_play"]
+    assert view["palette"]["kind"] == "production" and view["palette"]["entries"][0]["glyph"] == "?"
+    assert [b[0] for b in view["footer"]][-1] == "play" and view["footer"][-1][2] == "dead"
+    assert view["problems"]["heading"].endswith("problems") or view["problems"]["heading"].endswith("problem")
+
+
+def test_systems_are_placed_linked_moved_and_deleted_with_undo(session):
+    _maker(session)
+    res = _menu(session, "maker.place", x=300, y=300)
+    assert res["armed"] == 0 and len(res["maker"]["nodes"]) == 1
+    # shift chains a lane from the system placed last
+    res = _menu(session, "maker.place", x=600, y=300, shift=True)
+    view = res["maker"]
+    assert res["armed"] == 1 and view["lanes"] and view["lanes"][0][:2] == [0, 1]
+    assert view["sel_node"] == 1
+    # too close to another system: refused, said
+    res = _menu(session, "maker.place", x=605, y=305)
+    assert res["armed"] is None and not res["maker"]["status"]["ok"]
+    # a move-drag is one undo, and Delete removes the system and its lane
+    _menu(session, "maker.node", node=1)
+    _menu(session, "maker.drag", x=700, y=400)
+    view = _menu(session, "maker.release")["maker"]
+    assert view["nodes"][1][:2] == [700, 400]
+    view = _menu(session, "maker.key", name="Delete")["maker"]
+    assert len(view["nodes"]) == 1 and view["lanes"] == []
+    view = _menu(session, "maker.key", name="z", ctrl=True)["maker"]
+    assert len(view["nodes"]) == 2
+    view = _menu(session, "maker.control", key="undo")["maker"]
+    assert view["nodes"][1][:2] == [600, 300]
+    view = _menu(session, "maker.control", key="redo")["maker"]
+    assert view["nodes"][1][:2] == [700, 400]
+
+
+def test_the_lanes_tool_lays_and_picks_lanes(session):
+    _maker(session)
+    for x in (300, 600, 900):
+        _menu(session, "maker.place", x=x, y=500)
+    _menu(session, "maker.control", key="tool_lanes")
+    _menu(session, "maker.node", node=0)          # arm
+    view = _menu(session, "maker.node", node=1)["maker"]   # tap-tap lays it
+    assert [0, 1] == view["lanes"][0][:2] and view["lane_src"] is None
+    _menu(session, "maker.node", node=1)
+    view = _menu(session, "maker.lane", target=2)["maker"]  # a drag let go over #2
+    assert len(view["lanes"]) == 2
+    res = _menu(session, "maker.miss", lanes=[1])
+    assert res["maker"]["sel_lane"] == 1 and not res["pan"]
+    assert _menu(session, "maker.miss", lanes=[])["pan"]
+    assert any(b["kind"] == "check" for b in res["maker"]["side"])
+
+
+def test_owners_paint_and_a_problem_blocks_play_until_fixed(session):
+    _maker(session)
+    for x, y in ((300, 300), (700, 300), (500, 700)):
+        _menu(session, "maker.place", x=x, y=y)
+    _menu(session, "maker.control", key="tool_owners")
+    view = _menu(session, "maker.node", node=0)["maker"]
+    assert view["nodes"][0][4] == 1 and view["palette"]["kind"] == "seats"
+    # no lanes, one seat: Play refuses, says why and frames the offender
+    res = _menu(session, "maker.control", key="play")
+    assert "maker" in res and not res["maker"]["status"]["ok"]
+    assert _menu(session, "maker.miss")["box"]   # off every system: drops the selection, arms a box
+    _menu(session, "maker.control", key="seat_2")
+    _menu(session, "maker.box", nodes=[1])
+    _menu(session, "maker.control", key="auto_lanes")
+    view = _menu(session, "maker.key", name="y")["maker"]   # the confirm's yes
+    assert view["lanes"] and view["confirm"] is None
+    assert view["can_play"] and view["footer"][-1][2] == "blue"
+    res = _menu(session, "maker.control", key="play")
+    game = res["game"]
+    assert len(game["static"]["players"]) == 3 and len(game["static"]["systems"]) == 3
+    assert session.settings.custom_map is not None and session.maker is None
+
+
+def test_menu_keeps_the_map_and_a_slider_writes_the_setup(session):
+    _maker(session)
+    _menu(session, "maker.place", x=300, y=300)
+    _menu(session, "maker.slide", key="adv_home_ships", t=1.0, phase="end")
+    assert session.settings.home_start_ships == 50
+    _menu(session, "maker.node", node=0)
+    _menu(session, "maker.slide", key="ships_slider", t=0.5, phase="start")
+    view = _menu(session, "maker.slide", key="ships_slider", t=1.0, phase="end")["maker"]
+    assert view["nodes"][0][3] == 50
+    view = _menu(session, "maker.key", name="z", ctrl=True)["maker"]   # the whole drag is one undo
+    assert view["nodes"][0][3] != 50
+    res = _menu(session, "maker.key", name="Escape")
+    assert "back" in res and session.settings.custom_map is not None
+    assert len(session.settings.custom_map.nodes) == 1
+
+
+def test_a_pinchs_first_finger_is_put_back(session):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True, touch=True)
+    _menu(session, "menu.press", key="create_map")
+    _menu(session, "maker.place", x=300, y=300)
+    _menu(session, "maker.place", x=600, y=300)
+    view = _menu(session, "maker.unpress")["maker"]
+    assert len(view["nodes"]) == 1
+    view = _menu(session, "maker.key", name="z", ctrl=True)["maker"]
+    assert view["nodes"] == []
+
+
+def test_every_maker_parity_recipe_loads(session):
+    _call(session, "boot", page=PAGE, store={})
+    recipes = json.loads((Path(__file__).parent / "fixtures" / "parity_screens.json").read_text())["screens"]
+    for recipe in (r for r in recipes if r["surface"] == "maker"):
+        view = _menu(session, "parity.maker", recipe=recipe)["maker"]
+        assert (len(view["nodes"]) > 0) == (recipe["name"] == "maker-map")

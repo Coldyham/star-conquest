@@ -33,7 +33,7 @@ PORT = 8011
 SIZES = {"desktop": ("1440x960", False), "phone": ("412x870", True), "phone-land": ("870x412", True)}
 # The surfaces the HTML build draws, and the recipes on them whose screen
 # belongs to a later phase.
-SURFACES = ("game", "menu", "resume")
+SURFACES = ("game", "menu", "resume", "maker")
 LATER = ("confirm-quit",)
 
 SCRIPT = """(async () => {

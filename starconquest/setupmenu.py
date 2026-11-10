@@ -113,10 +113,6 @@ CLEARED_CHALLENGE_MSG = "Challenge cleared — this is your own setup now"
 CLEARED_MAP_MSG = "Custom map cleared — maps come from the seed again"
 # Shown when a quit couldn't close the app: a browser tab can rarely close itself.
 CANT_CLOSE_MSG = "Close the tab or app window to exit"
-# The menu's actions whose screens the HTML build has yet to reach
-# (`docs/design/html-frontend.md`, "How it is staged"), and what each opens.
-LATER = {"create_map": "the map creator"}
-LATER_MSG = "Not in this build yet: {what}"
 
 
 @dataclass
@@ -659,6 +655,22 @@ def answer_unchallenge(ms, settings: Settings, keep_edit: bool, say: Say) -> str
         settings.copy_from(Settings.from_dict(ms.challenge_snapshot))
         ms.seed_text = "" if settings.seed is None else str(settings.seed)
     return None
+
+
+def open_creator(ms, settings: Settings) -> str | None:
+    """``"create_map"``, the map creator to open — or raise the un-challenge
+    modal first and let *it* re-issue the action.
+
+    Asking here rather than on the way out of the editor is deliberate: authoring
+    a whole map and only then being told it invalidated the score on the link is
+    the wrong order to find out.
+    """
+    if settings.challenge is not None:
+        ms.challenge_snapshot = settings.to_dict()
+        ms.pending_action = "create_map"
+        ms.confirm_unchallenge = True
+        return None
+    return "create_map"
 
 
 # --------------------------------------------------------------------------- #

@@ -405,3 +405,45 @@ and the board behind it is not veiled.
 **Left for later:** a link pasted into an open page is not read until a
 reload, as with phase 3's links.
 
+## The map maker (phase 6)
+
+`/next/`'s Create map (Edit map, with a hand map set) opens the map maker
+(`js/maker.mjs`, `css/maker.css`), laid out as pygame's: the tool strip, the
+map, the palette band, the sidebar (on an upright phone a band under the
+palette, two sliders to a row) and the footer.
+
+- **The editor is `maker`'s now**, a core module: the `Editor` and its
+  recipe, what every press, key and control means (`press_system`,
+  `press_lane_tool`, `press_owner`, `control`, `press_key`, `answer_confirm`),
+  every edit with its undo, the sliders by fraction, the map library, every
+  word, and `view` for the page. pygame's `mapmaker` keeps its drawing, its
+  hit-testing in pixels, its camera and its gestures' thresholds, and reads
+  the rest from `maker` under its old names, so its tests pass unchanged and
+  its maker screens stayed byte-identical.
+- **The page hit-tests and sends what a press landed on**: a system's index
+  (`maker.node`), a point in world units (`maker.place`), the lanes near a
+  miss nearest first (`maker.miss`, which says whether a drag from there pans
+  or draws the Owners box), the armed system dragged past the threshold
+  (`maker.drag`, one in flight at a time) and let go (`maker.release`), a lane
+  drag's target (`maker.lane`), the box's systems (`maker.box`), a control's
+  key, a slider's fraction, a key's name, a problem's row. The camera is the
+  page's (`camera.mjs` with no room: `WorldView`'s own clamp); a press that
+  frames something (a problem, Play refused) sends the points as ``fit``.
+- **Play** commits the map and starts it as Start does (``game``); **Menu**
+  and Esc commit it and answer the menu's reply (``back``). A pinch's first
+  finger is put back (`maker.unpress`, `maker.snapshot` taken on a touch
+  screen's every map press).
+- **Save and Open** write the maps folder, which the worker keeps in
+  IndexedDB as it does the games folder, so a saved map opens again after a
+  reload (pygbag's build kept none).
+
+Both maker parity recipes shoot at their sizes.
+
+**Differences kept on purpose:** the footer wraps its two clusters onto two
+rows where they don't fit, rather than shedding controls by rank; the
+filename field shows the default name as a placeholder; systems draw at the
+desktop's radius on a phone, where pygame's follow the UI scale.
+
+**Left for later:** nothing of the editor; its files on disk are the browser's
+own, not a folder the player can open (phase 7's Save and Load files).
+

@@ -134,6 +134,7 @@ export class SetupMenu {
   after(res) {
     if (!res) return;
     if (res.game) this.hooks.resumed(res.game);
+    else if (res.maker) this.hooks.maker(res.maker);
     else if (res.action === "start") this.hooks.start();
     else if (res.action === "quit") this.hooks.quit();
     if (res.generating && !this.generating) {

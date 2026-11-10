@@ -23,9 +23,8 @@ import time
 import traceback
 from collections.abc import Callable
 
-from starconquest import (ai, app, bench, campaign, daily, engine, gauntletgen, hostio, hud, paths, pbp, play,
-                          replay, serial,
-                          setupmenu, share, turnfilm, webstore)
+from starconquest import (ai, app, bench, campaign, daily, engine, gauntletgen, hostio, hud, maker, paths, pbp,
+                          play, replay, serial, setupmenu, share, turnfilm, webstore)
 from starconquest import recipe as recipes
 from starconquest import run as gauntlet_run
 from starconquest.model import GameState
@@ -104,6 +103,8 @@ class Session:
         self.touch = False
         self.compact = False
         self.resume_log: GameLog | None = None
+        # The map maker's editor while it is open (`maker`).
+        self.maker: maker.Editor | None = None
         # The board: the weekly campaign's lookup for the setup on the menu or
         # in play (`campaign.Watcher`), a replay being fetched for a `#log=`
         # link, and the calls whose answers land on the win overlay (the
@@ -303,6 +304,7 @@ class Session:
             self.pbp.leave()
         self.state = self.ui = self.log = None
         self.history = self.live_fog = None
+        self.maker = None
         self.menu.strategies = setupmenu.strategy_options()
         return self._menu()
 
@@ -321,6 +323,8 @@ class Session:
             out["generating"] = True
         if self.opened is not None:
             out["game"], self.opened = self.opened, None
+        if action == "create_map" and self.maker is not None:
+            out["maker"] = maker.view(self.maker, settings, self.touch)
         if self.resume_log is not None:
             go, stay = setupmenu.resume_labels(self.touch)
             out["resume"] = {"title": "Resume last game?", "detail": setupmenu.resume_detail(self.resume_log),
@@ -387,8 +391,8 @@ class Session:
             # The page asks the browser to close it, which a tab rarely allows.
             self._say(setupmenu.CANT_CLOSE_MSG, False)
             action = key
-        elif key in setupmenu.LATER:
-            self._say(setupmenu.LATER_MSG.format(what=setupmenu.LATER[key]), False)
+        elif key == "create_map":
+            action = self._then(setupmenu.open_creator(ms, settings))
         else:
             raise ValueError(f"not a menu control: {key!r}")
         setupmenu.after_edit(ms, settings)
@@ -411,6 +415,9 @@ class Session:
         if action in ("run", "run_continue"):
             self._open_run(fresh=action == "run")
             return None
+        if action == "create_map":
+            self.maker = maker.open_editor(self._settings())
+            return action
         if action != "play_by_post":
             return action
         ms, settings = self.menu, self._settings()
@@ -882,6 +889,155 @@ class Session:
             title, body, confirm = hud.confirm_hint(self.ui, app.HINT_STRATEGY.title())
             out["modal"] = {"kind": "hint", "title": title, "body": body, "confirm": confirm}
         return out
+
+    # ------------------------------------------------------------------ #
+    # The map maker (`maker`): the page hit-tests in its own pixels and sends
+    # what a press landed on (a system, the lanes near it, a control's key, a
+    # point in world units), and draws the reply's ``maker`` as it stands. Play
+    # answers the match (``game``), Menu the menu's reply (``back``).
+    def _ed(self) -> maker.Editor:
+        assert self.maker is not None, "no map maker"
+        return self.maker
+
+    def _maker(self, action: str | None = None, **extra) -> dict:
+        """The editor's view, or what replaced it: Play's match, Menu's menu."""
+        if action == "play":
+            self.maker = None
+            return {"game": self.op_game_start()}
+        if action == "menu":
+            self.maker = None
+            return {"back": self._menu()}
+        out = {"maker": maker.view(self._ed(), self._settings(), self.touch), **extra}
+        if action is not None:
+            out["action"] = action
+        return out
+
+    def _map_press(self) -> maker.Editor:
+        """A press on the map: on a touch screen, kept for a pinch to put back
+        if this was its first finger (`op_maker_unpress`)."""
+        ed = self._ed()
+        if self.touch:
+            maker.snapshot(ed)
+        return ed
+
+    def op_maker_open(self) -> dict:
+        """Open the map maker on the menu's setup, as Create map does."""
+        self.maker = maker.open_editor(self._settings())
+        return self._maker()
+
+    def op_maker_place(self, x: float, y: float, shift: bool = False) -> dict:
+        """The Systems tool's press on empty map at world ``(x, y)``: place a
+        system there (``armed`` is its index, for the page's move-drag)."""
+        ed = self._map_press()
+        link = ed.sel_node if maker.chains(ed, bool(shift)) else None
+        return self._maker(armed=maker.place(ed, self._settings(), (float(x), float(y)), link))
+
+    def op_maker_node(self, node: int, shift: bool = False) -> dict:
+        """A press on system ``node``, by the tool: select it and arm a
+        move-drag (Systems, ``armed``), arm or lay a lane (Lanes), paint it (Owners)."""
+        ed, node = self._map_press(), int(node)
+        armed = None
+        if ed.tool == maker.SYSTEMS:
+            maker.press_system(ed, node, bool(shift))
+            armed = node
+        elif ed.tool == maker.LANES:
+            maker.press_lane_tool(ed, node)
+        else:
+            maker.press_owner(ed, node)
+        return self._maker(armed=armed)
+
+    def op_maker_miss(self, lanes: list | None = None) -> dict:
+        """A press on the map that missed every system, with the lanes within
+        reach nearest first. ``pan`` says a left-drag from there pans (Lanes, on
+        nothing at all); ``box`` that it draws the Owners tool's box."""
+        ed = self._map_press()
+        pan = box = False
+        if ed.tool == maker.LANES:
+            pan = maker.press_lane_tool(ed, None, [int(i) for i in lanes or []])
+        elif ed.tool == maker.OWNERS:
+            maker.press_owner(ed, None)
+            box = True
+        return self._maker(pan=pan, box=box)
+
+    def op_maker_drag(self, x: float, y: float) -> dict:
+        """The armed system dragged past the threshold, to world ``(x, y)``."""
+        maker.drag_to(self._ed(), (float(x), float(y)))
+        return self._maker()
+
+    def op_maker_release(self) -> dict:
+        """The press on a system let go (an illegal spot snaps back)."""
+        maker.release_drag(self._ed())
+        return self._maker()
+
+    def op_maker_lane(self, target: int | None = None) -> dict:
+        """A lane drag let go over system ``target`` (None: over nothing)."""
+        maker.lane_release(self._ed(), None if target is None else int(target))
+        return self._maker()
+
+    def op_maker_box(self, nodes: list) -> dict:
+        """The Owners tool's box let go around ``nodes``: paint them."""
+        maker.paint(self._ed(), [int(i) for i in nodes])
+        return self._maker()
+
+    def op_maker_control(self, key: str) -> dict:
+        """A press on a control by its key (`maker.control`)."""
+        return self._maker(maker.control(self._ed(), self._settings(), str(key)))
+
+    def op_maker_slide(self, key: str, t: float, phase: str = "move") -> dict:
+        """Slider ``key`` pressed (``start``), dragged, or let go at fraction
+        ``t``. The Garrison slider's press is one undo for the whole drag."""
+        ed, key = self._ed(), str(key)
+        if key == "ships_slider":
+            if maker.selected(ed) is None:
+                return self._maker()
+            if phase == "start":
+                maker.push_undo(ed)
+            maker.set_garrison(ed, float(t))
+        elif key in maker.slider_keys():
+            maker.set_slider(self._settings(), key, float(t))
+        return self._maker()
+
+    def op_maker_key(self, name: str, ctrl: bool = False) -> dict:
+        """A key by its ``KeyboardEvent.key`` name: Y or Enter answers a confirm
+        yes and N or Esc no; otherwise `maker.press_key` (``action``
+        ``reset_view`` is the page's camera)."""
+        ed, name = self._ed(), str(name)
+        if ed.confirm is not None:
+            if name in ("y", "Y", "Enter"):
+                maker.answer_confirm(ed, self._settings(), True)
+            elif name in ("n", "N", "Escape"):
+                maker.answer_confirm(ed, self._settings(), False)
+            return self._maker()
+        return self._maker(maker.press_key(ed, self._settings(), name, bool(ctrl)))
+
+    def op_maker_confirm(self, yes: bool) -> dict:
+        maker.answer_confirm(self._ed(), self._settings(), bool(yes))
+        return self._maker()
+
+    def op_maker_problem(self, index: int) -> dict:
+        """A press on a problem's row: select its offender (``fit`` frames it)."""
+        maker.focus_problem(self._ed(), int(index))
+        return self._maker()
+
+    def op_maker_filename(self, text: str) -> dict:
+        """The filename field holds ``text`` as typed (filtered to a name it can take)."""
+        self._ed().filename = maker.filename_text(str(text))
+        return self._maker()
+
+    def op_maker_unpress(self) -> dict:
+        """A second finger made the last map press a pinch: put back what it changed."""
+        maker.unpress(self._ed())
+        return self._maker()
+
+    def op_parity_maker(self, recipe: dict) -> dict:
+        """Put a parity screen's maker recipe on screen (`tools/parity_next.py`),
+        as `parity_shots.run_maker` draws it: the recipe's setup and map, with
+        Generate pinned to seed 1."""
+        self.settings = recipes.settings_of(recipe)
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.maker = maker.open_editor(self.settings, seed=1)
+        return self._maker()
 
     def op_net_reply(self, req: int, state: str, body: str) -> dict:
         """The page carried out an ``http`` or ``bridge`` effect; hand its answer

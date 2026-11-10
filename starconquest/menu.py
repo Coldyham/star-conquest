@@ -2699,19 +2699,9 @@ def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
 
 
 def _open_creator(ms: MenuState, settings: Settings) -> str | None:
-    """Hand ``main`` the "open the map creator" action — or raise the un-challenge
-    modal first and let *it* re-issue the action.
-
-    Asking here rather than on the way out of the editor is deliberate: authoring
-    a whole map and only then being told it invalidated the score on the link is
-    the wrong order to find out.
-    """
-    if settings.challenge is not None:
-        ms.challenge_snapshot = settings.to_dict()
-        ms.pending_action = "create_map"
-        ms.confirm_unchallenge = True
-        return None
-    return "create_map"
+    """Hand ``main`` the "open the map creator" action, or the un-challenge
+    modal first (`setupmenu.open_creator`)."""
+    return setupmenu.open_creator(ms, settings)
 
 
 def _settings_path(name: str) -> Path:
