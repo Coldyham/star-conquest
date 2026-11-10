@@ -5,8 +5,8 @@ The pygame shell (`render`, `menu`, `main`'s loop, `mapmaker`, `input`,
 (phase 8)*, below): SVG for the
 map, DOM and CSS for panels and menus, vanilla ES modules with no build step,
 like `leaderboard/js/`. The Python core stays Python and runs in Pyodide in a
-Web Worker. Locally, `main.py` will serve the same bundle on `localhost:8000`
-and open a browser.
+Web Worker. Locally, `main.py` serves the same bundle on `localhost:8000`
+and opens a browser.
 
 ## Why
 
@@ -552,3 +552,13 @@ The HTML build is the game: `/play/` on the site, and what `main.py` opens.
 
 Left open: startup on a real phone over a real network (*The Pyodide spike
 (phase 0)*, "Not measured").
+
+Also left open, from the plan's risks:
+
+- **A long bot turn can't be cut short.** The page shows "Thinking…", but the
+  worker runs the turn to the end. The plan's way out was to terminate the
+  worker and rebuild the game from its `GameLog` with `replay.reconstruct`,
+  which determinism makes safe.
+- **Play strength depends on the device.** actuary's `LOOK_BUDGET_S` is a
+  wall-clock budget, so a slow phone gets a weaker actuary than a desktop
+  does.
