@@ -256,7 +256,11 @@ footer. Quit asks the browser to close the window and says to close the tab
 when it can't, as `main.leave_app` does on the web.
 
 **Differences kept on purpose:** no Game UI size stepper (the browser's own
-zoom does that job, and the plan drops `ui_scale`); the desktop footer is
+zoom does that job, and the plan drops `ui_scale`, though a desktop window
+smaller than a screen needs shrinks it to fit, down to half size: 1100 x 720
+units for play, 860 x 930 for the menu, which zooms by its own `--menu-zoom`
+and centres safely so an overflow scrolls rather than losing its top
+(`hud.fitLayout`)); the desktop footer is
 pygame's web footer (Get Link and the board's lists, not Save and Load, which
 wait for files in phase 7); a slider on a phone
 grabs on touch rather than waiting for a sideways move, so the panel scrolls

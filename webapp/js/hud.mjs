@@ -42,7 +42,9 @@ const measure = document.createElement("canvas").getContext("2d");
  * `config.apply_ui_scale`): on a touch screen one baseline unit is up to a CSS
  * pixel, less where that would leave fewer than 600 x 480 units to lay out in;
  * a touch screen under 1100 x 720 units is compact, and compact held upright
- * is portrait. Sets `--zoom` and the `touch`, `compact` and `portrait` classes
+ * is portrait. A desktop window keeps one unit to a CSS pixel until it is
+ * smaller than a screen needs (1100 x 720 for play, 860 x 930 for the menu,
+ * which zooms by `--menu-zoom`), then shrinks to fit, down to half size. Sets `--zoom` and the `touch`, `compact` and `portrait` classes
  * on the root, which the stylesheet lays out by. */
 export function fitLayout() {
   // ?input=touch or ?input=mouse says which to assume: for trying the phone
@@ -56,10 +58,17 @@ export function fitLayout() {
     const room = Math.min(cw / 600, ch / 480);                  // config.TOUCH_MIN_W/H
     zoom = fit * Math.max(0.5, Math.min(1, room));              // TOUCH_CSS_MIN, TOUCH_CSS_SCALE
   }
+  let menuZoom = zoom;
+  if (!finger) {
+    const shrink = (w, h) => Math.max(0.5, Math.min(1, cw / w, ch / h));
+    zoom = shrink(1100, 720);                                    // COMPACT_MAX_W/H
+    menuZoom = shrink(860, 930);
+  }
   const lw = cw / zoom, lh = ch / zoom;
   const small = finger && (lw < 1100 || lh < 720);              // COMPACT_MAX_W/H
   const root = document.documentElement;
   root.style.setProperty("--zoom", String(zoom));
+  root.style.setProperty("--menu-zoom", String(menuZoom));
   root.classList.toggle("touch", finger);
   root.classList.toggle("compact", small);
   root.classList.toggle("portrait", small && lh > lw);
