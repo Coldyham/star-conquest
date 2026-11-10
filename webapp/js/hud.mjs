@@ -418,7 +418,7 @@ export class Hud {
         return h("div", { class: "gap" });
       });
       box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: `color:${tone}` }, card.label),
-        ...items, h("p", { class: "close" }, finger ? "Tap anywhere to close" : "Press any key to close"));
+        ...items, h("p", { class: "close" }, finger ? "Tap outside the card to close" : "Press any key to close"));
     }
     box.hidden = false;
   }

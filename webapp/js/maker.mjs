@@ -23,10 +23,22 @@ const LANE_ARM = "rgb(150,200,240)"; // mapmaker._LANE_ARM
 const FONT_SMALL = 14;
 const R_MIN = 12, R_MAX = 26, PROD_LO = 2, PROD_HI = 5;   // config.NODE_*_RADIUS, PRODUCTION_WEIGHTS' span
 
-/** config.node_radius: richer (lower production) is bigger. */
-function radius(production) {
+// Below this camera scale (layout px per world unit) the map's systems shrink
+// with it, down to SHRINK_MIN of their size: in a squat map area (a phone on
+// its side, under a browser's bars) full-size discs would cover each other.
+// Zooming in brings them back to full size.
+const FULL_SCALE = 0.6, SHRINK_MIN = 0.4;
+
+/** The fit's margin: `FIT_PAD`, less in a squat map area, where it would
+ * take a large share of the height (the systems shrink there too). */
+function fitPad([, , w, hgt]) {
+  return Math.max(16, Math.min(FIT_PAD, Math.round(Math.min(w, hgt) * 0.08)));
+}
+
+/** config.node_radius: richer (lower production) is bigger; `k` shrinks it. */
+function radius(production, k = 1) {
   const t = Math.max(0, Math.min(1, (production - PROD_LO) / (PROD_HI - PROD_LO)));
-  return Math.round(R_MAX + t * (R_MIN - R_MAX));
+  return Math.max(4, Math.round((R_MAX + t * (R_MIN - R_MAX)) * k));
 }
 
 function h(tag, attrs = {}, ...kids) {
@@ -123,7 +135,9 @@ export class MapMaker {
     }, { passive: false });
     new ResizeObserver(() => {
       if (!this.camera) return;
-      this.camera.resize(this.screen());
+      const screen = this.screen();
+      this.camera.padding = fitPad(screen);
+      this.camera.resize(screen);
       this.draw();
     }).observe(this.svg);
   }
@@ -182,7 +196,8 @@ export class MapMaker {
   show(view) {
     this.view = view;
     if (!this.camera) {
-      const cam = new Camera(view.world, this.screen(), FIT_PAD, null);
+      const screen = this.screen();
+      const cam = new Camera(view.world, screen, fitPad(screen), null);
       this.camera = cam;
     }
     if (view.fit) this.camera.fitTo(view.fit);
@@ -353,6 +368,11 @@ export class MapMaker {
     return [(event.clientX - r.left) / k, (event.clientY - r.top) / k];
   }
 
+  /** How much the map's systems shrink at the camera's scale (`FULL_SCALE`). */
+  shrink() {
+    return Math.max(SHRINK_MIN, Math.min(1, this.camera.scale / FULL_SCALE));
+  }
+
   pos(i) {
     const n = this.view.nodes[i];
     return this.camera.toScreen(n[0], n[1]);
@@ -361,10 +381,11 @@ export class MapMaker {
   /** The system under (x, y), nearest first, with the tap floor (`mapmaker._pick_node`). */
   pick(x, y) {
     let best = null, bestD = Infinity;
+    const k = this.shrink();
     this.view.nodes.forEach((n, i) => {
       const [sx, sy] = this.pos(i);
       const d = Math.hypot(x - sx, y - sy);
-      if (d <= Math.max(radius(n[2]), TAP_MIN) && d < bestD) {
+      if (d <= Math.max(radius(n[2], k), TAP_MIN) && d < bestD) {
         best = i;
         bestD = d;
       }
@@ -544,18 +565,20 @@ export class MapMaker {
         svg);
     });
     const badNodes = new Set(v.bad_nodes);
+    const k = this.shrink();
+    const font = Math.max(10, Math.round(FONT_SMALL * k));
     v.nodes.forEach((n, i) => {
       const [x, y] = this.pos(i);
-      const r = radius(n[2]);
+      const r = radius(n[2], k);
       const color = v.colors[n[4]];
       sv("circle", { cx: x, cy: y, r, fill: rgb(color), stroke: rgb(brighten(color)), "stroke-width": 2 }, svg);
       const ships = sv("text", { x, y, "text-anchor": "middle", "dominant-baseline": "central",
-        fill: rgb(textOn(color)), "font-size": FONT_SMALL }, svg);
+        fill: rgb(textOn(color)), "font-size": font }, svg);
       ships.textContent = String(n[3]);
       const ring = badNodes.has(i) ? WARN : i === v.lane_src ? LANE_ARM : i === v.sel_node ? SELECT : null;
       if (ring) sv("circle", { cx: x, cy: y, r: r + RING_PAD, fill: "none", stroke: ring, "stroke-width": 2 }, svg);
-      const id = sv("text", { x, y: y + r + 12, "text-anchor": "middle", "dominant-baseline": "central",
-        fill: TEXT_DIM, "font-size": FONT_SMALL }, svg);
+      const id = sv("text", { x, y: y + r + Math.round(font * 0.85), "text-anchor": "middle",
+        "dominant-baseline": "central", fill: TEXT_DIM, "font-size": font }, svg);
       id.textContent = `#${i}`;
     });
     const p = this.press;
@@ -567,7 +590,7 @@ export class MapMaker {
       const target = this.pick(bx, by);
       if (target !== null && target !== p.node) {
         const [tx, ty] = this.pos(target);
-        sv("circle", { cx: tx, cy: ty, r: radius(v.nodes[target][2]) + 4, fill: "none", stroke: SELECT, "stroke-width": 2 },
+        sv("circle", { cx: tx, cy: ty, r: radius(v.nodes[target][2], k) + 4, fill: "none", stroke: SELECT, "stroke-width": 2 },
           svg);
       }
     } else if (p?.moved && p.kind === "box") {

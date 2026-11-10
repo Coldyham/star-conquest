@@ -154,3 +154,9 @@ html.portrait .mkside {
 html.portrait .mkside > * { grid-column: 1 / -1; }
 html.portrait .mkside > .slider:not(.bare) { grid-column: auto; }
 html.portrait .mkpalette { min-height: 0; padding: 6px 8px; gap: 4px; }
+/* A phone on its side under a browser's bars: the palette's discs at two
+   thirds, so the map keeps what height there is (its systems shrink too). */
+@media (orientation: landscape) and (max-height: 480px) {
+  html.compact .mkpalette { min-height: 0; padding: 2px 8px; }
+  html.compact .mkpalette .swatch svg { width: 44px; height: 44px; }
+}

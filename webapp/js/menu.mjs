@@ -456,15 +456,15 @@ export class SetupMenu {
       h("span", { class: "trail" },
         a.play_by_post ? btn("play_by_post", "Play by post", "blue") : null,
         btn("quit", "Quit", "plain quit")));
-    // A phone's grid: the board's two lists share one button.
+    // A phone's grid: the board's two lists share one button, and Get Link
+    // joins the Files list as "Share or save", keeping it to six.
     const grid = h("div", { class: "grid" },
       a.tutorial ? btn("tutorial", a.tutorial, "go") : null,
       a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null,
       a.play_by_post ? btn("play_by_post", "Play by post", "blue") : null,
-      a.get_link ? btn("get_link", "Get Link", "plain") : null,
+      listBtn("files_menu", a.share_save, "plain", m.lists.share_save),
       a.board ? listBtn("board_menu", a.board, "plain", m.lists.board)
         : a.recent ? btn("browse_configs", "Recently played", "plain") : null,
-      a.files ? listBtn("files_menu", a.files, "plain", m.lists.files) : null,
       h("span", { class: "create" }, btn("create_map", a.create, "blue"),
         a.clear_map ? btn("clear_map", "x", "plain corner", { "aria-label": "Clear the drawn map" }) : null));
     this.actionsEl.replaceChildren(h("div", { class: "wide" }, row1, row2),

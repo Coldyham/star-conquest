@@ -42,6 +42,10 @@ const game = {
 function status(text, error = false) {
   $("status").textContent = text;
   $("status").className = error ? "error" : "";
+  if (!game.ready && text) {   // the loading screen is still up: say it there
+    $("loading-status").textContent = text;
+    $("loading-status").className = error ? "error" : "";
+  }
 }
 
 /** The setup the address asks for, as `Settings` fields: the menu's pre-fill. */
@@ -445,6 +449,9 @@ function playFilm(film, view, before) {
     let start = null, last = null, still = 0;
     game.film = { skip: game.queued.some((a) => a !== "toggle_play") };
     game.hud.popup(view);
+    // A shared match's waiting veil ("Resolving the turn...") is lifted for
+    // the film, so the turn's moves are seen; the view after it says what next.
+    if (game.view?.pbp?.overlay?.kind === "waiting") game.hud.pbp({});
     game.marks.archive(reel.board, reel.runTo(0), seeing.sees);   // `app._primed`
     const frame = (now) => {
       start ??= now;
@@ -469,7 +476,7 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard"]);
+  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard", "next_stage"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -804,10 +811,16 @@ async function boot() {
     throw err;
   }
   status("Starting…");
-  await core.call("boot", pageInfo());
+  try {
+    await core.call("boot", pageInfo());
+  } catch (err) {
+    status(`The game failed to start: ${err.message}`, true);
+    throw err;
+  }
   status("");
   await openMenu(true);
   if (params.has("go")) await newGame();
+  $("loading").hidden = true;
   const map = $("map");
   map.addEventListener("pointerdown", press);
   map.addEventListener("pointermove", move);
