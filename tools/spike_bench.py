@@ -134,7 +134,7 @@ def chrome() -> None:
     decide case, then a warm reload of the same profile (startup only)."""
     from starconquest import serve
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{serve.PORT}/next/", timeout=2)
+        urllib.request.urlopen(f"http://127.0.0.1:{serve.PORT}/play/", timeout=2)
     except OSError:
         serve.start()
     profile = OUT / "chrome-profile"
@@ -147,7 +147,7 @@ def chrome() -> None:
         _write_plan(run, cases)
         print(f"chrome {run}: {len(cases)} cases", flush=True)
         subprocess.run(["node", str(ROOT / "tools" / "chrome.mjs"),
-                        f"http://127.0.0.1:{serve.PORT}/next/spike.html?bench=1",
+                        f"http://127.0.0.1:{serve.PORT}/play/spike.html?bench=1",
                         "--until", "document.getElementById('status').textContent.endsWith('done')",
                         "--timeout", "3000", "--profile", str(profile)], check=True)
 

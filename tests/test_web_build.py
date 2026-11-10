@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SW = (ROOT / "tools" / "pwa" / "sw.js").read_text()
 BUILD = (ROOT / "tools" / "build_web.sh").read_text()
 ROUTER = (ROOT / "tools" / "pwa" / "root.html").read_text()
+PAGE = (ROOT / "webapp" / "index.html").read_text()
 
 
 def test_the_service_worker_never_answers_the_api():
@@ -28,20 +29,12 @@ def test_the_service_worker_never_answers_the_api():
     assert bypass < SW.index("event.respondWith("), "the bypass must come before any respondWith"
 
 
-def test_the_service_worker_caches_the_runtime_pygbag_loads():
-    """The runtime is cross-origin; only its CDN prefix joins the cache, and only
-    as CORS responses (an opaque one can't be checked and pads the quota)."""
-    import importlib.util
-
-    found = re.search(r'const RUNTIME = "([^"]+)";', SW)
-    assert found is not None
-    runtime = found.group(1)
-    spec = importlib.util.find_spec("pygbag")
-    assert spec is not None and spec.origin is not None
-    app = (Path(spec.origin).parent / "app.py").read_text()
-    assert f'DEFAULT_CDN = f"{runtime}{{cdn_version}}/"' in app
-    assert 'res.type === "cors"' in SW
-    assert "!url.href.startsWith(RUNTIME)) return;" in SW
+def test_the_service_worker_answers_only_same_origin_gets():
+    """Nothing the game or board loads comes from another origin, and an opaque
+    cross-origin response can't be checked and pads the quota."""
+    assert "if (url.origin !== self.location.origin) return;" in SW
+    assert "cors" not in SW
+    assert "pygame-web" not in SW
 
 
 def _sw_function(name: str) -> str:
@@ -58,10 +51,10 @@ def test_the_service_worker_fetches_board_pages_network_first():
 
 
 def test_the_html_build_is_network_first_but_for_what_its_name_fixes():
-    """/next/'s page and scripts are asked for first, so a deploy never boots an
+    """/play/'s page and scripts are asked for first, so a deploy never boots an
     old page against a new zip; the hashed zip, Pyodide's versioned files and
     the fonts never change under their name, so the cache answers them."""
-    nxt = SW.index('url.pathname.startsWith("/next/")')
+    nxt = SW.index('url.pathname.startsWith("/play/")')
     branch = SW[nxt:SW.index("return;", nxt)]
     assert "FIXED.test(url.pathname) ? cacheFirst(req) : networkFirst(req)" in branch
     assert nxt < SW.rindex("event.respondWith(")
@@ -69,11 +62,11 @@ def test_the_html_build_is_network_first_but_for_what_its_name_fixes():
     assert cached.index("cache.match(req)") < cached.index("fetch(req)")
     fixed = re.search(r"const FIXED = /(.+)/;", SW).group(1).replace("\\/", "/")
     pattern = re.compile(fixed)
-    for path in ("/next/py/starconquest-0123456789ab.zip", "/next/pyodide/0.27.7/pyodide.asm.wasm",
-                 "/next/fonts/DejaVuSansMono.ttf"):
+    for path in ("/play/py/starconquest-0123456789ab.zip", "/play/pyodide/0.27.7/pyodide.asm.wasm",
+                 "/play/fonts/DejaVuSansMono.ttf"):
         assert pattern.search(path), path
-    for path in ("/next/", "/next/index.html", "/next/js/build.mjs", "/next/js/play.mjs", "/next/worker.mjs",
-                 "/next/css/play.css", "/next/py/starconquest-0123456789ab.zip.tmp"):
+    for path in ("/play/", "/play/index.html", "/play/js/build.mjs", "/play/js/play.mjs", "/play/worker.mjs",
+                 "/play/css/play.css", "/play/py/starconquest-0123456789ab.zip.tmp"):
         assert not pattern.search(path), path
 
 
@@ -125,20 +118,9 @@ def test_the_build_drops_the_secret_before_running_anything():
     assert "curl" in rest and "build_web.sh" in rest
 
 
-def test_the_build_skips_the_tap_to_start_gate_but_keeps_the_leave_warning():
-    """The game plays no sound, so pygbag's wait-for-a-tap (`--ume_block`) is
-    only a delay. Its "leave site?" prompt (`--can_close`) is kept: it is what
-    warns before a single-player match in progress is navigated away from."""
-    call = next(line for line in BUILD.splitlines() if "pygbag --build" in line)
-    assert "--ume_block 0" in call
-    assert "--can_close" not in call
-
-
-def test_the_game_page_gets_our_favicon_not_pygbags():
-    """Without `--icon`, pygbag downloads its own default into /play/favicon.png,
-    and the game page links that one rather than the site root's."""
-    call = BUILD[BUILD.index("pygbag --build"):].split(")", 1)[0]
-    assert '--icon "$ROOT/tools/pwa/favicon.png"' in call
+def test_the_game_page_links_the_sites_favicon():
+    assert '<link rel="icon" type="image/png" href="/favicon.png">' in PAGE
+    assert 'cp "$ROOT/tools/pwa/favicon.png" "$ROOT/web/"' in BUILD
     assert (ROOT / "tools" / "pwa" / "favicon.png").exists()
 
 
@@ -195,13 +177,15 @@ def test_the_board_header_paints_over_the_page_so_its_menu_can_drop_down():
 
 
 def test_the_root_is_the_router_and_the_game_is_under_play():
-    assert 'cp -r "$STAGE/build/web/." "$ROOT/web/play/"' in BUILD
+    assert 'tools/build_next.py" --out "$ROOT/web/play"' in BUILD
     assert 'cp "$ROOT/tools/pwa/root.html" "$ROOT/web/index.html"' in BUILD
-    assert 'inject.py" "$ROOT/web/play/index.html"' in BUILD
+    assert "pygbag" not in BUILD
     # The service worker stays at the root, keeping the scope old installs hold.
     assert 'cp "$ROOT/tools/pwa/sw.js" "$ROOT/web/"' in BUILD
-    inject = (ROOT / "tools" / "pwa" / "inject.py").read_text()
-    assert 'register("/sw.js")' in inject and 'href="/manifest.webmanifest"' in inject
+    assert 'register("/sw.js")' in (ROOT / "webapp" / "js" / "play.mjs").read_text()
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in PAGE
+    for name in ("manifest.webmanifest", "favicon.png", "apple-touch-icon.png"):
+        assert f'"$ROOT/tools/pwa/{name}"' in BUILD, f"the page links /{name}"
 
 
 def test_the_router_sends_shared_links_to_the_game_and_visitors_to_the_board():
@@ -252,13 +236,6 @@ def test_the_board_links_to_the_game_under_play():
     assert admin.GAME_URL == "https://star-conquest.netlify.app/play/"
 
 
-def test_the_launcher_imports_pygame_for_pygbag():
-    """pygbag installs the pygame-ce wheel only for imports it finds in the
-    top-level main.py; the shim importing only the package boots to black."""
-    launcher = (ROOT / "main.py").read_text()
-    assert re.search(r"^import pygame\b", launcher, re.MULTILINE)
-
-
 def test_every_board_page_is_installable():
     """A browser offers the install only on a page that links the manifest and
     is controlled by the worker, so the board needs both, not just /play/."""
@@ -273,34 +250,15 @@ def test_an_app_launch_reopens_the_last_half():
     """The router reads the half each side records inside the installed app."""
     assert 'localStorage.getItem("sc_app_last")' in ROUTER
     assert 'last !== "board"' in ROUTER, "a never-recorded launch must still open the game"
-    inject = (ROOT / "tools" / "pwa" / "inject.py").read_text()
     nav = (ROOT / "leaderboard" / "js" / "nav.mjs").read_text()
-    assert 'setItem("sc_app_last", "game")' in inject
+    assert 'localStorage.setItem("sc_app_last", "game")' in PAGE
     assert 'setItem("sc_app_last", "board")' in nav
 
 
-def test_the_web_build_ships_the_gauntlets():
-    """The tutorial is a file beside the package code (`gauntlet._ASSETS`), so it
-    ships only because the build copies the package whole, fonts and all."""
-    from starconquest import gauntlet
-
-    assert 'cp -r "$ROOT/starconquest" "$STAGE/"' in BUILD
-    assert gauntlet._ASSETS.is_relative_to(ROOT / "starconquest")
-    assert (gauntlet._ASSETS / "tutorial.json").exists()
-
-
-def test_the_runtime_is_mirrored_after_the_page_is_patched():
-    """The mirror rewrites the page inject.py has finished with, under the build's
-    own Python, and after the wheel it reuses has been fetched."""
-    mirror = BUILD.index('uv run --project "$ROOT" python "$ROOT/tools/mirror_runtime.py" fetch "$ROOT/web"')
-    assert BUILD.index('inject.py" "$ROOT/web/play/index.html"') < mirror
-    assert BUILD.index('curl -fsSL -o "$ROOT/web/cdn/cp312/$WHEEL"') < mirror
-
-
 def test_a_page_that_now_redirects_leaves_the_cache():
-    """/game/ redirects to /play/: a navigation's opaque redirect is never ok, so
-    without this the cached old page (loading the blocked CDN) would win forever."""
+    """/game/ and /next/ redirect to /play/: a navigation's opaque redirect is
+    never ok, so without this the cached old page would win forever."""
     swr = SW.rindex("event.respondWith(")
     assert 'res.type === "opaqueredirect" || res.redirected' in SW[swr:]
     assert SW.index("cache.delete(req)", swr) < SW.index("cache.put(req", swr)
-    assert 'const CACHE = "starconquest-v4";' in SW
+    assert 'const CACHE = "starconquest-v5";' in SW

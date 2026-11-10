@@ -900,8 +900,6 @@ class Session:
         """Back to the live board, with its fog exactly as it was (`main`)."""
         ui = self._ui()
         ui.history = False
-        ui.dragging_scrubber = False
-        ui.dragging_graph = False
         ui.history_chart = None
         ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
         ui.history_graph = ui.graph_full = False

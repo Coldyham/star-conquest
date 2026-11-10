@@ -1,10 +1,9 @@
 """What a press on the play screen means, apart from where it landed.
 
-The pygame shell (`input`) and the HTML frontend (`session`) both hit-test in
-their own pixels, then hand the result here: a system id, the orders and rules
-under a lane press (nearest first), a drag's two ends, or a key by its
-``KeyboardEvent.key`` name. Every function mutates only the `Ui` and returns an
-action string for the caller to act on, or None, as `input` always has.
+The page hit-tests in its own pixels, and the session hands the result here: a
+system id, the orders and rules under a lane press (nearest first), a drag's
+two ends, or a key by its ``KeyboardEvent.key`` name. Every function mutates
+only the `Ui` and returns an action string for the caller to act on, or None.
 """
 
 from __future__ import annotations
@@ -156,8 +155,6 @@ def clear_selected(ui: Ui) -> None:
 def close_invite(ui: Ui) -> None:
     """Continue on the play-by-post invite overlay: put it away for good."""
     ui.pbp_invite = ()
-    ui.pbp_invite_rects = {}
-    ui.pbp_invite_close_rect = (0, 0, 0, 0)
     ui.pbp_invite_copied = 0
 
 
@@ -249,8 +246,6 @@ def route_clear(state: GameState, ui: Ui) -> None:
     """Clear route mode's group but stay in the mode, as Clear does elsewhere."""
     ui.route_sel = set()
     ui.route_dest = None
-    ui.route_press = False
-    ui.route_box = False
     ui.recompute_route(state)
 
 
@@ -304,7 +299,6 @@ def history_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str
         return "reset_view"   # as in live play: the camera is free here too
     if name == "g" and ui.history_chart is not None:
         ui.history_graph = not ui.history_graph
-        ui.dragging_graph = False
         return None
     if name == "Tab" and ui.history_graph:
         # the chart tabs, then Coach (when there is one), round and round

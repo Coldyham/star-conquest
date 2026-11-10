@@ -1,13 +1,11 @@
 """The map creator apart from its drawing: the editor's state, what each press,
-key and control means, every edit, and every word, read by both shells.
+key and control means, every edit, and every word.
 
-Pygame's ``mapmaker`` hit-tests in its pixels and draws; the HTML build's page
-hit-tests in its own (``webapp/js/maker.mjs``) and draws ``view``. Both hand the
-press over here as what it landed on: a system's index, a lane, a control's
-key, or a position in world units. Nothing here reads a screen size or a
-pointer, so the camera is each shell's own (``Editor.view`` is pygame's; the
-page keeps its own), and a press that wants the camera moved leaves the points
-to frame in ``Editor.fit``.
+The page hit-tests in its own pixels (``webapp/js/maker.mjs``) and draws
+``view``; it hands the press over here as what it landed on: a system's index,
+a lane, a control's key, or a position in world units. Nothing here reads a
+screen size or a pointer, so the camera is the page's, and a press that wants
+the camera moved leaves the points to frame in ``Editor.fit``.
 
 **Its working model is the recipe, not a live ``GameState``.** Positions plus
 lane index pairs, so the lanes follow their nodes for free and undo is a copy
@@ -147,11 +145,9 @@ class Editor:
 
     sel_node: int | None = None
     sel_lane: int | None = None
-    # Lane drawing: one armed source serving both gestures. A tap leaves it armed
-    # so the next press commits; a drag past the threshold commits on release.
+    # Lane drawing: the armed source. A tap leaves it armed so the next press
+    # commits.
     lane_src: int | None = None
-    lane_drag: bool = False
-    lane_pos: tuple[int, int] = (0, 0)
     # Refuse to *draw* a crossing lane. Editor-time only, and that is the whole
     # point: `custommap` reports a crossing as a warning rather than a blocker, so
     # turning this off leaves a map that still plays and still shares.
@@ -161,29 +157,18 @@ class Editor:
     # anything the recipe carries, so `adopt` leaves it alone.
     auto_relane: bool = False
 
-    # Owners tool. `owner_pick` is what a tap paints; the two box flags are route
-    # mode's arming exactly — `box_press` on the press, `box_active` only past the
-    # threshold, so a tap that never moves paints nothing.
+    # Owners tool: what a tap paints.
     owner_pick: int = 1
     # How many homeworlds *Auto* places. `None` means "as many as the map already
     # has", so the readout is the map's own truth until someone sets a number;
     # `adopt` puts it back. Never `settings.players` — `commit` derives that from
     # the recipe, so a number written there is overwritten on the way out.
     auto_seats: int | None = None
-    box_press: bool = False
-    box_active: bool = False
-    box_from: tuple[int, int] = (0, 0)
-    box_to: tuple[int, int] = (0, 0)
 
     drag_node: int | None = None
     drag_origin: tuple[int, int] | None = None   # world coords, for the snap-back
-    drag_start: tuple[int, int] = (0, 0)            # screen coords the press landed at
     drag_moved: bool = False
     drag_undone: bool = False                       # is this drag's undo snapshot taken?
-    pan_active: bool = False
-    pan_last: tuple[int, int] = (0, 0)
-    pan_button: int = 3    # which button armed the pan (Lanes allows the left one)
-    drag_slider: str | None = None
 
     # What the live validator is complaining about *right now*, so an illegal
     # drag rings amber under the cursor rather than only failing on release.
@@ -194,7 +179,6 @@ class Editor:
     redo_stack: list[CustomMap] = field(default_factory=list)
 
     filename: str = ""
-    editing_filename: bool = False
     confirm: str | None = None        # a `CONFIRMS` key, or None
 
     status: str = ""
@@ -204,24 +188,8 @@ class Editor:
     # shell to carry out and clear.
     fit: list | None = None
 
-    # Pygame's: laid out by `mapmaker.draw`, read by its `handle_event`. Cleared
-    # every frame, so a control this frame did not draw simply is not here to be
-    # clicked.
-    rects: dict = field(default_factory=dict)
-    problem_rows: list = field(default_factory=list)
-    # A compact screen's sidebar is shorter than what it holds, so it scrolls
-    # (pygame's `_draw_side`): how far, how tall its content ran last frame, and a
-    # drag on its blank space as (press y, scroll at the press) while one is under way.
-    side_scroll: int = 0
-    side_content_h: int = 0
-    side_drag: tuple[int, int] | None = None
-    # Two-finger pinch and pan of the canvas, as in the game: fingers down, the
-    # last (spread, midpoint), a lock until every finger is up, and the recipe from
-    # before the latest press, put back if that press was a pinch's first finger
-    # (it may have placed a system; `snapshot`, `unpress`).
-    fingers: dict = field(default_factory=dict)
-    pinch_last: tuple | None = None
-    pinch_lock: bool = False
+    # The recipe from before the latest press, put back if that press was a
+    # pinch's first finger (it may have placed a system; `snapshot`, `unpress`).
     press_undo: tuple | None = None
 
     def problems(self) -> list[Problem]:
@@ -331,17 +299,6 @@ def set_status(ed: Editor, text: str, ok: bool) -> None:
     ed.status_ms = STATUS_MS if ok else STATUS_ERROR_MS
 
 
-def age_status(ed: Editor, dt: int) -> None:
-    """Expire the status line. A failure holds far longer than a success, for the
-    reason the menu's does: an error is the only account of something that did
-    *not* happen, and one that clears before it can be read is worse than none."""
-    if not ed.status:
-        return
-    ed.status_ms -= dt
-    if ed.status_ms <= 0:
-        ed.status, ed.status_ms = "", 0
-
-
 # --------------------------------------------------------------------------- #
 # History — every committed mutation goes through `push_undo` first
 # --------------------------------------------------------------------------- #
@@ -377,8 +334,6 @@ def adopt(ed: Editor, recipe: CustomMap) -> None:
     ed.sel_node = ed.sel_lane = None
     ed.auto_seats = None
     ed.lane_src = None
-    ed.lane_drag = False
-    ed.box_press = ed.box_active = False
     ed.drag_node = ed.drag_origin = None
     ed.bad_nodes = ed.bad_lanes = frozenset()
 
@@ -435,8 +390,8 @@ def chain_lane(ed: Editor, node: int) -> None:
 def arm_move(ed: Editor, node: int) -> None:
     """Select a system and arm a move-drag on it. No undo snapshot yet: a tap that
     only selects is not an edit, and pushing one here would clear the redo stack
-    every time you looked at a system. The shell keeps where the press landed
-    (``drag_start``) for its drag threshold."""
+    every time you looked at a system. The page keeps where the press landed for
+    its drag threshold."""
     ed.sel_node = node
     ed.drag_node = node
     ed.drag_origin = (ed.recipe.nodes[node].x, ed.recipe.nodes[node].y)
@@ -513,7 +468,7 @@ def press_lane_tool(ed: Editor, node: int | None, lanes: list[int] = ()) -> bool
     if node is not None:
         ed.sel_lane = None
         if ed.lane_src is None:
-            ed.lane_src, ed.lane_drag = node, False
+            ed.lane_src = node
         elif ed.lane_src == node:
             ed.lane_src = None              # tapping the armed system again disarms
         else:
@@ -543,7 +498,7 @@ def lane_release(ed: Editor, target: int | None) -> None:
     gesture said where it meant to end."""
     if target is not None and ed.lane_src is not None and target != ed.lane_src:
         add_lane(ed, ed.lane_src, target)
-    ed.lane_src, ed.lane_drag = None, False
+    ed.lane_src = None
 
 
 def set_tool(ed: Editor, tool: str) -> None:
@@ -555,7 +510,6 @@ def set_tool(ed: Editor, tool: str) -> None:
         # would otherwise keep glowing on the map indefinitely.
         ed.sel_lane = None
         ed.lane_src = None
-        ed.lane_drag = False
     ed.tool = tool
 
 
@@ -686,15 +640,6 @@ def filename_text(raw: str) -> str:
     no more than ``FILENAME_MAX_LEN`` of them, so it can never name a path out of
     the maps folder."""
     return "".join(ch for ch in raw if ch.isalnum() or ch in "_-.")[:FILENAME_MAX_LEN]
-
-
-def type_filename(ed: Editor, text: str) -> None:
-    """Characters typed into the filename field, appended as far as they fit."""
-    if not ed.editing_filename:
-        return
-    for ch in text:
-        if (ch.isalnum() or ch in "_-.") and len(ed.filename) < FILENAME_MAX_LEN:
-            ed.filename += ch
 
 
 # --------------------------------------------------------------------------- #

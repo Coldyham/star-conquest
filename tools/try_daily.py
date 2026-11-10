@@ -3,8 +3,8 @@
 
 Deals a map from a weekday's daily spec (the board's, or with ``--puzzle`` the
 puzzle's) as ``tools/daily.py`` would, prints it,
-and opens it in the desktop game's setup menu (``--no-menu`` starts it
-straight away). Each run deals a fresh map; ``--seed`` deals one again. The
+and opens it in the game's setup menu, served on this machine
+(``--no-menu`` starts it straight away). Each run deals a fresh map; ``--seed`` deals one again. The
 spec is read live: edit ``tools/daily_spec.json`` (``tools/puzzle_spec.json``),
 or ``PLAYERS``, ``systems``, ``PUZZLE_OPPONENTS`` and ``turn_cap`` in
 ``tools/daily.py``, and the next run deals from the change. Reasons:
@@ -30,7 +30,8 @@ import argparse
 import datetime as dt
 import json
 import random
-import subprocess
+import threading
+import webbrowser
 import sys
 from pathlib import Path
 
@@ -87,7 +88,7 @@ def deal(day: dt.date, trial: str, kind: str = "board") -> Settings:
 
 
 def save(s: Settings, name: str) -> Path:
-    """The setup as an empty game log, which ``main.py --settings-from`` opens."""
+    """The setup as an empty game log, which the menu's *Open a file* opens."""
     TRY_DIR.mkdir(parents=True, exist_ok=True)
     path = TRY_DIR / f"{name}.json"
     log = replay.GameLog(seed=s.seed if s.seed is not None else 0, settings=s.to_dict())
@@ -148,9 +149,29 @@ def main(argv: list[str] | None = None) -> int:
     name = day.isoformat() if args.day else f"{WEEKDAYS[day.weekday()][:3].lower()}-{trial}"
     name = f"puzzle-{name}" if kind == "puzzle" else name
     path = save(s, name)
-    print(f"opening {path.relative_to(ROOT)}", flush=True)
-    cmd = [sys.executable, str(ROOT / "main.py"), "--settings-from", str(path)]
-    return subprocess.call(cmd + (["--no-menu"] if args.no_menu else []), cwd=ROOT)
+    print(f"saved {path.relative_to(ROOT)}", flush=True)
+    return play(s, args.no_menu)
+
+
+def page_url(s: Settings, start: bool, port: int) -> str:
+    """The local game's address carrying ``s`` as a setup link, which the menu
+    loads at boot; ``?go`` starts it straight away."""
+    return f"http://127.0.0.1:{port}/play/{'?go' if start else ''}#{s.to_token()}"
+
+
+def play(s: Settings, start: bool) -> int:
+    """Serve the game, open it on ``s`` and wait for Ctrl+C."""
+    from starconquest import serve
+
+    server = serve.start()
+    url = page_url(s, start, serve.PORT)
+    print(f"opening {url}  (Ctrl+C to stop)", flush=True)
+    webbrowser.open(url)
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        server.shutdown()
+    return 0
 
 
 if __name__ == "__main__":

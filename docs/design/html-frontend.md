@@ -1,7 +1,8 @@
-# The HTML frontend (in progress)
+# The HTML frontend
 
 The pygame shell (`render`, `menu`, `main`'s loop, `mapmaker`, `input`,
-`widgets`, `softkeyboard`) is being replaced by one HTML frontend: SVG for the
+`widgets`, `softkeyboard`) was replaced by one HTML frontend (*The cutover
+(phase 8)*, below): SVG for the
 map, DOM and CSS for panels and menus, vanilla ES modules with no build step,
 like `leaderboard/js/`. The Python core stays Python and runs in Pyodide in a
 Web Worker. Locally, `main.py` will serve the same bundle on `localhost:8000`
@@ -498,19 +499,56 @@ the browser asks where it goes; "Save last match" replaces a games folder the
 player could open. Closing the tab needs no confirm, as nothing is lost: every
 match is kept as it is played.
 
-**Ready for cutover.** What remains, and only that:
+**Ready for cutover.** What remained then: point `/play/` at the HTML build,
+make it `main.py`'s default, delete the pygame shell, and measure startup on a
+real phone. The first three are *The cutover (phase 8)*; the last is still open.
 
-1. Point `/play/` at the HTML build (`tools/build_web.sh` stages `web/next`
-   at `web/play`, and `tools/pwa/root.html`'s router and the manifest's start
-   URL follow), with the manifest linked from its page.
-2. Make `main.py`'s default launch the HTML one (``--html`` today), keeping a
-   flag for pygame only until it is deleted.
-3. Delete the pygame shell (`render`, `input`, `menu`, `widgets`, `mapmaker`,
-   `main`'s loop, `softkeyboard`, `uifont`) and its tests, the wrappers it
-   kept in `setupmenu`, `maker` and `hud`, and the `is_web()` branches only it
-   reached; drop pygbag, its runtime mirror and cache rules from
-   `tools/build_web.sh` and `tools/pwa/sw.js`; retire the parity screen tools
-   once the baseline is no longer needed.
-4. Measure startup on a real phone over a real network, which this work could
-   not (*The Pyodide spike (phase 0)*, "Not measured").
+## The cutover (phase 8)
 
+The HTML build is the game: `/play/` on the site, and what `main.py` opens.
+
+- **The deploy.** `tools/build_web.sh` stages `tools/build_next.py`'s output
+  at `web/play/`, beside the router, manifest, icons and service worker at the
+  root and the board at `/board/`. pygbag, its tap-to-start gate, the page
+  patch (`tools/pwa/inject.py`), the runtime mirror (`tools/mirror_runtime.py`,
+  `record_runtime.mjs`, `runtime_files.txt`) and the pygame-ce wheel went with
+  it. The page's own head links the manifest and icons and records
+  `sc_app_last`, so the router reopens the game inside the installed app as it
+  did. The manifest, its id and its start URL (the router) are unchanged, so
+  every install updates in place. `/next/` redirects to `/play/`, fragment
+  kept, as `/game/` already did.
+- **The service worker** gives `/play/` the rules `/next/` had (cache-first
+  for what its name fixes, network-first for the rest), answers only
+  same-origin requests now that no runtime loads from a CDN, and moved to cache
+  `starconquest-v5`, dropping v4's pygbag runtime and archive.
+- **The launcher.** `main.py` is `starconquest.serve` (``--html`` is accepted
+  and ignored); `/` and `/next/` redirect to `/play/`, query kept, and the
+  manifest and icons are served at the root. pygame's other flags (`--watch`,
+  `--settings-from`, `--match`, `--spectate`, `--gauntlet-spec`, `--layout`,
+  `--phone`) have no successor: a link or the menu's Files list does each.
+  `tools/try_daily.py` opens its deal as a setup link (`#<token>`, `?go`).
+- **The deletion.** The shell modules and their tests (`test_input`,
+  `test_menu`, `test_render`, `test_mapmaker`, `test_compact`, and the shell
+  halves of a dozen more), `tools/parity_shots.py`, `spike_pygbag.py` and
+  `tools/pwa/make_screenshots.py` (the store screenshots stay committed). In
+  the core, what only the shell read: `Ui`'s hit-rects and drag and pinch
+  state, `maker.Editor`'s pixel layout, the history-film helpers `main` drove
+  (`land_film`, `_next_history_film`, `hold_history_marks`), and every
+  `is_web()` branch that reached pygbag's `platform.window` (`webstore`,
+  `share`, `pbp`'s localStorage mailboxes); `paths.is_web` is now "in the
+  worker". `tools/slim_web.py` keeps only the Python stripping; the fonts ship
+  whole. pygame-ce stays a dev dependency, as an image library for
+  `tools/pwa/make_icons.py` and `tools/parity_sheet.py`; the game depends on
+  nothing beyond the standard library.
+- **The parity baseline** is no longer drawable at head: `parity_next.py` and
+  `parity_sheet.py` stay for the tweaks still to come, and the baseline is
+  redrawn by running `tools/parity_shots.py --out` at a1a17ad, the last commit
+  with the pygame shell.
+- **Checked:** the built site in headless Chromium: the root sends a visitor
+  to `/board/` and a fragment link to `/play/#…`; `/play/` boots, starts a
+  game from `?players=3&seed=7&go` and plays a turn with no console error;
+  the service worker, registered, caches the zip and Pyodide under `/play/`,
+  and with the network off the page boots from it and plays a turn.
+
+Left open: startup on a real phone over a real network (*The Pyodide spike
+(phase 0)*, "Not measured").

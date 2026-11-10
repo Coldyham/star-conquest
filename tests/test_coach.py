@@ -4,14 +4,10 @@ history review."""
 from __future__ import annotations
 
 import copy
-import os
 
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-import pygame
 
-from starconquest import app, coach, combat, config, engine, render, replay
-from starconquest import input as game_input
+from starconquest import app, coach, combat, config, engine, replay
 from starconquest.model import Order
 from starconquest.settings import Settings
 from tests.test_engine import make_state, no_jitter
@@ -140,56 +136,6 @@ def test_the_costliest_notes_are_kept_and_shown_in_turn_order():
     notes = coach.review(boards, orders, 1, limit=3).notes
     assert len(notes) == 3
     assert [n.turn for n in notes] == sorted(n.turn for n in notes)
-
-
-# -- in history review ------------------------------------------------------- #
-def _decided_review(tmp_path, monkeypatch):
-    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
-    pygame.init()
-    render._FONTS.clear()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
-    settings = Settings(seed=1, nodes=18, players=3)
-    log = replay.new_log(settings, 1)
-    log.path = tmp_path / "game.json"
-    state, ui = app.resume_game(log, settings)
-    ui.autoplay = True
-    while state.winner is None and state.turn < 300:
-        app.resolve_turn(state, ui, log, settings)
-    assert state.winner is not None
-    states, _f, _e, _l = app.open_history(state, ui, log)
-    return screen, states, ui
-
-
-def _key(key, mod=0):
-    return pygame.event.Event(pygame.KEYDOWN, key=key, mod=mod, unicode="")
-
-
-def test_the_coach_tab_steps_through_its_notes(tmp_path, monkeypatch):
-    try:
-        screen, states, ui = _decided_review(tmp_path, monkeypatch)
-        review = ui.coach_review
-        assert review is not None and review.notes
-        assert ui.coach_open == any(n.kind != coach.TURN for n in review.notes)
-        ui.coach_open = True
-        render.draw(screen, states[ui.history_turn], ui)
-        assert ui.coach_tab_rect[2] and ui.coach_rows and not ui.graph_trace_rects
-        # Down selects the first note, and History jumps to its board
-        game_input.handle_event(_key(pygame.K_DOWN), states[ui.history_turn], ui)
-        assert ui.coach_sel == 0 and ui.history_turn == review.notes[0].turn
-        # a click on a row selects it
-        render.draw(screen, states[ui.history_turn], ui)
-        i, rect = ui.coach_rows[-1]
-        click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(rect[0] + 4, rect[1] + 4))
-        game_input.handle_event(click, states[ui.history_turn], ui)
-        assert ui.coach_sel == i and ui.history_turn == review.notes[i].turn
-        # Tab leaves for the first chart and comes round to the coach again
-        game_input.handle_event(_key(pygame.K_TAB), states[ui.history_turn], ui)
-        assert not ui.coach_open and ui.graph_metric == 0
-        game_input.handle_event(_key(pygame.K_TAB, pygame.KMOD_SHIFT), states[ui.history_turn], ui)
-        assert ui.coach_open
-        render.draw(screen, states[ui.history_turn], ui)
-    finally:
-        pygame.quit()
 
 
 def test_no_coach_mid_game(tmp_path, monkeypatch):

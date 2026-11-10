@@ -1,18 +1,20 @@
 """Serve the HTML build on this machine: the page, Pyodide, and the game's Python.
 
-    uv run python -m starconquest.serve            # http://127.0.0.1:8000/next/
+    uv run python -m starconquest.serve            # http://127.0.0.1:8000/play/
     uv run python -m starconquest.serve --no-open
-    uv run python main.py --html --players 4 --seed 42   # the same, its menu pre-filled
+    uv run python main.py --players 4 --seed 42    # the same, its menu pre-filled
 
-The local launcher of the HTML build: the menu's flags (``--players``,
-``--nodes``, ``--seed``, ``--mode``, ``--autoplay``, ``--no-menu``) go into the
-page's address, which pre-fills its menu as they pre-fill pygame's
-(``--no-menu`` plays at once). ``main.py --html`` hands its other arguments here.
+The game's local launcher: the menu's flags (``--players``, ``--nodes``,
+``--seed``, ``--mode``, ``--autoplay``, ``--no-menu``) go into the page's
+address, which pre-fills its menu (``--no-menu`` plays at once). The root
+``main.py`` hands its arguments here.
 
-Straight from the sources, so an edit shows on reload: `webapp/` at ``/next/``,
+Straight from the sources, so an edit shows on reload: `webapp/` at ``/play/``
+(``/`` and the old ``/next/`` redirect there, query kept),
 the pinned Pyodide from `.cache/` (fetched on first run), the game zip built on
-request whenever a source has changed, and the board's modules at
-``/board/js/``. Port 8000 because the leaderboard's functions allow
+request whenever a source has changed, the board's modules at
+``/board/js/``, and the manifest and icons the page links at the root
+(`tools/pwa/`; no service worker, which the page never registers here). Port 8000 because the leaderboard's functions allow
 ``http://127.0.0.1:8000`` and ``http://localhost:8000`` as origins.
 
 ``GET /__bench`` answers `results/next-spike/plan.json`, and ``POST /__bench``
@@ -74,6 +76,10 @@ class _Zip:
 
 
 ZIP = _Zip()
+# What the page links at the site root (`webapp/index.html`), from `tools/pwa/`.
+ROOT_FILES = frozenset({"manifest.webmanifest", "favicon.png", "apple-touch-icon.png", "icon-192.png",
+                        "icon-512.png", "icon-maskable-512.png", "screenshot-wide.png",
+                        "screenshot-mobile.png"})
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -103,10 +109,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         build_next, fetch_pyodide = _tools()
-        path = self.path.split("?", 1)[0].split("#", 1)[0]
-        if path in ("/", "/next"):
+        path, _, query = self.path.split("#", 1)[0].partition("?")
+        if path in ("/", "/play", "/next") or path.startswith("/next/"):
             self.send_response(HTTPStatus.FOUND)
-            self.send_header("Location", "/next/")
+            self.send_header("Location", "/play/" + path[len("/next/"):] + ("?" + query if query else ""))
             self.end_headers()
             return
         if path == "/__bench":
@@ -115,10 +121,13 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/board/js/"):
             self._file(_inside(ROOT / "leaderboard" / "js", path[len("/board/js/"):]))
             return
-        if not path.startswith("/next/"):
+        if path.lstrip("/") in ROOT_FILES:
+            self._file(ROOT / "tools" / "pwa" / path.lstrip("/"))
+            return
+        if not path.startswith("/play/"):
             self._send(b"not found", "text/plain", status=404)
             return
-        rest = path[len("/next/"):] or "index.html"
+        rest = path[len("/play/"):] or "index.html"
         immutable = "public, max-age=31536000, immutable"
         if rest == "js/build.mjs":
             name, _ = ZIP.current()
@@ -192,7 +201,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--no-menu", action="store_true", help="skip the setup menu and start straight away")
     args = ap.parse_args(argv)
     server = start(args.port)
-    url = f"http://127.0.0.1:{args.port}/next/{page_query(args)}"
+    url = f"http://127.0.0.1:{args.port}/play/{page_query(args)}"
     print(f"serving {url}  (Ctrl+C to stop)", flush=True)
     if args.port != PORT:
         print("note: the leaderboard only answers pages on port 8000", flush=True)

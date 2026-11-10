@@ -57,12 +57,8 @@ from . import engine, hostio, replay, webstore
 from .model import ForwardRule, GameState, Order
 from .paths import (
     LEADERBOARD_PBP_PATH,
-    WEB_AUTH_KEY,
-    WEB_PBP_BODY_KEY,
     WEB_PBP_RULES_KEY,
     WEB_PBP_SEATS_KEY,
-    WEB_PBP_STATE_KEY,
-    is_web,
 )
 from .settings import Settings, build_state, fog_off
 
@@ -732,22 +728,6 @@ PENDING, OK, ERROR, MISSING, REFUSED = (
 # before anyone quits. Same figure ``share`` uses, for the same reason.
 _TIMEOUT = 20
 
-# How many web mailboxes calls rotate through. Each call gets its own, because a
-# poll and a submission are routinely in flight together and one shared slot
-# handed whichever landed first to whichever was collected first — a
-# submission's reply read as a match is "unreadable". Rotated rather than unique
-# so a call abandoned mid-flight (leaving a match) strands a bounded number of
-# keys in the store, and wide enough that no slot comes round again while its
-# last call could still be out.
-_WEB_SLOTS = 16
-_web_calls = 0
-
-
-def _web_keys(slot: int) -> tuple[str, str]:
-    """The ``(state, body)`` localStorage keys of one mailbox."""
-    return f"{WEB_PBP_STATE_KEY}:{slot}", f"{WEB_PBP_BODY_KEY}:{slot}"
-
-
 class Request:
     """One in-flight call to the endpoint, polled once a frame.
 
@@ -760,46 +740,19 @@ class Request:
     ``poll`` answers ``(state, body)``.
     """
 
-    def __init__(self, web: bool, slot: int = 0) -> None:
-        self._web = web
-        self._slot = slot                           # which web mailbox is ours
+    def __init__(self) -> None:
         self._result: list[tuple[str, str]] = []   # a one-slot mailbox
 
     def poll(self) -> tuple[str, str]:
-        if self._web:
-            return self._poll_web()
         return self._result[0] if self._result else (PENDING, "")
-
-    def _poll_web(self) -> tuple[str, str]:
-        """Collect whatever the fetch parked in localStorage.
-
-        Read through ``webstore.get`` rather than by evaluating JS, because that
-        is the read path the rest of the game proves works every launch. Handing
-        JavaScript a string to *store* and reading it back through the accessor
-        we already trust avoids depending on ``window.eval`` returning a value,
-        which nothing else here needs (``share`` documents the same reasoning).
-        """
-        state_key, body_key = _web_keys(self._slot)
-        state = webstore.get(state_key)
-        if state in (OK, ERROR, MISSING, REFUSED):
-            body = webstore.get(body_key) or ""
-            _clear_web_slot(self._slot)
-            return state, body
-        return PENDING, ""
-
-
-def _clear_web_slot(slot: int) -> None:
-    """Empty the mailbox, so a stale answer is never read as a fresh one."""
-    for key in _web_keys(slot):
-        webstore.set(key, "")
 
 
 def call(action: str, payload: dict | None = None, signed: bool = False,
          **params) -> Request | None:
     """Start a call to ``action``. None if it cannot be attempted at all.
 
-    ``payload`` makes it a POST. ``signed`` sends the board's sign-in session
-    along, when there is one (web only; see ``_call_web``). Nothing is awaited
+    ``payload`` makes it a POST. ``signed`` has the page send the board's
+    sign-in session along, when there is one (in the browser only). Nothing is awaited
     and nothing blocks; the caller polls the returned ``Request`` once a frame.
     """
     url = endpoint(action)
@@ -819,99 +772,20 @@ def request(url: str, body: str | None = None, signed: bool = False) -> Request 
     thing for a different endpoint rather than a third copy of it.
     """
     if hostio.in_worker():
-        req = Request(web=False)
+        req = Request()
         hostio.request(url, body, signed, lambda state, text: req._result.append((state, text)))
         return req
-    return _call_web(url, body, signed) if is_web() else _call_desktop(url, body)
+    return _call_desktop(url, body)
 
 
 def bridge(module: str, fn: str, args: list) -> Request | None:
     """Call ``fn`` of the board module at ``module`` in the page, parking how its
-    promise settles: ``settle`` for a host whose page Python can't hand JS to.
-    Worker only; None elsewhere (``share`` builds the pygbag call itself)."""
+    promise settles. Worker only; None elsewhere."""
     if not hostio.in_worker():
         return None
-    req = Request(web=False)
+    req = Request()
     hostio.bridge(module, fn, args, lambda state, text: req._result.append((state, text)))
     return req
-
-
-def _auth_js() -> str:
-    """JS adding ``Authorization`` to a headers object ``h`` from the board's
-    stored session, if any. Read in JS at fetch time rather than passed in, so
-    the token never passes through Python, and a missing, blocked or malformed
-    store simply sends nothing — the endpoint then treats the call as signed
-    out, which only matters for a claimed name."""
-    return (f"try{{var a=JSON.parse(localStorage.getItem({json.dumps(WEB_AUTH_KEY)})||'null');"
-            "if(a&&a.access_token)h.Authorization='Bearer '+a.access_token}catch(e){}")
-
-
-def _call_web(url: str, body: str | None, signed: bool = False) -> Request | None:
-    """A ``fetch`` that parks its own result where the poll can collect it.
-
-    The handlers leave the slot in exactly one of the three states whatever
-    happens: a non-2xx is as much an answer as a dead connection, and a promise
-    with no rejection handler surfaces in the console as a crash. A non-2xx keeps
-    its body, as the desktop path does: "stale turn" is the endpoint answering,
-    and dropping it would tell the player the match could not be reached.
-    """
-    import platform as _platform
-
-    mailbox = _next_mailbox()
-    state, slot = (json.dumps(key) for key in _web_keys(mailbox))
-    init = ("{method:'POST',headers:h,body:"
-            f"{json.dumps(body)}}}") if body is not None else "{}"
-    headers = "var h={'Content-Type':'application/json'};" + (_auth_js() if signed else "")
-    try:
-        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
-            f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
-            f"{headers}fetch({json.dumps(url)},{init}).then(function(r)"
-            "{return r.text().then(function(t){"
-            f"localStorage.setItem({slot},t);"
-            f"localStorage.setItem({state},r.ok?'{OK}':r.status===404?'{MISSING}'"
-            f":r.status===403?'{REFUSED}':'{ERROR}')}})}})"
-            f".catch(function(e){{console.warn('pbp call failed',e);"
-            f"localStorage.setItem({state},'{ERROR}')}})"
-        )
-        return Request(web=True, slot=mailbox)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _next_mailbox() -> int:
-    """The web mailbox the next call parks its answer in (``_WEB_SLOTS``)."""
-    global _web_calls
-    mailbox = _web_calls % _WEB_SLOTS
-    _web_calls += 1
-    return mailbox
-
-
-def settle(promise: str) -> Request | None:
-    """Web only: run ``promise``, a JS expression for a promise of a string, and
-    park how it settles in a mailbox. None off the web or without the bridge.
-
-    For work the board's own modules do in the page rather than an endpoint
-    answers (``share.quick_post``). A rejection is ``ERROR`` with its message as
-    the body, for the console.
-    """
-    if not is_web():
-        return None
-    import platform as _platform
-
-    mailbox = _next_mailbox()
-    state, slot = (json.dumps(key) for key in _web_keys(mailbox))
-    try:
-        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
-            f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({slot});"
-            f"Promise.resolve().then(function(){{return {promise}}}).then(function(t)"
-            f"{{localStorage.setItem({slot},t);localStorage.setItem({state},'{OK}')}})"
-            f".catch(function(e){{console.warn('call failed',e);"
-            f"localStorage.setItem({slot},String(e&&e.message||e));"
-            f"localStorage.setItem({state},'{ERROR}')}})"
-        )
-        return Request(web=True, slot=mailbox)
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _call_desktop(url: str, body: str | None) -> Request | None:
@@ -920,7 +794,7 @@ def _call_desktop(url: str, body: str | None) -> Request | None:
     import urllib.error
     import urllib.request
 
-    request = Request(web=False)
+    request = Request()
 
     def _go() -> None:
         try:

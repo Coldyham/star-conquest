@@ -59,12 +59,6 @@ def test_fragment_and_navigation_are_effects():
     assert webstore.url_token() == "xyz"
 
 
-def test_the_pygame_only_calls_answer_no():
-    assert webstore.trigger_resize() is False
-    assert webstore.viewport() is None
-    assert hostio.drain() == []
-
-
 def test_closing_the_window_is_the_pages_to_try():
     assert webstore.close_window() is True
     assert hostio.drain() == [{"t": "close"}]
