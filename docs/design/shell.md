@@ -1,5 +1,10 @@
 # Shell design notes: layout and controls
 
+The pygame shell this describes was deleted at cutover
+([`html-frontend.md`](html-frontend.md), "The cutover (phase 8)"); the page
+keeps its behaviour, so the reasons here still hold. Names of shell modules
+(`render`, `input`, `menu`, `widgets`, `main`) are as they were.
+
 Why the pygame shell behaves as it does. It covers text sizing and touch
 targets, viewport margins, the send popup, the menu's Combat page, spectating
 after a loss, and route mode (chain and rally). Headings match the rules in

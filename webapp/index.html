@@ -4,7 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Star Conquest</title>
-<link rel="icon" href="data:,">
+<meta name="description" content="A minimalist turn-based strategy game: take every star system to win.">
+<meta name="theme-color" content="#0a0c14">
+<!-- The installable app: the manifest, icons and service worker sit at the site
+     root, beside the router (tools/build_web.sh), hence the absolute paths. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Star Conquest">
+<script>
+// Inside the installed app, the game was the last half open: the root router
+// (tools/pwa/root.html) reopens it at the next launch.
+try {
+  if (navigator.standalone === true || matchMedia(
+      "(display-mode: standalone), (display-mode: fullscreen)").matches) {
+    localStorage.setItem("sc_app_last", "game");
+  }
+} catch (e) {}
+</script>
 <link rel="stylesheet" href="css/play.css">
 <link rel="stylesheet" href="css/menu.css">
 <link rel="stylesheet" href="css/maker.css">

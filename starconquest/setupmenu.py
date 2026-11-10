@@ -1,12 +1,10 @@
 """The setup menu apart from how it is drawn: its tabs and rows, what a press
 on each means, and the words it shows.
 
-Both shells read it. The pygame menu (`menu`) hit-tests its own rects and hands
-the widget key here (`press`, `apply_slider`); the HTML build's session does the
-same with the key the page sends, and draws `view`, the whole menu as plain
-JSON. A menu is any object with `MenuState`'s fields (`menu.MenuState` in
-pygame, `Menu` below for the session); everything here mutates only that and
-`Settings`, as `menu.handle_event` always has.
+The session hands it the widget key the page sends (`press`, `apply_slider`),
+and the page draws `view`, the whole menu as plain JSON. A menu is any object
+with `Menu`'s fields (below); everything here mutates only that and
+`Settings`.
 """
 
 from __future__ import annotations
@@ -428,7 +426,6 @@ def gauntlets_label(ms) -> str:
 DISABLED_TEXT = (78, 84, 100)
 WARN = (214, 172, 92)  # amber: a challenge whose settings no longer match
 START_BORDER = (96, 190, 120)
-STATUS_ERR = (214, 130, 110)
 
 
 # --------------------------------------------------------------------------- #
@@ -1131,7 +1128,6 @@ HIGHLIGHT = (120, 150, 210)   # `menu._HL_BORDER`: an open stage's status
 COPY_GAUNTLET = "Copy link"
 TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_", "run_")
 RUN_KEYS = ("run_start", "run_continue", "run_abandon")
-RUN_LABELS = ("Start run", "Start anyway", "Continue run", "Abandon run", "Sure? Abandon")
 RUN_ABOUT = "Run: every stage in order, each within its target, one life"
 PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
 

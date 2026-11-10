@@ -3,9 +3,9 @@
 
 A recipe is settings, a seed, then steps: play some turns, select a system,
 call a `Ui` method, set a `Ui` field, take a hint, open history, put up a
-modal. `tools/parity_shots.py` builds one here and draws it in pygame; the
-HTML build's session builds the same one (`Session.op_parity_load`) and the
-page draws it, so both shells show the same position. The committed recipes
+modal. The session builds one here (`Session.op_parity_load`) and the page
+draws it (`tools/parity_next.py`); the pygame shell's `tools/parity_shots.py`
+drew the same recipes for the baseline, until the cutover. The committed recipes
 (`tests/fixtures/parity_screens.json`) are already resolved: no ``@`` symbol
 is left in them.
 """

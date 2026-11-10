@@ -1,16 +1,16 @@
 """The page that a Web Worker's Python answers to.
 
-In the HTML build the core runs in Pyodide inside a Web Worker, which has no
+In the browser the game runs in Pyodide inside a Web Worker, which has no
 ``localStorage``, no clipboard, no address bar and no way to evaluate JS in the
 page (``docs/design/html-frontend.md``). So Python does no I/O there: what
 the page told it at boot is kept here (its address and a mirror of its
 storage), and everything it wants done is queued as an *effect*, a plain dict
 the page carries out after each command. A request's answer comes back as a
 command too (``reply``), and lands in the mailbox the caller polls, exactly as a
-pygbag fetch or a desktop thread's would.
+tool's ``urllib`` thread's does.
 
-Under pygbag and on the desktop none of this is used: ``in_worker`` is False and
-every bridge keeps its own path. Imports nothing from the package, so any
+In tools and tests none of this is used: ``in_worker`` is False and every
+bridge keeps its own path (a file, ``urllib``). Imports nothing from the package, so any
 module may import it.
 """
 

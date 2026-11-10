@@ -12,7 +12,6 @@ saved games persist and drop-in ``models/`` still be imported by path.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 # The package dir's parent: the repo root on desktop.
@@ -74,22 +73,6 @@ WEB_IRONMAN_KEY = "sc_ironman"
 # it belongs to this screen, not to a game setup.
 WEB_UI_SIZE_KEY = "sc_ui_size"
 
-# Where a browser download parks its result for the game loop to collect
-# (`share.fetch_log`). localStorage rather than a `window` property because
-# reading one back is the one bridge call this build cannot take for granted:
-# writing through `window.eval` is proven (that is how a replay is uploaded) and
-# so is reading a *property* (the URL fragment, these very keys), but `eval`
-# returning a value is neither. So the fetch writes here and the poll reads it
-# with `webstore.get`, which every stored preference already depends on.
-WEB_REPLAY_STATE_KEY = "sc_replay_state"
-WEB_REPLAY_BODY_KEY = "sc_replay_body"
-
-# The same mailbox pattern for a play-by-post request (`pbp.Request`). A separate
-# pair rather than a shared one because a client can have a replay download and a
-# match poll in flight at once, and one landing must not collect the other's body.
-WEB_PBP_STATE_KEY = "sc_pbp_state"
-WEB_PBP_BODY_KEY = "sc_pbp_body"
-
 # Where a seat's token is remembered, so reopening the game returns you to your
 # match without the link. Keyed by match id: `{"<match id>": {"seat": 2,
 # "token": "…"}}`. A token is the only thing that can move a seat's ships, so it
@@ -109,9 +92,10 @@ WEB_PBP_RULES_KEY = "sc_pbp_rules"
 WEB_PBP_NAME_KEY = "sc_pbp_name"
 
 # The board's sign-in session (`leaderboard/js/auth.mjs`'s SESSION_KEY),
-# JSON with an `access_token`. Read only by the web game's ``?action=create``
-# call, so a match may be opened under the player's own claimed name. The game
-# never refreshes or writes it: an expired one is refused like none at all, and
+# JSON with an `access_token`. Read only by the page (`webapp/js/core.mjs`), for
+# a signed call such as ``?action=create``, so a match may be opened under the
+# player's own claimed name; Python never sees it. The game never refreshes or
+# writes it: an expired one is refused like none at all, and
 # the board's player card (its account panel) is where a session is renewed.
 WEB_AUTH_KEY = "sc_auth"
 
@@ -186,11 +170,10 @@ def is_android() -> bool:
 
 
 def is_web() -> bool:
-    """True when running in the browser: pygbag's WebAssembly build, or the HTML
-    build's worker (``hostio``), which is Pyodide's Emscripten too."""
+    """True when running in the browser: the game's worker (``hostio``)."""
     from . import hostio
 
-    return sys.platform == "emscripten" or hostio.in_worker()
+    return hostio.in_worker()
 
 
 def data_dir() -> Path:
@@ -210,8 +193,6 @@ def saves_dir() -> Path:
 def maps_dir() -> Path:
     """Where hand-authored maps live (gitignored), mirroring ``saves_dir``.
 
-    On pygbag's web build this is emscripten MEMFS and does not survive a
-    reload — exactly as ``saves/`` already behaves. The HTML build's worker
-    keeps it in IndexedDB, as it does the games folder (``webapp/worker.mjs``).
+    In the browser the worker keeps it in IndexedDB, as it does the games folder (``webapp/worker.mjs``).
     """
     return data_dir() / "maps"

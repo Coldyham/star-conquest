@@ -9,41 +9,35 @@ it here and in `CLAUDE.md` together.
 
 ## Architecture
 
-The whole point of the layout is a hard split between a **pure simulation core**
-and a **thin pygame presentation shell**, so the entire game is testable
-headlessly. Respect these boundaries — they are load-bearing, not stylistic:
+The game is **pure Python with no display of its own**, so the entire game is
+testable headlessly. In the browser it runs in Pyodide in a Web Worker behind
+`session` (JSON in, JSON out), and the page in `webapp/` draws what it answers.
+Respect these boundaries — they are load-bearing, not stylistic:
 
-- **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`. `tests/test_settings.py::test_no_core_module_imports_pygame`
-  parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
-  writes into and never reads back) are presentation-only: the engine and AI
-  never consult them.
-- **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
-  `mapmaker`, and `main`. `main` is `starconquest/main.py`, like every other
-  module; the root `main.py` is only a launcher shim, kept there because
-  `tools/build_web.sh` hands pygbag a `main.py` at the top of its stage dir.
-  Tests import it as `from starconquest import main`.
-  - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
-    never imports `engine` or `ai`** (derived stats like threat are local
-    helpers). It stores nothing time-varying: a frame is a pure function of
-    `GameState` + `Ui` + time (`_flow_phase` reads the clock; playback reads
-    `Ui.film`/`Ui.film_ms`), so a test drives a film frame by setting a field.
-  - `input.py` mutates **only** `Ui` (and queues human `Order`s), and returns an
-    action string (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`,
-    `"toggle_history"`, `"rewind"`, `"restart"`, `"retry"`, `"menu"`) or `None`
-    for `main.py` to act on.
-  - `menu.py` has the same split: `draw` only reads `Settings`, `handle_event`
-    mutates `MenuState`/`Settings` and returns `"start"`/`"quit"`/`None`;
-    `menu.pump` is a per-frame poll for text that never reaches the SDL queue.
-    `main.py` runs a `"menu"` ⇄ `"game"` state machine.
-  - **Browser bridges** — `softkeyboard` (focuses a hidden DOM input so a touch
-    keyboard appears), `webstore` (address bar, clipboard, key/value store; a
-    JSON file under `data_dir()` off the web) and `share` (the one that talks to
-    a network: posts replays, fetches one to watch as a polled `Download`). All
-    pure of pygame, guarded everywhere, silent on failure, never blocking a
-    frame. `share` sends **only** on *Post to leaderboard* or with *Share
-    replays* ticked. Detail: `docs/design/shell.md`, "Browser bridges".
+- **No module imports pygame.** `tests/test_settings.py::test_no_module_imports_pygame`
+  parses every module of `starconquest/` and `models/` for it. The pygame shell
+  (`render`, `input`, `menu`, `widgets`, `mapmaker`, `main`'s loop,
+  `softkeyboard`, `uifont`) was deleted at cutover
+  (`docs/design/html-frontend.md`, "The cutover"). `fog` (visibility) and
+  `turnfilm` (playback, which the engine writes into and never reads back) are
+  presentation-only: the engine and AI never consult them.
+- **Python does no I/O in the browser.** `hostio` queues effects (storage
+  writes, fetches, the clipboard, the address bar, a download, closing the
+  window) for the page and takes its replies; the board's sign-in session
+  (`sc_auth`) never reaches Python. The bridges — `webstore` (address bar,
+  clipboard, key/value store; a JSON file under `data_dir()` outside the
+  browser) and `share` (posts replays, fetches one to watch as a polled
+  `Download`; `urllib` on a daemon thread outside the browser) — are guarded
+  everywhere and silent on failure. `share` sends **only** on *Post to
+  leaderboard* or with *Share replays* ticked.
+- **The page decides nothing.** What a press means lives in `play` (the play
+  screen), `setupmenu` (the setup menu) and `maker` (the map editor); the
+  words on screen in `hud`, `setupmenu` and `maker`. The page sends the
+  session a press and draws the view it answers; change a rule or a word in
+  Python, never in the page's JS alone.
+- **`serve` is the local server** the root `main.py` starts (`webapp/` at
+  `/play/`, the game zip built whenever a source changes), and the one module
+  never shipped in the zip (`tools/build_next.py`'s `LOCAL_ONLY`).
 
 ### Turn resolution (engine.py)
 

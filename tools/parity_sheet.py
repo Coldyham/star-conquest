@@ -1,12 +1,14 @@
 """Contact sheets of the parity screens, for looking over by eye.
 
 For each size, every screen in `tests/fixtures/parity_screens.json` is laid out
-as a labelled thumbnail from `results/parity/baseline/`. Where the HTML build's
+as a labelled thumbnail from `results/parity/baseline/`, the pygame shell's
+screens (redraw them with `tools/parity_shots.py` at any commit before the
+cutover, such as a1a17ad). Where the HTML build's
 shot of the same screen exists (`results/parity/next/<size>/<name>.png`), it
 sits to the right of the baseline, and a screen either side is missing is
 flagged in red.
 
-    uv run python tools/parity_sheet.py              # every size
+    uv run python tools/parity_sheet.py              # every size (pygame-ce: a dev dependency)
     uv run python tools/parity_sheet.py --size phone --width 300
 
 Writes `results/parity/sheet-<size>.png`, a few screens per row.

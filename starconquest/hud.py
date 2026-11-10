@@ -1,8 +1,7 @@
 """The play screen's words: the side panel, the scoreboard, the send popup's
 lines and the forecast, apart from how they are drawn.
 
-Both shells read these: `render` lays them out in pygame and `serial.view`
-sends them to the HTML page, so a line is worded in one place. A colour goes
+`serial.view` sends them to the page, so a line is worded in one place, here. A colour goes
 as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, ``"route"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
 colour; the win overlay adds ``"teal"``, ``"beat"``, ``"tie"``, ``"miss"``,
@@ -118,20 +117,6 @@ a second look: click one, or Up/Down, to go there.
 
 Rewind to here restarts play from the turn on screen. Esc returns to the live
 board."""
-
-
-def legend_text(history: bool, spectating: bool, touch: bool, compact: bool) -> str:
-    """The legend for the scene and the input modality — the one place the
-    variants are chosen between."""
-    if history:
-        if compact:
-            return LEGEND_HISTORY_COMPACT_TOUCH
-        return LEGEND_HISTORY_TOUCH if touch else LEGEND_HISTORY_KEYS
-    if spectating:
-        return LEGEND_SPECTATING_TOUCH if touch else LEGEND_SPECTATING_KEYS
-    if compact:
-        return LEGEND_COMPACT_TOUCH
-    return LEGEND_TOUCH if touch else LEGEND_KEYS
 
 
 def adjacent_enemy_strength(state: GameState, sid: int, owner: int) -> int:

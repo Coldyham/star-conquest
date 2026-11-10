@@ -1,13 +1,13 @@
 """Stage the HTML build: the page, the pinned Pyodide, and the game's Python.
 
-The game's Python ships as one zip the worker unpacks: the core modules and the
-bots, never the pygame shell, slimmed the way the pygbag build's archive is
-(`slim_web.strip_python`: comments and docstrings out, every line kept). Its
+The game's Python ships as one zip the worker unpacks: the game's modules and
+the bots, never the local server, slimmed (`slim_web.strip_python`: comments
+and docstrings out, every line kept). Its
 name carries a hash of its bytes, so a cached page can never pair with another
 build's Python, and the bytes are deterministic, so an unchanged tree keeps
 its name.
 
-    uv run python tools/build_next.py --out web/next    # what build_web.sh runs
+    uv run python tools/build_next.py --out web/play    # what build_web.sh runs
 
 `starconquest/serve.py` serves the same tree straight from the sources, building
 the zip on request.
@@ -29,16 +29,15 @@ sys.path.insert(0, str(ROOT))
 from tools import fetch_pyodide, slim_web
 
 WEBAPP = ROOT / "webapp"
-# The pygame shell, and the local server: never imported in the worker.
-SHELL = frozenset({"render", "input", "menu", "widgets", "mapmaker", "main", "uifont",
-                   "softkeyboard", "serve"})
+# The local server: never imported in the worker.
+LOCAL_ONLY = frozenset({"serve"})
 
 
 def game_files(slim: bool = True) -> list[tuple[str, bytes]]:
     """``(path in the zip, bytes)`` for every file the worker's Python reads."""
     out: list[tuple[str, bytes]] = []
     for path in sorted((ROOT / "starconquest").glob("*.py")):
-        if path.stem not in SHELL:
+        if path.stem not in LOCAL_ONLY:
             out.append((f"starconquest/{path.name}", _source(path, slim)))
     for path in sorted((ROOT / "starconquest" / "assets" / "gauntlets").glob("*.json")):
         out.append((f"starconquest/assets/gauntlets/{path.name}", path.read_bytes()))
@@ -73,7 +72,7 @@ def build_info(zip_path: str) -> str:
             f'export const GAME_ZIP = "{zip_path}";\n')
 
 
-# The shell's own font (`uifont`), served to the page at fonts/.
+# The game's own font, served to the page at fonts/.
 FONTS = ("DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf")
 
 

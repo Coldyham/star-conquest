@@ -2,9 +2,8 @@
 resolving a match, history review, hints, sharing and posting, replays, and the
 play-by-post client's helpers.
 
-Moved out of ``main`` unchanged so that a frontend other than the pygame loop
-can drive the same code (``docs/design/html-frontend.md``). Imports no pygame;
-``main`` imports from here.
+Moved out of the pygame shell's ``main`` so that the HTML frontend could drive
+the same code (``docs/design/html-frontend.md``); ``session`` drives it now.
 """
 
 from __future__ import annotations
@@ -43,7 +42,6 @@ from starconquest.settings import (RANDOM_STRATEGY, Challenge, Settings, apply_g
                                    random_seed, resolve_seed)
 from starconquest.viewstate import Ui
 
-AUTOPLAY_MS = 350  # delay between auto-resolved turns in autoplay mode
 PLAY_MS = 350      # delay between turns while play/pause (P) is running
 # ...and while fast-forwarding: no wait at all, so the loop resolves a turn every
 # frame (config.FPS turns/second) instead of one per delay above.
@@ -649,31 +647,6 @@ def _decode_log(blob: str) -> GameLog | None:
     return log if log.turn_count else None
 
 
-def is_log_path(wanted: str) -> bool:
-    """True when a ``--watch`` argument names a file rather than a match id."""
-    return wanted.endswith(".json") or Path(wanted).expanduser().is_file()
-
-
-def read_game_log(raw: str) -> GameLog:
-    """The saved match a command-line flag names (``ValueError`` if it isn't one)."""
-    try:
-        log = replay.load(Path(raw).expanduser())
-    except OSError as exc:
-        raise ValueError(f"can't read {raw}: {exc.strerror or exc}") from exc
-    except (ValueError, AttributeError, TypeError) as exc:
-        raise ValueError(f"{raw} is not a game log") from exc
-    if not log.settings:
-        raise ValueError(f"{raw} is not a game log")
-    return log
-
-
-def log_settings(log: GameLog) -> Settings:
-    """The setup ``log`` was played on, its seed included and its score to beat left out."""
-    settings = Settings.from_dict(log.settings).without_challenge()
-    settings.seed = log.seed
-    return settings
-
-
 def open_replay(blob: str, settings: Settings) -> tuple[GameState, Ui, GameLog] | None:
     """Rebuild a downloaded match, ready to review. None if the blob is not one,
     or if it was recorded under rules this engine has since moved past
@@ -1138,7 +1111,6 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     ui.history_reveal = state.winner is not None
     # The end-of-game graphs: read once off the boards just built, and open by
     # default on a finished game, where they are the summary the review is for.
-    ui.held_turn = None   # held marks are read afresh for this review
     ui.history_chart = stats.chart(history_states)
     if not ui.history_reveal:
         # mid-game, a rival is charted only for the turns the top bar showed it
@@ -1157,7 +1129,6 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         ui.coach_open = any(n.kind != coach.TURN for n in ui.coach_review.notes)
     ui.graph_full = False
     ui.graph_hidden = set()
-    ui.dragging_graph = False
     return history_states, history_fog, history_events, live_fog
 
 
@@ -1438,102 +1409,6 @@ def _primed(ui: Ui, reel: turnfilm.Reel) -> turnfilm.Reel:
     """
     ui.archive_marks(reel.board, reel.run_to(0.0))
     return reel
-
-
-def _carry_into(ui: Ui, reel: turnfilm.Reel, carry: float) -> None:
-    """Start a chained playback ``carry`` ms in rather than at zero.
-
-    A frame steps the clock by a whole frame's worth, so the frame that lands a
-    film nearly always overruns its end — and the next turn's glide is meant to
-    continue that one without a seam (see the chaining in the loop, and
-    `turnfilm`'s "a run of turns chains one animated turn straight into the
-    next"). Dropping the overrun instead stalls every fleet for the remainder of
-    that frame at every single join, which is a stutter the film's own length is
-    never responsible for and which no amount of tuning `FILM_MOVE_MS` can
-    remove. Paying it forward keeps the glide at one speed across the join.
-
-    Sized in the same currency `config.MAX_FRAME_MS` caps, so the debt a slow
-    frame can hand on is bounded by exactly what that frame was allowed to spend.
-    Clamped to the new film's own length as well, so a frame longer than a whole
-    turn's playback lands it on the next frame rather than running past its end.
-    """
-    if carry <= 0:
-        return
-    ui.film_ms = min(carry, reel.film.total_ms)
-    ui.archive_marks(reel.board, reel.run_to(ui.film_ms))
-
-
-def land_film(state: GameState, ui: Ui) -> None:
-    """Finish a playback, however it ended: drop the film and pay what it deferred.
-
-    The one place both endings meet — the clock running out and a press skipping it
-    (`input` calls `Ui.stop_film`, which leaves the debt deliberately unpaid) — so
-    the camera reveal a decided turn owes cannot be lost by skipping it. Idempotent,
-    and a no-op when nothing was deferred.
-    """
-    ui.stop_film()
-    if ui.deferred_view_snap:
-        ui.deferred_view_snap = False
-        ui.reset_view(state)
-
-
-def hold_history_marks(ui: Ui, history_states: list[GameState],
-                       history_fog: list, history_events: list) -> None:
-    """Hold the marks of the history turn on screen (`Ui.hold_marks`): its
-    fights' costs and finished hulls, read off the turn's events against the
-    board it started from, for what could be seen across it (everything, once
-    review is revealed)."""
-    i = ui.history_turn
-    if i <= 0 or i >= len(history_events) or i >= len(history_states):
-        ui.hold_marks(i, history_states[0], [], set())
-        return
-    board = history_states[i - 1]
-    if ui.history_reveal:
-        visible = set(board.systems)
-    else:
-        visible = set(history_fog[i - 1][0]) | set(history_fog[i][0])
-    ui.hold_marks(i, board, history_events[i], visible)
-
-
-def _next_history_film(ui: Ui, history_states: list[GameState],
-                       history_fog: list, history_events: list) -> turnfilm.Reel | None:
-    """Build the reel for the history turn after ``ui.history_turn``, if there is
-    anything in it worth animating.
-
-    Returns None when the next turn has nothing to show — no recorded events, or a
-    film that turns out to be all instants — in which case the caller falls back to
-    stepping it on its own, paced by `PLAY_MS`. With turn animation off, that is
-    every turn: this still archives that turn's marks directly (mirroring
-    `resolve_turn`'s own no-glide branch) before returning None, so a fight's cost
-    or a finished hull keeps showing up even though nothing here glides.
-
-    Shared by the two moments history playback advances: right after a film lands
-    (so back-to-back animated turns chain immediately, with no dead gap between
-    them) and the `PLAY_MS`-paced step for whenever the turn after that turns out
-    to be quiet.
-    """
-    nxt = ui.history_turn + 1
-    if not (nxt <= ui.history_max and nxt < len(history_events) and history_events[nxt]):
-        return None
-    if not webstore.animate_turns():
-        # Same union as the reel path below (`film_visible`, set then dropped
-        # right after the read) so a fight that cost us the system it happened at
-        # still gets its mark rather than playing out under a grey "?".
-        ui.film_visible = frozenset(history_fog[ui.history_turn][0])
-        ui.archive_marks(history_states[nxt], history_events[nxt])
-        ui.film_visible = frozenset()
-        return None
-    # Not lingering: a run of animated turns here must glide continuously, never
-    # stop-start for a fight to be read (that's what a live End Turn is for).
-    film = turnfilm.film(history_events[nxt])
-    if not film.plays:
-        return None
-    ui.film, ui.film_ms, ui.film_paused = film, 0.0, False
-    # the same union as live play: the turn's own fog on top of the one it lands in
-    ui.film_visible = frozenset(history_fog[ui.history_turn][0])
-    # a copy, so scrubbing back to this turn still finds the board it really was
-    reel = turnfilm.Reel(turnfilm.copy_board(history_states[ui.history_turn]), film)
-    return _primed(ui, reel)
 
 
 def apply_toggle_play(ui: Ui) -> None:

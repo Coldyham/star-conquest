@@ -25,7 +25,7 @@ const THINKING_MS = 150;    // a turn slower than this says so
 const TICK_MS = 1000;       // the session's clock (`Session.op_tick`): the campaign's lookup and its grace
 
 const core = new Core(new URL("../worker.mjs", import.meta.url));
-// The site's service worker (scope "/", `tools/pwa/sw.js`), which gives /next/
+// The site's service worker (scope "/", `tools/pwa/sw.js`), which gives /play/
 // its own rules; never from the local server, which has none to serve.
 if ("serviceWorker" in navigator && !["127.0.0.1", "localhost"].includes(location.hostname)) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -274,7 +274,7 @@ function place(box) {
   box.style.top = `${best[1]}px`;
 }
 
-/** History's held marks for the turn on screen (`Ui.hold_marks`): read off
+/** History's held marks for the turn on screen (`Session._held`): read off
  * its events, settled rather than fading. */
 function hold(held) {
   game.held = new Marks();

@@ -28,29 +28,8 @@ CHOOSING = "choosing"
 ROUTING = "routing"
 
 # The invite overlay's row for the spectator link (`Ui.pbp_invite`): not a seat,
-# so outside 1..6, and not 0, which `pbp_copy_seat` uses for "no row".
+# so outside 1..6, and not 0, which `pbp_invite_copied` uses for "no row".
 SPECTATE_ROW = -1
-
-
-# Every hit-rect the footer strip can record, so a frame can zero the lot before
-# drawing whichever survive — a stale rect would otherwise still answer clicks.
-FOOTER_RECTS = (
-    "retry_live_button_rect",
-    "undo_button_rect",
-    "clear_button_rect",
-    "menu_button_rect",
-    "restart_live_button_rect",
-    "history_button_rect",
-    "autoplay_button_rect",
-    "play_pause_rect",
-    "fast_forward_rect",
-    "route_button_rect",
-    "route_cancel_rect",
-    "route_mode_rect",
-    "route_auto_rect",
-    "hint_button_rect",
-    "hint_apply_rect",
-)
 
 
 @dataclass(frozen=True)
@@ -127,15 +106,6 @@ def read_marks(board: GameState, events: list[turnfilm.Event], sees, age_ms: flo
     return fights, hulls
 
 
-def _clip_to_play(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-    """Intersect a screen-space rect with the map viewport (empty if disjoint)."""
-    rx, ry, rw, rh = rect
-    px, py, pw, ph = config.play_rect()
-    x0, y0 = max(rx, px), max(ry, py)
-    x1, y1 = min(rx + rw, px + pw), min(ry + rh, py + ph)
-    return (x0, y0, max(0, x1 - x0), max(0, y1 - y0))
-
-
 @dataclass
 class Ui:
     view: WorldView
@@ -202,10 +172,6 @@ class Ui:
     #                      out (a rally point, a pocket no rally point reaches),
     #                      which a confirm deletes, so the plan is the whole of
     #                      the empire's forwarding (see `_plan_rally`)
-    #   route_box        — a selection box is being dragged. Its corners reuse
-    #                      `drag_start`/`drag_pos` below, which are dead in this
-    #                      mode; the separate flag is what stops render's
-    #                      drag-to-target rubber band drawing over the box.
     route_sel: set[int] = field(default_factory=set)
     route_dest: int | None = None
     # The sub-mode is a preference, not part of the proposal: `reset_route` leaves
@@ -216,13 +182,8 @@ class Ui:
     route_unroutable: set[int] = field(default_factory=set)
     route_cycles: set[int] = field(default_factory=set)
     route_clears: set[int] = field(default_factory=set)
-    #   route_press      — a press landed on empty map space and may yet become a
-    #                      box. Separate from `route_box` (already past the drag
-    #                      threshold) so a tap that never moves selects nothing.
-    route_box: bool = False
-    route_press: bool = False
     # Fog of war (human-only, so it lives here not in GameState). Recomputed each
-    # turn by main.refresh_fog from the human's territory; render reads these.
+    # turn from the human's territory (`app.refresh_fog`).
     #   visible      — systems in full detail this turn (owner + ship counts)
     #   seen         — every system ever perceived; the rest of `seen` (minus
     #                  `visible`) renders as a grey "?" silhouette, memory included
@@ -254,7 +215,6 @@ class Ui:
     history_turn: int = 0
     history_max: int = 0
     history_reveal: bool = False
-    dragging_scrubber: bool = False
     # The standing rules on each history board (`GameLog.rules_for`, the live
     # ones on the latest) and the live rules, held aside while `auto_forward`
     # shows the reviewed board's (`show_history_rules`, the same swap as fog);
@@ -267,8 +227,7 @@ class Ui:
     # read off the history boards once, on entering review (`stats.chart`), and
     # dropped on leaving it; `graph_metric` indexes `stats.METRICS`;
     # `graph_hidden` is the seats whose lines the legend has switched off. Open
-    # by default on a finished game. `dragging_graph` is a held drag across the
-    # plot, which scrubs the turn like the track does.
+    # by default on a finished game.
     history_chart: stats.Chart | None = None
     # Which bot drives each seat, for the top bar's hover tooltip and the graph
     # legend: ``{pid: "Knower · Search"}``, worked out once by `main.new_ui`
@@ -276,10 +235,6 @@ class Ui:
     # `settings.RANDOM_STRATEGY` and read "Random" until `bots_revealed`.
     seat_bots: dict[int, str] = field(default_factory=dict)
     random_seats: frozenset[int] = frozenset()
-    # The scoreboard entry under the pointer (or last tapped), and the entries'
-    # hit-rects as ``(pid, rect)``, rebuilt by render each frame.
-    score_hover: int | None = None
-    score_rects: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
     history_graph: bool = False
     graph_full: bool = False
     graph_metric: int = 0
@@ -287,15 +242,11 @@ class Ui:
     # on entering review of a decided game, and dropped on leaving it; None mid-game,
     # where it would give away what fog hid. `coach_open` puts its notes in the
     # graph panel in place of a chart (the Coach tab), `coach_sel` is the note
-    # being looked at (-1: none yet), and render rebuilds `coach_rows` as
-    # ``(note index, rect)`` and `coach_tab_rect` every frame.
+    # being looked at (-1: none yet).
     coach_review: coach.Review | None = None
     coach_open: bool = False
     coach_sel: int = -1
-    coach_rows: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
-    coach_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     graph_hidden: set[int] = field(default_factory=set)
-    dragging_graph: bool = False
     # Turn playback (see `turnfilm`). `film` is the immutable score of the turn
     # being replayed and `film_ms` where in it we are — the read-only half, so a
     # frame stays a pure function of GameState + Ui + time. `film_ms` is advanced by
@@ -332,100 +283,9 @@ class Ui:
     # the moment that film is replaced.
     fading_fights: list[FadingFight] = field(default_factory=list)
     fading_hulls: list[FadingHull] = field(default_factory=list)
-    # History review's held marks: the turn on screen's, fixed rather than
-    # fading (`hold_marks`); `held_turn` is the turn they were read for.
-    held_fights: list[FadingFight] = field(default_factory=list)
-    held_hulls: list[FadingHull] = field(default_factory=list)
-    held_turn: int | None = None
-    end_turn_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Play/pause button hit-rect, rebuilt by render each frame (zeroed while
-    # autoplay drives turns itself); tested by input, like end_turn_rect.
-    play_pause_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Hit-rects for the −/+ ship-count buttons flanking the active count label in
-    # the send popup. Rebuilt by render each frame; zeroed when the popup is closed
-    # (same handoff as end_turn_rect).
-    minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # The Forward tab's extra controls: −/+ on the system's hold, and, once a system
-    # forwards down two or more lanes, one (dest, row, minus, plus) per lane plus
-    # the Even split / Delete all pair. Same handoff as the rects above.
-    hold_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    hold_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    hold_smart_rect: tuple[int, int, int, int] = (0, 0, 0, 0)  # the hold row's "smart" toggle
-    share_rows: list[tuple[int, tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]] = field(default_factory=list)
-    even_split_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    delete_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # The popup's count slider: the whole row is the grab target, but the knob
-    # *travels* over the row inset by `config.SLIDER_KNOB_R` at each end, so it
-    # never overhangs the panel and never lags the finger (see `set_slider_from_x`,
-    # whose mapping widgets.slider inverts exactly). Rebuilt by render each
-    # frame from the popup's current top-left, so it follows a dragged popup.
-    slider_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    dragging_slider: bool = False
-    # Hit-rects for the send popup's action buttons (CHOOSING mode), rebuilt by
-    # render each frame and zeroed otherwise (same handoff as end_turn_rect).
-    send_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    forward_tab_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    send_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    send_half_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Done: closes a docked popup (`render._popup_docked`) keeping its send or
-    # rule, as a tap on empty map does; the floating one has no need of it.
-    done_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Send-popup placement. By default render auto-anchors it to the side of the
-    # lane that covers the fewest system nodes; once the user drags it, popup_pos
-    # pins the top-left (cleared on a new target so auto-placement resumes).
-    # popup_rect is the full panel rect (render writes it; input hit-tests it to
-    # start a drag on the background — away from the buttons).
-    popup_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Where the player dragged the send popup (its top-left), or None to let the
+    # page place it beside the lane; cleared on a new target.
     popup_pos: tuple[int, int] | None = None
-    dragging_popup: bool = False
-    popup_drag_off: tuple[int, int] = (0, 0)
-    # Drag-to-target gesture (touch-friendly alternative to tap-source-then-tap-
-    # dest): a press on an owned system arms `drag_src`; dragging past a threshold
-    # sets `drag_active` and `drag_pos` follows the finger; releasing over an
-    # adjacent system commits the send/rule. Render draws a line while active.
-    drag_src: int | None = None
-    drag_active: bool = False
-    drag_start: tuple[int, int] = (0, 0)
-    drag_pos: tuple[int, int] = (0, 0)
-    # Persistent side-panel button to clear every standing forward rule at once;
-    # drawn (and hit-tested) only while any rule exists.
-    clear_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Below it, a button that clears only the rules pointed at a system we don't
-    # hold; drawn (and hit-tested) only while at least one such rule exists.
-    clear_dangerous_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # History-mode hit-rects, rebuilt by render each frame and tested by input
-    # (same store-rect-then-test handoff as end_turn_rect). `history_button_rect`
-    # is the bottom-bar (and game-over overlay) toggle; the others are live only
-    # while `history` is on. `scrubber_rect` is the draggable track.
-    history_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    scrubber_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    rewind_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    exit_history_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Step-one-turn buttons flanking the track, the touch/mouse equivalent of the
-    # Left/Right arrow keys — picking an exact turn by dragging alone gets fiddly
-    # once a match has a long history.
-    history_prev_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    history_next_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # The graphs' hit-rects: the bar's Graphs toggle, the ^/v fullscreen caret,
-    # the plot (click or drag to seek a turn), one tab per `stats.METRICS`
-    # entry, one legend row per seat as ``(pid, rect)`` (click to show or hide
-    # its line), and Show all.
-    graph_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    graph_full_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    graph_plot_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    graph_tab_rects: list[tuple[int, int, int, int]] = field(default_factory=list)
-    graph_trace_rects: list[tuple[int, tuple[int, int, int, int]]] = field(default_factory=list)
-    graph_all_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Game-over overlay buttons (touch-reachable equivalents of the T/R/M keys),
-    # rebuilt by render each frame and tested by input like the rects above.
-    # `retry_button_rect` replays the very same match from the opening position
-    # (forks the log, same as rewinding to turn 0 from history) rather than
-    # `restart_button_rect`'s fresh map on the next seed.
-    retry_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    restart_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    menu_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Result-sharing, all game-over overlay only. `hand_turns` counts turns the
     # human actually decided (main increments it in resolve_turn, and recomputes it
     # from the log on resume/rewind) — autoplaying a decided game to skip the
@@ -446,8 +306,6 @@ class Ui:
     hint_orders: list[Order] = field(default_factory=list)
     hint_turn: int = -1
     hinted: bool = False
-    hint_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    hint_apply_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # Play-by-post: this match is shared, and this seat is ours. `pbp_match` is
     # the match id, `pbp_waiting` the seats still to move for the live turn, and
     # `pbp_submitted` whether we have sent ours — which is what puts the waiting
@@ -467,10 +325,7 @@ class Ui:
     # match takes spectators; empty means there is nothing to show, which is
     # what render/input gate the overlay's presence on.
     pbp_invite: tuple[tuple[int, str], ...] = ()
-    pbp_invite_rects: dict[int, tuple[int, int, int, int]] = field(default_factory=dict)
-    pbp_invite_close_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     pbp_invite_copied: int = 0   # seat whose row last showed "Copied" feedback
-    pbp_copy_seat: int = 0       # set by input on a row's Copy click; main acts on it and clears it
     challenge_target: tuple[int, int] | None = None
     challenge_by: str = ""
     # Ironman mode (`webstore.ironman`), stamped by `main.new_ui` when the match
@@ -504,8 +359,7 @@ class Ui:
     # sees a `Gauntlet`. `stage_label` ("Tutorial 3/10 · Defender's edge") is None
     # for an ordinary match, and is what every other stage control is gated on.
     # The briefing card is up over the board while `briefing_open`; any press
-    # closes it and the hint line in the side panel (`stage_hint_rect`) opens it
-    # again. `has_next_stage` puts Next stage where New map was on the win
+    # closes it and the hint line in the side panel opens it again. `has_next_stage` puts Next stage where New map was on the win
     # overlay: a stage's seed is pinned, so a new map would leave the stage.
     # `stage_target` is the stage's `gauntlet.Target` (a plain value), and
     # `stage_met_before` whether a best filed before this match already meets it.
@@ -520,8 +374,6 @@ class Ui:
     # The stage's gated ways out, as (label, far stage's title, target, met by
     # a best filed before this match): what a win here may unlock.
     stage_gates: tuple[tuple[str, str, Target, bool], ...] = ()
-    next_stage_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    stage_hint_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The run this match is the undecided game of (`run.Run.id`), or blank. Set
     # by `main.run_ui` only on the run's own game: a Retry or fork of it is free
     # play. A run game plays ironman and offers no Hint, and its Next stage
@@ -534,20 +386,13 @@ class Ui:
     run_note: str = ""
     run_ok: bool = True
     # The system whose star info card (`starlore`) is up over the board, or None.
-    # The i button beside a selected system's name in the side panel
-    # (`lore_button_rect`) and the I key open it; any press closes it.
+    # The i button beside a selected system's name in the side panel and the I
+    # key open it; any press closes it.
     lore_sid: int | None = None
-    lore_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # The send popup's forecast row (`forecast_rect`) opens a card over the board
+    # The send popup's forecast row opens a card over the board
     # setting out how its numbers were reached (`render._draw_odds_card`); any
     # press closes it, as the star info card.
     odds_open: bool = False
-    forecast_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    share_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Sits beside the share button: the same token, but opening the public
-    # leaderboard's entry form instead of going to the clipboard. Zero-width when
-    # no `paths.LEADERBOARD_ORIGIN` is configured.
-    leaderboard_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     share_msg: str = ""  # outcome of the last share, drawn under the buttons
     # Quick post (`share.quick_post`): the name the leaderboard button posts under
     # without the entry form ("" for the form), and how far the post has got:
@@ -559,69 +404,13 @@ class Ui:
     post_name_due: bool = False
     post_state: str = ""
     posted_key: str = ""
-    # Live-play bottom-bar buttons that are touch equivalents of keyboard-only
-    # actions (A: autoplay, N: new map, F: fast forward). menu_button_rect above is
-    # shared with the game-over overlay — the two scenes never draw at the same
-    # time, so whichever last ran render.draw owns the current value.
-    autoplay_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    restart_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Drawn (and hit-tested) only while the human is knocked out and the match is
-    # still running — the one situation `fast_forward` applies to.
-    fast_forward_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Retry (T) and Clear/cancel (X) touch equivalents, live play only. Retry
-    # restarts this same match from turn 0 (`retry_button_rect`'s fork, mid-game):
-    # the one way back to the start of a game with no history to rewind through,
-    # a daily's. Never in a shared match (`can_retry`).
-    retry_live_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Undo (U): take back the last turn, as History's rewind to the turn before
-    # does, in one press and with no confirm (`can_undo`).
-    undo_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    clear_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
     # The footer's overflow: a strip too narrow for every button folds the least
     # essential behind one "more" button (and a compact screen always folds the
-    # exits), and opening it draws them as a list above it. A folded button
-    # records its rect under its own attribute while the list is open, so input
-    # tests it exactly as it would on the strip; closed, the rect is zero.
-    more_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    more_menu_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # exits), and opening it lists them above it.
     more_open: bool = False
-    # Two-finger pinch and pan on a touch screen (`input._pinch`). `fingers` maps
-    # each finger down to its screen position; `pinch_last` is the previous
-    # (spread, midpoint) while two are down; `pinch_lock` holds until every
-    # finger is up after a pinch, so the emulated mouse of the first finger
-    # can't pan, drag or tap on its way off. `press_undo` is the selection state
-    # from just before the latest press, put back when that press turns out to
-    # be the first finger of a pinch rather than a tap.
-    fingers: dict = field(default_factory=dict)
-    pinch_last: tuple | None = None
-    pinch_lock: bool = False
+    # The selection state from just before the latest press, put back when that
+    # press turns out to be the first finger of a pinch rather than a tap.
     press_undo: tuple | None = None
-    # Route-mode hit-rects, rebuilt by render each frame and tested by input (same
-    # store-rect-then-test handoff as end_turn_rect). `route_button_rect` is the
-    # live-play toggle into the mode; the rest are live only while it is on, and
-    # `route_confirm_rect` deliberately takes over the End Turn button's slot, so
-    # ending the turn under an open plan is impossible rather than merely guarded.
-    route_button_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    route_confirm_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    route_cancel_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # the sub-mode toggle: one button naming the sub-mode it is in, which pressing
-    # (or Tab) switches
-    route_mode_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # rally mode's "pick the front line for me" shortcut, drawn only when there is
-    # something threatened to pick
-    route_auto_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    # Camera pan: a press on empty space (no node/lane/button under it) arms
-    # this instead of the drag-to-target gesture, so panning and drag-to-send
-    # never fight over the same press. `pan_last` is the previous motion-event
-    # position, used to turn each MOUSEMOTION into a `view.pan()` delta.
-    pan_active: bool = False
-    pan_last: tuple[int, int] = (0, 0)
-    # On-map camera control hit-rects (reset view, zoom +/-), rebuilt by render
-    # each frame and tested by input (same store-rect-then-test handoff as
-    # end_turn_rect); live-play only.
-    reset_view_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    zoom_minus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
-    zoom_plus_rect: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     # -- camera ------------------------------------------------------------- #
     def stop_film(self) -> None:
@@ -629,10 +418,8 @@ class Ui:
         this is the whole of "skip" — safe at any moment, because the turn it was
         showing has already been resolved.
 
-        Deliberately does *not* clear `deferred_view_snap`: `input` skips by
-        calling this, and what the film was holding back is still owed. Main
-        applies it wherever it drops the reel (`main.land_film`), which is the one
-        place both the skip and the natural end pass through.
+        Deliberately does *not* clear `deferred_view_snap`: a skip leaves what
+        the film was holding back still owed, and the session settles it.
         """
         self.film = None
         self.film_ms = 0.0
@@ -672,26 +459,6 @@ class Ui:
         self.fading_fights = [f for f in self.fading_fights if f.node_id not in taken] + fights
         built = {h.node_id for h in hulls}
         self.fading_hulls = [h for h in self.fading_hulls if h.node_id not in built] + hulls
-
-    def hold_marks(self, turn: int, board: GameState, events: list[turnfilm.Event],
-                   visible: set[int]) -> None:
-        """History review: the marks of the turn on screen, held there rather
-        than fading, so a fight can be found without stepping back and forth.
-        ``board`` is the turn's starting board and ``visible`` what could be
-        seen across it (its start and end, as a film's `sees`). Read once per
-        turn (``turn`` keys it). Drawn while no film runs (`shown_marks`)."""
-        if self.held_turn == turn:
-            return
-        self.held_turn = turn
-        settled = float(config.FILM_FLASH_MS)   # a burst done popping in, not yet fading
-        self.held_fights, self.held_hulls = read_marks(board, events, visible.__contains__, settled)
-
-    def shown_marks(self) -> tuple[list[FadingFight], list[FadingHull]]:
-        """The marks the map draws: in history with no film running, the held
-        marks of the turn on screen; otherwise the fading ones a film left."""
-        if self.history and self.film is None:
-            return self.held_fights, self.held_hulls
-        return self.fading_fights, self.fading_hulls
 
     def age_fading_marks(self, dt: float) -> None:
         """Advance every fading mark's clock and drop whatever has fully
@@ -775,12 +542,6 @@ class Ui:
     def graph_traces(self) -> tuple[int, ...]:
         """The seats whose lines the graphs draw: offered and not hidden."""
         return tuple(pid for pid in self.graph_seats() if pid not in self.graph_hidden)
-
-    def coach_note(self) -> coach.Note | None:
-        """The coach's note being looked at, if any."""
-        if self.coach_review is None or not 0 <= self.coach_sel < len(self.coach_review.notes):
-            return None
-        return self.coach_review.notes[self.coach_sel]
 
     def select_note(self, i: int) -> None:
         """Look at the coach's note ``i``: History jumps to the board it names."""
@@ -1095,21 +856,6 @@ class Ui:
         cap = self._active_cap(state)
         return (1 if cap > 0 else 0, cap, self.chosen)
 
-    def set_slider_from_x(self, state: GameState, px: int) -> None:
-        """Map a press/drag x within ``slider_rect`` onto the count being edited.
-
-        Inverse of the knob placement in ``widgets.slider``: the travel is the
-        recorded row inset by the knob radius at each end, so the knob sits exactly
-        under the pointer across the whole range. Funnels into ``set_share`` /
-        ``set_send_count``, inheriting their clamping and the write-through to the
-        rule or the queued order; a share snaps to `config.FORWARD_SNAP_PCT`. A no-op on a zeroed rect (the popup closed mid-drag) or a
-        zero-width range (an empty source)."""
-        x, _y, w, _h = self.slider_rect
-        travel = w - 2 * config.SLIDER_KNOB_R
-        if w <= 0 or travel <= 0:
-            return
-        self.set_slider_fraction(state, (px - x - config.SLIDER_KNOB_R) / travel)
-
     def set_slider_fraction(self, state: GameState, t: float) -> None:
         """Set the count being edited to fraction ``t`` (clamped to 0..1) of the
         slider's range: what a press at that point along the track means."""
@@ -1152,8 +898,6 @@ class Ui:
         self.editing_existing = False  # this popup created its own subject
         self.chosen = max(0, avail)
         self.popup_pos = None  # fresh target -> auto-place the popup
-        self.dragging_popup = False
-        self.dragging_slider = False
         if avail > 0:
             self.pending.append(Order(self.human_id, self.selected, dest, avail))
             self.sel_order = len(self.pending) - 1
@@ -1399,8 +1143,6 @@ class Ui:
         self.dest = None
         self.chosen = 0
         self.popup_pos = None
-        self.dragging_popup = False
-        self.dragging_slider = False
         self.mode = SELECTED if self.selected is not None else IDLE
 
     # -- route mode --------------------------------------------------------- #
@@ -1446,8 +1188,6 @@ class Ui:
         self.route_unroutable = set()
         self.route_cycles = set()
         self.route_clears = set()
-        self.route_box = False
-        self.route_press = False
         if self.mode == ROUTING:
             self.mode = IDLE
 
@@ -1464,8 +1204,6 @@ class Ui:
         self.route_rally = rally
         self.route_sel = set()
         self.route_dest = None
-        self.route_press = False
-        self.route_box = False
         self.recompute_route(state)
 
     def route_tap(self, state: GameState, sid: int) -> None:
@@ -1591,25 +1329,6 @@ class Ui:
         which the map and panel show already."""
         return {sid for sid, rule in self.route_plan.items()
                 if rule.smart and not (sid in self.auto_forward and self.auto_forward[sid].smart)}
-
-    def add_route_box(self, state: GameState, rect: tuple[int, int, int, int]) -> None:
-        """Add every one of our systems inside a dragged screen-space box.
-
-        Additive, so several boxes build one group. Clipped to the map viewport
-        first: ``view.to_screen`` projects *every* system, including ones panned
-        out under the side panel or behind the HUD bars, and only the drawing is
-        clipped — an unclipped box dragged to the edge would quietly pick up
-        systems that aren't on screen at all.
-        """
-        bx, by, bw, bh = _clip_to_play(rect)
-        if bw <= 0 or bh <= 0:
-            return
-        inside = []
-        for sid, sys in state.systems.items():
-            sx, sy = self.view.to_screen(sys.pos)
-            if bx <= sx <= bx + bw and by <= sy <= by + bh:
-                inside.append(sid)
-        self.add_route_sids(state, inside)
 
     def add_route_sids(self, state: GameState, sids) -> None:
         """Add those of ``sids`` that are ours to the route's group, as a box
@@ -1852,8 +1571,6 @@ class Ui:
         self.forward_replaced = None
         self.editing_existing = False
         self.popup_pos = None
-        self.dragging_popup = False
-        self.dragging_slider = False
 
     def rule_is_live(self, state: GameState, sid: int) -> bool:
         """Is the standing rule out of ``sid`` one that will actually fire — i.e.

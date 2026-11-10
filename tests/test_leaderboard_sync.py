@@ -135,7 +135,7 @@ def test_the_board_compares_setups_against_the_settings_defaults():
         assert getattr(settings, key) == value, key
 
 
-def test_the_boards_pace_estimate_tracks_real_maps():
+def test_the_boards_pace_estimate_tracks_real_maps(monkeypatch):
     """The board can't run mapgen, so it estimates a setup's median lane in
     turns as ceil(PACE_LY / sqrt(min(systems, 40)) / speed). Checked here
     against real generated maps across the node counts and speeds people play
@@ -144,8 +144,12 @@ def test_the_boards_pace_estimate_tracks_real_maps():
     import math
     import statistics
 
-    from starconquest.settings import Settings, build_state
+    from starconquest.settings import _GLOBAL_KNOBS, Settings, build_state
 
+    # `build_state` writes the setup's knobs into `config` globally: put them
+    # back after, or the speeds swept here leak into every later test.
+    for _, const in _GLOBAL_KNOBS:
+        monkeypatch.setattr(config, const, getattr(config, const))
     pace_ly = _js_constant("PACE_LY")
     exact = total = 0
     for nodes in (8, 12, 18, 24, 31, 40):

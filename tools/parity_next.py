@@ -1,10 +1,10 @@
 """Shoot the parity screens in the HTML build, beside pygame's baseline.
 
-Serves `/next/` locally, and for every recipe in
+Serves the game (`/play/`) locally, and for every recipe in
 `tests/fixtures/parity_screens.json` the HTML build can draw yet (the setup
 menu and its prompts, and the game surface: play, history, the modals), loads
 it into the page through the session (`Session.op_parity_menu` and
-`op_parity_load`, the same `starconquest.recipe` build the pygame side draws
+`op_parity_load`, the same `starconquest.recipe` build the pygame side drew
 from) and screenshots it in headless Chrome to
 `results/parity/next/<size>/<name>.png`. `tools/parity_sheet.py` then sets
 each beside its baseline. A shot already taken is kept unless ``--force``.
@@ -29,7 +29,7 @@ from starconquest import serve
 RECIPES = ROOT / "tests" / "fixtures" / "parity_screens.json"
 OUT = ROOT / "results" / "parity" / "next"
 PORT = 8011
-# The sizes, as CSS pixels (`parity_shots.SIZES`), and whether each is a phone.
+# The sizes, as CSS pixels (the baseline's), and whether each is a phone.
 SIZES = {"desktop": ("1440x960", False), "phone": ("412x870", True), "phone-land": ("870x412", True)}
 # The surfaces the HTML build draws: every recipe on them shoots.
 SURFACES = ("game", "menu", "resume", "maker")
@@ -48,7 +48,7 @@ def shoot(recipe: dict, size: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         ["node", str(ROOT / "tools" / "chrome.mjs"),
-         f"http://127.0.0.1:{PORT}/next/?input={'touch' if SIZES[size][1] else 'mouse'}",
+         f"http://127.0.0.1:{PORT}/play/?input={'touch' if SIZES[size][1] else 'mouse'}",
          "--until", "window.scNext && window.scNext.game.ready", "--timeout", "60",
          "--size", SIZES[size][0], *(["--mobile"] if SIZES[size][1] else []),
          "--shot", str(path), "--eval", SCRIPT % json.dumps(recipe)],

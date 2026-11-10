@@ -1,10 +1,11 @@
-# Netlify build for the pygbag (WebAssembly) browser build.
+# Netlify build for the site: the game (the HTML build, Python in Pyodide), the
+# leaderboard, and their functions.
 #
 # web/ is a gitignored build artifact, so Netlify produces it here at deploy time:
 # install uv, then run the same tools/build_web.sh used locally. uv fetches the
-# required Python (3.12, per pyproject) and the dev deps (pygbag), so the Netlify
-# image's own Python/Node versions don't matter. The build also curls the
-# pygame-ce WASM wheel from the pygame-web CDN into web/cdn/ (network is available
+# required Python (3.12, per pyproject) and the dev deps, so the Netlify image's
+# own Python/Node versions don't matter. The build downloads the pinned Pyodide
+# (checksum-checked, tools/fetch_pyodide.py) into web/play/ (network is available
 # during Netlify builds), keeping the published site self-contained.
 #
 # The game itself is served at /play/, and the root is a router page
@@ -33,7 +34,7 @@
 #
 # Our own builds are the other half. Netlify can scope a variable to Functions
 # only, but not on this plan, so the key is also in the build environment, where
-# third-party code runs: the uv installer piped from curl, pygbag and what it
+# third-party code runs: the uv installer piped from curl and what it
 # downloads. The build command therefore unsets it (and the legacy name) before
 # running anything. The functions are unaffected: Netlify hands them their own
 # environment at runtime, not the build shell's. This protects trusted builds
@@ -79,7 +80,7 @@
   to = "/board/"
   status = 301
 
-# Same for the game: pygbag's page loads its bundle relative to itself.
+# Same for the game: its page loads its scripts relative to itself.
 [[redirects]]
   from = "/play"
   to = "/play/"
@@ -97,7 +98,19 @@
   to = "/play/:splat"
   status = 301
 
-# Scoped to the board: pygbag's own assets are left exactly as they were.
+# The HTML build was previewed at /next/ until it became the game; old links
+# and bookmarks land on /play/ (a fragment survives the redirect).
+[[redirects]]
+  from = "/next"
+  to = "/play/"
+  status = 301
+
+[[redirects]]
+  from = "/next/*"
+  to = "/play/:splat"
+  status = 301
+
+# Scoped to the board; the game's files are served as Netlify types them.
 [[headers]]
   for = "/board/*"
   [headers.values]
