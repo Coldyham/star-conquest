@@ -261,15 +261,25 @@ export class Hud {
         h("p", { class: "wrap hint" }, r.hint)));
       return;
     }
+    // A gauntlet stage's reminder (`render._panel_stage_hint`), over the
+    // legend: a tap brings the briefing back, as B does. On a phone it is the
+    // panel's one job, the briefing having taught the rules.
+    const hint = p.stage_hint ? [h("button", { type: "button", class: "stage-hint",
+      onclick: () => this.on.call("open_briefing", []) }, p.stage_hint)] : [];
     if (p.focus === null) {
       if (portrait()) {
-        panel.replaceChildren(...you, ...clears, ...notes, h("p", { class: "wrap dim" }, p.portrait));
+        panel.replaceChildren(...you, ...clears, ...notes, ...hint,
+          ...(hint.length ? [] : [h("p", { class: "wrap dim" }, p.portrait)]));
+        return;
+      }
+      if (hint.length && compact()) {
+        panel.replaceChildren(...you, ...notes, ...clears, ...hint);
         return;
       }
       const set = this.legends[p.legend];
       const text = compact() ? set.compact : touch() ? set.touch : set.keys;
       const title = p.legend === "history" ? "History" : "Star Conquest";
-      panel.replaceChildren(...you, ...notes, ...clears, h("div", { class: "legend" }, h("h2", {}, title),
+      panel.replaceChildren(...you, ...notes, ...clears, ...hint, h("div", { class: "legend" }, h("h2", {}, title),
         ...text.split("\n\n").map((para) => h("p", {}, para.replace(/\n/g, " ")))));
       return;
     }
@@ -385,7 +395,14 @@ export class Hud {
       box.hidden = true;
       return;
     }
-    if (card.kind === "lore") {
+    if (card.kind === "briefing") {
+      // A gauntlet stage's briefing (`render._draw_briefing`): any press puts it away.
+      box.style.borderColor = "var(--teal)";
+      const close = !finger ? card.close.keys : portrait() ? card.close.portrait : card.close.touch;
+      box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: "color:var(--teal)" }, card.sub),
+        ...card.paras.map((t) => h("p", {}, t)), ...card.notes.map((t) => h("p", { class: "note" }, t)),
+        h("p", { class: "close" }, close));
+    } else if (card.kind === "lore") {
       box.style.borderColor = "rgb(110,140,200)";
       box.replaceChildren(h("h1", {}, card.title), h("p", { class: "sub", style: "color:rgb(110,140,200)" }, card.sub),
         ...card.paras.map((t) => h("p", {}, t)), ...card.notes.map((t) => h("p", { class: "note" }, t)),

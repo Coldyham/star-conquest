@@ -683,3 +683,135 @@ def test_a_spectate_link_watches_from_no_seat(session, games, quick_reads):
     assert view["pbp"]["you"] == ["Spectating", "text"] and view["pbp"]["end_word"] == "Spectating"
     assert view["pbp"]["overlay"]["kind"] == "notice" and not view["can"]["end_turn"]
     assert not _effects(_call(session, "turn.end"), "http")   # a spectator sends nothing
+
+
+# --------------------------------------------------------------------------- #
+# The daily and gauntlets (`setupmenu`'s Tutorial list, `app`'s menu side)
+def _chain_data(gid: str = "run-me") -> dict:
+    from starconquest.settings import Settings as _S
+    return {"id": gid, "name": "Run me", "stages": [
+        {"id": i, "title": f"Stage {i}", "settings": _S(players=2, nodes=8, seed=10 + i).to_dict(),
+         "target": {"turns": 60}, "briefing": [f"Brief {i}"]} for i in range(3)]}
+
+
+def test_the_tutorial_list_starts_a_stage_with_its_briefing(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    tut = _menu(session, "menu.press", key="tutorial")["menu"]["tutorial"]
+    assert tut["heading"] and tut["stages"][0]["open"] and tut["buttons"][-1]["key"] == "tutorial_close"
+    first = tut["stages"][0]["key"]
+    assert _menu(session, "menu.press", key="get_link")["menu"]["tutorial"] is not None   # modal: ignored
+    res = _menu(session, "menu.press", key=first)
+    if res["action"] is None:   # a slow-setup or campaign ask first
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert res["action"] == "start" and res["menu"]["tutorial"] is None
+    assert res["menu"]["subtitle"][0]["text"].startswith("TUTORIAL")
+    view = _menu(session, "game.start")["view"]
+    assert session.ui.in_stage and view["notes"][0][1] == "teal"
+    if session.ui.briefing:
+        assert view["card"]["kind"] == "briefing" and view["card"]["paras"]
+        view = _menu(session, "ui.key", name="x")["view"]
+        assert view["card"] is None
+    assert view["panel"]["stage_hint"]
+    view = _menu(session, "ui.call", method="open_briefing")["view"]
+    assert view["card"] is None or view["card"]["kind"] == "briefing"
+    assert _menu(session, "ui.key", name="n")["action"] is None   # no New map in a stage
+
+
+def test_next_stage_moves_the_menu_on_and_starts_it(session, games, monkeypatch):
+    from starconquest import gauntlet
+    from starconquest.viewstate import Ui
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    g = gauntlet.Gauntlet.from_dict(_chain_data("chain"))
+    session.menu.gauntlets = [g]
+    assert session.menu.stage_at is None
+    from starconquest import setupmenu
+    setupmenu.load_stage(session.menu, session.settings, g, 0)
+    _menu(session, "game.start")
+    assert session.ui.stage_title == "Stage 0"
+    monkeypatch.setattr(Ui, "offers_next_stage", lambda self, state: True)
+    res = _menu(session, "game.action", name="next_stage")
+    assert res["fresh"] and session.ui.stage_title == "Stage 1" and session.menu.stage_at == ("chain", 1)
+    assert res["view"]["card"]["kind"] == "briefing"
+
+
+def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, games):
+    from starconquest import gauntlet
+    from starconquest import run as gauntlet_run
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    _menu(session, "menu.press", key="tutorial")
+    g = gauntlet.Gauntlet.from_dict(_chain_data())
+    session.menu.gauntlets, session.menu.gauntlet_pick = [g], 0
+    tut = _menu(session, "menu.press", key="gauntlet_pick_inc")["menu"]["tutorial"]
+    assert tut["run"]["buttons"][0]["key"] == "run_start"
+    res = _menu(session, "menu.press", key="run_start")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert res["game"]["view"] and session.ui.run_id
+    assert gauntlet_run.active() is not None and session.ui.stage_label.endswith("· run")
+    # Back on the menu the list says the run is under way, and Continue resumes it.
+    _menu(session, "menu.open")
+    session.menu.gauntlets = [g]
+    session.menu.tutorial_open, session.menu.runs = True, gauntlet_run.runs()
+    tut = _menu(session, "menu.survey")["menu"]["tutorial"]
+    assert tut["run"]["text"].startswith("Run under way")
+    res = _menu(session, "menu.press", key="run_continue")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert res["game"] and session.ui.run_id
+
+
+def test_a_daily_link_fetches_the_day_onto_the_menu(session, games):
+    from starconquest.settings import Settings as _S
+    _call(session, "boot", page={**PAGE, "hash": "#daily"}, store={})
+    reply = _call(session, "menu.open", first=True)
+    assert reply["result"]["status"]["text"].startswith("Fetching the daily")
+    [http] = [e for e in reply["effects"] if e["t"] == "http" and "daily" in e["url"]]
+    body = json.dumps({"day": "2026-11-10", "kind": "board",
+                       "settings": _S(players=3, nodes=14, seed=4242).to_dict()})
+    pushed = _menu(session, "net.reply", req=http["req"], state="ok", body=body)["pushed"]
+    assert pushed["menu"]["status"]["ok"] and session.settings.seed == 4242
+    _menu(session, "game.start")
+    assert session.ui.daily_day == "2026-11-10"
+
+
+def test_the_daily_buttons_fetch_and_a_missing_day_says_so(session, games):
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    reply = _call(session, "menu.press", key="puzzle")
+    [http] = [e for e in reply["effects"] if e["t"] == "http"]
+    assert "puzzle" in reply["result"]["status"]["text"]
+    pushed = _menu(session, "net.reply", req=http["req"], state="missing", body="")["pushed"]
+    assert not pushed["menu"]["status"]["ok"]
+
+
+def test_a_gauntlet_link_is_fetched_kept_and_opened_on_the_list(session, games):
+    _call(session, "boot", page={**PAGE, "hash": "#g=mine-0123456789ab"}, store={})
+    reply = _call(session, "menu.open", first=True)
+    assert "resume" not in reply["result"]
+    [http] = [e for e in reply["effects"] if e["t"] == "http"]
+    body = json.dumps({"gauntlet": _chain_data("mine-0123456789ab")})
+    pushed = _menu(session, "net.reply", req=http["req"], state="ok", body=body)["pushed"]
+    tut = pushed["menu"]["menu"]["tutorial"]
+    assert tut is not None and tut["stages"][0]["title"].strip().endswith("Stage 0")
+    assert any(b["key"] == "tutorial_copy" for b in tut["buttons"])
+    reply = _call(session, "menu.press", key="tutorial_copy")
+    assert any(e["t"] == "clipboard" and "#gauntlet=" in e["text"] for e in reply["effects"])
+
+
+def test_a_spec_link_generates_a_gauntlet_a_slice_at_a_time(session, games):
+    from starconquest import gauntletgen
+    spec = {"stages": 2, "seed": 9, "candidates": 2, "rules": {"players": {"fix": 2}, "systems": {"range": [8, 10]}},
+            "opponents": ["rusherplus", "heuristic"]}
+    _call(session, "boot", page={**PAGE, "hash": "#" + gauntletgen.spec_fragment(spec)}, store={})
+    res = _menu(session, "menu.open", first=True)
+    assert res["generating"] and res["status"]["text"].startswith("Generating a gauntlet")
+    for _ in range(2000):
+        res = _menu(session, "menu.generate")
+        if not res.get("generating"):
+            break
+    assert not res.get("generating")
+    tut = res["menu"]["tutorial"]
+    assert tut is not None and len(tut["stages"]) >= 1

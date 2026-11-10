@@ -656,6 +656,21 @@ def match_notes(ui: Ui) -> list[tuple[str, Role]]:
     return notes
 
 
+def briefing_close(touch: bool, portrait: bool) -> str:
+    """The briefing card's foot: how to put it away and bring it back. On a
+    touch screen the hint sits in the side panel, under the map upright."""
+    if touch:
+        where = "below the map" if portrait else "at the right"
+        return f"Tap anywhere to begin · tap the hint {where} to read this again"
+    return "Press any key to begin · B shows this again"
+
+
+def briefing_notes(ui: Ui) -> tuple[str, ...]:
+    """The briefing card's target, which it always shows, so the target is
+    never a surprise on the win overlay."""
+    return (f"Target: {ui.stage_target.text()}",) if ui.stage_target is not None else ()
+
+
 def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:
     """The win overlay's stage line: cleared, or which way the target went. A
     win short of it says so, and says too when an earlier best already cleared

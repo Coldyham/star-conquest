@@ -34,7 +34,7 @@ SIZES = {"desktop": ("1440x960", False), "phone": ("412x870", True), "phone-land
 # The surfaces the HTML build draws, and the recipes on them whose screen
 # belongs to a later phase.
 SURFACES = ("game", "menu", "resume")
-LATER = ("stage-", "confirm-quit")
+LATER = ("confirm-quit",)
 
 SCRIPT = """(async () => {
   try {

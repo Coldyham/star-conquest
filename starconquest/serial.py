@@ -257,7 +257,8 @@ def panel(state: GameState, ui: Ui) -> dict:
                  "dangerous": hud.clear_dangerous_label(dangerous) if dangerous else None}
     if focus not in state.systems:
         return {"focus": None, "legend": "history" if ui.history else "spectating" if ui.spectating else "live",
-                "clear": clear, "portrait": hud.portrait_hint(ui)}
+                "clear": clear, "portrait": hud.portrait_hint(ui),
+                "stage_hint": ui.stage_hint if ui.stage_hint and not ui.history else None}
     sys = state.systems[focus]
     dest = hud.lane_target(state, ui, focus)
     ruled = focus in ui.auto_forward
@@ -326,10 +327,16 @@ def hint(state: GameState, ui: Ui) -> dict:
 
 
 def card(state: GameState, ui: Ui) -> dict | None:
-    """The card over the board, if any: a star's lore, or the forecast's
-    breakdown (`render._draw_lore`, `_draw_odds_card`)."""
+    """The card over the board, if any: a gauntlet stage's briefing, a star's
+    lore, or the forecast's breakdown (`render._draw_briefing`, `_draw_lore`,
+    `_draw_odds_card`)."""
     if ui.history or state.winner is not None:
         return None
+    if ui.briefing_open and ui.in_stage:
+        return {"kind": "briefing", "title": ui.stage_title, "sub": ui.stage_label or "",
+                "paras": list(ui.briefing), "notes": list(hud.briefing_notes(ui)),
+                "close": {"keys": hud.briefing_close(False, False), "touch": hud.briefing_close(True, False),
+                          "portrait": hud.briefing_close(True, True)}}
     if ui.lore_sid in state.systems:
         name = state.systems[ui.lore_sid].name
         lore = starlore.LORE.get(name)

@@ -23,7 +23,8 @@ import time
 import traceback
 from collections.abc import Callable
 
-from starconquest import (ai, app, bench, campaign, daily, engine, hostio, hud, paths, pbp, play, replay, serial,
+from starconquest import (ai, app, bench, campaign, daily, engine, gauntletgen, hostio, hud, paths, pbp, play,
+                          replay, serial,
                           setupmenu, share, turnfilm, webstore)
 from starconquest import recipe as recipes
 from starconquest import run as gauntlet_run
@@ -66,6 +67,7 @@ UI_CALLS = {
     "open_odds": lambda ui, state: setattr(ui, "odds_open", ui.mode == CHOOSING and not ui.forward_armed),
     "open_lore": lambda ui, state: play.open_lore(state, ui, ui.selected),
     "dismiss_card": lambda ui, state: play.dismiss_card(ui),
+    "open_briefing": lambda ui, state: setattr(ui, "briefing_open", True),
     "toggle_graph": lambda ui, state: play.history_key(state, ui, "g"),
     "graph_full": lambda ui, state: setattr(ui, "graph_full", not ui.graph_full),
     "graph_tab": lambda ui, state, i: play.graph_tab(ui, int(i)),
@@ -78,7 +80,10 @@ UI_CALLS = {
 
 # Ops that are not the player's doing: they leave play-by-post's idle clock
 # running (`PbpClient.idle`, which stretches the wait between reads).
-_NOT_INPUT = ("tick", "net.reply", "game.view")
+_NOT_INPUT = ("tick", "net.reply", "game.view", "menu.generate")
+# How long one `menu.generate` may hold the worker: a slice of probe games,
+# then the page's other commands get their turn before it asks again.
+GEN_SLICE_S = 0.1
 
 
 class Session:
@@ -110,6 +115,15 @@ class Session:
         # `tick` on the time that has passed since the last step.
         self.pbp = PbpClient()
         self.stepped: float | None = None
+        # The menu's own calls to the board (a daily, a linked gauntlet, a
+        # generated gauntlet's listing), each landing as an `app.MenuNote`,
+        # and a `#gauntlet-spec=` link's generator, stepped by `menu.generate`.
+        self.menu_waits: list[tuple[pbp.Request, Callable[[str, str], app.MenuNote]]] = []
+        self.gen_job: gauntletgen.Job | None = None
+        self.daily_due = False
+        # A match the menu opened itself (a run's stage), for the next menu
+        # reply to hand the page as ``game``.
+        self.opened: dict | None = None
 
     def handle(self, raw: str) -> str:
         try:
@@ -149,7 +163,9 @@ class Session:
             self.settings = Settings()
         ai.load_models()   # files added since boot, or named by a loaded setup
         self.seed = seed if seed is not None else resolve_seed(self.settings)
-        self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay)
+        # The gauntlet stage the menu's setup still is, if any (`menu.active_stage`).
+        stage = setupmenu.active_stage(self.menu, self.settings) if menu_setup else None
+        self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay, stage)
         self.history = self.live_fog = None
         if menu_setup:
             # What the campaign said about this setup as it begins (Start).
@@ -167,6 +183,103 @@ class Session:
     # slider's fraction or the seed field's text, and draws the reply's
     # ``menu`` as it stands. ``action`` is for the page to carry out
     # (``start``, ``quit``, or a screen of a later phase).
+    # ------------------------------------------------------------------ #
+    # The daily, gauntlets and runs on the menu (`app`'s menu side, each
+    # answering a `MenuNote` that `_note` shows, as `main.show_note` does)
+    def _note(self, note: app.MenuNote) -> None:
+        ms, settings = self.menu, self._settings()
+        if note.status is not None and note.status[0]:
+            self._say(*note.status)
+        if note.gauntlet is not None:
+            setupmenu.open_tutorial(ms, settings, self._say, pick=note.gauntlet)
+        if note.said is not None:
+            setupmenu.say_gauntlet(ms, *note.said, self._say)
+
+    def _begin(self, action: str) -> str | None:
+        """``action`` (``start``, ``run``, ``run_continue``) through Start's gate,
+        the campaign's confirm asked for a plain start only (`menu._start`)."""
+        asked = campaign.confirm(self.campaign.status) if action == "start" else None
+        return setupmenu.start(self.menu, self._settings(), action, self._say, asked=asked)
+
+    def _daily(self, kind: str, day: str = "") -> None:
+        """Fetch ``day``'s daily of ``kind`` onto the menu (`app.open_daily`)."""
+        if self.daily_due:
+            return   # one at a time, as pygame's ``pending_daily``
+        pending, note = app.open_daily(day, kind)
+        self._note(note)
+        if pending is not None:
+            self.daily_due = True
+
+            def land(st: str, body: str) -> app.MenuNote:
+                self.daily_due = False
+                return app.land_daily(self._settings(), st, body, kind)
+            self.menu_waits.append((pending, land))
+
+    def _open_run(self, fresh: bool, reopen: bool = True) -> bool:
+        """Start a run of the gauntlet picked in the list, or carry on the active
+        one (`app.open_run`); the match goes to the page with the next menu
+        reply (``opened``). False, with the list open again saying why, when
+        there is nothing to play."""
+        ms, settings = self.menu, self._settings()
+        opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
+                                    lambda g, sid: setupmenu.load_stage(ms, settings, g, sid))
+        self._note(note)
+        if opened is None:
+            if reopen:
+                setupmenu.reopen_gauntlets(ms, settings, self._say)
+            return False
+        self.state, self.ui, self.log, self.seed = opened
+        self.history = self.live_fog = None
+        app.stamp_campaign(self.ui, self.campaign)
+        self.resume_log = None
+        self.opened = self._started()
+        return True
+
+    def _menu_links(self) -> None:
+        """A gauntlet link (``#g=``, ``#gauntlet=``), else a ``#daily`` or
+        ``#puzzle`` link, else a ``#gauntlet-spec=`` one to generate from, unless
+        a replay or a match took the launch. Any of them puts the resume prompt
+        away, as pygame's launch does."""
+        if self.fetching is not None or self.pbp.invite is not None:
+            return
+        gid, inline = app.gauntlet_request()
+        if gid is not None or inline is not None:
+            pending, note = app.open_linked_gauntlet(gid, inline)
+            self._note(note)
+            if pending is not None:
+                self.menu_waits.append((pending, app.land_gauntlet))
+            self.resume_log = None
+            return
+        asked = daily.link(webstore.url_token())
+        if asked is not None:
+            kind, day = asked
+            self._daily(kind, day)
+            self.resume_log = None
+            return
+        job, note = app.start_generation(app.spec_request(""))
+        self._note(note)
+        if job is not None:
+            self.gen_job = job
+            self.resume_log = None
+
+    def op_menu_generate(self) -> dict:
+        """One slice of a ``#gauntlet-spec=`` generator (`app.pump_generation`),
+        which the page asks for again while the reply says ``generating``; once
+        done, the gauntlet opens on the Tutorial list and a listing is asked
+        for if its link ticked the box (`app.ask_listing`)."""
+        job = self.gen_job
+        if job is None:
+            return self._menu()
+        self.gen_job, note = app.pump_generation(self._settings(), job, GEN_SLICE_S)
+        self._note(note)
+        if self.gen_job is None:
+            asked, said = app.ask_listing(job)
+            self._note(said)
+            if asked is not None:
+                gid, name, pending = asked
+                self.menu_waits.append((pending, lambda st, _body: app.land_listing(gid, name, st)))
+        return self._menu()
+
     def op_menu_open(self, prefill: dict | None = None, touch: bool = False, compact: bool = False,
                      first: bool = False) -> dict:
         """Show the menu: at boot (``first``) on a fresh setup, pre-filled from
@@ -181,11 +294,11 @@ class Session:
             self.resume_log = None
             if first:
                 log = replay.latest_log()
-                if (log is not None and not log.finished and log.turn_count > 0
-                        and not gauntlet_run.is_playing(log)):
+                if log is not None and not log.finished and log.turn_count > 0:
                     self.resume_log = log
                 self._watch_link()
                 self._match_link()
+                self._menu_links()
         if self.ui is not None and self.ui.in_pbp:
             self.pbp.leave()
         self.state = self.ui = self.log = None
@@ -204,6 +317,10 @@ class Session:
             out["status"] = {"text": ms.status, "ok": ms.status_ok,
                              "ms": setupmenu.STATUS_MS if ms.status_ok else setupmenu.STATUS_ERROR_MS}
             ms.status = ""
+        if self.gen_job is not None:
+            out["generating"] = True
+        if self.opened is not None:
+            out["game"], self.opened = self.opened, None
         if self.resume_log is not None:
             go, stay = setupmenu.resume_labels(self.touch)
             out["resume"] = {"title": "Resume last game?", "detail": setupmenu.resume_detail(self.resume_log),
@@ -223,6 +340,12 @@ class Session:
             if key.startswith("pbp_"):
                 return self._menu(self._then(setupmenu.pbp_press(ms, settings, key)))
             return self._menu()
+        if ms.tutorial_open:
+            # Modal too: a stage, a run button, the picker, Leave, Copy, Close.
+            if key.startswith(setupmenu.TUTORIAL_KEYS):
+                return self._menu(self._then(setupmenu.tutorial_press(
+                    ms, settings, key, paths.is_web(), self._say, self._begin)))
+            return self._menu()
         if key != "seed":
             ms.editing_seed = False
         if not (key == "strategy" or key.startswith("strategy_opt_")):
@@ -232,8 +355,11 @@ class Session:
         setupmenu.before_edit(ms, settings)
         action = None
         if key == "start":
-            action = setupmenu.start(ms, settings, "start", self._say,
-                                     asked=campaign.confirm(self.campaign.status))
+            action = self._begin("start")
+        elif key == "tutorial":
+            setupmenu.open_tutorial(ms, settings, self._say)
+        elif key in ("daily", "puzzle"):
+            self._daily(daily.PUZZLE if key == "puzzle" else daily.BOARD)
         elif key == "daily_menu":
             ms.daily_open = not daily_was
         elif key == "board_menu":
@@ -282,6 +408,9 @@ class Session:
         rest: ``play_by_post`` creates the match (`PbpClient.create`) on the
         setup, for the roster and deadline the prompt confirmed; the page stays
         on the menu until the match opens (`tick`)."""
+        if action in ("run", "run_continue"):
+            self._open_run(fresh=action == "run")
+            return None
         if action != "play_by_post":
             return action
         ms, settings = self.menu, self._settings()
@@ -330,6 +459,10 @@ class Session:
         answers a confirm yes and N or Esc no; otherwise Esc closes an open
         list, and Enter (or space) starts as Start Game does."""
         ms, name = self.menu, str(name)
+        if ms.tutorial_open and not (ms.confirm_slow or ms.confirm_unchallenge):
+            if name == "Escape":
+                ms.tutorial_open = False
+            return self._menu()
         if ms.pbp_prompt:
             if name == "Enter":
                 return self._menu(self._then(setupmenu.confirm_pbp(ms, self._settings())))
@@ -391,6 +524,11 @@ class Session:
         """Answer the boot prompt: play the unfinished match on, or leave it."""
         log, self.resume_log = self.resume_log, None
         if not accept or log is None:
+            return self._menu()
+        if gauntlet_run.is_playing(log):
+            # A run's own game comes back as the run's, so it keeps the run's
+            # rules and its result reaches the run.
+            self._open_run(fresh=False)
             return self._menu()
         ai.load_models()   # a resumed game may name a drop-in strategy
         settings = self._settings()
@@ -549,11 +687,13 @@ class Session:
             self.state, self.ui = app.resume_game(self.log, self.settings)
             if not ui.watched:
                 app.stamp_campaign(self.ui, self.campaign)
+                self._stage_again()
             return self._whole()
         elif name == "rewind_confirmed" and ui.history and not ui.in_pbp:
             self.history = self.live_fog = None
             self.state, self.ui = app.apply_rewind(self.log, self.settings, ui.history_turn)
             self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
+            self._stage_again()
             return self._whole()
         elif name == "toggle_route":
             # Leaving discards the plan: it is only ever committed by its confirm.
@@ -577,11 +717,31 @@ class Session:
             self.state, self.ui = app.resume_game(self.log, self.settings)
             if not ui.watched:
                 app.stamp_campaign(self.ui, self.campaign)
+                self._stage_again()
             return self._whole()
         elif name == "undo" and ui.can_undo(state):
             self.state, self.ui = app.apply_rewind(self.log, self.settings, max(self.log.turn_count - 1, 0))
             self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
+            self._stage_again()
             return self._whole()
+        elif name == "next_stage" and ui.offers_next_stage(state):
+            # The stage after this one, briefing and all. The menu's setup
+            # becomes that stage's, so going back to the menu lands on it. In
+            # a run it is the run's next stage, begun as its next step.
+            if ui.run_id:
+                if self._open_run(fresh=False, reopen=False):
+                    self.opened = None
+                    return self._whole()
+            else:
+                found = setupmenu.next_stage(self.menu, self.settings)
+                if found is not None:
+                    ai.load_models()
+                    self.seed = resolve_seed(self.settings)
+                    self.state, self.ui, self.log = app.start_game(self.settings, self.seed,
+                                                                   self.settings.autoplay, found)
+                    self.history = self.live_fog = None
+                    app.stamp_campaign(self.ui, self.campaign)
+                    return self._whole()
         elif name == "share" and ui.can_post(state):
             # A challenge link to the clipboard, or a daily's result line.
             ui.share_msg = (app.copy_daily_result(self.settings, state, ui) if ui.daily_day
@@ -589,6 +749,11 @@ class Session:
         elif name == "leaderboard" and ui.can_post(state):
             self._leaderboard()
         return {"fresh": False, "view": self._view()}
+
+    def _stage_again(self) -> None:
+        """A Retry, undo or rewind keeps the stage being played, but not its
+        briefing, read the first time round (`app.stage_ui`)."""
+        app.stage_ui(self._ui(), setupmenu.active_stage(self.menu, self._settings()), briefing=False)
 
     def _leaderboard(self) -> None:
         """The win overlay's board button, by what it does now
@@ -849,6 +1014,16 @@ class Session:
             else:
                 land(got, body)
         self.waits = waiting
+        menu_landed = False
+        still = []
+        for request, land_note in self.menu_waits:
+            got, body = request.poll()
+            if got == pbp.PENDING:
+                still.append((request, land_note))
+            else:
+                self._note(land_note(got, body))
+                menu_landed = True
+        self.menu_waits = still
         if self.ui is not None and self.state is not None and self.settings is not None:
             app.campaign_tick(self.ui, self.settings, self.campaign)
         else:
@@ -860,6 +1035,8 @@ class Session:
                 return self._open_watched(got, body)
         if before is not None and self._view() != before:
             pushed["view"] = self._view()
+        if menu_landed and self.state is None:
+            pushed["menu"] = self._menu()
         return pushed
 
     def _open_watched(self, got: str, body: str) -> dict:

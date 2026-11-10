@@ -247,9 +247,9 @@ match's log survives a reload and the boot prompt can offer to resume it, as
 pygame's does from `games/` on a desktop. The pygbag build kept no games
 across a reload.
 
-**Left for their phases, and saying so:** Tutorial (and gauntlets and runs),
-the Daily list's two items, Play by post and its roster prompt, and Create map
-answer "Not in this build yet" in the status line. Get Link, Shared matches
+**Left for their phases, and saying so:** Create map answers "Not in this
+build yet" in the status line (Tutorial, the Daily list and Play by post did
+until phases 4 and 5). Get Link, Shared matches
 and Recently played work, through the same `webstore` calls as pygame's
 footer. Quit asks the browser to close the window and says to close the tab
 when it can't, as `main.leave_app` does on the web.
@@ -355,4 +355,53 @@ cadence that is not felt.
 
 **Left for later:** a seat link pasted into an open page (`hashchange`) is
 not read until a reload, as with phase 3's links.
+
+## The daily and gauntlets (phase 5)
+
+`/next/` plays the daily, the tutorial and every gauntlet, runs included,
+through the same `app` calls pygame's loop makes (`open_daily`, `land_daily`,
+`open_linked_gauntlet`, `land_gauntlet`, `open_run`, the generator and its
+listing); each answers an `app.MenuNote`, which the session shows on its menu
+as `main.show_note` does on pygame's.
+
+- **The Tutorial list is `setupmenu`'s now**: the stage being played
+  (`active_stage`, `next_stage`, `load_stage`), the stage banner in the
+  subtitle's slot (`stage_lines`), the list's rows with their progress and
+  colours (`stage_rows`), its run line (`run_row`) and what a press on it
+  means (`tutorial_press`), and `tutorial_view` for the page. pygame's `menu`
+  keeps only its drawing and hit-testing and reads the same rows; its names
+  stay as wrappers, so its tests pass unchanged. The list is modal: only its
+  own controls answer, and Esc closes it.
+- **A stage starts through Start's gate**, and `game.start` plays it as the
+  stage the menu's setup still is. Retry, Undo and a rewind keep the stage
+  without its briefing; Next stage on the win overlay moves the menu on and
+  starts the next one, or the run's next step.
+- **A run's game reaches the page with the menu's reply** (``game``), whether
+  started, continued from the list, or offered by the boot prompt (a run's
+  own unfinished game is offered now, and comes back as the run's).
+- **The briefing is a card** (`serial.card` kind ``briefing``, its foot and
+  target worded by `hud.briefing_close` and `hud.briefing_notes`, read by
+  `render` too) that any press puts away (`play.card_up`). The stage's hint
+  heads the empty side panel, a tap bringing the briefing back
+  (`open_briefing`, as B does); on a phone it is the panel's one job.
+- **The board's calls land on the menu.** The Daily list's two items and a
+  `#daily`/`#puzzle` link fetch the day onto the menu; a `#g=<id>` link is
+  fetched, kept and opened on the list, a `#gauntlet=` one opened at once.
+  Each answer lands through `net.reply` and comes back as a pushed ``menu``.
+  A puzzle won by hand asks its par as phase 3 wired it.
+- **A `#gauntlet-spec=` link generates on the page's clock**: the menu's reply
+  says ``generating`` and the page asks `menu.generate` again at once, each
+  slice holding the worker at most `session.GEN_SLICE_S` (0.1 s), so its other
+  commands still get their turn. Done, the gauntlet opens on the list and a
+  ticked listing ask is sent.
+
+Both stage parity recipes shoot at their sizes, as does the Daily list, and
+pygame's game, menu and stage screens stayed byte-identical.
+
+**Differences kept on purpose:** the briefing card's paragraphs are set in the
+card's own type, as the lore card's are, rather than pygame's fitted fonts,
+and the board behind it is not veiled.
+
+**Left for later:** a link pasted into an open page is not read until a
+reload, as with phase 3's links.
 

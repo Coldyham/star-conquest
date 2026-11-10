@@ -114,6 +114,7 @@ export class SetupMenu {
   async open(args = {}) {
     this.root.hidden = false;
     const res = await this.send("menu.open", args);
+    this.after(res);
     return res;
   }
 
@@ -127,10 +128,22 @@ export class SetupMenu {
     this.after(res);
   }
 
+  /** Carry out what a reply asks of the page: a match to start or one the
+   * menu opened itself (a run's stage, a resumed match), quitting, or the next
+   * slice of a gauntlet being generated (`menu.generate`). */
   after(res) {
     if (!res) return;
-    if (res.action === "start") this.hooks.start();
+    if (res.game) this.hooks.resumed(res.game);
+    else if (res.action === "start") this.hooks.start();
     else if (res.action === "quit") this.hooks.quit();
+    if (res.generating && !this.generating) {
+      this.generating = true;
+      setTimeout(async () => {
+        const next = await this.send("menu.generate");
+        this.generating = false;
+        this.after(next);
+      }, 0);
+    }
   }
 
   draw(res) {
@@ -147,7 +160,7 @@ export class SetupMenu {
     this.drawActions(m);
     this.hintEl.textContent = m.hint || "";
     this.hintEl.hidden = !m.hint;
-    this.drawModal(m.modal, res.resume, m.pbp_prompt);
+    this.drawModal(m.modal, res.resume, m.pbp_prompt, m.tutorial);
     if (res.status) this.say(res.status);
     this.root.classList.toggle("dragging", Boolean(m.dragging));
     clearTimeout(this.surveyTimer);
@@ -451,7 +464,11 @@ export class SetupMenu {
   }
 
   // --- confirms: the menu's own, and the boot prompt to resume --------------- //
-  drawModal(modal, resume, prompt) {
+  drawModal(modal, resume, prompt, tutorial) {
+    if (tutorial && !modal) {
+      this.drawTutorial(tutorial);
+      return;
+    }
     if (prompt && !modal) {
       this.drawPrompt(prompt);
       return;
@@ -531,9 +548,33 @@ export class SetupMenu {
     }
   }
 
+  /** The Tutorial list (`setupmenu.tutorial_view`): the gauntlet's stages in
+   * order with their progress, its runs, and Leave, Copy link and Close. */
+  drawTutorial(t) {
+    const tone = { warn: "go", hl: "blue", dim: "plain" };
+    const rows = t.stages.map((s) => h("button", {
+      type: "button", class: `trow${s.here ? " here" : ""}`, disabled: !s.open,
+      onclick: s.open ? () => this.press(s.key) : null,
+    }, h("span", { class: "ttitle" }, s.title), h("span", { class: "tstatus", style: `color:${s.color}` }, s.status)));
+    const run = t.run ? [h("p", { class: "tnote" }, t.run.text),
+      h("div", { class: "mbuttons" }, ...t.run.buttons.map((b) => h("button", {
+        type: "button", class: `mbtn ${b.warn ? "go" : "start-edge"}`, onclick: () => this.press(b.key) }, b.label)))] : [];
+    this.modalEl.hidden = false;
+    this.modalEl.replaceChildren(h("div", { class: "mmodal tutorial", role: "dialog", "aria-modal": "true" },
+      h("p", { class: "mtitle" }, t.heading),
+      t.picker ? h("div", { class: "prow" }, h("span", { class: "plabel" }, t.picker.name),
+        this.control({ kind: "stepper", key: "gauntlet_pick", value: t.picker.at })) : null,
+      h("div", { class: "trows" }, ...rows),
+      ...run,
+      t.note ? h("p", { class: "tnote" }, t.note) : null,
+      t.said ? h("p", { class: `tnote ${t.said.ok ? "ok" : "err"}` }, t.said.text) : null,
+      h("div", { class: "mbuttons tbuttons" }, ...t.buttons.map((b) => h("button", {
+        type: "button", class: `mbtn ${tone[b.tone]}`, onclick: () => this.press(b.key) }, b.label)))));
+  }
+
   async resume(accept) {
     const res = await this.send("menu.resume", { accept });
-    if (res?.game) this.hooks.resumed(res.game);
+    this.after(res);
   }
 
   async key(e) {

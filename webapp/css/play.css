@@ -308,6 +308,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #graph .note-row.on { background: rgb(30, 34, 50); }
 #graph .note-row .turn { flex: none; min-width: 34px; }
 :root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); --campaign: rgb(255, 210, 63); }
+#panel .stage-hint { display: block; width: 100%; margin: 0 0 12px; padding: 0; border: none; background: none;
+  color: var(--teal); font: inherit; font-size: 14px; line-height: 22px; text-align: left; cursor: pointer; }
 #panel .match-note { font-size: 14px; margin: 0 0 6px; }
 #app.graphing #camera { bottom: calc(min(320px, 45%) + 18px); }
 
