@@ -787,7 +787,9 @@ async function key(event) {
   // Any key skips a film, but Play/Pause (which pauses it), Autoplay (the one
   // way to stop autoplay) and the camera's own key (`input._toggles_play`,
   // `_toggles_autoplay`, `_moves_camera`).
-  if (game.film && !["p", "a", "r"].includes(name)) {
+  // Enter too while it names Pause or Take control (`hud.end_turn_button`).
+  const stops = (name === "Enter" || name === " ") && game.view.end?.[1] !== "end_turn";
+  if (game.film && !stops && !["p", "a", "r"].includes(name)) {
     game.film.skip = true;
     event.preventDefault();
     return;
@@ -842,7 +844,7 @@ async function boot() {
     if (game.view?.route) {
       if (game.view.route.confirm[1]) act("ui.call", { method: "confirm_route" });
     } else {
-      endTurn();
+      actOn(game.view?.end?.[1] ?? "end_turn");
     }
   });
   $("reset-view").addEventListener("click", () => actOn("reset_view"));

@@ -984,6 +984,17 @@ def spectator_line(state: GameState, ui: Ui) -> str:
     return ("Waiting for " + ", ".join(names)) if names else "Resolving the turn..."
 
 
+def end_turn_button(state: GameState, ui: Ui) -> tuple[str, str]:
+    """The big button's word and the action it (and Enter) presses: whatever
+    stops a clock that is running (autoplay's, then Play's), else End Turn."""
+    if not ui.history and state.winner is None and not ui.in_pbp:
+        if ui.autoplay:
+            return "Take control", "toggle_autoplay"
+        if ui.playing:
+            return "Pause", "toggle_play"
+    return "End Turn", "end_turn"
+
+
 def end_turn_word(state: GameState, ui: Ui) -> str | None:
     """What stands where End Turn would, when there is no turn of ours to
     end: a spectator's, or a shared turn already sent. None otherwise."""

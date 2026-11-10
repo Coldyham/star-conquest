@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 
 from . import starlore, stats
+from .hud import end_turn_button
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
 
@@ -170,7 +171,10 @@ def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
         # key. Suppressed rather than swallowed further up so every other control
         # — panning, looking, opening history — keeps working while you wait.
         # A spectator has no turn to end at all.
-        return None if ui.awaiting_others(state) or ui.spectating else "end_turn"
+        # While a clock runs, the key stops it, as the button it names does.
+        if ui.awaiting_others(state) or ui.spectating:
+            return None
+        return end_turn_button(state, ui)[1]
     if name in ("p", "a"):
         # Play and autoplay both resolve turns on a clock of their own, which a
         # shared match has no room for: its turns advance when the last seat

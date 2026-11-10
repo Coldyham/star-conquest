@@ -152,15 +152,24 @@ export class Hud {
       end.replaceChildren(view.route.confirm[0]);
       end.disabled = !view.route.confirm[1];
       end.classList.toggle("route", true);
+      end.classList.toggle("green", true);
+      end.classList.toggle("active", false);
     } else if (view.pbp?.end_word && !view.can.end_turn) {
       // A spectator's, or a shared turn already sent: nothing here to end.
       end.replaceChildren(view.pbp.end_word);
       end.disabled = true;
       end.classList.toggle("route", true);
+      end.classList.toggle("green", true);
+      end.classList.toggle("active", false);
     } else {
-      end.replaceChildren("End Turn ", h("span", { class: "key" }, "⏎"));
-      end.disabled = !view.can.end_turn;
+      // While autoplay or Play runs, the button stops it (`hud.end_turn_button`).
+      const [word, action] = view.end;
+      const stops = action !== "end_turn";
+      end.replaceChildren(`${word} `, h("span", { class: "key" }, "⏎"));
+      end.disabled = !stops && !view.can.end_turn;
       end.classList.toggle("route", false);
+      end.classList.toggle("green", !stops);
+      end.classList.toggle("active", stops);
     }
     this.pbp(view);
   }

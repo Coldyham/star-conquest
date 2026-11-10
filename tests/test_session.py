@@ -182,6 +182,20 @@ def test_flow_actions_undo_retry_and_restart(session):
     assert view["playing"]
 
 
+def test_end_turn_stops_a_running_clock(session):
+    _human_game(session)
+    assert _menu(session, "game.view")["view"]["end"] == ["End Turn", "end_turn"]
+    view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
+    assert view["end"] == ["Take control", "toggle_autoplay"]
+    assert _menu(session, "ui.key", name="Enter")["action"] == "toggle_autoplay"
+    _call(session, "game.action", name="toggle_autoplay")
+    view = _call(session, "game.action", name="toggle_play")["result"]["view"]
+    assert view["end"] == ["Pause", "toggle_play"]
+    assert _menu(session, "ui.key", name="Enter")["action"] == "toggle_play"
+    view = _call(session, "game.action", name="toggle_play")["result"]["view"]
+    assert view["end"] == ["End Turn", "end_turn"]
+
+
 def test_a_decided_game_shows_its_veil_and_answers_its_keys(session):
     _call(session, "boot", page=PAGE, store={})
     _call(session, "game.start", settings={"players": 2, "nodes": 8, "autoplay": True}, seed=3)

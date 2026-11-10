@@ -145,6 +145,7 @@ def view(state: GameState, ui: Ui) -> dict:
         "more_open": ui.more_open,
         "more_labels": {attr: list(pair) for attr, pair in hud.MORE_LABELS.items()},
         "lost": me.ships_lost if me is not None and not ui.spectating else None,
+        "end": list(hud.end_turn_button(state, ui)),
         "autoplay": ui.autoplay,
         "playing": ui.playing,
         "fast_forward": ui.fast_forward,
