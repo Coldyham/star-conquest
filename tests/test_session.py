@@ -1046,3 +1046,17 @@ def test_a_link_opened_in_an_open_page_is_read_as_at_boot(session, games):
     res = _menu(session, "page.hash", hash=f"#{token}")["menu"]
     rows = {r["label"]: r["control"] for r in res["menu"]["panel"] if r["kind"] == "row"}
     assert rows["Players"]["value"] == "4" and rows["Seed"]["text"] == "123"
+
+
+def test_a_phones_share_or_save_list_is_get_link_and_the_files_list(session, games):
+    """The phone grid folds Get Link into Files (`setupmenu.SHARE_SAVE_ITEMS`),
+    opened and closed by the one Files press."""
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    m = _menu(session, "menu.press", key="files_menu")["menu"]
+    assert m["actions"]["share_save"] == "Share or save"
+    keys = [i["key"] for i in m["lists"]["share_save"]["items"]]
+    assert keys == ["get_link"] + [i["key"] for i in m["lists"]["files"]["items"]]
+    assert m["lists"]["share_save"]["open"]
+    reply = _call(session, "menu.press", key="get_link")
+    assert not reply["result"]["menu"]["lists"]["share_save"]["open"]

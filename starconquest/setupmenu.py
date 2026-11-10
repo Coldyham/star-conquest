@@ -91,6 +91,9 @@ BOARD_ITEMS = (("browse_configs", "Recently played"), ("browse_matches", "Shared
 # as files the browser keeps, and any of them, or a map, opened again.
 FILES_LABEL = "Files"
 FILES_ITEMS = (("save_settings", "Save setup"), ("save_game", "Save last match"), ("load_file", "Open a file…"))
+# A phone's grid folds Get Link into the Files list, keeping it to six buttons.
+SHARE_SAVE_LABEL = "Share or save"
+SHARE_SAVE_ITEMS = (("get_link", "Get Link"), *FILES_ITEMS)
 
 # The lane-battle toggle's caveat: a lane fight is the page's fight minus the
 # ground, so the advantage slider applies to neither side.
@@ -993,13 +996,16 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
             "create": "Edit map" if drawn else "Create map",
             "clear_map": drawn,
             "files": FILES_LABEL,
+            "share_save": SHARE_SAVE_LABEL,
         },
         "lists": {"daily": {"open": ms.daily_open,
                             "items": [{"key": k, "label": label} for k, label in DAILY_ITEMS]},
                   "board": {"open": ms.board_open,
                             "items": [{"key": k, "label": label} for k, label in BOARD_ITEMS]},
                   "files": {"open": ms.files_open,
-                            "items": [{"key": k, "label": label} for k, label in FILES_ITEMS]}},
+                            "items": [{"key": k, "label": label} for k, label in FILES_ITEMS]},
+                  "share_save": {"open": ms.files_open,
+                                 "items": [{"key": k, "label": label} for k, label in SHARE_SAVE_ITEMS]}},
         "hint": None if touch else KEY_HINT,
         "modal": modal(ms, settings, touch),
         "pbp_prompt": pbp_prompt_view(ms, settings, touch),

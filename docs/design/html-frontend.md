@@ -460,7 +460,9 @@ The last of what pygame's shell does that `/next/` did not.
   the page's file picker, opened on the press itself, as a browser requires;
   its text goes to `file.open`: a setup loads onto the menu, a map becomes the
   setup's hand map, and a match opens in history from its first turn as
-  someone else's game, as pygame's ``--watch FILE`` opens one. The map maker
+  someone else's game, as pygame's ``--watch FILE`` opens one. On a phone
+  the grid folds Get Link into that list as *Share or save*
+  (`setupmenu.SHARE_SAVE_ITEMS`), keeping it to six buttons. The map maker
   keeps its library (Save and Open, the maps folder in IndexedDB) and gains
   Export and Import (`maker.FILE_CONTROLS`, only in this build's footer).
 - **Quitting asks first.** Quit and Esc on the menu raise the quit confirm

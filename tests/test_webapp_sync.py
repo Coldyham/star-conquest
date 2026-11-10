@@ -28,7 +28,7 @@ def test_the_page_sends_every_game_action_the_session_answers():
 
     answered = set(re.findall(r'name == "(\w+)"', inspect.getsource(Session.op_game_action)))
     page = (Path(__file__).resolve().parents[1] / "webapp" / "js" / "play.mjs").read_text()
-    listed = re.search(r"const GAME_ACTIONS = new Set\(\[(.*?)\]\)", page, re.S)
+    listed = re.search(r"const GAME_ACTIONS = new Set\(\[(.*?)\]\)", page, re.DOTALL)
     assert listed is not None
     sent = set(re.findall(r'"(\w+)"', listed.group(1)))
     assert answered <= sent, f"missing from GAME_ACTIONS: {sorted(answered - sent)}"
