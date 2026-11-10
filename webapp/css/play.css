@@ -233,6 +233,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #veil .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
 #veil .share { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
 #veil .btn { min-width: 220px; }
+/* the result lines' roles (`hud.result_lines`) */
+:root { --beat: rgb(130, 200, 150); --tie: rgb(190, 205, 225); --miss: rgb(214, 172, 92);
+  --par: rgb(255, 220, 60); --failed: rgb(214, 130, 110); }
 
 /* --- route mode --------------------------------------------------------- */
 :root { --route: rgb(250, 120, 200); --likely: rgb(200, 150, 96); }
