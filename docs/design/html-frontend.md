@@ -128,9 +128,9 @@ and checked against its published SHA-256.
 desktop CPU), and download time over a real network. Both sides were served
 from localhost.
 
-**Caveat:** the service worker (scope `/`) caches `/next/` like any other path.
-That is safe, because the zip's name is its hash, but `/next/` gets its own
-rules in phase 7.
+**Caveat:** the service worker (scope `/`) cached `/next/` like any other path.
+That was safe, because the zip's name is its hash; phase 7 gave `/next/` its
+own rules.
 
 ## The play screen (phase 1)
 
@@ -247,9 +247,9 @@ match's log survives a reload and the boot prompt can offer to resume it, as
 pygame's does from `games/` on a desktop. The pygbag build kept no games
 across a reload.
 
-**Left for their phases, and saying so:** Tutorial (and gauntlets and runs),
-the Daily list's two items, Play by post and its roster prompt, and Create map
-answer "Not in this build yet" in the status line. Get Link, Shared matches
+**Left for their phases, and saying so:** Create map answers "Not in this
+build yet" in the status line (Tutorial, the Daily list and Play by post did
+until phases 4 and 5). Get Link, Shared matches
 and Recently played work, through the same `webstore` calls as pygame's
 footer. Quit asks the browser to close the window and says to close the tab
 when it can't, as `main.leave_app` does on the web.
@@ -257,8 +257,7 @@ when it can't, as `main.leave_app` does on the web.
 **Differences kept on purpose:** no Game UI size stepper (the browser's own
 zoom does that job, and the plan drops `ui_scale`); the desktop footer is
 pygame's web footer (Get Link and the board's lists, not Save and Load, which
-wait for files in phase 7); the slow-setup confirm does not yet add the
-weekly campaign's lines, which need the board (phase 3); a slider on a phone
+wait for files in phase 7); a slider on a phone
 grabs on touch rather than waiting for a sideways move, so the panel scrolls
 from anywhere else.
 
@@ -266,3 +265,250 @@ from anywhere else.
 recipe but the play-by-post prompt (phase 4) shoots (`tools/parity_next.py`),
 and a headless run sets players, a seed and a slider, starts, plays three
 turns, goes back to the menu, reloads and resumes the match.
+
+## Sharing (phase 3)
+
+`/next/` talks to the board as pygame's web build does, through the same
+`app`, `share` and `campaign` calls; the session carries out pygame's loop's
+part (`main`'s ``pending_*`` polls).
+
+- **The win overlay's two buttons** are game actions (`game.action`
+  ``share`` and ``leaderboard``, and the C and L keys), gated on
+  `Ui.can_post` as pygame gates them. Share copies a challenge link (a daily's
+  result line on a daily); the board button opens the entry form, posts under
+  a name (`share.quick_post`, through the board's own module in the page), or
+  once posted opens the map's page (`Ui.board_action`). Each sends the replay
+  first, the press being the consent. The overlay's line under them is
+  `Ui.share_msg`.
+- **An answer lands later, and is pushed.** The signed-in name for the post
+  button, a puzzle's par and a quick post's summary are asked for after the
+  command that made them due (`Session._ask_due`) and land when the page hands
+  back the answer (`net.reply`). That reply's ``pushed`` is what changed on
+  screen: a ``view``, a ``game`` or a ``menu`` reply. The page draws it unasked,
+  or, while a turn is in flight, asks for the view again once it lands
+  (`game.view`).
+- **The weekly campaign.** The session keeps one `campaign.Watcher`, pumped by
+  the menu's replies and by `tick`, which the page sends once a second (it
+  settles a lookup, refreshes it, and counts a grace down). Start raises the
+  campaign's confirm with the slow-setup lines; the answer at Start is stamped
+  on the match, kept through an undo or rewind and stamped again on a retry.
+- **The match's notes** (`hud.match_notes`: the stage, the campaign's
+  reminder, a challenge link's target) head the side panel, on a portrait
+  phone only while nothing is in focus, as `render` draws them.
+- **A `#log=<id>` link** fetches the replay at boot ("Loading replay...") and
+  opens it in history at turn 0, as someone else's game; one that is missing,
+  unreadable or recorded under older rules says so on the menu.
+- **Share replays** needed nothing new: the checkpoint upload in
+  `app.resolve_turn` already goes out as a ``fire`` effect.
+
+**Differences kept on purpose:** a board page opens in this tab (the
+``navigate`` effect, as pygame's web build does), so the back button returns
+to a fresh `/next/`; a decided match is not offered to resume, so nothing is
+lost.
+
+**Left for later:** the daily's buttons and par waited for phase 5 with the
+daily. (A link pasted into an open page is read since phase 7.)
+
+## Play by post (phase 4)
+
+`/next/` plays a shared match through the same machine pygame's loop drives,
+`pbpclient.PbpClient`, held by the session and stepped by `tick` on the time
+that has passed since its last step.
+
+- **The roster prompt** is `setupmenu`'s now (`open_pbp_prompt`,
+  `pbp_press`, `confirm_pbp`, `pbp_prompt_view`), read by pygame's `menu`
+  too, which keeps only its hit-testing and drawing. Play by post goes
+  through Start's gate (a hand map's blockers), then the prompt; Create match
+  goes through the slow-setup confirm with the seats that are people, and the
+  session creates the match on a seed resolved once for the whole table. The
+  page's two text rows are native inputs (`menu.pbp_text`) and keep their own
+  text while typed into, so a late reply never takes keystrokes back.
+- **Links at boot.** A `#pbp=<match>:<token>` seat link or a `#spectate=`
+  link opens the match ("Opening match...", no resume prompt over it), unless
+  a `#log=` link took the launch.
+- **Answers are stepped, not landed.** A pbp answer waits in its mailbox
+  until the next `tick` collects it, so a read never lands mid-film: the page
+  sends no `tick` while a turn is in flight or filming (`PbpClient.step`'s
+  ``filming``). The step's `Outcome` comes back as `pushed`: a ``game`` (a
+  match opened, or rebuilt from its log, which keeps the camera:
+  ``map_fresh`` false), a ``turn`` (one settled elsewhere or resolved here,
+  with its film, played as End Turn's is), a ``menu`` reply for the menu's
+  line, or a ``view`` (who is waited on, the last call's line). Every op but
+  `tick`, `net.reply` and `game.view` counts as input for the idle clock that
+  stretches the wait between reads.
+- **End Turn sends.** In a shared match `turn.end` resolves nothing: it sends
+  our orders (`PbpClient.send`) and answers the waiting view. Nothing resolves
+  on a clock; Play and Autoplay stay dead, as in pygame.
+- **The words are `hud`'s** (`you_are`, `invite_label`, `waiting_lines`,
+  `spectator_line`, `end_turn_word`), read by `render` too; `serial.pbp`
+  picks the overlay in `render`'s order under the win veil, a briefing and
+  the cards: the invite (each row's Copy is `pbp.copy`, Continue
+  `play.close_invite`), the waiting veil, the last call's line, or a
+  spectator's. The invite is modal for keys too (`play.press_key`).
+
+All four play-by-post parity recipes shoot at their sizes, and pygame's
+screens stayed byte-identical.
+
+**Differences kept on purpose:** a pbp answer can take up to a second longer
+to show than in pygame, which polls once a frame; against a five-second read
+cadence that is not felt.
+
+**Left for later:** nothing; a seat link pasted into an open page is read
+since phase 7.
+
+## The daily and gauntlets (phase 5)
+
+`/next/` plays the daily, the tutorial and every gauntlet, runs included,
+through the same `app` calls pygame's loop makes (`open_daily`, `land_daily`,
+`open_linked_gauntlet`, `land_gauntlet`, `open_run`, the generator and its
+listing); each answers an `app.MenuNote`, which the session shows on its menu
+as `main.show_note` does on pygame's.
+
+- **The Tutorial list is `setupmenu`'s now**: the stage being played
+  (`active_stage`, `next_stage`, `load_stage`), the stage banner in the
+  subtitle's slot (`stage_lines`), the list's rows with their progress and
+  colours (`stage_rows`), its run line (`run_row`) and what a press on it
+  means (`tutorial_press`), and `tutorial_view` for the page. pygame's `menu`
+  keeps only its drawing and hit-testing and reads the same rows; its names
+  stay as wrappers, so its tests pass unchanged. The list is modal: only its
+  own controls answer, and Esc closes it.
+- **A stage starts through Start's gate**, and `game.start` plays it as the
+  stage the menu's setup still is. Retry, Undo and a rewind keep the stage
+  without its briefing; Next stage on the win overlay moves the menu on and
+  starts the next one, or the run's next step.
+- **A run's game reaches the page with the menu's reply** (``game``), whether
+  started, continued from the list, or offered by the boot prompt (a run's
+  own unfinished game is offered now, and comes back as the run's).
+- **The briefing is a card** (`serial.card` kind ``briefing``, its foot and
+  target worded by `hud.briefing_close` and `hud.briefing_notes`, read by
+  `render` too) that any press puts away (`play.card_up`). The stage's hint
+  heads the empty side panel, a tap bringing the briefing back
+  (`open_briefing`, as B does); on a phone it is the panel's one job.
+- **The board's calls land on the menu.** The Daily list's two items and a
+  `#daily`/`#puzzle` link fetch the day onto the menu; a `#g=<id>` link is
+  fetched, kept and opened on the list, a `#gauntlet=` one opened at once.
+  Each answer lands through `net.reply` and comes back as a pushed ``menu``.
+  A puzzle won by hand asks its par as phase 3 wired it.
+- **A `#gauntlet-spec=` link generates on the page's clock**: the menu's reply
+  says ``generating`` and the page asks `menu.generate` again at once, each
+  slice holding the worker at most `session.GEN_SLICE_S` (0.1 s), so its other
+  commands still get their turn. Done, the gauntlet opens on the list and a
+  ticked listing ask is sent.
+
+Both stage parity recipes shoot at their sizes, as does the Daily list, and
+pygame's game, menu and stage screens stayed byte-identical.
+
+**Differences kept on purpose:** the briefing card's paragraphs are set in the
+card's own type, as the lore card's are, rather than pygame's fitted fonts,
+and the board behind it is not veiled.
+
+**Left for later:** nothing; a link pasted into an open page is read since
+phase 7.
+
+## The map maker (phase 6)
+
+`/next/`'s Create map (Edit map, with a hand map set) opens the map maker
+(`js/maker.mjs`, `css/maker.css`), laid out as pygame's: the tool strip, the
+map, the palette band, the sidebar (on an upright phone a band under the
+palette, two sliders to a row) and the footer.
+
+- **The editor is `maker`'s now**, a core module: the `Editor` and its
+  recipe, what every press, key and control means (`press_system`,
+  `press_lane_tool`, `press_owner`, `control`, `press_key`, `answer_confirm`),
+  every edit with its undo, the sliders by fraction, the map library, every
+  word, and `view` for the page. pygame's `mapmaker` keeps its drawing, its
+  hit-testing in pixels, its camera and its gestures' thresholds, and reads
+  the rest from `maker` under its old names, so its tests pass unchanged and
+  its maker screens stayed byte-identical.
+- **The page hit-tests and sends what a press landed on**: a system's index
+  (`maker.node`), a point in world units (`maker.place`), the lanes near a
+  miss nearest first (`maker.miss`, which says whether a drag from there pans
+  or draws the Owners box), the armed system dragged past the threshold
+  (`maker.drag`, one in flight at a time) and let go (`maker.release`), a lane
+  drag's target (`maker.lane`), the box's systems (`maker.box`), a control's
+  key, a slider's fraction, a key's name, a problem's row. The camera is the
+  page's (`camera.mjs` with no room: `WorldView`'s own clamp); a press that
+  frames something (a problem, Play refused) sends the points as ``fit``.
+- **Play** commits the map and starts it as Start does (``game``); **Menu**
+  and Esc commit it and answer the menu's reply (``back``). A pinch's first
+  finger is put back (`maker.unpress`, `maker.snapshot` taken on a touch
+  screen's every map press).
+- **Save and Open** write the maps folder, which the worker keeps in
+  IndexedDB as it does the games folder, so a saved map opens again after a
+  reload (pygbag's build kept none).
+
+Both maker parity recipes shoot at their sizes.
+
+**Differences kept on purpose:** the footer wraps its two clusters onto two
+rows where they don't fit, rather than shedding controls by rank; the
+filename field shows the default name as a placeholder; systems draw at the
+desktop's radius on a phone, where pygame's follow the UI scale.
+
+**Left for later:** nothing of the editor; its files on disk are the browser's
+own, not a folder the player can open (phase 7's Save and Load files).
+
+## Files, the launcher and the service worker (phase 7)
+
+The last of what pygame's shell does that `/next/` did not.
+
+- **Save and Open are files** (`files`, a core module: what a saved setup,
+  match or map holds, and what a picked file is, by its shape, never its
+  name). The menu's Files list saves the setup (pygame's Save, as
+  `Settings.save` writes it, less any challenge: a challenge travels by
+  clipboard only) and the last match (its log, from the games folder), each a
+  ``download`` effect the page hands the browser as a file. Open a file is
+  the page's file picker, opened on the press itself, as a browser requires;
+  its text goes to `file.open`: a setup loads onto the menu, a map becomes the
+  setup's hand map, and a match opens in history from its first turn as
+  someone else's game, as pygame's ``--watch FILE`` opens one. The map maker
+  keeps its library (Save and Open, the maps folder in IndexedDB) and gains
+  Export and Import (`maker.FILE_CONTROLS`, only in this build's footer).
+- **Quitting asks first.** Quit and Esc on the menu raise the quit confirm
+  (`setupmenu.modal` kind ``quit``, its words `hud.confirm_quit`, read by
+  `render` too); over a game it is `game.action` ``quit``, whose confirm is
+  the parity screen `confirm-quit`. Confirmed, the session asks the browser to
+  close the window (the ``close`` effect, as `main.leave_app` does on the
+  web) and, should it stay open, says how to leave on the menu.
+- **A link opened in an open page is read** (`page.hash`, on the page's
+  ``hashchange``): any match is left and the link opens as at boot (a setup,
+  a replay, a seat or a spectator's link, a daily, a gauntlet). Our own
+  address edits use ``history.replaceState``, which fires none.
+- **The local launcher.** ``uv run python main.py --html`` (or
+  ``python -m starconquest.serve``) serves the build on 127.0.0.1:8000 and
+  opens the browser; the menu's flags (``--players``, ``--nodes``,
+  ``--seed``, ``--mode``, ``--autoplay``, ``--no-menu``) become the address's
+  query, which pre-fills the menu as they pre-fill pygame's. Games and maps
+  persist in the browser's IndexedDB there as on the site. The default launch
+  stays pygame's until cutover.
+- **The service worker gives `/next/` its own rules** (`tools/pwa/sw.js`):
+  what its name fixes (the hashed game zip, Pyodide's versioned files, the
+  fonts) is cache-first; the page, its scripts and `js/build.mjs`, which names
+  the zip, are network-first like `/board/`, the cache answering only offline.
+  `/api/` stays untouched. The page registers it, except from the local
+  server, which serves none.
+
+Every parity recipe now shoots at every size it lists (`tools/parity_next.py`
+has no later phase left).
+
+**Differences kept on purpose:** a setup is saved as a download named
+`starconquest_settings.json` rather than into a named file under `saves/`, since
+the browser asks where it goes; "Save last match" replaces a games folder the
+player could open. Closing the tab needs no confirm, as nothing is lost: every
+match is kept as it is played.
+
+**Ready for cutover.** What remains, and only that:
+
+1. Point `/play/` at the HTML build (`tools/build_web.sh` stages `web/next`
+   at `web/play`, and `tools/pwa/root.html`'s router and the manifest's start
+   URL follow), with the manifest linked from its page.
+2. Make `main.py`'s default launch the HTML one (``--html`` today), keeping a
+   flag for pygame only until it is deleted.
+3. Delete the pygame shell (`render`, `input`, `menu`, `widgets`, `mapmaker`,
+   `main`'s loop, `softkeyboard`, `uifont`) and its tests, the wrappers it
+   kept in `setupmenu`, `maker` and `hud`, and the `is_web()` branches only it
+   reached; drop pygbag, its runtime mirror and cache rules from
+   `tools/build_web.sh` and `tools/pwa/sw.js`; retire the parity screen tools
+   once the baseline is no longer needed.
+4. Measure startup on a real phone over a real network, which this work could
+   not (*The Pyodide spike (phase 0)*, "Not measured").
+

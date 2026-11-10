@@ -44,10 +44,37 @@ def test_the_service_worker_caches_the_runtime_pygbag_loads():
     assert "!url.href.startsWith(RUNTIME)) return;" in SW
 
 
+def _sw_function(name: str) -> str:
+    start = SW.index(f"async function {name}(req)")
+    return SW[start:SW.index("\n}\n", start)]
+
+
 def test_the_service_worker_fetches_board_pages_network_first():
     board = SW.index('url.pathname.startsWith("/board/")')
     branch = SW[board:SW.index("return;", board)]
-    assert branch.index("fetch(req)") < branch.index("cache.match(req)")
+    assert "networkFirst(req)" in branch
+    first = _sw_function("networkFirst")
+    assert first.index("fetch(req)") < first.index("cache.match(req)")
+
+
+def test_the_html_build_is_network_first_but_for_what_its_name_fixes():
+    """/next/'s page and scripts are asked for first, so a deploy never boots an
+    old page against a new zip; the hashed zip, Pyodide's versioned files and
+    the fonts never change under their name, so the cache answers them."""
+    nxt = SW.index('url.pathname.startsWith("/next/")')
+    branch = SW[nxt:SW.index("return;", nxt)]
+    assert "FIXED.test(url.pathname) ? cacheFirst(req) : networkFirst(req)" in branch
+    assert nxt < SW.rindex("event.respondWith(")
+    cached = _sw_function("cacheFirst")
+    assert cached.index("cache.match(req)") < cached.index("fetch(req)")
+    fixed = re.search(r"const FIXED = /(.+)/;", SW).group(1).replace("\\/", "/")
+    pattern = re.compile(fixed)
+    for path in ("/next/py/starconquest-0123456789ab.zip", "/next/pyodide/0.27.7/pyodide.asm.wasm",
+                 "/next/fonts/DejaVuSansMono.ttf"):
+        assert pattern.search(path), path
+    for path in ("/next/", "/next/index.html", "/next/js/build.mjs", "/next/js/play.mjs", "/next/worker.mjs",
+                 "/next/css/play.css", "/next/py/starconquest-0123456789ab.zip.tmp"):
+        assert not pattern.search(path), path
 
 
 def test_the_board_copy_is_an_allow_list_of_servable_files():

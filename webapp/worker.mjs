@@ -5,12 +5,14 @@
 // is the games folder, where every match's log is kept as it is played
 // (`replay.GAMES_DIR`): it lives in IndexedDB, so the menu can offer to resume
 // an unfinished match after a reload, and is written back shortly after a
-// command changes it.
+// command changes it. The map maker's maps folder (`paths.maps_dir`) is kept
+// the same way, so a map saved there opens again after a reload.
 
 import { GAME_ZIP, PYODIDE } from "./js/build.mjs";
 
 const started = performance.now();
 const GAMES = "/game/games";
+const MAPS = "/game/maps";
 const SYNC_MS = 400;
 let syncTimer = null;
 
@@ -28,13 +30,17 @@ const handle = (async () => {
   const booted = performance.now();
   const zip = await (await fetch(new URL(GAME_ZIP, import.meta.url))).arrayBuffer();
   py.unpackArchive(zip, "zip", { extractDir: "/game" });
-  try {
-    py.FS.mkdirTree(GAMES);
-    py.FS.mount(py.FS.filesystems.IDBFS, {}, GAMES);
-    await syncfs(py, true);
-  } catch (err) {
-    console.warn("no stored games here", err);   // games still save, for this visit only
+  // The games folder and the map maker's maps folder (`paths.maps_dir`),
+  // each kept in IndexedDB.
+  for (const dir of [GAMES, MAPS]) {
+    try {
+      py.FS.mkdirTree(dir);
+      py.FS.mount(py.FS.filesystems.IDBFS, {}, dir);
+    } catch (err) {
+      console.warn(`no stored ${dir} here`, err);   // still saved, for this visit only
+    }
   }
+  await syncfs(py, true);
   self.py = py;
   const fetched = performance.now();
   py.runPython("import sys; sys.path.insert(0, '/game')");

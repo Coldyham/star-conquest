@@ -21,12 +21,14 @@ import json
 import math
 import time
 import traceback
+from collections.abc import Callable
 
-from starconquest import (ai, app, bench, engine, hostio, hud, paths, play, replay, serial, setupmenu, turnfilm,
-                          webstore)
+from starconquest import (ai, app, bench, campaign, daily, engine, files, gauntletgen, hostio, hud, maker, paths,
+                          pbp, play, replay, serial, setupmenu, share, turnfilm, webstore)
 from starconquest import recipe as recipes
 from starconquest import run as gauntlet_run
 from starconquest.model import GameState
+from starconquest.pbpclient import Outcome, PbpClient
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
 from starconquest.viewstate import CHOOSING, ROUTING, Ui
@@ -64,6 +66,7 @@ UI_CALLS = {
     "open_odds": lambda ui, state: setattr(ui, "odds_open", ui.mode == CHOOSING and not ui.forward_armed),
     "open_lore": lambda ui, state: play.open_lore(state, ui, ui.selected),
     "dismiss_card": lambda ui, state: play.dismiss_card(ui),
+    "open_briefing": lambda ui, state: setattr(ui, "briefing_open", True),
     "toggle_graph": lambda ui, state: play.history_key(state, ui, "g"),
     "graph_full": lambda ui, state: setattr(ui, "graph_full", not ui.graph_full),
     "graph_tab": lambda ui, state, i: play.graph_tab(ui, int(i)),
@@ -71,7 +74,15 @@ UI_CALLS = {
     "show_all_traces": lambda ui, state: ui.graph_hidden.clear(),
     "select_note": lambda ui, state, i: ui.select_note(int(i)),
     "seek_turn": lambda ui, state, turn: play.seek(ui, int(turn)),
+    "close_invite": lambda ui, state: play.close_invite(ui),
 }
+
+# Ops that are not the player's doing: they leave play-by-post's idle clock
+# running (`PbpClient.idle`, which stretches the wait between reads).
+_NOT_INPUT = ("tick", "net.reply", "game.view", "menu.generate")
+# How long one `menu.generate` may hold the worker: a slice of probe games,
+# then the page's other commands get their turn before it asks again.
+GEN_SLICE_S = 0.1
 
 
 class Session:
@@ -92,6 +103,28 @@ class Session:
         self.touch = False
         self.compact = False
         self.resume_log: GameLog | None = None
+        # The map maker's editor while it is open (`maker`).
+        self.maker: maker.Editor | None = None
+        # The board: the weekly campaign's lookup for the setup on the menu or
+        # in play (`campaign.Watcher`), a replay being fetched for a `#log=`
+        # link, and the calls whose answers land on the win overlay (the
+        # signed-in name, a puzzle's par, a quick post), each with its landing.
+        self.campaign = campaign.Watcher()
+        self.fetching: share.Download | None = None
+        self.waits: list[tuple[pbp.Request, Callable[[str, str], None]]] = []
+        # Play by post (`pbpclient`): one shared match's calls, stepped by
+        # `tick` on the time that has passed since the last step.
+        self.pbp = PbpClient()
+        self.stepped: float | None = None
+        # The menu's own calls to the board (a daily, a linked gauntlet, a
+        # generated gauntlet's listing), each landing as an `app.MenuNote`,
+        # and a `#gauntlet-spec=` link's generator, stepped by `menu.generate`.
+        self.menu_waits: list[tuple[pbp.Request, Callable[[str, str], app.MenuNote]]] = []
+        self.gen_job: gauntletgen.Job | None = None
+        self.daily_due = False
+        # A match the menu opened itself (a run's stage), for the next menu
+        # reply to hand the page as ``game``.
+        self.opened: dict | None = None
 
     def handle(self, raw: str) -> str:
         try:
@@ -100,11 +133,14 @@ class Session:
             return json.dumps({"id": None, "ok": False, "error": f"not JSON: {err}", "effects": []})
         reply: dict = {"id": cmd.get("id")}
         fn = getattr(self, "op_" + str(cmd.get("op", "")).replace(".", "_"), None)
+        if cmd.get("op") not in _NOT_INPUT:
+            self.pbp.idle = 0
         if fn is None:
             reply.update(ok=False, error=f"no such op: {cmd.get('op')!r}")
         else:
             try:
                 reply.update(ok=True, result=fn(**(cmd.get("args") or {})))
+                self._ask_due()
             except Exception as err:  # noqa: BLE001 - a failed command answers, never kills the worker
                 reply.update(ok=False, error=f"{type(err).__name__}: {err}", trace=traceback.format_exc())
         reply["effects"] = hostio.drain()
@@ -121,14 +157,21 @@ class Session:
     def op_game_start(self, settings: dict | None = None, seed: int | None = None) -> dict:
         """A fresh match on ``settings`` (`Settings.from_dict`), or on the menu's
         setup when none are given (Start Game), seeded or rolled."""
+        menu_setup = settings is None
         if settings is not None:
             self.settings = Settings.from_dict(settings)
         elif self.settings is None:
             self.settings = Settings()
         ai.load_models()   # files added since boot, or named by a loaded setup
         self.seed = seed if seed is not None else resolve_seed(self.settings)
-        self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay)
+        # The gauntlet stage the menu's setup still is, if any (`menu.active_stage`).
+        stage = setupmenu.active_stage(self.menu, self.settings) if menu_setup else None
+        self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay, stage)
         self.history = self.live_fog = None
+        if menu_setup:
+            # What the campaign said about this setup as it begins (Start).
+            app.stamp_campaign(self.ui, self.campaign)
+            app.campaign_tick(self.ui, self.settings, self.campaign)
         return self._started()
 
     def _started(self) -> dict:
@@ -141,6 +184,103 @@ class Session:
     # slider's fraction or the seed field's text, and draws the reply's
     # ``menu`` as it stands. ``action`` is for the page to carry out
     # (``start``, ``quit``, or a screen of a later phase).
+    # ------------------------------------------------------------------ #
+    # The daily, gauntlets and runs on the menu (`app`'s menu side, each
+    # answering a `MenuNote` that `_note` shows, as `main.show_note` does)
+    def _note(self, note: app.MenuNote) -> None:
+        ms, settings = self.menu, self._settings()
+        if note.status is not None and note.status[0]:
+            self._say(*note.status)
+        if note.gauntlet is not None:
+            setupmenu.open_tutorial(ms, settings, self._say, pick=note.gauntlet)
+        if note.said is not None:
+            setupmenu.say_gauntlet(ms, *note.said, self._say)
+
+    def _begin(self, action: str) -> str | None:
+        """``action`` (``start``, ``run``, ``run_continue``) through Start's gate,
+        the campaign's confirm asked for a plain start only (`menu._start`)."""
+        asked = campaign.confirm(self.campaign.status) if action == "start" else None
+        return setupmenu.start(self.menu, self._settings(), action, self._say, asked=asked)
+
+    def _daily(self, kind: str, day: str = "") -> None:
+        """Fetch ``day``'s daily of ``kind`` onto the menu (`app.open_daily`)."""
+        if self.daily_due:
+            return   # one at a time, as pygame's ``pending_daily``
+        pending, note = app.open_daily(day, kind)
+        self._note(note)
+        if pending is not None:
+            self.daily_due = True
+
+            def land(st: str, body: str) -> app.MenuNote:
+                self.daily_due = False
+                return app.land_daily(self._settings(), st, body, kind)
+            self.menu_waits.append((pending, land))
+
+    def _open_run(self, fresh: bool, reopen: bool = True) -> bool:
+        """Start a run of the gauntlet picked in the list, or carry on the active
+        one (`app.open_run`); the match goes to the page with the next menu
+        reply (``opened``). False, with the list open again saying why, when
+        there is nothing to play."""
+        ms, settings = self.menu, self._settings()
+        opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
+                                    lambda g, sid: setupmenu.load_stage(ms, settings, g, sid))
+        self._note(note)
+        if opened is None:
+            if reopen:
+                setupmenu.reopen_gauntlets(ms, settings, self._say)
+            return False
+        self.state, self.ui, self.log, self.seed = opened
+        self.history = self.live_fog = None
+        app.stamp_campaign(self.ui, self.campaign)
+        self.resume_log = None
+        self.opened = self._started()
+        return True
+
+    def _menu_links(self) -> None:
+        """A gauntlet link (``#g=``, ``#gauntlet=``), else a ``#daily`` or
+        ``#puzzle`` link, else a ``#gauntlet-spec=`` one to generate from, unless
+        a replay or a match took the launch. Any of them puts the resume prompt
+        away, as pygame's launch does."""
+        if self.fetching is not None or self.pbp.invite is not None:
+            return
+        gid, inline = app.gauntlet_request()
+        if gid is not None or inline is not None:
+            pending, note = app.open_linked_gauntlet(gid, inline)
+            self._note(note)
+            if pending is not None:
+                self.menu_waits.append((pending, app.land_gauntlet))
+            self.resume_log = None
+            return
+        asked = daily.link(webstore.url_token())
+        if asked is not None:
+            kind, day = asked
+            self._daily(kind, day)
+            self.resume_log = None
+            return
+        job, note = app.start_generation(app.spec_request(""))
+        self._note(note)
+        if job is not None:
+            self.gen_job = job
+            self.resume_log = None
+
+    def op_menu_generate(self) -> dict:
+        """One slice of a ``#gauntlet-spec=`` generator (`app.pump_generation`),
+        which the page asks for again while the reply says ``generating``; once
+        done, the gauntlet opens on the Tutorial list and a listing is asked
+        for if its link ticked the box (`app.ask_listing`)."""
+        job = self.gen_job
+        if job is None:
+            return self._menu()
+        self.gen_job, note = app.pump_generation(self._settings(), job, GEN_SLICE_S)
+        self._note(note)
+        if self.gen_job is None:
+            asked, said = app.ask_listing(job)
+            self._note(said)
+            if asked is not None:
+                gid, name, pending = asked
+                self.menu_waits.append((pending, lambda st, _body: app.land_listing(gid, name, st)))
+        return self._menu()
+
     def op_menu_open(self, prefill: dict | None = None, touch: bool = False, compact: bool = False,
                      first: bool = False) -> dict:
         """Show the menu: at boot (``first``) on a fresh setup, pre-filled from
@@ -155,16 +295,22 @@ class Session:
             self.resume_log = None
             if first:
                 log = replay.latest_log()
-                if (log is not None and not log.finished and log.turn_count > 0
-                        and not gauntlet_run.is_playing(log)):
+                if log is not None and not log.finished and log.turn_count > 0:
                     self.resume_log = log
+                self._watch_link()
+                self._match_link()
+                self._menu_links()
+        if self.ui is not None and self.ui.in_pbp:
+            self.pbp.leave()
         self.state = self.ui = self.log = None
         self.history = self.live_fog = None
+        self.maker = None
         self.menu.strategies = setupmenu.strategy_options()
         return self._menu()
 
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
+        self.campaign.pump(settings)
         out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN),
                                       every_tab=self.compact),
                "action": action, "status": None,
@@ -173,6 +319,12 @@ class Session:
             out["status"] = {"text": ms.status, "ok": ms.status_ok,
                              "ms": setupmenu.STATUS_MS if ms.status_ok else setupmenu.STATUS_ERROR_MS}
             ms.status = ""
+        if self.gen_job is not None:
+            out["generating"] = True
+        if self.opened is not None:
+            out["game"], self.opened = self.opened, None
+        if action == "create_map" and self.maker is not None:
+            out["maker"] = maker.view(self.maker, settings, self.touch, files=True)
         if self.resume_log is not None:
             go, stay = setupmenu.resume_labels(self.touch)
             out["resume"] = {"title": "Resume last game?", "detail": setupmenu.resume_detail(self.resume_log),
@@ -185,22 +337,45 @@ class Session:
     def op_menu_press(self, key: str) -> dict:
         """A press on the menu's control ``key`` (`setupmenu.view` names them)."""
         ms, settings, key = self.menu, self._settings(), str(key)
-        if ms.confirm_unchallenge or ms.confirm_slow or ms.confirm_clear_map:
-            return self._menu(self._answer(key))
+        if ms.confirm_unchallenge or ms.confirm_slow or ms.confirm_clear_map or ms.confirm_quit:
+            return self._menu(self._then(self._answer(key)))
+        if ms.pbp_prompt:
+            # Modal: only its own controls answer.
+            if key.startswith("pbp_"):
+                return self._menu(self._then(setupmenu.pbp_press(ms, settings, key)))
+            return self._menu()
+        if ms.tutorial_open:
+            # Modal too: a stage, a run button, the picker, Leave, Copy, Close.
+            if key.startswith(setupmenu.TUTORIAL_KEYS):
+                return self._menu(self._then(setupmenu.tutorial_press(
+                    ms, settings, key, paths.is_web(), self._say, self._begin)))
+            return self._menu()
         if key != "seed":
             ms.editing_seed = False
         if not (key == "strategy" or key.startswith("strategy_opt_")):
             ms.strategy_open = False
-        daily_was, board_was = ms.daily_open, ms.board_open
-        ms.daily_open = ms.board_open = False
+        daily_was, board_was, files_was = ms.daily_open, ms.board_open, ms.files_open
+        ms.daily_open = ms.board_open = ms.files_open = False
         setupmenu.before_edit(ms, settings)
         action = None
         if key == "start":
-            action = setupmenu.start(ms, settings, "start", self._say)
+            action = self._begin("start")
+        elif key == "tutorial":
+            setupmenu.open_tutorial(ms, settings, self._say)
+        elif key in ("daily", "puzzle"):
+            self._daily(daily.PUZZLE if key == "puzzle" else daily.BOARD)
         elif key == "daily_menu":
             ms.daily_open = not daily_was
         elif key == "board_menu":
             ms.board_open = not board_was
+        elif key == "files_menu":
+            ms.files_open = not files_was
+        elif key == "save_settings":
+            self._download(files.setup_file(settings))
+        elif key == "save_game":
+            self._save_last_match()
+        elif key == "load_file":
+            pass   # the page opens its file picker on the press itself (`file.open`)
         elif setupmenu.press(ms, settings, key, self._say):
             pass
         elif key == "get_link":
@@ -213,18 +388,54 @@ class Session:
                 self._say("Couldn't create link", False)
         elif key in ("browse_matches", "browse_configs"):
             self._browse(key)
+        elif key == "play_by_post":
+            # The same gate Start goes through (a hand map that cannot build),
+            # then the roster prompt rather than the match itself.
+            if setupmenu.start(ms, settings, "play_by_post", self._say) is not None:
+                setupmenu.open_pbp_prompt(ms, settings)
         elif key == "clear_map":
             ms.confirm_clear_map = settings.custom_map is not None
         elif key == "quit":
-            # The page asks the browser to close it, which a tab rarely allows.
-            self._say(setupmenu.CANT_CLOSE_MSG, False)
-            action = key
-        elif key in setupmenu.LATER:
-            self._say(setupmenu.LATER_MSG.format(what=setupmenu.LATER[key]), False)
+            ms.confirm_quit = True
+        elif key == "create_map":
+            action = self._then(setupmenu.open_creator(ms, settings))
         else:
             raise ValueError(f"not a menu control: {key!r}")
         setupmenu.after_edit(ms, settings)
         return self._menu(action)
+
+    def op_menu_pbp_text(self, which: str, text: str, done: bool = False) -> dict:
+        """The roster prompt's text row ``which`` (``name`` or ``title``) holds
+        ``text`` as typed; ``done`` when it loses the caret."""
+        ms = self.menu
+        if ms.pbp_prompt and which in ("name", "title"):
+            setupmenu.set_pbp_text(ms, which, str(text))
+            ms.pbp_editing = None if done else which
+        return self._menu()
+
+    def _then(self, action: str | None) -> str | None:
+        """Carry out a menu action the session owns, and pass the page the
+        rest: ``play_by_post`` creates the match (`PbpClient.create`) on the
+        setup, for the roster and deadline the prompt confirmed; the page stays
+        on the menu until the match opens (`tick`)."""
+        if action in ("run", "run_continue"):
+            self._open_run(fresh=action == "run")
+            return None
+        if action == "create_map":
+            self.maker = maker.open_editor(self._settings())
+            return action
+        if action != "play_by_post":
+            return action
+        ms, settings = self.menu, self._settings()
+        if self.pbp.make is None:
+            # The seed is resolved now and sent: "roll a fresh seed" has to
+            # mean one seed for the whole table, not one each.
+            self.seed = resolve_seed(settings)
+            line = self.pbp.create(settings, self.seed, sorted(ms.pbp_roster) or None,
+                                   ms.pbp_deadline_hours, ms.pbp_public, ms.pbp_title, ms.pbp_name)
+            if line is not None:
+                self._say(*line)
+        return None
 
     def _browse(self, key: str) -> None:
         """Open one of the board's lists in this tab, as pygame's footer does."""
@@ -242,6 +453,96 @@ class Session:
         else:
             self._say(failed, False)
 
+    # ------------------------------------------------------------------ #
+    # Files (`files`): Save hands the browser a file (a ``download`` effect);
+    # Open is the page's file picker, whose file comes back as `file.open`.
+    def _download(self, file: files.Download) -> None:
+        hostio.emit("download", **file.effect())
+        self._say(f"Saved {file.name}", True)
+
+    def _save_last_match(self) -> None:
+        """The newest match in the games folder, as its log."""
+        for path in replay.list_logs():
+            try:
+                log = replay.load(path)
+            except (OSError, ValueError):
+                continue
+            if log.turn_count:
+                self._download(files.match_file(log))
+                return
+        self._say("No match to save yet", False)
+
+    def op_file_open(self, name: str, text: str, where: str = "menu") -> dict:
+        """The player picked file ``name`` holding ``text``: in the map maker
+        (``where`` ``maker``) a map to edit, on the menu a setup to load, a map
+        to play or edit, or a match to watch from its first turn (as pygame's
+        ``--watch FILE``). Anything else says what it is not."""
+        name = str(name)[:120]
+        opened = files.read(str(text))
+        if where == "maker" and self.maker is not None:
+            ed = self.maker
+            if opened.kind == "map":
+                maker.push_undo(ed)
+                maker.adopt(ed, opened.value)
+                maker.set_status(ed, f"Opened {name}", True)
+            else:
+                maker.set_status(ed, f"{name} isn't a map: {opened.why or 'it is a ' + str(opened.kind)}", False)
+            return self._maker()
+        ms, settings = self.menu, self._settings()
+        if opened.kind is None:
+            self._say(f"Couldn't open {name}: {opened.why}", False)
+        elif opened.kind == "setup":
+            setupmenu.before_edit(ms, settings)
+            settings.copy_from(opened.value)
+            ms.seed_text = "" if settings.seed is None else str(settings.seed)
+            setupmenu.after_edit(ms, settings)
+            self._say(f"Loaded {name}", True)
+        elif opened.kind == "map":
+            setupmenu.before_edit(ms, settings)
+            maker.apply_map(settings, opened.value)
+            setupmenu.after_edit(ms, settings)
+            self._say(f"Opened {name}: Edit map to change it", True)
+        else:
+            result = self._open_watched(share.OK, opened.value.encoded())
+            if "game" not in result:
+                return result["menu"]
+            self.opened = result["game"]
+        return self._menu()
+
+    def _leave(self) -> str:
+        """A confirmed quit (`main.leave_app`): ask the browser to close the
+        window, and say how to leave if it won't, back on the menu."""
+        webstore.close_window()
+        if self.ui is not None and self.ui.in_pbp:
+            self.pbp.leave()
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.maker = None
+        self._say(setupmenu.CANT_CLOSE_MSG, False)
+        return "quit"
+
+    def op_page_hash(self, hash: str) -> dict:
+        """The page's address took a new ``#fragment`` (a link opened in an
+        installed app, or pasted into an open tab): open it as boot does, on
+        the menu, leaving any match behind. A blank one changes nothing."""
+        hostio.set_hash(str(hash).lstrip("#"))
+        if not hostio.page("hash"):
+            return {}
+        if self.ui is not None and self.ui.in_pbp:
+            self.pbp.leave()
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.maker = None
+        self.settings = Settings()
+        app._apply_shared_link(self.settings)
+        self.menu = setupmenu.Menu()
+        self.menu.strategies = setupmenu.strategy_options()
+        self.resume_log = None
+        self._watch_link()
+        self._match_link()
+        self._menu_links()
+        return {"menu": self._menu()}
+
     def _answer(self, key: str) -> str | None:
         """A press while a confirm is up: only its two buttons answer it."""
         ms, settings = self.menu, self._settings()
@@ -249,6 +550,11 @@ class Session:
             return setupmenu.answer_unchallenge(ms, settings, key == "unchallenge_change", self._say)
         if ms.confirm_slow and key in ("slow_go", "slow_back"):
             return setupmenu.answer_slow(ms, key == "slow_go")
+        if ms.confirm_quit and key in ("quit_yes", "quit_no"):
+            ms.confirm_quit = False
+            if key == "quit_yes":
+                return self._leave()
+            return None
         if ms.confirm_clear_map and key in ("clear_map_yes", "clear_map_no"):
             ms.confirm_clear_map = False
             if key == "clear_map_yes":
@@ -261,6 +567,19 @@ class Session:
         answers a confirm yes and N or Esc no; otherwise Esc closes an open
         list, and Enter (or space) starts as Start Game does."""
         ms, name = self.menu, str(name)
+        if ms.tutorial_open and not (ms.confirm_slow or ms.confirm_unchallenge):
+            if name == "Escape":
+                ms.tutorial_open = False
+            return self._menu()
+        if ms.pbp_prompt:
+            if name == "Enter":
+                return self._menu(self._then(setupmenu.confirm_pbp(ms, self._settings())))
+            if name == "Escape":
+                if ms.pbp_editing is not None:
+                    ms.pbp_editing = None
+                else:
+                    setupmenu.close_pbp_prompt(ms)
+            return self._menu()
         modal = setupmenu.modal(ms, self._settings(), self.touch)
         if modal is not None:
             if name in ("y", "Y", "Enter"):
@@ -268,9 +587,9 @@ class Session:
             if name in ("n", "N", "Escape"):
                 return self.op_menu_press(modal["stay"]["key"])
             return self._menu()
-        if ms.strategy_open or ms.daily_open or ms.board_open:
+        if ms.strategy_open or ms.daily_open or ms.board_open or ms.files_open:
             if name == "Escape":
-                ms.strategy_open = ms.daily_open = ms.board_open = False
+                ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
             return self._menu()
         if name in ("Enter", " "):
             return self.op_menu_press("start")
@@ -284,7 +603,7 @@ class Session:
         only once it is let go."""
         ms, settings = self.menu, self._settings()
         if phase == "start":
-            ms.strategy_open = ms.daily_open = ms.board_open = False
+            ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
             setupmenu.before_edit(ms, settings)
             ms.drag_key = str(key)
         setupmenu.apply_slider(str(key), ms, settings, float(t))
@@ -313,6 +632,11 @@ class Session:
         """Answer the boot prompt: play the unfinished match on, or leave it."""
         log, self.resume_log = self.resume_log, None
         if not accept or log is None:
+            return self._menu()
+        if gauntlet_run.is_playing(log):
+            # A run's own game comes back as the run's, so it keeps the run's
+            # rules and its result reaches the run.
+            self._open_run(fresh=False)
             return self._menu()
         ai.load_models()   # a resumed game may name a drop-in strategy
         settings = self._settings()
@@ -344,6 +668,13 @@ class Session:
         film to watch it by and the board it lands on."""
         assert self.state is not None and self.ui is not None and self.settings is not None
         if self.state.winner is not None:
+            return {"board": serial.board(self.state), "travel": serial.travel(self.state), "film": None,
+                    "fog": self._fog(), "view": self._view(), "snap": False, "ms": 0.0}
+        if self.ui.in_pbp:
+            # The turn advances when the last seat is in, never on a press:
+            # this sends ours and waits (`tick` collects the rest).
+            if not self.ui.awaiting_others(self.state) and not self.ui.spectating:
+                self.pbp.send(self.state, self.ui)
             return {"board": serial.board(self.state), "travel": serial.travel(self.state), "film": None,
                     "fog": self._fog(), "view": self._view(), "snap": False, "ms": 0.0}
         was_over, was_out = self.state.winner is not None, self.state.is_defeated(self.ui.human_id)
@@ -462,10 +793,15 @@ class Session:
             self.seed = self.log.seed
             self.history = self.live_fog = None
             self.state, self.ui = app.resume_game(self.log, self.settings)
+            if not ui.watched:
+                app.stamp_campaign(self.ui, self.campaign)
+                self._stage_again()
             return self._whole()
         elif name == "rewind_confirmed" and ui.history and not ui.in_pbp:
             self.history = self.live_fog = None
             self.state, self.ui = app.apply_rewind(self.log, self.settings, ui.history_turn)
+            self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
+            self._stage_again()
             return self._whole()
         elif name == "toggle_route":
             # Leaving discards the plan: it is only ever committed by its confirm.
@@ -485,12 +821,71 @@ class Session:
             except OSError:
                 pass
             self.seed = self.log.seed
+            self.history = self.live_fog = None
             self.state, self.ui = app.resume_game(self.log, self.settings)
+            if not ui.watched:
+                app.stamp_campaign(self.ui, self.campaign)
+                self._stage_again()
             return self._whole()
+        elif name == "quit":
+            title, body, confirm = hud.confirm_quit()
+            return {"fresh": False, "view": self._view(),
+                    "modal": {"kind": "quit", "title": title, "body": body, "confirm": confirm, "tone": "red",
+                              "then": "quit_confirmed"}}
+        elif name == "quit_confirmed":
+            return {"quit": True, "menu": self._menu(self._leave())}
         elif name == "undo" and ui.can_undo(state):
             self.state, self.ui = app.apply_rewind(self.log, self.settings, max(self.log.turn_count - 1, 0))
+            self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
+            self._stage_again()
             return self._whole()
+        elif name == "next_stage" and ui.offers_next_stage(state):
+            # The stage after this one, briefing and all. The menu's setup
+            # becomes that stage's, so going back to the menu lands on it. In
+            # a run it is the run's next stage, begun as its next step.
+            if ui.run_id:
+                if self._open_run(fresh=False, reopen=False):
+                    self.opened = None
+                    return self._whole()
+            else:
+                found = setupmenu.next_stage(self.menu, self.settings)
+                if found is not None:
+                    ai.load_models()
+                    self.seed = resolve_seed(self.settings)
+                    self.state, self.ui, self.log = app.start_game(self.settings, self.seed,
+                                                                   self.settings.autoplay, found)
+                    self.history = self.live_fog = None
+                    app.stamp_campaign(self.ui, self.campaign)
+                    return self._whole()
+        elif name == "share" and ui.can_post(state):
+            # A challenge link to the clipboard, or a daily's result line.
+            ui.share_msg = (app.copy_daily_result(self.settings, state, ui) if ui.daily_day
+                            else app.share_challenge(self.settings, state, ui, self.seed, self.log))
+        elif name == "leaderboard" and ui.can_post(state):
+            self._leaderboard()
         return {"fresh": False, "view": self._view()}
+
+    def _stage_again(self) -> None:
+        """A Retry, undo or rewind keeps the stage being played, but not its
+        briefing, read the first time round (`app.stage_ui`)."""
+        app.stage_ui(self._ui(), setupmenu.active_stage(self.menu, self._settings()), briefing=False)
+
+    def _leaderboard(self) -> None:
+        """The win overlay's board button, by what it does now
+        (`Ui.board_action`): open the map's page once posted, post under the
+        remembered or signed-in name, or open the entry form."""
+        state, ui = self._state(), self._ui()
+        assert self.settings is not None and self.log is not None and self.seed is not None
+        board = ui.board_action()
+        if board == "view":
+            ui.share_msg = app.open_map_page(ui.posted_key) or ui.share_msg
+        elif board == "post":
+            request = app.quick_post(self.settings, state, ui, self.seed, self.log)
+            if request is not None:
+                figures = (state.turn, state.players[ui.human_id].ships_lost)
+                self.waits.append((request, lambda st, body: app.land_quick_post(ui, figures, st, body)))
+        elif board == "enter":
+            ui.share_msg = app.post_to_leaderboard(self.settings, state, ui, self.seed, self.log)
 
     def _whole(self, fresh: bool = True) -> dict:
         """The board on screen (a history turn while reviewing) and its view.
@@ -601,12 +996,351 @@ class Session:
         elif built.overlay == "hint":
             title, body, confirm = hud.confirm_hint(self.ui, app.HINT_STRATEGY.title())
             out["modal"] = {"kind": "hint", "title": title, "body": body, "confirm": confirm}
+        elif built.overlay == "quit":
+            title, body, confirm = hud.confirm_quit()
+            out["modal"] = {"kind": "quit", "title": title, "body": body, "confirm": confirm, "tone": "red",
+                            "then": "quit_confirmed"}
         return out
+
+    # ------------------------------------------------------------------ #
+    # The map maker (`maker`): the page hit-tests in its own pixels and sends
+    # what a press landed on (a system, the lanes near it, a control's key, a
+    # point in world units), and draws the reply's ``maker`` as it stands. Play
+    # answers the match (``game``), Menu the menu's reply (``back``).
+    def _ed(self) -> maker.Editor:
+        assert self.maker is not None, "no map maker"
+        return self.maker
+
+    def _maker(self, action: str | None = None, **extra) -> dict:
+        """The editor's view, or what replaced it: Play's match, Menu's menu."""
+        if action == "play":
+            self.maker = None
+            return {"game": self.op_game_start()}
+        if action == "menu":
+            self.maker = None
+            return {"back": self._menu()}
+        out = {"maker": maker.view(self._ed(), self._settings(), self.touch, files=True), **extra}
+        if action is not None:
+            out["action"] = action
+        return out
+
+    def _map_press(self) -> maker.Editor:
+        """A press on the map: on a touch screen, kept for a pinch to put back
+        if this was its first finger (`op_maker_unpress`)."""
+        ed = self._ed()
+        if self.touch:
+            maker.snapshot(ed)
+        return ed
+
+    def op_maker_open(self) -> dict:
+        """Open the map maker on the menu's setup, as Create map does."""
+        self.maker = maker.open_editor(self._settings())
+        return self._maker()
+
+    def op_maker_place(self, x: float, y: float, shift: bool = False) -> dict:
+        """The Systems tool's press on empty map at world ``(x, y)``: place a
+        system there (``armed`` is its index, for the page's move-drag)."""
+        ed = self._map_press()
+        link = ed.sel_node if maker.chains(ed, bool(shift)) else None
+        return self._maker(armed=maker.place(ed, self._settings(), (float(x), float(y)), link))
+
+    def op_maker_node(self, node: int, shift: bool = False) -> dict:
+        """A press on system ``node``, by the tool: select it and arm a
+        move-drag (Systems, ``armed``), arm or lay a lane (Lanes), paint it (Owners)."""
+        ed, node = self._map_press(), int(node)
+        armed = None
+        if ed.tool == maker.SYSTEMS:
+            maker.press_system(ed, node, bool(shift))
+            armed = node
+        elif ed.tool == maker.LANES:
+            maker.press_lane_tool(ed, node)
+        else:
+            maker.press_owner(ed, node)
+        return self._maker(armed=armed)
+
+    def op_maker_miss(self, lanes: list | None = None) -> dict:
+        """A press on the map that missed every system, with the lanes within
+        reach nearest first. ``pan`` says a left-drag from there pans (Lanes, on
+        nothing at all); ``box`` that it draws the Owners tool's box."""
+        ed = self._map_press()
+        pan = box = False
+        if ed.tool == maker.LANES:
+            pan = maker.press_lane_tool(ed, None, [int(i) for i in lanes or []])
+        elif ed.tool == maker.OWNERS:
+            maker.press_owner(ed, None)
+            box = True
+        return self._maker(pan=pan, box=box)
+
+    def op_maker_drag(self, x: float, y: float) -> dict:
+        """The armed system dragged past the threshold, to world ``(x, y)``."""
+        maker.drag_to(self._ed(), (float(x), float(y)))
+        return self._maker()
+
+    def op_maker_release(self) -> dict:
+        """The press on a system let go (an illegal spot snaps back)."""
+        maker.release_drag(self._ed())
+        return self._maker()
+
+    def op_maker_lane(self, target: int | None = None) -> dict:
+        """A lane drag let go over system ``target`` (None: over nothing)."""
+        maker.lane_release(self._ed(), None if target is None else int(target))
+        return self._maker()
+
+    def op_maker_box(self, nodes: list) -> dict:
+        """The Owners tool's box let go around ``nodes``: paint them."""
+        maker.paint(self._ed(), [int(i) for i in nodes])
+        return self._maker()
+
+    def op_maker_control(self, key: str) -> dict:
+        """A press on a control by its key (`maker.control`). Export hands the
+        browser the map as a file; Import is the page's file picker (`file.open`)."""
+        ed, key = self._ed(), str(key)
+        if key == "export":
+            file = files.map_file(ed.recipe, ed.filename or maker.DEFAULT_FILENAME)
+            hostio.emit("download", **file.effect())
+            maker.set_status(ed, f"Exported {file.name}", True)
+            return self._maker()
+        if key == "import":
+            return self._maker()
+        return self._maker(maker.control(ed, self._settings(), key))
+
+    def op_maker_slide(self, key: str, t: float, phase: str = "move") -> dict:
+        """Slider ``key`` pressed (``start``), dragged, or let go at fraction
+        ``t``. The Garrison slider's press is one undo for the whole drag."""
+        ed, key = self._ed(), str(key)
+        if key == "ships_slider":
+            if maker.selected(ed) is None:
+                return self._maker()
+            if phase == "start":
+                maker.push_undo(ed)
+            maker.set_garrison(ed, float(t))
+        elif key in maker.slider_keys():
+            maker.set_slider(self._settings(), key, float(t))
+        return self._maker()
+
+    def op_maker_key(self, name: str, ctrl: bool = False) -> dict:
+        """A key by its ``KeyboardEvent.key`` name: Y or Enter answers a confirm
+        yes and N or Esc no; otherwise `maker.press_key` (``action``
+        ``reset_view`` is the page's camera)."""
+        ed, name = self._ed(), str(name)
+        if ed.confirm is not None:
+            if name in ("y", "Y", "Enter"):
+                maker.answer_confirm(ed, self._settings(), True)
+            elif name in ("n", "N", "Escape"):
+                maker.answer_confirm(ed, self._settings(), False)
+            return self._maker()
+        return self._maker(maker.press_key(ed, self._settings(), name, bool(ctrl)))
+
+    def op_maker_confirm(self, yes: bool) -> dict:
+        maker.answer_confirm(self._ed(), self._settings(), bool(yes))
+        return self._maker()
+
+    def op_maker_problem(self, index: int) -> dict:
+        """A press on a problem's row: select its offender (``fit`` frames it)."""
+        maker.focus_problem(self._ed(), int(index))
+        return self._maker()
+
+    def op_maker_filename(self, text: str) -> dict:
+        """The filename field holds ``text`` as typed (filtered to a name it can take)."""
+        self._ed().filename = maker.filename_text(str(text))
+        return self._maker()
+
+    def op_maker_unpress(self) -> dict:
+        """A second finger made the last map press a pinch: put back what it changed."""
+        maker.unpress(self._ed())
+        return self._maker()
+
+    def op_parity_maker(self, recipe: dict) -> dict:
+        """Put a parity screen's maker recipe on screen (`tools/parity_next.py`),
+        as `parity_shots.run_maker` draws it: the recipe's setup and map, with
+        Generate pinned to seed 1."""
+        self.settings = recipes.settings_of(recipe)
+        self.state = self.ui = self.log = None
+        self.history = self.live_fog = None
+        self.maker = maker.open_editor(self.settings, seed=1)
+        return self._maker()
 
     def op_net_reply(self, req: int, state: str, body: str) -> dict:
         """The page carried out an ``http`` or ``bridge`` effect; hand its answer
-        to whoever is polling for it."""
-        return {"delivered": hostio.reply(req, state, body)}
+        to whoever is polling for it. ``pushed`` is what the answer changed on
+        screen, for the page to draw unasked: a ``view`` (the win overlay's
+        button or line, the campaign reminder), a ``game`` (a fetched replay,
+        opened in history), or a ``menu`` reply (a replay that would not open)."""
+        out: dict = {"delivered": hostio.reply(req, state, body)}
+        pushed = self._land()
+        if pushed:
+            out["pushed"] = pushed
+        return out
+
+    def op_tick(self) -> dict:
+        """The page's clock, once a second while it is open: the campaign's
+        lookup settles, refreshes and counts its grace down on it. ``pushed``
+        as `op_net_reply`'s, when the reminder's words changed."""
+        if not hostio.in_worker():   # not booted: the watcher would decide it is off for good
+            return {}
+        before = self._view()
+        pushed = self._step_match() or self._land(before)
+        return {"pushed": pushed} if pushed else {}
+
+    def op_game_view(self) -> dict:
+        """The play screen's view as it stands, for a page that set a pushed
+        one aside while a turn was in flight."""
+        return {"view": self._view()}
+
+    def op_pbp_copy(self, seat: int) -> dict:
+        """The invite overlay's Copy on ``seat``'s row: its link to the clipboard."""
+        ui = self._ui()
+        link = next((link for row, link in ui.pbp_invite if row == int(seat)), "")
+        if link and webstore.copy_to_clipboard(link):
+            ui.pbp_invite_copied = int(seat)
+        return {"view": self._view()}
+
+    def _match_link(self) -> None:
+        """A ``#pbp=<match>:<token>`` seat link or a ``#spectate=<match>`` link,
+        unless a replay link already took the launch: open the match (`tick`
+        collects it). No resume prompt over it."""
+        if self.fetching is not None:
+            return
+        invite = app.pbp_request()
+        line = self.pbp.open_link(invite, app.pbp_spectate_request() if invite is None else None)
+        if line is not None:
+            self._say(*line)
+        if self.pbp.invite is not None:
+            self.resume_log = None
+
+    def _step_match(self) -> dict:
+        """Step play-by-post's client on the time since its last step, never
+        mid-film (the page sends no `tick` while one plays), and answer what it
+        changed on screen: a match opened or rebuilt (``game``), a turn played
+        onto the board (``turn``, with its film), the menu's line (``menu``)."""
+        now = time.monotonic()
+        dt = 0 if self.stepped is None else int((now - self.stepped) * 1000)
+        self.stepped = now
+        state, ui = self.state, self.ui
+        was_over = state is not None and state.winner is not None
+        was_out = state is not None and ui is not None and state.is_defeated(ui.human_id)
+        self.pbp.idle += dt
+        heard = self.pbp.step(dt, state, ui, self.log, self._settings(), filming=False)
+        return self._heard(heard, was_over, was_out)
+
+    def _heard(self, heard: Outcome, was_over: bool, was_out: bool) -> dict:
+        if heard.status is not None:
+            self._say(*heard.status)
+        if heard.created:
+            self.resume_log = None
+        if heard.game is not None:
+            self.state, self.ui, self.log = heard.game
+            if heard.seed is not None:
+                self.seed = heard.seed
+            self.history = self.live_fog = None
+            return {"game": {**self._whole(), "legends": serial.legends(), "map_fresh": heard.opened}}
+        if heard.reel is not None:
+            state, ui = self._state(), self._ui()
+            film = heard.reel.film
+            ui.stop_film()
+            snap = ((state.winner is not None and not was_over)
+                    or (state.is_defeated(ui.human_id) and not was_out))
+            ui.deferred_view_snap = False
+            return {"turn": {"board": serial.board(state), "travel": serial.travel(state),
+                             "film": serial.film(film) if film else None, "fog": self._fog(),
+                             "view": self._view(), "snap": snap}}
+        if heard.status is not None and self.state is None:
+            return {"menu": self._menu()}
+        return {}
+
+    def _watch_link(self) -> None:
+        """A ``#log=<id>`` link asks to watch a posted replay: fetch it, and
+        open it in history once it lands (`_land`)."""
+        wanted = app.replay_request()
+        if not wanted:
+            return
+        self.fetching = share.fetch_log(wanted)
+        if self.fetching is None:
+            print(f"cannot fetch replay {wanted!r}: no endpoint, or not a match id")
+            self._say(app.WATCH_UNREACHABLE_MSG, False)
+        else:
+            self._say("Loading replay...", True)
+
+    def _ask_due(self) -> None:
+        """Start the calls a command made due: the signed-in name for the win
+        overlay's post button, and a daily puzzle's par (`app.resolve_turn`)."""
+        ui = self.ui
+        if ui is None:
+            return
+        if ui.post_name_due:
+            ui.post_name_due = False
+            asked = share.signed_in_name()
+            if asked is not None:
+                self.waits.append((asked, lambda st, body: app.land_post_name(ui, st, body)))
+        if ui.par_due is not None:
+            figures, ui.par_due = ui.par_due, None
+            asked = daily.par_check(ui.daily_day, *figures)
+            if asked is not None:
+                self.waits.append((asked, lambda st, body: app.land_par(ui, figures, st, body)))
+
+    def _land(self, before: dict | None = None) -> dict:
+        """Land every answer that has arrived, and keep the campaign's lookup
+        current. Answers what changed on screen (`op_net_reply`'s ``pushed``)."""
+        pushed: dict = {}
+        before = before if before is not None else self._view()
+        waiting = []
+        for request, land in self.waits:
+            got, body = request.poll()
+            if got == pbp.PENDING:
+                waiting.append((request, land))
+            else:
+                land(got, body)
+        self.waits = waiting
+        menu_landed = False
+        still = []
+        for request, land_note in self.menu_waits:
+            got, body = request.poll()
+            if got == pbp.PENDING:
+                still.append((request, land_note))
+            else:
+                self._note(land_note(got, body))
+                menu_landed = True
+        self.menu_waits = still
+        if self.ui is not None and self.state is not None and self.settings is not None:
+            app.campaign_tick(self.ui, self.settings, self.campaign)
+        else:
+            self.campaign.pump(self._settings())
+        if self.fetching is not None:
+            got, body = self.fetching.poll()
+            if got != share.PENDING:
+                self.fetching = None
+                return self._open_watched(got, body)
+        if before is not None and self._view() != before:
+            pushed["view"] = self._view()
+        if menu_landed and self.state is None:
+            pushed["menu"] = self._menu()
+        return pushed
+
+    def _open_watched(self, got: str, body: str) -> dict:
+        """A fetched replay landed: open it in history from its first turn, or
+        say on the menu why it can't be (`main`'s ``pending_replay``)."""
+        opened = app.open_replay(body, self._settings()) if got == share.OK else None
+        if opened is not None:
+            self.state, self.ui, self.log = opened
+            self.seed = self.log.seed
+            states, fog, events, live = app.open_history(self.state, self.ui, self.log)
+            if states:
+                self.history, self.live_fog = (states, fog, events), live
+                return {"game": {**self._whole(), "legends": serial.legends()}}
+            self.state = self.ui = self.log = None
+        elif got != share.OK:
+            print(f"replay fetch ended in state {got!r}")
+            self._say(app.WATCH_MISSING_MSG if got == share.MISSING else app.WATCH_UNREACHABLE_MSG, False)
+        else:
+            stale = app._decode_log(body)
+            if stale is not None and not stale.is_current:
+                print(f"replay was recorded under rules v{stale.rules_version}, "
+                      f"this build plays v{engine.RULES_VERSION}")
+                self._say(app.WATCH_OUTDATED_MSG, False)
+            else:
+                print(f"replay body was not a readable log ({len(body)} bytes): {body[:120]!r}")
+                self._say(app.WATCH_UNREADABLE_MSG, False)
+        return {"menu": self._menu()}
 
     def op_bench_decide(self, bot: str, aux: float, nodes: int, seed: int, turns: int,
                         budget_scale: float | None = None) -> dict:

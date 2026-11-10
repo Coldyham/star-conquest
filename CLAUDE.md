@@ -54,7 +54,8 @@ uv run python tools/admin.py matches            # moderation (dry run until --ye
 uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots column
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
 node --test webapp/tests/*.test.mjs             # the HTML build's JS suite
-uv run python -m starconquest.serve             # the HTML build (in progress) at 127.0.0.1:8000/next/
+uv run python main.py --html --players 4        # the HTML build (in progress), served and opened
+uv run python -m starconquest.serve             # ...the same, at 127.0.0.1:8000/next/
                                                  # (?players=3&seed=7 pre-fills its menu, &go plays it;
                                                  # the spike is /next/spike.html)
 ```
@@ -100,7 +101,7 @@ the game is testable headlessly. The boundaries are load-bearing:
   `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
   `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run`,
   and the HTML build's `app`, `hostio`, `pbpclient`, `serial`, `session`, `bench`, `play`, `hud`,
-  `setupmenu`
+  `setupmenu`, `maker`, `files`
   (`test_no_core_module_imports_pygame`). `fog` and `turnfilm` are
   presentation-only: the engine and AI never consult them.
 - **The HTML build (in progress, `docs/design/html-frontend.md`)** runs the core in
@@ -391,7 +392,8 @@ concrete; never widen `WORLD_SIZE`; `CustomMap.from_dict` never raises,
 `generate_custom` asserts; `normalised()` stays idempotent and deletion goes
 through `without_node`; the editor's model is the recipe, never a `GameState`;
 `problems()` is the one validator; `tools/bot_replay._OUTCOME_MODULES` includes
-`custommap`.
+`custommap`. **The editor's rules and words live in `maker`** (core), read by
+pygame's `mapmaker` and the page: never in `mapmaker` alone.
 
 ### Gauntlets (gauntlet.py)
 

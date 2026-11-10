@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 import pygame
 
-from . import coach, combat, config, fog, hud, matchnames, paths, starlore, stats, widgets
+from . import coach, combat, config, fog, hud, paths, starlore, stats, widgets
 from .geometry import lerp
 from .model import Fleet, GameState, lane_key
 from .viewstate import CHOOSING, FOOTER_RECTS, ROUTING, SPECTATE_ROW, Ui
@@ -1820,10 +1820,9 @@ def _draw_hud(surface, state: GameState, ui: Ui) -> None:
     # A spectator has no turn to end at all, so the block only says so.
     _gone = ui.film is not None or ui.awaiting_others(state) or ui.spectating
     ui.end_turn_rect = (0, 0, 0, 0) if _gone else (hit.x, hit.y, hit.w, hit.h)
-    if _gone and (ui.awaiting_others(state) or ui.spectating):
-        _text(surface, _fonts()["normal"],
-              "Spectating" if ui.spectating else "Orders sent", config.COLOR_TEXT_DIM,
-              center=br.center)
+    word = hud.end_turn_word(state, ui)
+    if _gone and word is not None:
+        _text(surface, _fonts()["normal"], word, config.COLOR_TEXT_DIM, center=br.center)
         _draw_footer_buttons(surface, state, ui, by)
         return
     pygame.draw.rect(surface, fill, br, border_radius=config.s(8))
@@ -2024,21 +2023,10 @@ def _draw_ships_lost(surface, state: GameState, ui: Ui, turn: pygame.Rect) -> py
 
 
 def _match_notes(ui: Ui) -> list[tuple[str, tuple[int, int, int]]]:
-    """What this match is for, as (text, colour) lines for the head of the side
-    panel (`_panel_notes`): the gauntlet stage and its target, the campaign
-    reminder, the challenge target. Not in the top bar, which they would share
-    with the scoreboard (on a portrait phone, by covering it)."""
-    notes: list[tuple[str, tuple[int, int, int]]] = []
-    if ui.stage_label:
-        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
-        notes.append((text, _BTN_TEAL[1]))
-    if ui.campaign_label:
-        notes.append((ui.campaign_label, config.COLOR_CAMPAIGN))
-    if ui.challenge_target is not None:
-        turns, lost = ui.challenge_target
-        who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
-        notes.append((f"Beat {who}{turns}t / {lost} lost", _BTN_TEAL[1]))
-    return notes
+    """What this match is for (`hud.match_notes`), as (text, colour) lines for
+    the head of the side panel (`_panel_notes`)."""
+    colours = {"teal": _BTN_TEAL[1], "campaign": config.COLOR_CAMPAIGN}
+    return [(text, colours[role]) for text, role in hud.match_notes(ui)]
 
 
 def _draw_scoreboard(surface, state: GameState, ui: Ui, w: int, x0: int) -> None:
@@ -2360,12 +2348,8 @@ def _panel_you_are(surface, ui: Ui, x, y) -> int:
     spectator holds no seat, and the line says that instead. Under it,
     the match's title, or its pass-phrase name where it has none — whichever the
     lobby headlines it by."""
-    if ui.spectating:
-        y = _row(surface, x, y, "Spectating", config.COLOR_TEXT)
-    else:
-        y = _row(surface, x, y, f"You are {config.player_name(ui.human_id)}",
-                 config.player_color(ui.human_id))
-    label = ui.pbp_title or matchnames.phrase(ui.pbp_match)
+    (text, role), label = hud.you_are(ui)
+    y = _row(surface, x, y, text, _role(role))
     return _rows_named(surface, x, y, label, config.COLOR_TEXT_DIM) if label else y
 
 
@@ -2556,13 +2540,8 @@ def _draw_briefing(surface, ui: Ui) -> None:
     the stage's title, which stage it is, then the briefing's paragraphs, and its
     target as a note, which the card always shows, so the target is never a
     surprise on the win overlay."""
-    if config.touch_ui:
-        # The hint sits in the side panel: under the map in portrait.
-        where = "below the map" if config.portrait else "at the right"
-        close = f"Tap anywhere to begin · tap the hint {where} to read this again"
-    else:
-        close = "Press any key to begin · B shows this again"
-    notes = (f"Target: {ui.stage_target.text()}",) if ui.stage_target is not None else ()
+    close = hud.briefing_close(config.touch_ui, config.portrait)
+    notes = hud.briefing_notes(ui)
     _draw_card(surface, ui.stage_title, ui.stage_label or "", _BTN_TEAL[1], ui.briefing, close, notes)
 
 
@@ -2690,11 +2669,12 @@ def confirm_quit_buttons(surface) -> tuple[pygame.Rect, pygame.Rect]:
 
 def draw_confirm_quit(surface) -> None:
     """Modal 'are you sure?' veil, overlaid on whichever scene is beneath it."""
-    quit_label, cancel = confirm_labels("Quit")
+    title, body, confirm = hud.confirm_quit()
+    quit_label, cancel = confirm_labels(confirm)
     _draw_modal(
         surface,
-        "Quit Star Conquest?",
-        "",
+        title,
+        body,
         (
             (quit_label, *_BTN_DANGER),
             (cancel, *_BTN_GREEN),
@@ -2724,12 +2704,7 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
     surface.blit(veil, (0, 0))
 
     big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
-    title = "Match created — copy each seat's link"
-    # The one and only time these links are ever shown: `main.pbp_open` mints
-    # the tokens and hands them over right here, and nothing stores them again
-    # (`pbp.create`'s own docstring — "the reply is the one and only time the
-    # seat tokens exist in the clear"). A missed one has no second chance.
-    subtitle = "Save these somewhere — they won't be shown again"
+    title, subtitle = hud.INVITE_TITLE, hud.INVITE_SUBTITLE
     copy_w = _btn_w(small, "Copy", config.s(64))
     copy_h = max(config.s(28), small.get_height() + config.s(10))
     sw = config.s(14)   # colour swatch side
@@ -2737,9 +2712,7 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
     row_h = max(normal.get_height(), copy_h) + config.s(4)
 
     def seat_label(seat: int) -> str:
-        if seat == SPECTATE_ROW:
-            return "Spectators"
-        return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
+        return hud.invite_label(ui, seat)
 
     name_w = max((normal.size(seat_label(seat))[0] for seat, _ in ui.pbp_invite), default=0)
 
@@ -2755,7 +2728,7 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
     title_w = max((big.size(line)[0] for line in title_lines), default=0)
     subtitle_w = max((small.size(line)[0] for line in subtitle_lines), default=0)
     pw = max(inner_w, title_w, subtitle_w) + 2 * pad
-    done_w = _btn_w(normal, "Continue", config.s(140))
+    done_w = _btn_w(normal, hud.INVITE_DONE, config.s(140))
     done_h = copy_h + config.s(6)
     title_h = len(title_lines) * _row_h("big")
     subtitle_h = len(subtitle_lines) * _row_h("small")
@@ -2787,13 +2760,13 @@ def _draw_invite_overlay(surface, ui: Ui) -> None:
         r = pygame.Rect(panel.right - pad - copy_w, y + (row_h - copy_h) // 2, copy_w, copy_h)
         copied = ui.pbp_invite_copied == seat
         fill, edge = _BTN_ACTIVE if copied else _BTN_BLUE
-        ui.pbp_invite_rects[seat] = _btn(surface, r, "Copied" if copied else "Copy",
+        ui.pbp_invite_rects[seat] = _btn(surface, r, hud.invite_copy(ui, seat),
                                          fill, edge, small)
         y += row_h + row_gap
 
     y += config.s(10)
     done = pygame.Rect(panel.centerx - done_w // 2, y, done_w, done_h)
-    ui.pbp_invite_close_rect = _btn(surface, done, "Continue", *_BTN_GREEN, normal)
+    ui.pbp_invite_close_rect = _btn(surface, done, hud.INVITE_DONE, *_BTN_GREEN, normal)
 
 
 def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
@@ -2820,14 +2793,7 @@ def _draw_waiting_overlay(surface, state: GameState, ui: Ui) -> None:
     width = pw - config.s(48)
 
     big, normal, small = _fonts()["big"], _fonts()["normal"], _fonts()["small"]
-    names = [_seat_name(state, seat) for seat in ui.pbp_waiting]
-    if not names:
-        headline, detail = "Resolving the turn...", ""
-    elif len(names) == 1:
-        headline, detail = "Waiting for " + names[0], "Your orders are in."
-    else:
-        headline = f"Waiting for {len(names)} players"
-        detail = ", ".join(names)
+    headline, detail = hud.waiting_lines(state, ui)
 
     # Measured, then centred — a line that is not drawn tightens the stack up
     # rather than leaving a hole, and one too long for the map wraps rather than
@@ -2868,18 +2834,10 @@ def _draw_spectator_notice(surface, state: GameState, ui: Ui) -> None:
     the screen is which of them is holding the turn up. A pill rather than a
     veil, in the notice's place, so the board stays the thing on the wall.
     """
-    names = [_seat_name(state, seat) for seat in ui.pbp_waiting]
-    line = ("Waiting for " + ", ".join(names)) if names else "Resolving the turn..."
+    line = hud.spectator_line(state, ui)
     x, y, w, _ = config.play_rect()
     _label_pill(surface, _fonts()["small"], line,
                 config.COLOR_TEXT, (x + w // 2, y + config.FILM_CAPTION_GAP))
-
-
-def _seat_name(state: GameState, seat: int) -> str:
-    """What to call a seat we are waiting on. Its player name, which is already
-    how every other readout names a side."""
-    player = state.players.get(seat)
-    return player.name if player is not None else f"Seat {seat}"
 
 
 def _draw_win_overlay(surface, state: GameState, ui: Ui) -> None:

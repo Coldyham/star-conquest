@@ -403,7 +403,10 @@ def close_window() -> bool:
     player on a blank page with no way back, so a caller that can't verify the close
     must stay in the app instead (see ``main.leave_app``).
     """
-    if hostio.in_worker() or not is_web():
+    if hostio.in_worker():
+        hostio.emit("close")
+        return True
+    if not is_web():
         return False
     import platform as _platform
 

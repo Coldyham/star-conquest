@@ -153,6 +153,15 @@ class PbpClient:
             # to move. The write's own follow-up read replaces it.
             self.poll = None
 
+    def leave(self) -> None:
+        """Left the match — back to the menu, a new map, a retry. Nothing in
+        flight is about it anymore, and the seat itself stays remembered so
+        the link still works."""
+        self.seat, self.poll, self.write, self.ident = None, None, None, None
+        self.failures, self.wait, self.read_line = 0, PBP_POLL_MS, ""
+        self.resolving = self.stale = False
+        self.last, self.moved, self.quiet = None, None, 0
+
     # ------------------------------------------------------------------ #
     # Each frame
     # ------------------------------------------------------------------ #
@@ -175,13 +184,7 @@ class PbpClient:
         if self.poll is not None and not filming and self.seat is not None:
             state, ui, log = self._collect_poll(out, state, ui, log, settings)
         if ui is not None and not ui.in_pbp:
-            # Left the match — back to the menu, a new map, a retry. Nothing in
-            # flight is about it anymore, and the seat itself stays remembered so
-            # the link still works.
-            self.seat, self.poll, self.write, self.ident = None, None, None, None
-            self.failures, self.wait, self.read_line = 0, PBP_POLL_MS, ""
-            self.resolving = self.stale = False
-            self.last, self.moved, self.quiet = None, None, 0
+            self.leave()
         elif (ui is not None and self.seat is not None and self.poll is None
                 and self.ident is None and self.write is None and state is not None
                 and state.winner is None):

@@ -4,6 +4,8 @@
 // about looking: where a slider's finger is along its track, the seed field's
 // caret, the status line's clock, and when to ask for the lanes to be measured.
 
+import { pickFile } from "./files.mjs";
+
 const SURVEY_MS = 250;   // the setup has settled once nothing moved for this long
 
 function h(tag, attrs = {}, ...kids) {
@@ -114,6 +116,7 @@ export class SetupMenu {
   async open(args = {}) {
     this.root.hidden = false;
     const res = await this.send("menu.open", args);
+    this.after(res);
     return res;
   }
 
@@ -123,14 +126,30 @@ export class SetupMenu {
   }
 
   async press(key) {
+    if (key === "load_file") {   // the picker opens on the press itself
+      pickFile(async (name, text) => this.after(await this.send("file.open", { name, text })));
+    }
     const res = await this.send("menu.press", { key });
     this.after(res);
   }
 
+  /** Carry out what a reply asks of the page: a match to start or one the
+   * menu opened itself (a run's stage, a resumed match), quitting, or the next
+   * slice of a gauntlet being generated (`menu.generate`). */
   after(res) {
     if (!res) return;
-    if (res.action === "start") this.hooks.start();
+    if (res.game) this.hooks.resumed(res.game);
+    else if (res.maker) this.hooks.maker(res.maker);
+    else if (res.action === "start") this.hooks.start();
     else if (res.action === "quit") this.hooks.quit();
+    if (res.generating && !this.generating) {
+      this.generating = true;
+      setTimeout(async () => {
+        const next = await this.send("menu.generate");
+        this.generating = false;
+        this.after(next);
+      }, 0);
+    }
   }
 
   draw(res) {
@@ -147,7 +166,7 @@ export class SetupMenu {
     this.drawActions(m);
     this.hintEl.textContent = m.hint || "";
     this.hintEl.hidden = !m.hint;
-    this.drawModal(m.modal, res.resume);
+    this.drawModal(m.modal, res.resume, m.pbp_prompt, m.tutorial);
     if (res.status) this.say(res.status);
     this.root.classList.toggle("dragging", Boolean(m.dragging));
     clearTimeout(this.surveyTimer);
@@ -426,7 +445,8 @@ export class SetupMenu {
       a.get_link ? btn("get_link", "Get Link", "plain") : null,
       a.shared ? btn("browse_matches", "Shared matches", "plain") : null,
       a.recent ? btn("browse_configs", "Recently played", "plain") : null,
-      a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null);
+      a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null,
+      a.files ? listBtn("files_menu", a.files, "plain", m.lists.files) : null);
     // Start stays centred: the map creator to its left, the rest to its right.
     const row2 = h("div", { class: "row2" },
       h("span", { class: "lead" },
@@ -444,6 +464,7 @@ export class SetupMenu {
       a.get_link ? btn("get_link", "Get Link", "plain") : null,
       a.board ? listBtn("board_menu", a.board, "plain", m.lists.board)
         : a.recent ? btn("browse_configs", "Recently played", "plain") : null,
+      a.files ? listBtn("files_menu", a.files, "plain", m.lists.files) : null,
       h("span", { class: "create" }, btn("create_map", a.create, "blue"),
         a.clear_map ? btn("clear_map", "x", "plain corner", { "aria-label": "Clear the drawn map" }) : null));
     this.actionsEl.replaceChildren(h("div", { class: "wide" }, row1, row2),
@@ -451,7 +472,15 @@ export class SetupMenu {
   }
 
   // --- confirms: the menu's own, and the boot prompt to resume --------------- //
-  drawModal(modal, resume) {
+  drawModal(modal, resume, prompt, tutorial) {
+    if (tutorial && !modal) {
+      this.drawTutorial(tutorial);
+      return;
+    }
+    if (prompt && !modal) {
+      this.drawPrompt(prompt);
+      return;
+    }
     if (modal) {
       this.modalEl.hidden = false;
       this.modalEl.replaceChildren(h("div", { class: "mmodal", role: "dialog", "aria-modal": "true" },
@@ -476,9 +505,84 @@ export class SetupMenu {
     this.modalEl.replaceChildren();
   }
 
+  /** Play by post's roster prompt (`setupmenu.pbp_prompt_view`): who at the
+   * table is a person, the deadline, the lobby, and two optional words. A
+   * text field being typed into keeps its caret across the reply. */
+  drawPrompt(p) {
+    const focused = this.modalEl.querySelector("input.ptext:focus");
+    const which = focused?.dataset.which;
+    const seats = p.seats.map((s) => h("div", { class: "prow" },
+      h("span", { class: "swatch", style: `background:${s.color}` }),
+      h("span", { class: "pname", style: `color:${s.color}` }, s.name),
+      s.you ? h("span", { class: "you" }, "(you)")
+        : this.checkbox({ on: s.checked, key: s.key, label: `${s.name} is a person` })));
+    const texts = p.text.map((t) => {
+      const input = h("input", { class: "ptext", type: "text", autocomplete: "off", spellcheck: "false",
+        maxlength: String(t.limit), placeholder: "optional", value: t.text, "aria-label": t.label, "data-which": t.which });
+      input.addEventListener("input", () => this.send("menu.pbp_text", { which: t.which, text: input.value }));
+      input.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          input.blur();
+          this.press(p.go.key);
+        } else if (e.key === "Escape") {
+          input.blur();
+        }
+      });
+      input.addEventListener("blur", () => this.send("menu.pbp_text", { which: t.which, text: input.value, done: true }));
+      return h("div", { class: "prow" }, h("span", { class: "plabel" }, t.label), input);
+    });
+    this.modalEl.hidden = false;
+    this.modalEl.replaceChildren(h("div", { class: "mmodal pbp", role: "dialog", "aria-modal": "true" },
+      h("p", { class: "mtitle" }, p.title),
+      ...seats,
+      h("div", { class: "prow" }, h("span", { class: "plabel" }, "Deadline"), this.control({
+        kind: "stepper", key: "pbp_deadline", value: p.deadline, wide: true })),
+      h("div", { class: "prow" }, h("span", { class: "plabel" }, "Publicly joinable"),
+        this.checkbox({ on: p.public, key: "pbp_public", label: "Publicly joinable" })),
+      ...texts,
+      h("div", { class: "mbuttons" },
+        h("button", { type: "button", class: "mbtn start", onclick: () => this.press(p.go.key) }, p.go.label),
+        h("button", { type: "button", class: "mbtn plain", onclick: () => this.press(p.stay.key) }, p.stay.label))));
+    if (which) {
+      const fresh = this.modalEl.querySelector(`input.ptext[data-which="${which}"]`);
+      if (fresh && focused) {
+        // Its own text, not the reply's: a reply to an earlier keystroke
+        // would take back the ones typed since. The field's text is settled
+        // when it lets go of the caret (`menu.pbp_text`'s ``done``).
+        fresh.replaceWith(focused);
+        focused.focus();
+      }
+    }
+  }
+
+  /** The Tutorial list (`setupmenu.tutorial_view`): the gauntlet's stages in
+   * order with their progress, its runs, and Leave, Copy link and Close. */
+  drawTutorial(t) {
+    const tone = { warn: "go", hl: "blue", dim: "plain" };
+    const rows = t.stages.map((s) => h("button", {
+      type: "button", class: `trow${s.here ? " here" : ""}`, disabled: !s.open,
+      onclick: s.open ? () => this.press(s.key) : null,
+    }, h("span", { class: "ttitle" }, s.title), h("span", { class: "tstatus", style: `color:${s.color}` }, s.status)));
+    const run = t.run ? [h("p", { class: "tnote" }, t.run.text),
+      h("div", { class: "mbuttons" }, ...t.run.buttons.map((b) => h("button", {
+        type: "button", class: `mbtn ${b.warn ? "go" : "start-edge"}`, onclick: () => this.press(b.key) }, b.label)))] : [];
+    this.modalEl.hidden = false;
+    this.modalEl.replaceChildren(h("div", { class: "mmodal tutorial", role: "dialog", "aria-modal": "true" },
+      h("p", { class: "mtitle" }, t.heading),
+      t.picker ? h("div", { class: "prow" }, h("span", { class: "plabel" }, t.picker.name),
+        this.control({ kind: "stepper", key: "gauntlet_pick", value: t.picker.at })) : null,
+      h("div", { class: "trows" }, ...rows),
+      ...run,
+      t.note ? h("p", { class: "tnote" }, t.note) : null,
+      t.said ? h("p", { class: `tnote ${t.said.ok ? "ok" : "err"}` }, t.said.text) : null,
+      h("div", { class: "mbuttons tbuttons" }, ...t.buttons.map((b) => h("button", {
+        type: "button", class: `mbtn ${tone[b.tone]}`, onclick: () => this.press(b.key) }, b.label)))));
+  }
+
   async resume(accept) {
     const res = await this.send("menu.resume", { accept });
-    if (res?.game) this.hooks.resumed(res.game);
+    this.after(res);
   }
 
   async key(e) {

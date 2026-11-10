@@ -30,37 +30,26 @@ map is built and nothing is serialized, so the editor shows ids (``#7``). See
 
 from __future__ import annotations
 
-import json
-import random
-from dataclasses import dataclass, field
-from pathlib import Path
-
 import pygame
 
-from . import config, custommap, mapgen, paths, softkeyboard, widgets
-from . import settings as settings_mod
-from .custommap import CustomMap, MapNode, Problem
+from . import config, maker, softkeyboard, widgets
+from . import paths  # noqa: F401 - the maps folder `maker.map_path` reads, named here for its tests
+from .custommap import MapNode
 from .geometry import WorldView, dist, point_segment_dist
+from .maker import SYSTEMS  # noqa: F401 - the tool's name, for callers of this module
+from .maker import LANES, OWNERS, PALETTE_RANDOM, Editor
 from .settings import Settings
 
-# Tool modes. Phase 1 ships the first; the strip is drawn for all three so the
-# scene's layout — and therefore the camera — never moves as they arrive.
-SYSTEMS, LANES, OWNERS = "systems", "lanes", "owners"
-_TOOLS = ((SYSTEMS, "Systems"), (LANES, "Lanes"), (OWNERS, "Owners"))
-_READY_TOOLS = (SYSTEMS, LANES, OWNERS)
-
-# The production palette: a weighted roll, then the six explicit values.
-# `config.node_radius` clamps, so 1 and 2 draw the same size and 5 and 6 do too —
-# the numeral in the swatch is what tells them apart, which is the same
-# arrangement Advanced's home-production slider (1..8) already lives with.
-PALETTE_RANDOM = "random"
-_PALETTE_VALUES = (1, 2, 3, 4, 5, 6)
-
-_DEFAULT_FILENAME = "map"
-_FILENAME_MAX_LEN = 24
-
-_STATUS_MS = 4000
-_STATUS_ERROR_MS = 15000
+# The editor's model, its edits and its words are `maker`'s, read by the HTML
+# build's page too; the names below are this module's own for them, kept so
+# its drawing and its tests read as they always did.
+_TOOLS = maker.TOOLS
+_READY_TOOLS = maker.READY_TOOLS
+_PALETTE_VALUES = maker.PALETTE_VALUES
+_DEFAULT_FILENAME = maker.DEFAULT_FILENAME
+_FILENAME_MAX_LEN = maker.FILENAME_MAX_LEN
+_STATUS_MS = maker.STATUS_MS
+_STATUS_ERROR_MS = maker.STATUS_ERROR_MS
 
 _PANEL_BG = (22, 25, 36)
 _PANEL_EDGE = (48, 54, 74)
@@ -69,193 +58,17 @@ _LANE_ARM = (150, 200, 240)   # the armed lane source, and its rubber band
 _BAD = (220, 110, 110)
 
 
-@dataclass
-class Editor:
-    """Everything the creator scene holds. Analogous to ``viewstate.Ui``: purely
-    transient interaction state, with the one durable thing — ``recipe`` — handed
-    to ``Settings`` on commit."""
-
-    recipe: CustomMap
-    view: WorldView
-    # A throwaway generator for the "roll me a system" values. Never the global
-    # `random` module: the web build boots from a fixed interpreter image, so
-    # `random`'s auto-seeding can hand out the same sequence on every page load.
-    rng: random.Random = field(default_factory=settings_mod.fresh_rng)
-    # What *Generate* rolls, when it is pinned. `None` — every real caller — means
-    # "resolve one off the Settings the way starting a game would", so the button
-    # hands back a different map each press.
-    seed: int | None = None
-
-    tool: str = SYSTEMS
-    pick: object = PALETTE_RANDOM        # PALETTE_RANDOM, or an int production
-
-    sel_node: int | None = None
-    sel_lane: int | None = None
-    # Lane drawing: one armed source serving both gestures. A tap leaves it armed
-    # so the next press commits; a drag past the threshold commits on release.
-    lane_src: int | None = None
-    lane_drag: bool = False
-    lane_pos: tuple[int, int] = (0, 0)
-    # Refuse to *draw* a crossing lane. Editor-time only, and that is the whole
-    # point: `custommap` reports a crossing as a warning rather than a blocker, so
-    # turning this off leaves a map that still plays and still shares.
-    planar: bool = True
-    # Re-run *Auto* after every system added or removed, so the network tracks the
-    # systems while they are laid out. A preference like `planar` rather than
-    # anything the recipe carries, so `_adopt` leaves it alone.
-    auto_relane: bool = False
-
-    # Owners tool. `owner_pick` is what a tap paints; the two box flags are route
-    # mode's arming exactly — `box_press` on the press, `box_active` only past the
-    # threshold, so a tap that never moves paints nothing.
-    owner_pick: int = 1
-    # How many homeworlds *Auto* places. `None` means "as many as the map already
-    # has", so the readout is the map's own truth until someone sets a number;
-    # `_adopt` puts it back. Never `settings.players` — `commit` derives that from
-    # the recipe, so a number written there is overwritten on the way out.
-    auto_seats: int | None = None
-    box_press: bool = False
-    box_active: bool = False
-    box_from: tuple[int, int] = (0, 0)
-    box_to: tuple[int, int] = (0, 0)
-
-    drag_node: int | None = None
-    drag_origin: tuple[int, int] | None = None   # world coords, for the snap-back
-    drag_start: tuple[int, int] = (0, 0)            # screen coords the press landed at
-    drag_moved: bool = False
-    drag_undone: bool = False                       # is this drag's undo snapshot taken?
-    pan_active: bool = False
-    pan_last: tuple[int, int] = (0, 0)
-    pan_button: int = 3    # which button armed the pan (Lanes allows the left one)
-    drag_slider: str | None = None
-
-    # What the live validator is complaining about *right now*, so an illegal
-    # drag rings amber under the cursor rather than only failing on release.
-    bad_nodes: frozenset[int] = frozenset()
-    bad_lanes: frozenset[int] = frozenset()
-
-    undo_stack: list[CustomMap] = field(default_factory=list)
-    redo_stack: list[CustomMap] = field(default_factory=list)
-
-    filename: str = ""
-    editing_filename: bool = False
-    confirm: str | None = None        # an `_CONFIRMS` key, or None
-
-    status: str = ""
-    status_ok: bool = True
-    status_ms: int = 0
-
-    # Laid out by `draw`, read by `handle_event`. Cleared every frame, so a
-    # control this frame did not draw simply is not here to be clicked — the
-    # strongest form of "guard every rect test", with no zeroed rect to leak.
-    rects: dict[str, pygame.Rect] = field(default_factory=dict)
-    problem_rows: list[tuple[int, pygame.Rect]] = field(default_factory=list)
-    # A compact screen's sidebar is shorter than what it holds, so it scrolls
-    # (`_draw_side`): how far, how tall its content ran last frame, and a drag on
-    # its blank space as (press y, scroll at the press) while one is under way.
-    side_scroll: int = 0
-    side_content_h: int = 0
-    side_drag: tuple[int, int] | None = None
-    # Two-finger pinch and pan of the canvas (`_pinch`), as in the game: fingers
-    # down, the last (spread, midpoint), a lock until every finger is up, and the
-    # recipe from before the latest press, put back if that press was a pinch's
-    # first finger (it may have placed a system).
-    fingers: dict = field(default_factory=dict)
-    pinch_last: tuple | None = None
-    pinch_lock: bool = False
-    press_undo: tuple | None = None
-
-    def problems(self) -> list[Problem]:
-        return self.recipe.problems()
-
-    def can_play(self) -> bool:
-        return self.recipe.is_playable()
-
-    def seat_target(self) -> int:
-        """How many homeworlds *Auto* places, clamped to a playable seat count."""
-        want = self.recipe.seats() if self.auto_seats is None else self.auto_seats
-        return max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, want))
-
-
 # --------------------------------------------------------------------------- #
 # Opening / committing
 # --------------------------------------------------------------------------- #
 def open_editor(settings: Settings, seed: int | None = None) -> Editor:
-    """The editor for ``settings`` — its existing hand map, or a blank canvas.
-
-    Blank is the default because *Create map* means create: handing someone a
-    generated board to pick apart is a different task from drawing one, and the
-    footer's *Generate* is one press away for anyone who wants that instead.
-    ``seed`` is therefore only consulted by *Generate*; it is accepted here so a
-    caller can pin the map that button rolls.
-    """
-    # The lane readouts and lane styling go through `config.travel_turns_at_length`,
-    # so the menu's ship-speed knob has to have reached `config` or the editor
-    # quotes the previous game's travel times.
-    settings_mod.apply_globals(settings)
-    recipe = settings.custom_map.copy() if settings.custom_map is not None else CustomMap()
-    return Editor(recipe=recipe, view=_build_view(), seed=seed)
+    """The editor for ``settings`` (`maker.open_editor`), with this shell's camera."""
+    return maker.open_editor(settings, seed, _build_view())
 
 
-def _generated(settings: Settings, seed: int | None = None) -> CustomMap:
-    """A recipe from a freshly generated map, honouring the menu's own knobs.
-
-    Goes through ``settings.apply_globals`` rather than ``mapgen.generate``
-    directly, because generation reads the map knobs live off ``config`` and that
-    is the single sanctioned writer into it.
-
-    Centred on the way in: generation lays out inside the square ``_play_bounds``
-    and the creator's canvas is wider than that, so an uncentred recipe would open
-    hugging the left edge. A translation is the only edit — scaling it to fill the
-    width would stretch every lane and hand back travel times the seed never gave.
-    """
-    settings_mod.apply_globals(settings)
-    concrete = settings_mod.resolve_seed(settings) if seed is None else seed
-    # A larger board is laid out in a larger box (`config.world_side`) that this
-    # canvas cannot hold, so the creator only ever adopts a standard-sized one.
-    nodes = min(settings.nodes, config.STANDARD_MAX_NODES)
-    state = mapgen.generate(concrete, settings.mode, nodes, settings.players, settings.layout)
-    return _centred(custommap.from_state(state))
-
-
-def _centred(recipe: CustomMap) -> CustomMap:
-    """``recipe`` shifted so its bounding box sits in the middle of the canvas."""
-    if not recipe.nodes:
-        return recipe
-    xs = [n.x for n in recipe.nodes]
-    ys = [n.y for n in recipe.nodes]
-    dx = round((config.CUSTOM_WORLD_W - (max(xs) + min(xs))) / 2)
-    dy = round((config.WORLD_SIZE - (max(ys) + min(ys))) / 2)
-    for node in recipe.nodes:
-        node.x, node.y = node.x + dx, node.y + dy
-    return recipe.normalised()
-
-
-def commit(ed: Editor, settings: Settings) -> None:
-    """Write the drawn map onto ``settings``, keeping its three fields in sync.
-
-    ``players`` and ``nodes`` are not decoration once a recipe is present: the AI
-    tab lists seats ``2..players``, ``challenge_keys`` blanks seats past it, and
-    the leaderboard's decoder requires both. ``from_dict`` reconciles them on the
-    way back in, so letting them drift here would move the digest in between.
-
-    Runs even for a map that fails the Play gate — a half-built map must survive a
-    trip to the menu to change a setting. Only *starting a game* is gated
-    (``menu._start``, since ``mapgen.generate_custom`` asserts).
-
-    An *empty* recipe is the exception, and it is not a half-built map: it carries
-    nothing to preserve and is indistinguishable in intent from having no hand map
-    at all. Writing it would pin the menu into "Edit map" with a setup that cannot
-    start, which is what opening the creator and leaving straight away would
-    otherwise do now that a blank canvas is where it opens.
-    """
-    recipe = ed.recipe.normalised()
-    if not recipe.nodes:
-        settings.custom_map = None
-        return
-    settings.custom_map = recipe
-    settings.players = max(config.MIN_PLAYERS, min(config.MAX_PLAYERS, recipe.seats()))
-    settings.nodes = max(1, len(recipe.nodes))
+_generated = maker.generated
+_centred = maker.centred
+commit = maker.commit
 
 
 def reflow(ed: Editor) -> None:
@@ -456,16 +269,6 @@ def _draw_map(surface, ed: Editor) -> None:
     surface.set_clip(prev)
 
 
-def _lane_turns(a: MapNode, b: MapNode) -> int:
-    """Travel time for a lane between two recipe nodes, on turn 0.
-
-    Through ``config.travel_turns_at_length`` — the same call ``GameState.
-    travel_turns`` makes — so the number authored against is the number the built
-    map gives, including the menu's ship-speed slider.
-    """
-    return config.travel_turns_at_length(_lane_length(a, b), 0)
-
-
 def _draw_zoom_controls(surface, ed: Editor) -> None:
     """The on-map camera cluster, anchored bottom-right of the viewport — the
     touch/no-wheel equivalent of scroll-to-zoom, matching ``render``'s."""
@@ -538,10 +341,7 @@ def _draw_top(surface, ed: Editor) -> None:
         surface.set_clip(prev)
 
 
-_TOOL_HINTS = {
-    LANES: ("Drag from one system to another to lay a lane —",
-            "or tap one, then tap the other. Tap a lane to select it."),
-}
+_TOOL_HINTS = maker.TOOL_HINTS
 
 
 def _draw_palette(surface, ed: Editor) -> None:
@@ -563,8 +363,7 @@ def _draw_palette(surface, ed: Editor) -> None:
             y += widgets.row_h("small")
         return
 
-    entries: list[tuple[object, str, int]] = [(PALETTE_RANDOM, "Random (2-5)", config.HOME_PRODUCTION)]
-    entries += [(p, f"{p}/ship", p) for p in _PALETTE_VALUES]
+    entries = maker.production_entries()
 
     swatch = widgets.tap_size(2 * config.NODE_MAX_RADIUS + config.s(8))
     wanted = max(swatch, max(font.size(caption)[0] for _v, caption, _p in entries) + config.s(8))
@@ -599,17 +398,7 @@ def _draw_palette(surface, ed: Editor) -> None:
         x = rect.right + config.BTN_GAP
 
 
-def _seat_entries(recipe: CustomMap) -> list[int]:
-    """Neutral, then the seats — one more than are currently held, floored at two.
-
-    One list with two readers: the Owners tool's palette band and the selected
-    system's owner row in the sidebar. They must agree about which seats exist, or
-    one of them offers a seat the other says is a gap.
-    """
-    counts = recipe.owner_counts()
-    held = sum(1 for pid, n in counts.items() if pid > 0 and n > 0)
-    top = max(config.MIN_PLAYERS, min(held + 1, config.MAX_PLAYERS))
-    return [0] + list(range(1, top + 1))
+_seat_entries = maker.seat_entries
 
 
 def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
@@ -627,11 +416,8 @@ def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
     selected recolours the moment you press a different swatch here, rather than
     only from the sidebar.
     """
-    counts = ed.recipe.owner_counts()
     entries = _seat_entries(ed.recipe)
-
-    captions = {pid: (f"{config.player_name(pid)} ({counts.get(pid, 0)})" if pid else
-                      f"Neutral ({counts.get(0, 0)})") for pid in entries}
+    captions = {pid: maker.seat_caption(ed.recipe, pid) for pid in entries}
     swatch = widgets.tap_size(2 * config.NODE_MAX_RADIUS + config.s(8))
     wanted = max(swatch, max(font.size(c)[0] for c in captions.values()) + config.s(8))
     gaps = config.BTN_GAP * (len(entries) - 1)
@@ -648,9 +434,7 @@ def _draw_seat_palette(surface, ed: Editor, band: pygame.Rect, font) -> None:
         r = config.node_radius(config.HOME_PRODUCTION)
         pygame.draw.circle(surface, colour, centre, r)
         pygame.draw.circle(surface, widgets.brighten(colour, 40), centre, r, config.s(2))
-        # Seat 1 is the human (`main.new_ui` passes human_id=1) — worth marking,
-        # since which colour you are is not otherwise visible until the game opens.
-        glyph = "-" if pid == 0 else ("You" if pid == 1 else str(pid))
+        glyph = maker.seat_glyph(pid)
         widgets.text(surface, font, glyph, config.text_on(colour), center=centre)
         if ed.owner_pick == pid:
             pygame.draw.circle(surface, config.COLOR_SELECT, centre,
@@ -724,10 +508,8 @@ def _pinch(event, ed: Editor) -> bool:
         spread = max(1.0, ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
         mid = ((x0 + x1) / 2, (y0 + y1) / 2)
         if ed.pinch_last is None:
-            if not ed.pinch_lock and ed.press_undo is not None:
-                recipe, sel_node, sel_lane, depth = ed.press_undo
-                ed.recipe, ed.sel_node, ed.sel_lane = recipe, sel_node, sel_lane
-                del ed.undo_stack[depth:]
+            if not ed.pinch_lock:
+                maker.unpress(ed)
             ed.press_undo = None
             ed.pinch_lock = True
             ed.drag_node = ed.drag_slider = ed.lane_src = None
@@ -742,7 +524,7 @@ def _pinch(event, ed: Editor) -> bool:
                                         pygame.MOUSEMOTION):
         return True
     if event.type == pygame.MOUSEBUTTONDOWN and config.touch_ui:
-        ed.press_undo = (ed.recipe.copy(), ed.sel_node, ed.sel_lane, len(ed.undo_stack))
+        maker.snapshot(ed)
     return False
 
 
@@ -798,14 +580,13 @@ def _draw_side_body(surface, ed: Editor, settings: Settings, panel: pygame.Rect,
             # already the tight case at high UI scale, and this has no touch
             # equivalent to be worth the squeeze there anyway (dropped the same
             # way `render._key_hint` drops the `(Esc)`/`(R)` suffixes).
-            for line in widgets.wrap(f["small"], "Tip: shift-click a system to "
-                                     "lane it from the one you placed last", inner_w):
+            for line in widgets.wrap(f["small"], maker.SHIFT_TIP, inner_w):
                 widgets.text(surface, f["small"], line, config.COLOR_TEXT_DIM,
                             topleft=(x, y))
                 y += widgets.row_h("small")
             y += config.ROW_GAP
         y = _draw_sliders(surface, ed, settings, f, x, y, inner_w,
-                          "New system rolls", econ_specs())
+                          maker.ECON_HEADING, econ_specs())
     # scrolled, the list runs its full length; fixed, it stops at the floor
     floor = 10 ** 6 if config.compact else panel.bottom - pad
     return _draw_problems(surface, ed, f, x, y, inner_w, floor)
@@ -814,7 +595,7 @@ def _draw_side_body(surface, ed: Editor, settings: Settings, panel: pygame.Rect,
 def _draw_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     node = _selected(ed)
     if node is None:
-        for line in widgets.wrap(f["small"], "Click empty space to place a system", w):
+        for line in widgets.wrap(f["small"], maker.PLACE_HINT, w):
             widgets.text(surface, f["small"], line, config.COLOR_TEXT_DIM, topleft=(x, y))
             y += widgets.row_h("small")
         return y + config.ROW_GAP
@@ -840,7 +621,7 @@ def _draw_lane_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     """The selected lane: how far it runs, how long it takes, and Delete."""
     lane = _selected_lane(ed)
     if lane is None:
-        widgets.text(surface, f["small"], "Tap a lane to select it",
+        widgets.text(surface, f["small"], maker.LANE_HINT,
                      config.COLOR_TEXT_DIM, topleft=(x, y))
         return y + widgets.row_h() + config.ROW_GAP
 
@@ -860,7 +641,7 @@ def _draw_lane_selection(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     if config.SHIP_SPEED_GROWTH_PCT > 0:
         # The figure above is turn 0's, which is the one worth authoring against —
         # but with growth on it is a ceiling, not the whole story.
-        for line in widgets.wrap(f["small"], "Ships speed up each turn, so this is turn 0.", w):
+        for line in widgets.wrap(f["small"], maker.GROWTH_NOTE, w):
             widgets.text(surface, f["small"], line, _WARN, topleft=(x, y))
             y += widgets.row_h("small")
 
@@ -895,12 +676,12 @@ def _draw_checkbox(surface, ed: Editor, f, x: int, y: int, w: int,
 def _draw_lane_controls(surface, ed: Editor, settings: Settings, f, x: int, y: int, w: int) -> int:
     """The two lane-generation knobs, the Planar and Re-run toggles, and the two
     map-wide lane actions."""
-    y = _draw_sliders(surface, ed, settings, f, x, y, w, "Auto-lanes", lane_specs())
+    y = _draw_sliders(surface, ed, settings, f, x, y, w, maker.LANES_HEADING, lane_specs())
 
     y = _draw_checkbox(surface, ed, f, x, y, w, "planar", ed.planar,
-                       "Planar (refuse crossings)")
+                       maker.PLANAR_LABEL)
     y = _draw_checkbox(surface, ed, f, x, y, w, "auto_relane", ed.auto_relane,
-                       "Re-run after each change")
+                       maker.RELANE_LABEL)
 
     bh = widgets.tap_size(config.FOOTER_BTN_H)
     bw = (w - config.BTN_GAP) // 2
@@ -935,7 +716,7 @@ def _draw_owner_controls(surface, ed: Editor, f, x: int, y: int, w: int) -> int:
     # The seat count lives here rather than staying on the menu's Basic tab: with
     # a recipe set, `commit` derives `settings.players` from the map, so the
     # number that decides how many seats play *is* how many homeworlds get placed.
-    widgets.text(surface, f["small"], "Auto home systems", config.COLOR_TEXT_DIM, topleft=(x, y))
+    widgets.text(surface, f["small"], maker.SEATS_HEADING, config.COLOR_TEXT_DIM, topleft=(x, y))
     y += widgets.row_h("small") + config.ROW_GAP
     y = _stepper_row(surface, ed, f, x, y, w, "seats", "Seats", str(ed.seat_target()))
     ed.rects["auto_owners"] = _btn_rect(
@@ -1058,23 +839,8 @@ def _draw_sliders(surface, ed: Editor, settings: Settings, f, x: int, y: int, w:
     return y + config.ROW_GAP
 
 
-def lane_specs():
-    """The two lane-generation knobs, from the menu's own list (see
-    ``econ_specs`` for why it is imported lazily)."""
-    from .menu import lane_sliders
-    return lane_sliders()
-
-
-def econ_specs():
-    """The Economy slider specs, taken from the menu's own list so the two cannot
-    drift — the sliders moved scene, not namespace, and they still write
-    ``Settings``.
-
-    Imported lazily inside the call: ``menu`` imports ``ai`` for strategy
-    discovery, and the editor has no reason to pull that in at import time.
-    """
-    from .menu import econ_sliders
-    return econ_sliders()
+lane_specs = maker.lane_specs
+econ_specs = maker.econ_specs
 
 
 def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) -> int:
@@ -1084,8 +850,7 @@ def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) 
     selects the offender and centres the camera on it.
     """
     problems = ed.problems()
-    noun = "problem" if len(problems) == 1 else "problems"
-    heading = "Ready to play" if not problems else f"{len(problems)} {noun}"
+    heading = maker.problems_heading(problems)
     widgets.text(surface, f["small"], heading,
                  config.COLOR_TEXT_DIM if not problems else _WARN, topleft=(x, y))
     y += widgets.row_h("small") + config.ROW_GAP
@@ -1109,26 +874,15 @@ def _draw_problems(surface, ed: Editor, f, x: int, y: int, w: int, bottom: int) 
 _DEAD_PALETTE = ((38, 42, 52), (78, 84, 98))
 
 
-# (key, label, fill, edge, squeeze rank, cluster). The filename field carries no
-# label of its own but takes part in the same measure-and-squeeze pass, so a
-# narrow window sheds it in rank order like everything else.
-#
-# Left to right: the two that replace the whole map, then the two that step
-# through its history, then the file cluster and *Play now*. *Menu* is not here —
-# it sits in the tool strip (see `_draw_top`).
+_FOOTER_PALETTES = {"amber": widgets.BTN_AMBER, "blue": widgets.BTN_BLUE,
+                    "dead": _DEAD_PALETTE, "field": ((0, 0, 0), (0, 0, 0))}
+
+
 def _footer_specs(ed: Editor | None) -> list[tuple[str, str, tuple, tuple, int, str]]:
-    """The strip's controls; ``ed`` only colours *Play now* (None: measuring)."""
-    playable = ed is not None and ed.can_play()
-    return [
-        ("generate", "Generate", *widgets.BTN_AMBER, 35, "left"),
-        ("new", "New (blank)", *widgets.BTN_AMBER, 40, "left"),
-        ("undo", "Undo", *widgets.BTN_BLUE, 70, "left"),
-        ("redo", "Redo", *widgets.BTN_BLUE, 65, "left"),
-        ("filename", "", (0, 0, 0), (0, 0, 0), 45, "right"),
-        ("open", "Open", *widgets.BTN_BLUE, 50, "right"),
-        ("save", "Save", *widgets.BTN_BLUE, 55, "right"),
-        ("play", "Play now", *(widgets.BTN_BLUE if playable else _DEAD_PALETTE), 100, "right"),
-    ]
+    """The strip's controls (`maker.footer`) as (key, label, fill, edge, squeeze
+    rank, cluster); ``ed`` only colours *Play now* (None: measuring)."""
+    return [(key, label, *_FOOTER_PALETTES[palette], rank, cluster)
+            for key, label, palette, rank, cluster in maker.footer(ed)]
 
 
 def _draw_footer(surface, ed: Editor) -> None:
@@ -1208,24 +962,12 @@ def _text_field(surface, font, rect: pygame.Rect, text: str, editing: bool) -> N
     surface.set_clip(prev)
 
 
-_CONFIRMS = {
-    "auto_lanes": ("Replace every lane?",
-                   ("Auto-lanes rebuilds the whole network, so any bottleneck you "
-                    "drew by hand goes with it.")),
-    "clear_lanes": ("Remove every lane?",
-                    "The systems stay where they are; only the network goes."),
-    "auto_owners": ("Replace every home system?",
-                    ("Auto-placing spreads the starts around the rim, so any seat "
-                     "you painted by hand goes with it.")),
-    "new": ("Start from a blank canvas?", "The map you have drawn will be discarded."),
-}
+_CONFIRMS = maker.CONFIRMS
 
 
 def _draw_confirm(surface, ed: Editor) -> None:
-    title, detail = _CONFIRMS[ed.confirm or "new"]
-    yes_label, no_label = widgets.confirm_labels(
-        {"auto_lanes": "Replace", "auto_owners": "Replace",
-         "clear_lanes": "Remove"}.get(ed.confirm or "", "Discard"))
+    title, detail, yes = maker.confirm_words(ed.confirm)
+    yes_label, no_label = widgets.confirm_labels(yes)
     widgets.draw_modal(surface, title, detail,
                        ((yes_label, *widgets.BTN_DANGER), (no_label, *widgets.BTN_BLUE)))
     yes, no = widgets.modal_buttons(surface, (yes_label, no_label))
@@ -1238,6 +980,19 @@ def _draw_confirm(surface, ed: Editor) -> None:
 def handle_event(event, ed: Editor, settings: Settings) -> str | None:
     """Mutate ``ed`` (and, for the sliders, ``settings``); return a high-level
     action for ``main`` — ``"play"``, ``"menu"``, or ``None``."""
+    action = _dispatch(event, ed, settings)
+    _apply_fit(ed)
+    return action
+
+
+def _apply_fit(ed: Editor) -> None:
+    """Frame what a press asked the camera to (`maker.focus_problem`)."""
+    if ed.fit and ed.view is not None:
+        ed.view.fit_to(ed.fit)
+    ed.fit = None
+
+
+def _dispatch(event, ed: Editor, settings: Settings) -> str | None:
     if ed.confirm is not None:
         _handle_confirm(event, ed, settings)
         return None
@@ -1310,70 +1065,39 @@ def _handle_press(event, ed: Editor, settings: Settings) -> str | None:
     # building from what it just touched. Off while Auto-lanes' "re-run after
     # every change" is on, since the network it rebuilds would overwrite the
     # very lane a chained click just drew.
-    shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT) and not ed.auto_relane
+    shift = bool(pygame.key.get_mods() & pygame.KMOD_SHIFT)
     node = _pick_node(ed, pos)
     if node is not None:
-        if shift:
-            _chain_lane(ed, node)     # reads sel_node before _arm_move overwrites it
-        _arm_move(ed, node, pos)
+        maker.press_system(ed, node, shift)
+        ed.drag_start = pos
         return None
-    _place(ed, settings, pos, link=ed.sel_node if shift else None)
+    _place(ed, settings, pos, link=ed.sel_node if maker.chains(ed, shift) else None)
     return None
 
 
 def _press_owner(ed: Editor, pos) -> None:
-    """A press on the map in the Owners tool: paint one system, or arm a box.
-
-    One meaning per tap. A press on a system paints it, and a second press on a
-    system *already* that owner clears it to neutral — never "select here, paint
-    there", and never a second primary meaning conditional on the system, which is
-    the trap route mode's tap documents.
-
-    A press that misses every system drops the selection on its way to arming the
-    box. Without it the ring — and the sidebar block that follows it — has nothing
-    anywhere in this tool that can clear it again.
-    """
+    """A press on the map in the Owners tool (`maker.press_owner`): paint the
+    system under it, or arm a box from it."""
     node = _pick_node(ed, pos)
+    maker.press_owner(ed, node)
     if node is not None:
-        ed.sel_node = node
-        _paint(ed, [node])
         return
-    ed.sel_node = None
     ed.box_press, ed.box_active = True, False
     ed.box_from = ed.box_to = pos
     ed.drag_start = pos
 
 
 def _press_lane(ed: Editor, pos) -> None:
-    """A press on the map in the Lanes tool.
-
-    Systems are tested before lanes: a lane's endpoint sits inside its system's
-    tap reach, and "start a lane here" has to win there. One armed source serves
-    both gestures — a tap leaves it armed so the next press commits, a drag
-    commits on release.
-
-    A press that misses every system also drops ``sel_node``: it is the Systems
-    tool's selection, this tool has no press that sets it, and its ring would
-    otherwise sit on the map for the rest of the session.
-    """
+    """A press on the map in the Lanes tool (`maker.press_lane_tool`): a system
+    under it first, else the lanes near it; on nothing at all, a left-drag pans."""
     node = _pick_node(ed, pos)
     if node is not None:
-        ed.sel_lane = None
-        if ed.lane_src is None:
-            ed.lane_src, ed.lane_drag, ed.lane_pos = node, False, pos
+        maker.press_lane_tool(ed, node)
+        if ed.lane_src == node:
+            ed.lane_pos = pos
             ed.drag_start = pos
-        elif ed.lane_src == node:
-            ed.lane_src = None              # tapping the armed system again disarms
-        else:
-            _add_lane(ed, ed.lane_src, node)
-            ed.lane_src = None
         return
-
-    ed.lane_src = ed.sel_node = None
-    ed.sel_lane = _pick_lane(ed, pos)
-    if ed.sel_lane is None:
-        # Nothing under the press at all, so left-drag is free here — unlike the
-        # Systems tool, where it always means "place".
+    if maker.press_lane_tool(ed, None, _lanes_near(ed, pos)):
         ed.pan_active, ed.pan_last, ed.pan_button = True, pos, 1
 
 
@@ -1388,60 +1112,19 @@ def _hit(ed: Editor, pos) -> str | None:
                  if rect.w > 0 and rect.h > 0 and rect.collidepoint(pos)), None)
 
 
-def _chain_lane(ed: Editor, node: int) -> None:
-    """Shift-click on an already-placed system, from the Systems tool: lane it to
-    the current selection and (via the caller's `_arm_move`) make it the new
-    anchor, so a run of shift-clicks chains and a shift-click off to the side
-    branches from wherever you're pointing.
-
-    Reads `sel_node` before `_handle_press` calls `_arm_move`, which would
-    otherwise overwrite it with `node` first.
-    """
-    if ed.sel_node is None or node == ed.sel_node:
-        return
-    _add_lane(ed, ed.sel_node, node)
-    ed.sel_lane = None
+_chain_lane = maker.chain_lane
 
 
 def _arm_move(ed: Editor, node: int, pos) -> None:
-    """Select a system and arm a move-drag on it. No undo snapshot yet: a tap that
-    only selects is not an edit, and pushing one here would clear the redo stack
-    every time you looked at a system."""
-    ed.sel_node = node
-    ed.drag_node = node
-    ed.drag_origin = (ed.recipe.nodes[node].x, ed.recipe.nodes[node].y)
+    """Select a system and arm a move-drag on it from the press at ``pos``."""
+    maker.arm_move(ed, node)
     ed.drag_start = pos
-    ed.drag_moved = False
-    ed.drag_undone = False
 
 
 def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> str | None:
     """A press on a laid-out control: the toolbar, palette, sidebar or footer."""
     if hit != "filename":
         _stop_editing_filename(ed)
-
-    if hit.startswith("pal_"):
-        value = hit[4:]
-        ed.pick = PALETTE_RANDOM if value == PALETTE_RANDOM else int(value)
-        _retype_selection(ed, settings)
-        return None
-    if hit.startswith("seat_"):
-        _pick_seat(ed, int(hit[5:]))
-        return None
-    if hit.startswith("own_"):
-        _pick_seat(ed, int(hit[4:]))
-        return None
-    if hit.startswith("tool_"):
-        new_tool = hit[5:]
-        if ed.tool == LANES and new_tool != LANES:
-            # Lanes-only state: a selected lane or an armed source has no tool
-            # left to click it away in once Lanes isn't the active one, so it
-            # would otherwise keep glowing on the map indefinitely.
-            ed.sel_lane = None
-            ed.lane_src = None
-            ed.lane_drag = False
-        ed.tool = new_tool
-        return None
     if hit == "ships_slider":
         if _selected(ed) is not None:
             _push_undo(ed)
@@ -1452,83 +1135,28 @@ def _handle_chrome(hit: str, pos, ed: Editor, settings: Settings) -> str | None:
         ed.drag_slider = hit
         _set_slider(ed, settings, hit, pos[0])
         return None
-
     return _handle_action(hit, ed, settings)
 
 
 def _handle_action(hit: str, ed: Editor, settings: Settings) -> str | None:
+    """The camera's controls and the filename field here; anything else is
+    `maker.control`'s."""
     if hit == "zoom_in":
         ed.view.zoom_at(_view_centre(), config.ZOOM_BUTTON_STEP)
     elif hit == "zoom_out":
         ed.view.zoom_at(_view_centre(), 1 / config.ZOOM_BUTTON_STEP)
     elif hit == "zoom_reset":
         ed.view.reset()
-    elif hit in ("prod_minus", "prod_plus"):
-        _step_selected(ed, "production", 1 if hit.endswith("plus") else -1)
-    elif hit in ("ships_minus", "ships_plus"):
-        _step_selected(ed, "ships", 1 if hit.endswith("plus") else -1)
-    elif hit in ("seats_minus", "seats_plus"):
-        ed.auto_seats = ed.seat_target() + (1 if hit.endswith("plus") else -1)
-    elif hit == "reroll":
-        _reroll_selected(ed, settings)
-    elif hit == "delete":
-        _delete_selected(ed, settings)
-    elif hit == "delete_lane":
-        _delete_lane(ed)
-    elif hit == "planar":
-        ed.planar = not ed.planar
-    elif hit == "auto_relane":
-        ed.auto_relane = not ed.auto_relane
-        if ed.auto_relane:
-            # Never relanes on the spot — that would be a destructive rewrite
-            # with no confirm. It takes hold from the next system added or
-            # removed, same as any other preference that only bites forward.
-            _set_status(ed, "Lanes will redraw on the next system added or removed", True)
-    elif hit == "clear_lanes":
-        ed.confirm = "clear_lanes"
-    elif hit == "make_home":
-        _make_homeworld(ed)
-    elif hit == "renumber":
-        _renumber_seats(ed)
-    elif hit == "undo":
-        _undo(ed)
-    elif hit == "redo":
-        _redo(ed)
-    elif hit == "auto_lanes":
-        ed.confirm = "auto_lanes"
-    elif hit == "auto_owners":
-        ed.confirm = "auto_owners"
-    elif hit == "new":
-        ed.confirm = "new"
-    elif hit == "generate":
-        _push_undo(ed)
-        _adopt(ed, _generated(settings, ed.seed))
-        _set_status(ed, "Generated a fresh map to edit", True)
-    elif hit == "open":
-        _open_file(ed)
-    elif hit == "save":
-        _save_file(ed)
     elif hit == "filename":
         ed.editing_filename = True
         softkeyboard.open(ed.filename)
         _start_text_input()
-    elif hit == "play":
-        return _play(ed, settings)
-    elif hit == "back":
-        commit(ed, settings)
-        return "menu"
+    else:
+        return maker.control(ed, settings, hit)
     return None
 
 
-def _play(ed: Editor, settings: Settings) -> str | None:
-    """Commit and start, or refuse with the first blocker said out loud."""
-    blockers = ed.recipe.blockers()
-    if blockers:
-        _focus_problem(ed, 0)
-        _set_status(ed, blockers[0].text, False)
-        return None
-    commit(ed, settings)
-    return "play"
+_play = maker.play
 
 
 def _handle_motion(event, ed: Editor, settings: Settings) -> None:
@@ -1559,16 +1187,7 @@ def _handle_motion(event, ed: Editor, settings: Settings) -> None:
     # position would never fire again after the first pixel.
     if not ed.drag_moved and dist(event.pos, ed.drag_start) <= config.DRAG_THRESHOLD:
         return
-    if not ed.drag_moved:
-        ed.drag_moved = True
-        if not ed.drag_undone:
-            _push_undo(ed)          # the first real movement is the edit
-            ed.drag_undone = True
-    # The node follows the cursor the whole way, legal or not: rubber-banding it
-    # away mid-drag reads as the drag being broken. The refusal shows as amber
-    # rings on the offenders, and is paid on release.
-    _move_node(ed, ed.drag_node, event.pos)
-    _refresh_bad(ed, ed.drag_node)
+    maker.drag_to(ed, ed.view.to_world(event.pos))
 
 
 def _handle_release(event, ed: Editor) -> None:
@@ -1587,24 +1206,15 @@ def _handle_release(event, ed: Editor) -> None:
         ed.box_press = ed.box_active = False
         return
     if ed.lane_drag:
-        # A drag that landed on nothing cancels the arming rather than leaving it
-        # set — the gesture said where it meant to end.
-        target = _pick_node(ed, event.pos)
-        if target is not None and ed.lane_src is not None and target != ed.lane_src:
-            _add_lane(ed, ed.lane_src, target)
-        ed.lane_src, ed.lane_drag = None, False
+        maker.lane_release(ed, _pick_node(ed, event.pos))
         return
-    node = ed.drag_node
-    ed.drag_node = None
-    if node is not None and ed.drag_moved and _illegal(ed, node) and ed.drag_origin is not None:
-        # Snapped back rather than clamped to "the nearest legal point": with
-        # several constraints live at once that point is ill-defined, and it
-        # silently puts the system somewhere nobody asked for.
-        ed.recipe.nodes[node].x, ed.recipe.nodes[node].y = ed.drag_origin
-        _set_status(ed, "That spot is blocked — the system snapped back.", False)
-    ed.drag_origin = None
-    ed.drag_moved = ed.drag_undone = False
-    ed.bad_nodes = ed.bad_lanes = frozenset()
+    maker.release_drag(ed)
+
+
+# The keys the editor answers, by their `KeyboardEvent.key` names (`maker.press_key`).
+_KEY_NAMES = {pygame.K_z: "z", pygame.K_y: "y", pygame.K_r: "r", pygame.K_ESCAPE: "Escape",
+              pygame.K_DELETE: "Delete", pygame.K_BACKSPACE: "Backspace",
+              pygame.K_RETURN: "Enter", pygame.K_KP_ENTER: "Enter"}
 
 
 def _handle_key(event, ed: Editor, settings: Settings) -> str | None:
@@ -1614,22 +1224,14 @@ def _handle_key(event, ed: Editor, settings: Settings) -> str | None:
         elif event.key == pygame.K_BACKSPACE:
             ed.filename = ed.filename[:-1]
         return None
-
-    ctrl = event.mod & pygame.KMOD_CTRL
-    if ctrl and event.key == pygame.K_z:
-        _undo(ed)
-    elif ctrl and event.key in (pygame.K_y, pygame.K_r):
-        _redo(ed)
-    elif event.key == pygame.K_r:
+    name = _KEY_NAMES.get(event.key)
+    if name is None:
+        return None
+    action = maker.press_key(ed, settings, name, bool(event.mod & pygame.KMOD_CTRL))
+    if action == "reset_view":
         ed.view.reset()
-    elif event.key == pygame.K_ESCAPE:
-        commit(ed, settings)
-        return "menu"
-    elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE):
-        _delete_lane(ed) if ed.tool == LANES else _delete_selected(ed, settings)
-    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-        return _play(ed, settings)
-    return None
+        return None
+    return action
 
 
 def _handle_confirm(event, ed: Editor, settings: Settings) -> None:
@@ -1644,29 +1246,12 @@ def _handle_confirm(event, ed: Editor, settings: Settings) -> None:
             answer = True
         elif event.key in (pygame.K_n, pygame.K_ESCAPE):
             answer = False
-    if answer is None:
-        return
-    which, ed.confirm = ed.confirm, None
-    if not answer:
-        return
-    if which == "auto_lanes":
-        _auto_lanes(ed, settings)
-    elif which == "auto_owners":
-        _auto_owners(ed, settings)
-    elif which == "clear_lanes":
-        _clear_lanes(ed)
-    elif which == "new":
-        _push_undo(ed)
-        _adopt(ed, CustomMap())
-        _set_status(ed, "Blank canvas", True)
+    if answer is not None:
+        maker.answer_confirm(ed, settings, answer)
 
 
 def _handle_text_input(text: str, ed: Editor) -> None:
-    if not ed.editing_filename:
-        return
-    for ch in text:
-        if (ch.isalnum() or ch in "_-.") and len(ed.filename) < _FILENAME_MAX_LEN:
-            ed.filename += ch
+    maker.type_filename(ed, text)
 
 
 def pump(ed: Editor) -> None:
@@ -1675,293 +1260,39 @@ def pump(ed: Editor) -> None:
     is read back out of the hidden DOM field instead."""
     if not ed.editing_filename:
         return
-    raw = softkeyboard.value(ed.filename)
-    text = "".join(ch for ch in raw if ch.isalnum() or ch in "_-.")[:_FILENAME_MAX_LEN]
+    text = maker.filename_text(softkeyboard.value(ed.filename))
     if text != ed.filename:
         ed.filename = text
 
 
 # --------------------------------------------------------------------------- #
-# Editing operations — every committed mutation goes through `_push_undo` first
+# Editing operations (`maker`'s), by this module's names for them
 # --------------------------------------------------------------------------- #
-def _push_undo(ed: Editor) -> None:
-    ed.undo_stack.append(ed.recipe.copy())
-    del ed.undo_stack[:-config.EDIT_UNDO_DEPTH]
-    ed.redo_stack.clear()
-
-
-def _undo(ed: Editor) -> None:
-    if not ed.undo_stack:
-        _set_status(ed, "Nothing to undo", False)
-        return
-    ed.redo_stack.append(ed.recipe.copy())
-    _adopt(ed, ed.undo_stack.pop())
-
-
-def _redo(ed: Editor) -> None:
-    if not ed.redo_stack:
-        _set_status(ed, "Nothing to redo", False)
-        return
-    ed.undo_stack.append(ed.recipe.copy())
-    _adopt(ed, ed.redo_stack.pop())
-
-
-def _adopt(ed: Editor, recipe: CustomMap) -> None:
-    """Swap in a whole recipe, dropping anything that pointed into the old one.
-
-    A selection is an index, and an index into a map that has been replaced is at
-    best meaningless and at worst the wrong system.
-    """
-    ed.recipe = recipe
-    ed.sel_node = ed.sel_lane = None
-    ed.auto_seats = None
-    ed.lane_src = None
-    ed.lane_drag = False
-    ed.box_press = ed.box_active = False
-    ed.drag_node = ed.drag_origin = None
-    ed.bad_nodes = ed.bad_lanes = frozenset()
+_push_undo = maker.push_undo
+_undo = maker.undo
+_redo = maker.redo
+_adopt = maker.adopt
+_rolled_production = maker.rolled_production
+_weighted_production = maker.weighted_production
+_rolled_garrison = maker.rolled_garrison
+_retype_selection = maker.retype_selection
+_reroll_selected = maker.reroll_selected
+_step_selected = maker.step_selected
+_set_owner = maker.set_owner
+_pick_seat = maker.pick_seat
+_delete_selected = maker.delete_selected
+_paint = maker.paint
+_make_homeworld = maker.make_homeworld
+_auto_owners = maker.auto_owners
+_renumber_seats = maker.renumber_seats
 
 
 def _place(ed: Editor, settings: Settings, pos, link: int | None = None) -> None:
-    """Place a system at ``pos``, if the rules allow it there.
-
-    ``link`` is a system to lane the new one to — shift-click chaining, and its
-    only caller. Validated against the recipe with the new node already in it,
-    since the lane's far end didn't exist a moment ago; a refused link never
-    refuses the placement, it only leaves the status saying which half failed.
-    """
-    if len(ed.recipe.nodes) >= config.STANDARD_MAX_NODES:
-        _set_status(ed, f"That's the limit — {config.STANDARD_MAX_NODES} systems.", False)
-        return
-    wx, wy = ed.view.to_world(pos)
-    node = MapNode(x=round(wx), y=round(wy),
-                   production=_rolled_production(ed), ships=0).clamped()
-    node.ships = _rolled_garrison(ed, settings, node)
-
-    candidate = CustomMap(nodes=ed.recipe.nodes + [node], lanes=list(ed.recipe.lanes))
-    index = len(candidate.nodes) - 1
-    if _offenders(candidate, index, ed.planar)[0]:
-        _set_status(ed, "Too close to another system or a lane.", False)
-        return
-    lanes = _lane_candidate(ed, candidate, link, index) if link is not None else None
-
-    _push_undo(ed)
-    ed.recipe.nodes.append(node)
-    if lanes is not None:
-        ed.recipe.lanes = lanes
-        ed.sel_lane = lanes.index((min(link, index), max(link, index)))
-    elif ed.auto_relane and len(ed.recipe.nodes) >= 2:
-        # Off when `link` is given — `_handle_press` never sets both, since a
-        # generated network would overwrite the chained lane inside the same
-        # gesture that just drew it.
-        _relane(ed, settings)
-    # Placing also arms the move-drag, so place-then-position is one gesture —
-    # and one undo. `drag_undone` is already True, so nudging it into place does
-    # not push a second snapshot on top of the placement's.
-    _arm_move(ed, index, pos)
-    ed.drag_undone = True
-    if link is None or lanes is not None:
-        _set_status(ed, "", True)
-
-
-def _rolled_production(ed: Editor) -> int:
-    if isinstance(ed.pick, int):        # PALETTE_RANDOM is the string, so this splits them
-        return ed.pick
-    return _weighted_production(ed)
-
-
-def _weighted_production(ed: Editor) -> int:
-    """The Random swatch's roll, with no palette pick able to override it — what
-    ``mapgen._assign_production_and_garrisons`` gives an ordinary system."""
-    values = list(config.PRODUCTION_WEIGHTS)
-    weights = [config.PRODUCTION_WEIGHTS[v] for v in values]
-    return ed.rng.choices(values, weights=weights, k=1)[0]
-
-
-def _rolled_garrison(ed: Editor, settings: Settings, node: MapNode) -> int:
-    """The garrison a freshly placed system starts with.
-
-    Concrete from the moment it is placed — nothing stored is a sentinel resolved
-    later, which is what lets the seed stop shaping a custom map. The Economy
-    sliders in the sidebar are what govern this roll, so they have to reach
-    ``config`` first.
-    """
-    settings_mod.apply_globals(settings)
-    if node.owner != 0:
-        return config.HOME_START_SHIPS
-    return config.garrison_for(node.production, ed.rng.randint(0, max(0, config.GARRISON_JITTER)))
-
-
-def _retype_selection(ed: Editor, settings: Settings) -> None:
-    """Picking a swatch retypes the selected system as well as arming the next
-    placement — otherwise choosing "3/ship" while a system is selected looks like
-    it did nothing at all."""
-    node = _selected(ed)
-    if node is None:
-        return
-    _push_undo(ed)
-    node.production = _rolled_production(ed)
-    if node.owner == 0:
-        node.ships = _rolled_garrison(ed, settings, node)
-
-
-def _reroll_selected(ed: Editor, settings: Settings) -> None:
-    node = _selected(ed)
-    if node is None:
-        return
-    _push_undo(ed)
-    node.production = _rolled_production(ed)
-    node.ships = _rolled_garrison(ed, settings, node)
-
-
-def _step_selected(ed: Editor, attr: str, delta: int) -> None:
-    node = _selected(ed)
-    if node is None:
-        return
-    hi = {"production": config.CUSTOM_MAX_PRODUCTION,
-          "ships": config.CUSTOM_MAX_SHIPS}[attr]
-    value = max(0, min(hi, getattr(node, attr) + delta))
-    if value == getattr(node, attr):
-        return
-    _push_undo(ed)
-    setattr(node, attr, value)
-
-
-def _set_owner(ed: Editor, pid: int) -> None:
-    """Stamp a seat onto the selected system, if there is one and it doesn't
-    already hold it. The stamping half of `_pick_seat` — see there for why a
-    swatch is never a no-op if a system is watching."""
-    node = _selected(ed)
-    if node is None or node.owner == pid:
-        return
-    _push_undo(ed)
-    node.owner = pid
-
-
-def _pick_seat(ed: Editor, pid: int) -> None:
-    """Arm the seat a map tap paints, and stamp it on the selected system.
-
-    The palette band and the sidebar's owner row both land here, so they cannot
-    disagree about what pressing a swatch does — the production palette already
-    works this way (`_retype_selection`): a swatch pressed while a system is
-    selected that left the system alone looks like it did nothing at all.
-
-    Never a toggle to neutral: Neutral is its own swatch in both rows, so
-    pressing the seat a system already holds arms the pick and stops there —
-    `_set_owner`'s own guard. That second meaning belongs to a *map* tap
-    (`_press_owner`), where there is nothing else to press.
-    """
-    ed.owner_pick = pid
-    _set_owner(ed, pid)
-
-
-def _delete_selected(ed: Editor, settings: Settings) -> None:
-    if ed.sel_node is None:
-        return
-    _push_undo(ed)
-    ed.recipe = ed.recipe.without_node(ed.sel_node)
-    ed.sel_node = None
-    ed.drag_node = ed.drag_origin = None
-    ed.bad_nodes = ed.bad_lanes = frozenset()
-    # `without_node` already drops every lane the deleted system carried, so
-    # there is always at least the two nodes `_relane` needs once this fires.
-    if ed.auto_relane and len(ed.recipe.nodes) >= 2:
-        _relane(ed, settings)
-
-
-def _paint(ed: Editor, targets: list[int]) -> None:
-    """Stamp ``owner_pick`` onto ``targets``, or clear them if they already hold it.
-
-    The toggle is decided once, from the whole group, so a box never half-paints
-    and half-clears: if every system in it already belongs to the picked seat, the
-    press clears them all; otherwise it paints them all.
-    """
-    targets = [i for i in targets if 0 <= i < len(ed.recipe.nodes)]
-    if not targets:
-        return
-    clearing = all(ed.recipe.nodes[i].owner == ed.owner_pick for i in targets)
-    owner = 0 if clearing else ed.owner_pick
-    if all(ed.recipe.nodes[i].owner == owner for i in targets):
-        return
-    _push_undo(ed)
-    for i in targets:
-        ed.recipe.nodes[i].owner = owner
-
-
-def _make_homeworld(ed: Editor) -> None:
-    """Stamp the homeworld production and garrison onto the selected system."""
-    node = _selected(ed)
-    if node is None:
-        return
-    if (node.production, node.ships) == (config.HOME_PRODUCTION, config.HOME_START_SHIPS):
-        return
-    _push_undo(ed)
-    node.production = config.HOME_PRODUCTION
-    node.ships = config.HOME_START_SHIPS
-
-
-def _auto_owners(ed: Editor, settings: Settings) -> None:
-    """Spread ``seat_target()`` homeworlds around the rim through
-    ``mapgen.peripheral_starts`` — the generator's own placement, so a hand-drawn
-    board is started from no differently than one rolled from a seed.
-
-    Replaces rather than merges, which is why it is behind a confirm: one start
-    per angular sector is the whole property, and a seat kept somewhere else
-    breaks it.
-
-    A system that loses its start is rolled back down to an ordinary one, as
-    ``mapgen`` rolls every non-home system — otherwise the map's largest prize is
-    a leftover garrison sitting where a homeworld used to be. Only an exact
-    homeworld stamp is demoted; numbers an author set are left alone, the same
-    line ``_make_homeworld`` draws.
-    """
-    want = ed.seat_target()
-    if len(ed.recipe.nodes) < want:
-        _set_status(ed, f"Place at least {want} systems first.", False)
-        return
-    # The Economy sliders govern both stamps below, and they only write `Settings`
-    # — `apply_globals` is the single sanctioned writer into `config`.
-    settings_mod.apply_globals(settings)
-    homes = mapgen.peripheral_starts(
-        {i: n.pos for i, n in enumerate(ed.recipe.nodes)}, want, ed.rng)
-
-    _push_undo(ed)
-    picked = set(homes)
-    stamp = (config.HOME_PRODUCTION, config.HOME_START_SHIPS)
-    for i, node in enumerate(ed.recipe.nodes):
-        if i in picked:
-            continue
-        node.owner = 0
-        if (node.production, node.ships) == stamp:
-            node.production = _weighted_production(ed)
-            node.ships = _rolled_garrison(ed, settings, node)
-    for pid, i in enumerate(homes, start=1):
-        node = ed.recipe.nodes[i]
-        node.owner = pid
-        node.production, node.ships = stamp
-    # The palette only offers seats up to the highest one held, so a pick left
-    # above that would paint a gap straight back in — the blocker `_renumber_seats`
-    # exists to clear.
-    ed.owner_pick = min(ed.owner_pick, want) if ed.owner_pick > 0 else 0
-    _set_status(ed, f"{want} home systems placed around the rim", True)
-
-
-def _renumber_seats(ed: Editor) -> None:
-    """Compact the seats to ``1..k`` ascending, closing any gap.
-
-    Offered as a one-press fix rather than done silently: it changes a seat's
-    colour without being asked, and the colour is part of what an author intended.
-    """
-    held = sorted({n.owner for n in ed.recipe.nodes if n.owner > 0})
-    remap = {pid: i for i, pid in enumerate(held, start=1)}
-    if all(pid == new for pid, new in remap.items()):
-        return
-    _push_undo(ed)
-    for node in ed.recipe.nodes:
-        if node.owner > 0:
-            node.owner = remap[node.owner]
-    ed.owner_pick = min(ed.owner_pick, len(held)) if ed.owner_pick > 0 else 0
-    _set_status(ed, "Seats renumbered", True)
+    """Place a system under the press at ``pos`` (`maker.place`), and arm its
+    move-drag from there, so place-then-position is one gesture."""
+    index = maker.place(ed, settings, ed.view.to_world(pos), link)
+    if index is not None:
+        ed.drag_start = pos
 
 
 def _box_rect(ed: Editor) -> tuple[int, int, int, int]:
@@ -1999,148 +1330,27 @@ def _nodes_in_box(ed: Editor, rect: tuple[int, int, int, int]) -> list[int]:
     return out
 
 
-def _lane_candidate(ed: Editor, recipe: CustomMap, a: int, b: int
-                    ) -> list[tuple[int, int]] | None:
-    """``recipe.lanes`` with ``a``-``b`` added, or ``None`` with the refusal said
-    out loud. Split out of `_add_lane` so a placement that also links (shift-click
-    chaining) can validate the new lane against a recipe that already holds the
-    new system, before either half is committed — and so both take one undo
-    snapshot rather than two."""
-    key = (min(a, b), max(a, b))
-    if key in recipe.lanes:
-        _set_status(ed, f"#{key[0]} and #{key[1]} are already linked.", False)
-        return None
-
-    candidate = CustomMap(nodes=recipe.nodes, lanes=sorted(recipe.lanes + [key]))
-    index = candidate.lanes.index(key)
-    if _lane_offenders(candidate, index, ed.planar)[1]:
-        _set_status(ed, "That lane would run under a system."
-                    if not ed.planar else
-                    "That lane would run under a system, or cross another.", False)
-        return None
-    return candidate.lanes
-
-
-def _add_lane(ed: Editor, a: int, b: int) -> None:
-    """Draw one lane, if the rules allow it there. The single commit path, shared
-    by the tap-tap and drag gestures."""
-    lanes = _lane_candidate(ed, ed.recipe, a, b)
-    if lanes is None:
-        return
-    _push_undo(ed)
-    ed.recipe.lanes = lanes
-    ed.sel_lane = lanes.index((min(a, b), max(a, b)))
-    _set_status(ed, "", True)
-
-
-def _delete_lane(ed: Editor) -> None:
-    lane = _selected_lane(ed)
-    if lane is None:
-        return
-    _push_undo(ed)
-    ed.recipe.lanes = [pair for pair in ed.recipe.lanes if pair != lane]
-    ed.sel_lane = None
-
-
-def _clear_lanes(ed: Editor) -> None:
-    if not ed.recipe.lanes:
-        return
-    _push_undo(ed)
-    ed.recipe.lanes = []
-    ed.sel_lane = None
-    _set_status(ed, "Every lane removed", True)
-
-
-def _relane(ed: Editor, settings: Settings) -> None:
-    """Rebuild the network in place with ``mapgen``'s own planar edge builder —
-    ``_auto_lanes`` without the confirm or the undo snapshot, so a placement or
-    deletion that re-runs it (``Editor.auto_relane``) folds into that edit's own
-    single undo step rather than pushing a second one.
-
-    ``_planar_edges`` reads ``EXTRA_EDGE_FRACTION``/``MAX_EDGE_LENGTH_FRAC`` live
-    off ``config``, so the knobs go in through ``settings.apply_globals`` — the
-    single sanctioned writer. This module never ``setattr``s ``config`` itself.
-    """
-    settings_mod.apply_globals(settings)
-    positions = [n.pos for n in ed.recipe.nodes]
-    ed.recipe.lanes = sorted(
-        (min(a, b), max(a, b)) for a, b in mapgen._planar_edges(positions)
-    )
-    ed.sel_lane = None
-
-
-def _auto_lanes(ed: Editor, settings: Settings) -> None:
-    """Rebuild the whole lane network — the *Auto* button's confirmed, undoable
-    one-shot version of ``_relane``.
-
-    Replaces rather than merges, which is why it is behind a confirm:
-    ``_planar_edges`` always builds a full MST, so merging it into a hand-drawn
-    set would silently bury a deliberate bottleneck. Its output is planar and
-    graze-free by construction, so it can never produce a map the manual rules
-    would then refuse.
-    """
-    if len(ed.recipe.nodes) < 2:
-        _set_status(ed, "Place at least two systems first.", False)
-        return
-    _push_undo(ed)
-    _relane(ed, settings)
-    _set_status(ed, f"{len(ed.recipe.lanes)} lanes drawn", True)
-
-
-# --------------------------------------------------------------------------- #
-# Geometry & validation helpers — all of them defer to `CustomMap.problems`
-# --------------------------------------------------------------------------- #
-# The positional rules, the ones a move or a placement can break. A seat gap or a
-# disconnected graph is equally a blocker, but neither is the drag's fault and
-# neither should snap a system back. "crossing" joins them only while the Planar
-# toggle is on — it is a warning in the validator, not a blocker, so with the
-# toggle off a crossing must not refuse anything.
-_PLACEMENT_CODES = frozenset({"too_close", "graze"})
-
-
-def _codes(planar: bool) -> frozenset[str]:
-    return _PLACEMENT_CODES | {"crossing"} if planar else _PLACEMENT_CODES
-
-
-def _offenders(recipe: CustomMap, index: int, planar: bool = True
-               ) -> tuple[frozenset[int], frozenset[int]]:
-    """The nodes and lanes a positional rule is complaining about *around* the
-    system ``index`` — one validator, filtered, rather than a second copy of the
-    geometry that could drift from what the Play gate enforces."""
-    return _filter(recipe, planar, lambda problem: index in problem.nodes)
-
-
-def _lane_offenders(recipe: CustomMap, lane: int, planar: bool
-                    ) -> tuple[frozenset[int], frozenset[int]]:
-    """The same, for a lane rather than a system — what a newly drawn lane is
-    tested against."""
-    return _filter(recipe, planar, lambda problem: lane in problem.lanes)
-
-
-def _filter(recipe: CustomMap, planar: bool, touches) -> tuple[frozenset[int], frozenset[int]]:
-    codes = _codes(planar)
-    nodes: set[int] = set()
-    lanes: set[int] = set()
-    for problem in recipe.problems():
-        if problem.code not in codes or not touches(problem):
-            continue
-        nodes.update(problem.nodes)
-        lanes.update(problem.lanes)
-    return frozenset(nodes), frozenset(lanes)
-
-
-def _refresh_bad(ed: Editor, index: int) -> None:
-    ed.bad_nodes, ed.bad_lanes = _offenders(ed.recipe, index, ed.planar)
-
-
-def _illegal(ed: Editor, index: int) -> bool:
-    return bool(_offenders(ed.recipe, index, ed.planar)[0])
+_lane_candidate = maker.lane_candidate
+_add_lane = maker.add_lane
+_delete_lane = maker.delete_lane
+_clear_lanes = maker.clear_lanes
+_relane = maker.relane
+_auto_lanes = maker.auto_lanes
+_codes = maker.codes
+_offenders = maker.offenders
+_lane_offenders = maker.lane_offenders
+_refresh_bad = maker.refresh_bad
+_illegal = maker.illegal
+_selected = maker.selected
+_selected_lane = maker.selected_lane
+_lane_length = maker.lane_length
+_lane_turns = maker.lane_turns
+_set_status = maker.set_status
+age_status = maker.age_status
 
 
 def _move_node(ed: Editor, index: int, pos) -> None:
-    wx, wy = ed.view.to_world(pos)
-    moved = MapNode(x=round(wx), y=round(wy)).clamped()
-    ed.recipe.nodes[index].x, ed.recipe.nodes[index].y = moved.x, moved.y
+    maker.move_node(ed, index, ed.view.to_world(pos))
 
 
 def _pick_node(ed: Editor, pos) -> int | None:
@@ -2159,52 +1369,27 @@ def _screen_of(ed: Editor, index: int) -> tuple[int, int]:
     return ed.view.to_screen(ed.recipe.nodes[index].pos)
 
 
-def _selected_lane(ed: Editor) -> tuple[int, int] | None:
-    """The selected lane as its node pair, or None. Returns the *pair* rather than
-    the index, because an index into a list that has since been edited is at best
-    meaningless and at worst the wrong lane."""
-    if ed.sel_lane is None or not 0 <= ed.sel_lane < len(ed.recipe.lanes):
-        return None
-    return ed.recipe.lanes[ed.sel_lane]
-
-
-def _lane_length(a: MapNode, b: MapNode) -> float:
-    return round(dist(a.pos, b.pos) * config.LY_PER_WORLD_UNIT, 1)
-
-
-def _pick_lane(ed: Editor, pos) -> int | None:
-    """The lane under ``pos``, nearest first — with a repeat press cycling through
-    overlapping candidates rather than always grabbing the same one, the same
-    shape ``input._pick_lane`` uses."""
+def _lanes_near(ed: Editor, pos) -> list[int]:
+    """The lanes within reach of ``pos``, nearest first."""
     hits: list[tuple[float, int]] = []
     for i, (a, b) in enumerate(ed.recipe.lanes):
         d = point_segment_dist(pos, ed.view.to_screen(ed.recipe.nodes[a].pos),
                                ed.view.to_screen(ed.recipe.nodes[b].pos))
         if d <= config.LANE_PICK_DIST:
             hits.append((d, i))
-    if not hits:
-        return None
-    order = [i for _d, i in sorted(hits)]
-    if ed.sel_lane in order:
-        return order[(order.index(ed.sel_lane) + 1) % len(order)]
-    return order[0]
+    return [i for _d, i in sorted(hits)]
 
 
-def _selected(ed: Editor) -> MapNode | None:
-    if ed.sel_node is None or not 0 <= ed.sel_node < len(ed.recipe.nodes):
-        return None
-    return ed.recipe.nodes[ed.sel_node]
+def _pick_lane(ed: Editor, pos) -> int | None:
+    """The lane under ``pos``, nearest first — a repeat press cycling through
+    overlapping candidates (`maker.pick_lane`)."""
+    return maker.pick_lane(ed, _lanes_near(ed, pos))
 
 
 def _focus_problem(ed: Editor, index: int) -> None:
-    problems = ed.problems()
-    if not 0 <= index < len(problems):
-        return
-    targets = [i for i in problems[index].nodes if 0 <= i < len(ed.recipe.nodes)]
-    if not targets:
-        return
-    ed.sel_node = targets[0]
-    ed.view.fit_to([ed.recipe.nodes[i].pos for i in targets])
+    """Select problem ``index``'s offender and centre the camera on it."""
+    maker.focus_problem(ed, index)
+    _apply_fit(ed)
 
 
 def _view_centre() -> tuple[int, int]:
@@ -2215,49 +1400,26 @@ def _view_centre() -> tuple[int, int]:
 # --------------------------------------------------------------------------- #
 # Sliders, text entry and the map library
 # --------------------------------------------------------------------------- #
-def _slider_specs():
-    """Every slider the creator can draw, whichever tool is up. One lookup, so
-    `_set_slider` cannot go looking in the wrong group."""
-    return tuple(econ_specs()) + tuple(lane_specs())
-
-
-def _SLIDER_KEYS() -> frozenset[str]:
-    return frozenset(spec[0] for spec in _slider_specs())
+_slider_specs = maker.slider_specs
+_SLIDER_KEYS = maker.slider_keys
 
 
 def _set_slider(ed: Editor, settings: Settings, key: str, px: int) -> None:
-    """Write a slider's value from a pointer x.
-
-    Inverted through ``widgets.slider_fraction``, which is the exact inverse of
-    where ``widgets.slider`` puts the knob — re-deriving the inset here is how a
-    knob ends up drifting away from the finger at the extremes.
-    """
-    spec = next((s for s in _slider_specs() if s[0] == key), None)
+    """Write a slider's value from a pointer x, inverted through
+    ``widgets.slider_fraction`` — the exact inverse of where ``widgets.slider``
+    puts the knob."""
     rect = ed.rects.get(key)
-    if spec is None or rect is None:
+    if key not in _SLIDER_KEYS() or rect is None:
         return
-    _key, _label, attr, lo, hi, step, is_int = spec
-    t = widgets.slider_fraction(rect, px)
-    value = lo + t * (hi - lo)
-    value = round(value / step) * step if step else value
-    value = max(lo, min(hi, value))
-    setattr(settings, attr, round(value) if is_int else round(value, 4))
+    maker.set_slider(settings, key, widgets.slider_fraction(rect, px))
 
 
 def _set_garrison_slider(ed: Editor, px: int) -> None:
-    """Write the Garrison slider's value onto the selected node.
-
-    Not a `_slider_specs()` entry: those write a `Settings`/`AiParams` attribute,
-    and this writes the selected node's `ships` directly, capped at
-    `config.CUSTOM_GARRISON_SLIDER_MAX` rather than `CUSTOM_MAX_SHIPS` — the
-    steppers are what reach past that.
-    """
-    node = _selected(ed)
+    """Write the Garrison slider's value onto the selected node (`maker.set_garrison`)."""
     rect = ed.rects.get("ships_slider")
-    if node is None or rect is None:
+    if _selected(ed) is None or rect is None:
         return
-    t = widgets.slider_fraction(rect, px)
-    node.ships = round(t * config.CUSTOM_GARRISON_SLIDER_MAX)
+    maker.set_garrison(ed, widgets.slider_fraction(rect, px))
 
 
 def _stop_editing_filename(ed: Editor) -> None:
@@ -2278,54 +1440,6 @@ def _start_text_input() -> None:
         pass
 
 
-def _map_path(name: str) -> Path:
-    """The file for ``name`` under the gitignored maps dir. The field's character
-    filter excludes path separators, so it can never escape that directory."""
-    name = name.strip() or _DEFAULT_FILENAME
-    if not name.endswith(".json"):
-        name += ".json"
-    return paths.maps_dir() / name
-
-
-def _save_file(ed: Editor) -> None:
-    path = _map_path(ed.filename)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as fh:
-            json.dump(ed.recipe.normalised().to_dict(), fh, indent=2)
-        _set_status(ed, f"Saved {path.name}", True)
-    except OSError:
-        _set_status(ed, f"Couldn't save {path.name}", False)
-
-
-def _open_file(ed: Editor) -> None:
-    path = _map_path(ed.filename)
-    try:
-        with open(path) as fh:
-            recipe = CustomMap.from_dict(json.load(fh))
-    except (OSError, ValueError):
-        _set_status(ed, f"Couldn't open {path.name}", False)
-        return
-    if recipe is None:
-        _set_status(ed, f"{path.name} isn't a usable map", False)
-        return
-    _push_undo(ed)
-    _adopt(ed, recipe)
-    _set_status(ed, f"Opened {path.name}", True)
-
-
-def _set_status(ed: Editor, text: str, ok: bool) -> None:
-    ed.status, ed.status_ok = text, ok
-    ed.status_ms = _STATUS_MS if ok else _STATUS_ERROR_MS
-
-
-def age_status(ed: Editor, dt: int) -> None:
-    """Expire the status line. A failure holds far longer than a success, for the
-    reason ``menu``'s does: an error is the only account of something that did
-    *not* happen, and one that clears before it can be read is worse than none."""
-    if not ed.status:
-        return
-    ed.status_ms -= dt
-    if ed.status_ms <= 0:
-        ed.status, ed.status_ms = "", 0
-
+_map_path = maker.map_path
+_save_file = maker.save_file
+_open_file = maker.open_file

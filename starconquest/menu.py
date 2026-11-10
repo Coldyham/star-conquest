@@ -505,128 +505,49 @@ def _draw_challenge(surface, settings: Settings, w: int) -> None:
 _challenge_lines = setupmenu.challenge_lines
 
 
-def active_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
-    """The gauntlet stage the menu's setup still is, or None.
-
-    Public because `main` asks it at Start (and on a Retry or rewind) which
-    stage the match is playing. A stage of the gauntlet being played, matched
-    by challenge key (`gauntlet.stage_of`): one knob moved and it is your own
-    setup again. A challenge link's setup is never a stage, even one that
-    happens to match, because its banner has the subtitle slot.
-    """
-    if ms.stage_at is None or settings.challenge is not None:
-        return None
-    g = gauntlet.find(ms.gauntlets, ms.stage_at[0])
-    if g is None:
-        return None
-    sid = gauntlet.stage_of(g, settings)
-    stage = g.stage(sid) if sid is not None else None
-    return (g, stage) if stage is not None else None
+def _say(ms: MenuState):
+    """`setupmenu`'s ``say``: this menu's status line."""
+    return lambda text, ok: set_status(ms, text, ok)
 
 
-def next_stage(ms: MenuState, settings: Settings) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
-    """Move the menu onto the stage after the one being played and return it, or
-    None at the end (or a fork). Public for the win overlay's Next stage, so
-    going back to the menu afterwards lands on the stage just started."""
-    found = active_stage(ms, settings)
-    if found is None:
-        return None
-    g, stage = found
-    nxt = gauntlet.next_stage(g, stage.id, gauntlet.bests(g))
-    if nxt is None:
-        return None
-    return _load_stage(ms, settings, g, nxt)
-
-
-def enter_stage(ms: MenuState, settings: Settings, g: gauntlet.Gauntlet,
-                sid: int) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
-    """Put the menu on stage ``sid`` of ``g`` and return it, as picking it from
-    the list does. Public for a run, which `main` moves from stage to stage."""
-    return _load_stage(ms, settings, g, sid)
-
-
-def _load_stage(ms: MenuState, settings: Settings, g: gauntlet.Gauntlet,
-                sid: int) -> tuple[gauntlet.Gauntlet, gauntlet.Stage] | None:
-    stage = g.stage(sid)
-    if stage is None:
-        return None
-    if ms.stash is None and active_stage(ms, settings) is None:
-        ms.stash = settings.to_dict()   # the player's own setup, once
-    settings.copy_from(gauntlet.stage_settings(stage))
-    ms.stage_at = (g.id, sid)
-    ms.seed_text = "" if settings.seed is None else str(settings.seed)
-    return g, stage
+# The gauntlet being played and the Tutorial list (`setupmenu`): `main` asks
+# which stage the match is playing at Start (and on a Retry or rewind), moves
+# a run from stage to stage, and reports a link's or generator's gauntlet.
+active_stage = setupmenu.active_stage
+next_stage = setupmenu.next_stage
+enter_stage = setupmenu.load_stage
+_load_stage = setupmenu.load_stage
+_stage_bits = setupmenu.stage_bits
+_stage_lines = setupmenu.stage_lines
+picked_gauntlet = setupmenu.picked_gauntlet
+_picked = setupmenu.picked_gauntlet
+_playing_word = setupmenu.playing_word
+_live_run = setupmenu.live_run
+_run_row = setupmenu.run_row
+_run_stage = setupmenu.run_stage
+_gauntlets_label = setupmenu.gauntlets_label
+_COPY_GAUNTLET = setupmenu.COPY_GAUNTLET
+_TUTORIAL_KEYS = setupmenu.TUTORIAL_KEYS
+_RUN_KEYS = setupmenu.RUN_KEYS
+_RUN_LABELS = setupmenu.RUN_LABELS
+_RUN_ABOUT = setupmenu.RUN_ABOUT
+_PROGRESS_NOTE = setupmenu.PROGRESS_NOTE
+_STAGE_ROW_H = 36
 
 
 def _leave_gauntlet(ms: MenuState, settings: Settings) -> None:
-    """Stop playing the gauntlet. Your own setup comes back if the menu is still
-    on a stage; if you have already changed it, what is there now stays."""
-    if active_stage(ms, settings) is not None and ms.stash is not None:
-        settings.copy_from(Settings.from_dict(ms.stash))
-        ms.seed_text = "" if settings.seed is None else str(settings.seed)
-    word = _playing_word(ms)
-    ms.stage_at, ms.stash = None, None
-    ms.tutorial_open = False
-    set_status(ms, f"Left the {word} — this is your own setup", True)
-
-
-def _stage_bits(settings: Settings) -> list[str]:
-    """What the stage is, in a line: its size, whether it is fogged, and who it
-    is against — a bot at a named stop of its knob says which."""
-    bots = []
-    for seat in range(2, settings.players + 1):
-        name = settings.seat_strategy(seat)
-        stop = ai.aux_stop_name(name, settings.seat_params(seat).aux)
-        bots.append(f"{name} · {stop}" if stop else name)
-    bits = [f"{settings.system_count()} systems", "no fog" if fog_off(settings) else "fog of war"]
-    if bots:
-        bits.append("vs " + ", ".join(bots))
-    return bits
+    setupmenu.leave_gauntlet(ms, settings, _say(ms))
 
 
 def _draw_stage_banner(surface, ms: MenuState, settings: Settings, w: int) -> None:
-    """The subtitle slot while a gauntlet is being played, as the challenge
-    banner uses it: which stage, then the setup and your best on it — or, once a
-    knob has moved, a warning that this is no longer the stage. It warns rather
-    than locks, for the reason `_draw_challenge` gives."""
+    """The subtitle slot while a gauntlet is being played (`setupmenu.stage_lines`)."""
     f = _fonts()
     for (text, colour), y in zip(_stage_lines(ms, settings), (124, 144)):
         _text(surface, f["small"], text, colour, center=(w // 2, y))
 
 
-def _stage_lines(ms: MenuState, settings: Settings) -> list[tuple[str, tuple[int, int, int]]]:
-    """The stage banner's two lines and their colours (`_draw_stage_banner`),
-    or none when the stage's gauntlet can't be found."""
-    g = gauntlet.find(ms.gauntlets, ms.stage_at[0]) if ms.stage_at else None
-    found = active_stage(ms, settings)
-    if g is None:
-        return []
-    if found is None:
-        return [(f"{g.name.upper()} — setup changed", _WARN),
-                (f"this isn't the stage any more — open {_gauntlets_label(ms)} to pick one, or leave", _WARN)]
-    _g, stage = found
-    head = f"{g.name.upper()} {gauntlet.place(g, stage.id)} — {stage.title}"
-    bits = _stage_bits(settings)
-    mine = webstore.best(*settings.challenge_keys())
-    if mine is not None:
-        bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
-    return [(head, _START_BORDER), ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
-
-
 def _open_tutorial(ms: MenuState, settings: Settings, pick: str | None = None) -> None:
-    ms.gauntlets = gauntlet.every()     # a user gauntlet dropped in since shows now
-    ms.stage_bests = {}
-    ms.kept_ids = frozenset(g.id for g in gauntlet.remembered())
-    ms.runs = run.runs()
-    ms.run_confirm = ""
-    ms.gauntlet_note = None
-    ids = [g.id for g in ms.gauntlets]
-    if pick is None and ms.stage_at:
-        pick = ms.stage_at[0]
-    ms.gauntlet_pick = ids.index(pick) if pick in ids else 0
-    ms.tutorial_open = bool(ms.gauntlets)
-    if not ms.gauntlets:
-        set_status(ms, "No tutorial found in this build", False)
+    setupmenu.open_tutorial(ms, settings, _say(ms), pick)
 
 
 def open_gauntlet(ms: MenuState, settings: Settings, gid: str) -> None:
@@ -636,101 +557,25 @@ def open_gauntlet(ms: MenuState, settings: Settings, gid: str) -> None:
 
 
 def say_gauntlet(ms: MenuState, gid: str, text: str, ok: bool) -> None:
-    """Tell the player something about gauntlet ``gid``: in the list while it is
-    open, since the list covers the status line, else on the status line. Public
-    because ``main`` reports a generated gauntlet's run and listing here."""
-    if ms.tutorial_open:
-        ms.gauntlet_note = (gid, text, ok)
-    else:
-        set_status(ms, text, ok)
+    """`setupmenu.say_gauntlet` on this menu. Public because ``main`` reports a
+    generated gauntlet's run and listing here."""
+    setupmenu.say_gauntlet(ms, gid, text, ok, _say(ms))
 
 
 def reopen_gauntlets(ms: MenuState, settings: Settings) -> None:
-    """Open the list again on the gauntlet it was showing, keeping what was
-    said about it: where a run that couldn't start explains why."""
-    g, said = _picked(ms), ms.gauntlet_note
-    _open_tutorial(ms, settings, pick=g.id if g is not None else None)
-    ms.gauntlet_note = said
-
-
-def _picked(ms: MenuState) -> gauntlet.Gauntlet | None:
-    if not ms.gauntlets:
-        return None
-    return ms.gauntlets[max(0, min(len(ms.gauntlets) - 1, ms.gauntlet_pick))]
-
-
-def picked_gauntlet(ms: MenuState) -> gauntlet.Gauntlet | None:
-    """The gauntlet the list is showing. Public for Start run."""
-    return _picked(ms)
-
-
-_gauntlets_label = setupmenu.gauntlets_label
-
-
-def _playing_word(ms: MenuState) -> str:
-    """What the stage being played belongs to, in a label: "tutorial" only for
-    the built-in one."""
-    return "tutorial" if ms.stage_at is None or ms.stage_at[0] == gauntlet.TUTORIAL_ID else "gauntlet"
+    setupmenu.reopen_gauntlets(ms, settings, _say(ms))
 
 
 def _tutorial_labels(ms: MenuState) -> tuple[str, str]:
-    leave = f"Leave {_playing_word(ms)}"
-    return (leave, "Close") if config.touch_ui else (leave, "Close (Esc)")
-
-
-_COPY_GAUNTLET = "Copy link"
+    return setupmenu.tutorial_labels(ms, config.touch_ui)
 
 
 def _shareable(ms: MenuState, g: gauntlet.Gauntlet) -> bool:
-    """Can Copy link send ``g`` on: one opened from a link or generated here, on
-    the web (where there is a clipboard and a page to link to). Never a built-in
-    or a desktop file."""
-    return is_web() and g.id in ms.kept_ids
+    return setupmenu.shareable(ms, g, is_web())
 
 
 def _copy_gauntlet(ms: MenuState, g: gauntlet.Gauntlet) -> None:
-    """Copy a ``#gauntlet=`` link carrying the whole file: no board needed, so a
-    generated gauntlet can be shared as it is."""
-    data = gauntlet.kept(g.id) if _shareable(ms, g) else None
-    url = webstore.link_url(gauntlet.link_fragment(data)) if data is not None else ""
-    if url and webstore.copy_to_clipboard(url):
-        say_gauntlet(ms, g.id, f"Link to {g.name} copied", True)
-    else:
-        say_gauntlet(ms, g.id, "Couldn't copy the gauntlet's link", False)
-
-
-_STAGE_ROW_H = 36
-_TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_", "run_")
-_RUN_KEYS = ("run_start", "run_continue", "run_abandon")
-_RUN_LABELS = ("Start run", "Start anyway", "Continue run", "Abandon run", "Sure? Abandon")
-_RUN_ABOUT = "Run: every stage in order, each within its target, one life"
-
-
-def _live_run(ms: MenuState) -> run.Run | None:
-    return next((r for r in ms.runs if r.status == run.ACTIVE), None)
-
-
-def _run_row(ms: MenuState, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | None:
-    """The list's run line and its buttons, ``(text, [(key, label)])``, or None
-    for a gauntlet that can't be run (`run.offered`): the tutorial, a fork."""
-    if not run.offered(g):
-        return None
-    live = _live_run(ms)
-    if live is not None and live.gauntlet_id == g.id:
-        at, total = run.position(live, g)
-        abandon = "Sure? Abandon" if ms.run_confirm == "run_abandon" else "Abandon run"
-        return f"Run under way: stage {at} of {total}", [("run_continue", "Continue run"),
-                                                         ("run_abandon", abandon)]
-    if live is not None and ms.run_confirm == "run_start":
-        return "Starting this ends your run of another gauntlet", [("run_start", "Start anyway")]
-    return run.summary(g, ms.runs) or _RUN_ABOUT, [("run_start", "Start run")]
-
-
-def _run_stage(ms: MenuState, g: gauntlet.Gauntlet) -> int | None:
-    """The stage the active run of ``g`` is on, to mark in its row."""
-    live = _live_run(ms)
-    return run.stage_to_play(live, g) if live is not None and live.gauntlet_id == g.id else None
-_PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
+    setupmenu.copy_gauntlet(ms, g, is_web(), _say(ms))
 
 
 def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
@@ -751,14 +596,8 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
         return
     f = _fonts()
     pad, gap = 28, 10
-    if g.id not in ms.stage_bests:
-        ms.stage_bests[g.id] = gauntlet.bests(g)
-    bests = ms.stage_bests[g.id]
-    done = gauntlet.cleared(g, bests)
-    opened = gauntlet.open_stages(g, done, set(bests), bests)
-    listed = gauntlet.shown(g, opened)
-    found = active_stage(ms, settings)
-    here = found[1].id if found is not None and found[0].id == g.id else None
+    rows = setupmenu.stage_rows(ms, settings, g)
+    listed = [r.stage for r in rows]
 
     leave, close = _tutorial_labels(ms)
     share = _shareable(ms, g)
@@ -782,7 +621,6 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
     # A gauntlet that can be run gets a line about its runs and a row of run
     # buttons under the stages (`_run_row`).
     run_row = _run_row(ms, g)
-    run_on = _run_stage(ms, g)
     rbw = max(f["normal"].size(s)[0] for s in _RUN_LABELS) + 2 * 18
     if run_row is not None:
         pw = max(pw, f["small"].size(run_row[0])[0] + 2 * pad,
@@ -812,36 +650,20 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
 
     for key in [k for k in ms.rects if k.startswith("stage_")]:
         ms.rects.pop(key)     # a stage hidden again (another gauntlet picked) is no target
-    for i, stage in enumerate(listed):
+    for r in rows:
         row = pygame.Rect(panel.x + pad // 2, y, pw - pad, _STAGE_ROW_H - 4)
-        open_ = stage.id in opened
-        key = f"stage_{stage.id}"
-        if stage.id == here:
+        key = f"stage_{r.stage.id}"
+        if r.here:
             pygame.draw.rect(surface, _HL_FILL, row, border_radius=6)
             pygame.draw.rect(surface, _HL_BORDER, row, 1, border_radius=6)
-        if open_:
+        if r.open:
             ms.rects[key] = row
         else:
             ms.rects.pop(key, None)
-        colour = config.COLOR_TEXT if open_ else _DISABLED_TEXT
-        _text(surface, f["normal"], f"{i + 1:>2}  {stage.title}", colour,
+        colour = config.COLOR_TEXT if r.open else _DISABLED_TEXT
+        _text(surface, f["normal"], f"{r.index + 1:>2}  {r.stage.title}", colour,
               midleft=(row.x + pad // 2, row.centery))
-        mine = bests.get(stage.id)
-        aim = f" · {stage.target.short()}" if stage.target is not None else ""
-        if stage.id in done and mine is not None:
-            status, scol = f"✓ {mine[0]} turns / {mine[1]} lost", _START_BORDER
-        elif mine is not None:     # won, short of the target: "18 turns · target 14"
-            status, scol = f"{mine[0]} turns / {mine[1]} lost{aim}", _HL_BORDER
-        elif open_:
-            status, scol = ("next" if bests else "start here") + aim, _HL_BORDER
-        else:
-            gate = gauntlet.way_in(g, stage.id)
-            if gate is not None:
-                aim = f" · {gate[0]}: {gate[1].short()}"
-            status, scol = "locked" + aim, _DISABLED_TEXT
-        if stage.id == run_on:
-            status, scol = "run · " + status, _START_BORDER
-        _text(surface, f["small"], status, scol, midright=(row.right - pad // 2, row.centery))
+        _text(surface, f["small"], r.status, r.colour, midright=(row.right - pad // 2, row.centery))
         y += _STAGE_ROW_H
 
     for key in _RUN_KEYS:
@@ -888,8 +710,7 @@ def _draw_tutorial(surface, ms: MenuState, settings: Settings, w: int, h: int) -
 
 
 def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
-    """Answer the stage list: pick an open stage (it loads and starts, through
-    the same gate Start goes through), step the gauntlet picker, leave, or close."""
+    """Answer the stage list (`setupmenu.tutorial_press`): Esc closes it."""
     if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
         ms.tutorial_open = False
         return None
@@ -899,61 +720,11 @@ def _handle_tutorial(event, ms: MenuState, settings: Settings) -> str | None:
     # and one of them must not take a press aimed at a stage row above it.
     hit = next((key for key, rect in ms.rects.items()
                 if key.startswith(_TUTORIAL_KEYS) and rect.collidepoint(event.pos)), None)
-    g = _picked(ms)
-    armed, ms.run_confirm = ms.run_confirm, ""   # any other press disarms a run button
-    if hit in _RUN_KEYS and g is not None:
-        return _handle_run(ms, settings, g, hit, armed)
-    if hit == "tutorial_close":
-        ms.tutorial_open = False
-    elif hit == "tutorial_leave":
-        _leave_gauntlet(ms, settings)
-    elif hit == "tutorial_copy" and g is not None:
-        _copy_gauntlet(ms, g)
-    elif hit in ("gauntlet_pick_dec", "gauntlet_pick_inc") and ms.gauntlets:
-        step = 1 if hit.endswith("inc") else -1
-        ms.gauntlet_pick = (ms.gauntlet_pick + step) % len(ms.gauntlets)
-    elif hit is not None and hit.startswith("stage_") and g is not None:
-        sid = int(hit[len("stage_"):])
-        found = ms.stage_bests.get(g.id, {})
-        if (sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found), found)
-                and _load_stage(ms, settings, g, sid) is not None):
-            ms.tutorial_open = False
-            return _start(ms, settings)
-    return None
-
-
-def _handle_run(ms: MenuState, settings: Settings, g: gauntlet.Gauntlet, hit: str,
-                armed: str) -> str | None:
-    """A run button: put the menu on the stage to play and hand `main` the
-    action ("run" to start, "run_continue"), which goes through the same gate
-    Start does. Starting over another gauntlet's run, and abandoning, each take
-    a second press (``armed``)."""
-    live = _live_run(ms)
-    mine = live if live is not None and live.gauntlet_id == g.id else None
-    if hit == "run_abandon":
-        if mine is None:
-            return None
-        if armed != hit:
-            ms.run_confirm = hit
-            return None
-        run.abandon(mine)
-        ms.runs = run.runs()
-        say_gauntlet(ms, g.id, "Run abandoned", True)
+    if hit is None:
+        ms.run_confirm = ""
         return None
-    if hit == "run_start":
-        if live is not None and mine is None and armed != hit:
-            ms.run_confirm = hit
-            return None
-        order = gauntlet.chain(g)
-        sid = order[0] if order else None
-        action = "run"
-    else:
-        sid = run.stage_to_play(mine, g) if mine is not None else None
-        action = "run_continue"
-    if sid is None or _load_stage(ms, settings, g, sid) is None:
-        return None
-    ms.tutorial_open = False
-    return _start(ms, settings, action)
+    return setupmenu.tutorial_press(ms, settings, hit, is_web(), _say(ms),
+                                    lambda action: _start(ms, settings, action))
 
 
 def _unchallenge_labels() -> tuple[str, str]:
@@ -1071,67 +842,17 @@ def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
 def _pbp_prompt_labels() -> tuple[str, str]:
     """(confirm, cancel) labels; key hints dropped on a touch build, as every
     other modal here does."""
-    if config.touch_ui:
-        return ("Create match", "Cancel")
-    return ("Create match (Enter)", "Cancel (Esc)")
+    return setupmenu.pbp_prompt_labels(config.touch_ui)
 
 
-# `pbp.DEADLINE_HOURS` is the format's own unit ("two days is what play-by-post
-# exists for"), so the stepper below moves in whole days rather than exposing
-# raw hour arithmetic — a day (24h) at a time, from one day up to the endpoint's
-# own ceiling of 336h (14 days).
-_PBP_DEADLINE_STEP_H = 24
-_PBP_DEADLINE_MIN_H = 24
-_PBP_DEADLINE_MAX_H = 336
-
-
-def _deadline_label(hours: int) -> str:
-    days = max(1, hours // 24)
-    return "1 day" if days == 1 else f"{days} days"
-
-
-def _step_deadline(ms: MenuState, by: int) -> None:
-    ms.pbp_deadline_hours = max(_PBP_DEADLINE_MIN_H, min(
-        _PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * _PBP_DEADLINE_STEP_H))
-
-
-# The prompt's two free-text rows: (label, which, character limit).
-_PBP_TEXT_ROWS = (("Your name", "name", pbp.NAME_MAX), ("Title", "title", pbp.TITLE_MAX))
+_deadline_label = setupmenu.deadline_label
+_step_deadline = setupmenu.step_deadline
+_PBP_TEXT_ROWS = setupmenu.PBP_TEXT_ROWS
 _PBP_FIELD_W = 300
-
-
-def _pbp_text(ms: MenuState, which: str) -> str:
-    return ms.pbp_name if which == "name" else ms.pbp_title
-
-
-def _set_pbp_text(ms: MenuState, which: str, text: str) -> None:
-    limit = next(cap for _, key, cap in _PBP_TEXT_ROWS if key == which)
-    text = _filter(text, _pbp_char, limit)
-    if which == "name":
-        ms.pbp_name = text
-    else:
-        ms.pbp_title = text
-
-
-def _pbp_char(ch: str) -> bool:
-    return ch.isprintable()
-
-
-def _open_pbp_prompt(ms: MenuState, settings: Settings) -> None:
-    """Open the roster prompt on its defaults: every seat a person, the format's
-    own deadline, private, and the name this installation last used."""
-    ms.pbp_prompt = True
-    ms.pbp_roster = set(range(1, settings.players + 1))
-    ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
-    ms.pbp_public = False
-    ms.pbp_name = _filter(webstore.pbp_name(), _pbp_char, pbp.NAME_MAX)
-    ms.pbp_title = ""
-    ms.pbp_editing = None
-
-
-def _close_pbp_prompt(ms: MenuState) -> None:
-    ms.pbp_prompt = False
-    ms.pbp_editing = None
+_pbp_text = setupmenu.pbp_text
+_set_pbp_text = setupmenu.set_pbp_text
+_open_pbp_prompt = setupmenu.open_pbp_prompt
+_close_pbp_prompt = setupmenu.close_pbp_prompt
 
 
 def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
@@ -1154,7 +875,7 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     confirm, cancel = _pbp_prompt_labels()
     bw = max(f["normal"].size(s)[0] for s in (confirm, cancel)) + 2 * 18
     bh = 40
-    title = "Who's playing?"
+    title = setupmenu.PBP_PROMPT_TITLE
     name_w = max(f["normal"].size(config.player_name(seat))[0]
                  for seat in range(1, settings.players + 1))
     stepper_w = 34 + 64 + 34  # `_stepper`'s own fixed −/box/+ widths
@@ -2631,38 +2352,20 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     leaves the field rather than the prompt, and Tab moves to the other field.
     """
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-        ms.pbp_editing = None
-        for _, which, _ in _PBP_TEXT_ROWS:
-            rect = ms.rects.get(f"pbp_{which}_field")
-            if rect is not None and rect.collidepoint(event.pos):
-                ms.pbp_editing = which
-                return None
-        for seat in range(2, settings.players + 1):
-            rect = ms.rects.get(f"pbp_seat_{seat}")
-            if rect is not None and rect.collidepoint(event.pos):
-                ms.pbp_roster.symmetric_difference_update({seat})
-                return None
-        for key, by in (("pbp_deadline_dec", -1), ("pbp_deadline_inc", 1)):
-            rect = ms.rects.get(key)
-            if rect is not None and rect.collidepoint(event.pos):
-                _step_deadline(ms, by)
-                return None
-        rect = ms.rects.get("pbp_public")
-        if rect is not None and rect.collidepoint(event.pos):
-            ms.pbp_public = not ms.pbp_public
+        keys = ([f"pbp_{which}_field" for _, which, _ in _PBP_TEXT_ROWS]
+                + [f"pbp_seat_{seat}" for seat in range(2, settings.players + 1)]
+                + ["pbp_deadline_dec", "pbp_deadline_inc", "pbp_public", "pbp_confirm", "pbp_cancel"])
+        hit = next((key for key in keys if ms.rects.get(key) is not None
+                    and ms.rects[key].collidepoint(event.pos)), None)
+        if hit is None:
+            ms.pbp_editing = None
             return None
-        if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
-            _close_pbp_prompt(ms)
-            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
-        if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
-            _close_pbp_prompt(ms)
-            return None
+        return setupmenu.pbp_press(ms, settings, hit)
     elif event.type == pygame.TEXTINPUT and ms.pbp_editing is not None:
         _set_pbp_text(ms, ms.pbp_editing, _pbp_text(ms, ms.pbp_editing) + event.text)
     elif event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            _close_pbp_prompt(ms)
-            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
+            return setupmenu.confirm_pbp(ms, settings)
         if ms.pbp_editing is not None:
             if event.key == pygame.K_ESCAPE:
                 ms.pbp_editing = None
@@ -2996,19 +2699,9 @@ def _apply_seed_text(ms: MenuState, settings: Settings) -> None:
 
 
 def _open_creator(ms: MenuState, settings: Settings) -> str | None:
-    """Hand ``main`` the "open the map creator" action — or raise the un-challenge
-    modal first and let *it* re-issue the action.
-
-    Asking here rather than on the way out of the editor is deliberate: authoring
-    a whole map and only then being told it invalidated the score on the link is
-    the wrong order to find out.
-    """
-    if settings.challenge is not None:
-        ms.challenge_snapshot = settings.to_dict()
-        ms.pending_action = "create_map"
-        ms.confirm_unchallenge = True
-        return None
-    return "create_map"
+    """Hand ``main`` the "open the map creator" action, or the un-challenge
+    modal first (`setupmenu.open_creator`)."""
+    return setupmenu.open_creator(ms, settings)
 
 
 def _settings_path(name: str) -> Path:

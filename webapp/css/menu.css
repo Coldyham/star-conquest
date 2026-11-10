@@ -201,6 +201,34 @@ input.seed:focus { border-color: var(--m-hl-edge); }
 .mmodal .mbuttons { display: grid; grid-template-columns: 1fr 1fr; }
 .mmodal .go { border-color: var(--m-warn); }
 .mmodal .stay { background: var(--m-hl); border-color: var(--m-hl-edge); }
+.mmodal.pbp { border-color: var(--m-hl-edge); text-align: left; min-width: 360px; }
+.mmodal.pbp .mtitle { text-align: center; margin-bottom: 10px; }
+.mmodal.pbp .prow { display: flex; align-items: center; gap: 10px; min-height: 40px; margin-bottom: 10px; }
+.mmodal.pbp .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.mmodal.pbp .pname, .mmodal.pbp .plabel { flex: 1; }
+.mmodal.pbp .you { color: var(--dim); font-size: 14px; }
+.mmodal.pbp .ptext { width: 300px; max-width: 55vw; height: var(--m-ch); padding: 0 8px; border: 2px solid var(--m-btn-edge);
+  border-radius: 6px; background: var(--m-trough); color: var(--text); font: inherit; font-size: 18px; }
+.mmodal.pbp .ptext:focus { outline: none; border-color: var(--m-hl-edge); }
+.mmodal.pbp .mbuttons { display: grid; grid-template-columns: 1fr 1fr; }
+.mmodal.tutorial { border-color: var(--m-hl-edge); min-width: 460px; max-height: calc(100% - 24px); overflow: auto; }
+.mmodal.tutorial .mtitle { margin-bottom: 10px; }
+.mmodal.tutorial .prow { display: flex; align-items: center; gap: 10px; min-height: 40px; margin-bottom: 10px; }
+.mmodal.tutorial .plabel { flex: 1; text-align: left; }
+.trows { display: flex; flex-direction: column; gap: 4px; }
+.trow { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 32px; padding: 0 14px;
+  border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 18px;
+  text-align: left; cursor: pointer; }
+.trow:disabled { color: rgb(78, 84, 100); cursor: default; }
+.trow:not(:disabled):hover { background: var(--m-hl); }
+.trow.here { background: var(--m-hl); border-color: var(--m-hl-edge); }
+.trow .ttitle { white-space: pre; }
+.trow .tstatus { font-size: 14px; white-space: nowrap; }
+.mmodal.tutorial .tnote { margin-top: 10px; font-size: 14px; line-height: 20px; color: var(--dim); }
+.mmodal.tutorial .tnote.ok { color: var(--m-start-edge); }
+.mmodal.tutorial .tnote.err { color: var(--m-warn); }
+.mmodal.tutorial .mbuttons { display: flex; }
+.mbtn.start-edge { border-color: var(--m-start-edge); }
 .resume { text-align: center; }
 .resume .rtitle { margin: 0; font-size: 30px; font-weight: bold; }
 .resume .rdetail { margin: 8px 0 0; font-size: 14px; color: var(--dim); }

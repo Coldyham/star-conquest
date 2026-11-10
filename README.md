@@ -37,6 +37,7 @@ uv run python main.py --watch MATCH_ID         # open a posted replay in history
 uv run python main.py --watch games/game_X.json      # ...or a saved local one
 uv run python main.py --settings-from games/game_X.json   # pre-fill that game's setup
 uv run python main.py --match MATCH:TOKEN      # open your seat in a play-by-post match
+uv run python main.py --html                   # the HTML build (in progress), in your browser
 ```
 
 Launch drops you into a **setup menu** with four tabs:

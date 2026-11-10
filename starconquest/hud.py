@@ -6,7 +6,8 @@ sends them to the HTML page, so a line is worded in one place. A colour goes
 as a role, never RGB: ``"text"``, ``"dim"``, ``"select"``, ``"fog"``, ``"forward"``, ``"route"``, a
 forecast's ``"sure"``/``"likely"``/``"gamble"``, or a seat id for that seat's
 colour; the win overlay adds ``"teal"``, ``"beat"``, ``"tie"``, ``"miss"``,
-``"par"`` and ``"failed"``, and the coach ``"violet"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
+``"par"`` and ``"failed"``, the coach ``"violet"``, and the side panel's
+campaign reminder ``"campaign"``. A row is ``(text, role, kind)``: kind ``"head"`` for a heading (with a
 star name in it, so it may need the small font), ``"row"`` for one line, and
 ``"wrap"`` for a line to reflow to the panel's width.
 """
@@ -15,9 +16,9 @@ from __future__ import annotations
 
 import math
 
-from . import coach, combat, config, fog, stats
+from . import coach, combat, config, fog, matchnames, stats
 from .model import GameState, System, lane_key, shares_even
-from .viewstate import CHOOSING, ROUTING, Ui
+from .viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
 Role = str | int
 Row = tuple[str, Role, str]
@@ -636,6 +637,40 @@ def result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, Role]]:
     return note + lines
 
 
+def match_notes(ui: Ui) -> list[tuple[str, Role]]:
+    """What this match is for, as ``(text, role)`` lines for the head of the
+    side panel: the gauntlet stage and its target, the weekly campaign's
+    reminder (`app.campaign_tick`), and a challenge link's target. Not in the
+    top bar, which they would share with the scoreboard (on a portrait phone,
+    by covering it)."""
+    notes: list[tuple[str, Role]] = []
+    if ui.stage_label:
+        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, "teal"))
+    if ui.campaign_label:
+        notes.append((ui.campaign_label, "campaign"))
+    if ui.challenge_target is not None:
+        turns, lost = ui.challenge_target
+        who = f"{ui.challenge_by}'s " if ui.challenge_by else ""
+        notes.append((f"Beat {who}{turns}t / {lost} lost", "teal"))
+    return notes
+
+
+def briefing_close(touch: bool, portrait: bool) -> str:
+    """The briefing card's foot: how to put it away and bring it back. On a
+    touch screen the hint sits in the side panel, under the map upright."""
+    if touch:
+        where = "below the map" if portrait else "at the right"
+        return f"Tap anywhere to begin · tap the hint {where} to read this again"
+    return "Press any key to begin · B shows this again"
+
+
+def briefing_notes(ui: Ui) -> tuple[str, ...]:
+    """The briefing card's target, which it always shows, so the target is
+    never a surprise on the win overlay."""
+    return (f"Target: {ui.stage_target.text()}",) if ui.stage_target is not None else ()
+
+
 def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:
     """The win overlay's stage line: cleared, or which way the target went. A
     win short of it says so, and says too when an earlier best already cleared
@@ -844,6 +879,11 @@ def confirm_hint(ui: Ui, advisor: str) -> tuple[str, str, str]:
             "Show hint")
 
 
+def confirm_quit() -> tuple[str, str, str]:
+    """The ask before quitting: title, body (none) and the confirm button's word."""
+    return "Quit Star Conquest?", "", "Quit"
+
+
 def confirm_rewind(turn: int) -> tuple[str, str, str]:
     """The ask before a destructive mid-game rewind: title, body, and the
     confirm button's word."""
@@ -902,3 +942,66 @@ def portrait_hint(ui: Ui) -> str:
 MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu"),
                "hint_button_rect": ("✗", "✗ Hide hint"),
                "hint_apply_rect": ("✓", "✓ Apply hint")}
+
+
+# --------------------------------------------------------------------------- #
+# Play-by-post
+# --------------------------------------------------------------------------- #
+INVITE_TITLE = "Match created — copy each seat's link"
+# The one and only time these links are ever shown: `app.pbp_open` mints the
+# tokens and hands them over right here, and nothing stores them again. A
+# missed one has no second chance.
+INVITE_SUBTITLE = "Save these somewhere — they won't be shown again"
+INVITE_DONE = "Continue"
+
+
+def you_are(ui: Ui) -> tuple[tuple[str, Role], str]:
+    """The side panel's head in a shared match: which seat is ours (in its
+    colour), or that a spectator holds none; and the match's title, or its
+    pass-phrase name where it has none (whichever the lobby headlines it by)."""
+    line: tuple[str, Role] = (("Spectating", "text") if ui.spectating
+                              else (f"You are {config.player_name(ui.human_id)}", ui.human_id))
+    return line, ui.pbp_title or matchnames.phrase(ui.pbp_match)
+
+
+def invite_label(ui: Ui, seat: int) -> str:
+    """An invite row's name: the seat's, ours marked, or the spectators'."""
+    if seat == SPECTATE_ROW:
+        return "Spectators"
+    return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
+
+
+def invite_copy(ui: Ui, seat: int) -> str:
+    """An invite row's button, which says so once its link was copied."""
+    return "Copied" if ui.pbp_invite_copied == seat else "Copy"
+
+
+def seat_name(state: GameState, seat: int) -> str:
+    """What to call a seat we are waiting on: its player name, which is
+    already how every other readout names a side."""
+    player = state.players.get(seat)
+    return player.name if player is not None else f"Seat {seat}"
+
+
+def waiting_lines(state: GameState, ui: Ui) -> tuple[str, str]:
+    """The waiting veil's headline and detail, once our orders are in."""
+    names = [seat_name(state, seat) for seat in ui.pbp_waiting]
+    if not names:
+        return "Resolving the turn...", ""
+    if len(names) == 1:
+        return "Waiting for " + names[0], "Your orders are in."
+    return f"Waiting for {len(names)} players", ", ".join(names)
+
+
+def spectator_line(state: GameState, ui: Ui) -> str:
+    """Who the live turn is waiting on, for a spectator's screen."""
+    names = [seat_name(state, seat) for seat in ui.pbp_waiting]
+    return ("Waiting for " + ", ".join(names)) if names else "Resolving the turn..."
+
+
+def end_turn_word(state: GameState, ui: Ui) -> str | None:
+    """What stands where End Turn would, when there is no turn of ours to
+    end: a spectator's, or a shared turn already sent. None otherwise."""
+    if ui.spectating:
+        return "Spectating"
+    return "Orders sent" if ui.awaiting_others(state) else None

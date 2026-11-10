@@ -7,10 +7,12 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/play.css">
 <link rel="stylesheet" href="css/menu.css">
+<link rel="stylesheet" href="css/maker.css">
 <script type="module" src="js/play.mjs"></script>
 </head>
 <body>
 <main id="setup" hidden aria-label="Setup menu"></main>
+<main id="maker" hidden aria-label="Map maker"></main>
 <div id="app">
   <header id="top">
     <span id="turn">Turn 0</span>
@@ -24,6 +26,7 @@
     <p id="caption" aria-live="polite"></p>
     <p id="hint-caption" hidden></p>
     <div id="card" hidden></div>
+    <div id="pbp" hidden></div>
     <div id="graph" hidden></div>
     <div id="camera">
       <button type="button" class="btn blue" id="reset-view">Reset<span class="key"> (R)</span></button>

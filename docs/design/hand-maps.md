@@ -12,6 +12,11 @@ gestures, seats, what the menu hides, the wider box, and the blank canvas.
 The rules are in CLAUDE.md, keyed by the matching heading. What follows is the
 reasoning and the measurements behind them.
 
+The editor's state, edits and words live in the core module `maker`, read by
+both shells; `mapmaker` is pygame's drawing and hit-testing over it, and keeps
+its old names for what moved (`mapmaker._relane` is `maker.relane`, and so on),
+which is how the notes below still name them.
+
 ### Why the recipe lives on `Settings`
 
 Everything a shared map has to survive — a save file, a settings link, a challenge

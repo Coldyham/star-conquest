@@ -153,6 +153,14 @@ def clear_selected(ui: Ui) -> None:
         ui.clear_forward(ui.selected)
 
 
+def close_invite(ui: Ui) -> None:
+    """Continue on the play-by-post invite overlay: put it away for good."""
+    ui.pbp_invite = ()
+    ui.pbp_invite_rects = {}
+    ui.pbp_invite_close_rect = (0, 0, 0, 0)
+    ui.pbp_invite_copied = 0
+
+
 def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     """A key in live play, by its ``KeyboardEvent.key`` name (letters lower case).
 
@@ -345,23 +353,28 @@ def seek(ui: Ui, turn: int) -> None:
 
 
 def card_up(state: GameState, ui: Ui) -> bool:
-    """Is a card over the board that any press puts away: a star's info card,
-    or the forecast's breakdown?"""
+    """Is a card over the board that any press puts away: a stage's briefing,
+    a star's info card, or the forecast's breakdown?"""
     if not ui.odds_card_up():
         ui.odds_open = False
+    briefing = ui.briefing_open and ui.in_stage and not ui.history and state.winner is None
     lore = ui.lore_sid is not None and not ui.history and state.winner is None
-    return lore or ui.odds_open
+    return briefing or lore or ui.odds_open
 
 
 def dismiss_card(ui: Ui) -> None:
     """Put away whichever card is up; the press that does it is spent on it."""
+    ui.briefing_open = False
     ui.lore_sid = None
     ui.odds_open = False
 
 
 def press_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     """A key in whichever scene is up: a card (which any key puts away),
-    history, the game-over veil, route mode, or live play."""
+    history, the game-over veil, route mode, or live play. The play-by-post
+    invite is modal ahead of them all: only its own buttons answer it."""
+    if ui.pbp_invite:
+        return None
     if card_up(state, ui):
         dismiss_card(ui)
         return None

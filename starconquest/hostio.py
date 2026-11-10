@@ -27,6 +27,8 @@ EFFECTS = frozenset({
     "clipboard",  # {text}
     "navigate",   # {url}: a same-tab navigation
     "fragment",   # {token}: history.replaceState to "#token"
+    "download",   # {name, text, type}: hand the browser a file to save (`files.Download`)
+    "close",      # {}: ask the browser to close this window (a confirmed quit)
 })
 
 _worker = False

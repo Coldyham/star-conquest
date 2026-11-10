@@ -16,6 +16,13 @@
 // - /board/ is network-first, falling back to the cache only offline. Its pages
 //   are thin shells over live data, and a single stale load after a deploy could
 //   pair old JS with a new API or rules version.
+// - /next/, the HTML build (docs/design/html-frontend.md), splits by name. What
+//   is named by its contents or a version never changes, so once cached it is
+//   served from the cache, never asked for again: the game zip
+//   (py/starconquest-<hash>.zip), Pyodide (pyodide/<version>/) and the fonts.
+//   Everything else (the page, its JS and CSS, and js/build.mjs, which names
+//   the zip) is network-first like /board/, so a deploy never boots an old page
+//   against a new zip, and the cache only answers offline.
 //
 // One cross-origin prefix is cached too: pygbag's runtime (CPython and pygame
 // compiled to WebAssembly, several megabytes) loads from the pygame-web CDN under
@@ -35,6 +42,34 @@
 
 const CACHE = "starconquest-v4";
 const RUNTIME = "https://pygame-web.github.io/cdn/";
+// /next/'s files that never change under their name.
+const FIXED = /^\/next\/(py\/starconquest-[0-9a-f]+\.zip$|pyodide\/[^/]+\/|fonts\/)/;
+
+/** The network's answer, kept for offline; the cache only when it fails. */
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  try {
+    const res = await fetch(req);
+    if (res && res.ok && res.type === "basic") cache.put(req, res.clone());
+    return res;
+  } catch {
+    return (await cache.match(req)) || new Response("Offline", { status: 503 });
+  }
+}
+
+/** The cached copy if there is one, else the network's, kept. */
+async function cacheFirst(req) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(req);
+  if (cached) return cached;
+  try {
+    const res = await fetch(req);
+    if (res && res.ok && res.type === "basic") cache.put(req, res.clone());
+    return res;
+  } catch {
+    return new Response("Offline", { status: 503 });
+  }
+}
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -63,18 +98,12 @@ self.addEventListener("fetch", (event) => {
   if (sameOrigin && url.pathname.startsWith("/api/")) return;
 
   if (sameOrigin && url.pathname.startsWith("/board/")) {
-    event.respondWith(
-      (async () => {
-        const cache = await caches.open(CACHE);
-        try {
-          const res = await fetch(req);
-          if (res && res.ok && res.type === "basic") cache.put(req, res.clone());
-          return res;
-        } catch {
-          return (await cache.match(req)) || new Response("Offline", { status: 503 });
-        }
-      })()
-    );
+    event.respondWith(networkFirst(req));
+    return;
+  }
+
+  if (sameOrigin && url.pathname.startsWith("/next/")) {
+    event.respondWith(FIXED.test(url.pathname) ? cacheFirst(req) : networkFirst(req));
     return;
   }
 

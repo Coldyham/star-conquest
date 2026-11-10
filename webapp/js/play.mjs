@@ -14,6 +14,7 @@ import { BoardView } from "./board.mjs";
 import { BUTTON_STEP, WHEEL_STEP } from "./camera.mjs";
 import { Core, pageInfo } from "./core.mjs";
 import { compact, fitLayout, Hud, touch } from "./hud.mjs";
+import { MapMaker } from "./maker.mjs";
 import { FLASH_MS, Marks, readMarks } from "./marks.mjs";
 import { SetupMenu } from "./menu.mjs";
 import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
@@ -21,14 +22,21 @@ import { fromBoard, label, Reel, travel as travelAt } from "./reel.mjs";
 const $ = (id) => document.getElementById(id);
 const DRAG_THRESHOLD = 8;   // config.DRAG_THRESHOLD
 const THINKING_MS = 150;    // a turn slower than this says so
+const TICK_MS = 1000;       // the session's clock (`Session.op_tick`): the campaign's lookup and its grace
 
 const core = new Core(new URL("../worker.mjs", import.meta.url));
+// The site's service worker (scope "/", `tools/pwa/sw.js`), which gives /next/
+// its own rules; never from the local server, which has none to serve.
+if ("serviceWorker" in navigator && !["127.0.0.1", "localhost"].includes(location.hostname)) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 const params = new URLSearchParams(location.search);
 
 const game = {
   map: null, board: null, view: null, board_view: null, hud: null, seed: null,
   hover: null, drag: null, pan: null, box: null, film: null, fingers: new Map(), pinch: null, pressed: false, held: new Marks(), busy: false, looping: false, marks: new Marks(),
   queued: [],   // game actions pressed while a turn was resolving or filming (`actOn`)
+  stale: false,   // a pushed view was set aside while a turn was in flight (`pushed`)
 };
 
 function status(text, error = false) {
@@ -43,12 +51,13 @@ function setup() {
   if (params.has("mode")) settings.mode = params.get("mode");
   if (params.has("fog")) settings.fog_sight = Number(params.get("fog"));
   if (params.has("ai")) settings.ai_strategy = params.get("ai").split(",");
+  if (params.has("autoplay")) settings.autoplay = true;
   return settings;
 }
 
 const menu = new SetupMenu($("setup"), core, {
   start: () => newGame(),
-  quit: () => window.close(),
+  quit: () => {},   // the session asked the browser to close the window (the `close` effect)
   resumed: (res) => {
     menu.hide();
     game.film = null;
@@ -56,7 +65,87 @@ const menu = new SetupMenu($("setup"), core, {
     adopt(res);
     clock(game.view.step_ms);
   },
+  maker: (view) => {
+    menu.hide();
+    maker.open(view);
+  },
 });
+
+/** The map maker (`maker.mjs`): Play starts its map, Menu goes back to the setup. */
+const maker = new MapMaker($("maker"), core, {
+  play: (res) => {
+    game.film = null;
+    game.map = null;   // a new map: the camera starts fitted
+    game.legends = res.legends;
+    adopt(res);
+    status("");
+    clock(game.view.step_ms);
+  },
+  back: (res) => {
+    menu.root.hidden = false;
+    menu.draw(res);
+  },
+});
+
+/** Is a screen other than the play screen up (the menu, the map maker)? */
+function away() {
+  return menu.shown || maker.shown;
+}
+
+/** What an answer from the board changed, drawn unasked (`Session.op_net_reply`):
+ * a fetched replay opens in history, one that would not open says why on the
+ * menu, and anything else redraws the play screen, once no turn is in flight. */
+function pushed(p) {
+  if (p.game) {
+    maker.hide();
+    // A match opened (or a replay fetched) draws its map afresh; a shared
+    // match rebuilt from its log (`map_fresh` false) keeps the camera.
+    menu.hide();
+    game.film = null;
+    if (p.game.map_fresh !== false) game.map = null;
+    game.legends = p.game.legends;
+    adopt(p.game);
+    status("");
+  } else if (p.turn) {
+    landTurn(p.turn);
+  } else if (p.menu) {
+    if (menu.shown) menu.draw(p.menu);
+  } else if (p.view && game.view && !away()) {
+    if (game.busy || game.film || game.seeking || game.replaying) game.stale = true;
+    else show(p.view);
+  }
+}
+core.onPush = pushed;
+setInterval(() => {
+  if (document.hidden || game.busy || game.film) return;
+  core.call("tick").then((res) => core.push(res), () => {});
+}, TICK_MS);
+
+/** A shared match's turn, resolved by the last seat in (`Session._step_match`):
+ * its film played onto the board the page has, as End Turn's is. */
+async function landTurn(res) {
+  if (away()) return;
+  game.busy = true;
+  try {
+    const before = game.view;
+    if (res.film && !before?.history) await playFilm(res.film, res.view, before);
+    game.board = fromBoard(res.board);
+    game.board_view.setTravel(res.travel);
+    if (res.snap) game.board_view.rest(res.view.snap);
+    show(res.view);
+  } finally {
+    game.busy = false;
+    freshen();
+    runQueued();
+  }
+}
+
+/** Fetch the view a push left stale while a turn was in flight. */
+function freshen() {
+  if (!game.stale || game.busy || game.film) return;
+  game.stale = false;
+  act("game.view");
+}
 
 /** Back to the setup menu: the match is left behind, as pygame's Menu leaves it. */
 async function openMenu(first = false) {
@@ -71,6 +160,34 @@ async function openMenu(first = false) {
   }
   await menu.open({ first, prefill: first ? setup() : null, touch: touch(), compact: compact() });
 }
+
+/** Leave the play screen (or the map maker) for the menu reply `reply`. */
+function toMenu(reply) {
+  clearTimeout(game.timer);
+  game.film = null;
+  game.busy = false;
+  game.queued = [];
+  game.map = null;
+  if (game.modal) {
+    game.modal = null;
+    game.hud.modal(null);
+  }
+  if (maker.shown) maker.hide();
+  menu.root.hidden = false;
+  menu.draw(reply);
+  menu.after(reply);
+}
+
+// A link opened in an open page (pasted, or handed to an installed app) is
+// read as at boot (`Session.op_page_hash`); our own address edits use
+// `history.replaceState`, which fires no `hashchange`.
+window.addEventListener("hashchange", async () => {
+  const res = await core.call("page.hash", { hash: location.hash }).catch((err) => {
+    status(`Couldn't open that link: ${err.message}`, true);
+    return null;
+  });
+  if (res && res.menu) toMenu(res.menu);
+});
 
 /** What the board draws through: the view, fog, and the pointer. A film
  * draws the union of what was seen before and after (`Ui.sees`). */
@@ -231,6 +348,7 @@ function adopt(res) {
       act("ui.call", { method: "step_share", args: [delta] });
     },
     footer,
+    copy: (seat) => act("pbp.copy", { seat }),
     action: actOn,
     seek,
     done: () => act("ui.empty"),
@@ -240,7 +358,7 @@ function adopt(res) {
 
 /** End the turn, and play its film onto the board the page already has. */
 async function endTurn(byHand = true) {
-  if (game.busy || menu.shown || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
+  if (game.busy || away() || !game.view?.can.end_turn || (byHand && game.view.autoplay)) return;
   game.busy = true;
   const thinking = setTimeout(() => { $("caption").textContent = "Thinking…"; }, THINKING_MS);
   try {
@@ -254,6 +372,7 @@ async function endTurn(byHand = true) {
     if (res.snap) game.board_view.rest(res.view.snap);
     show(res.view);
     game.busy = false;
+    freshen();
     if (!runQueued()) clock(res.film ? 0 : res.view.step_ms);
   } catch (err) {
     clearTimeout(thinking);
@@ -314,7 +433,7 @@ function runQueued() {
 function clock(ms) {
   clearTimeout(game.timer);
   const v = game.view;
-  if (!v || menu.shown || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
+  if (!v || away() || !(v.autoplay || v.playing) || v.over || v.mode === "routing") return;
   game.timer = setTimeout(() => endTurn(false), ms);
 }
 
@@ -350,7 +469,7 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed"]);
+  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -372,6 +491,10 @@ async function actOn(action) {
       return null;
     });
     if (!res) return;
+    if (res.quit) {   // the browser kept the window open: back to the menu, saying how to leave
+      toMenu(res.menu);
+      return;
+    }
     if (res.board) adopt(res);
     else show(res.view);
     if (res.modal) ask(res.modal);
@@ -412,6 +535,7 @@ async function seek(turn) {
     show(res.view);
   } finally {
     game.seeking = false;
+    freshen();
   }
   if (game.seekTo !== undefined && game.seekTo !== null) {
     const next = game.seekTo;
@@ -437,6 +561,7 @@ async function replay() {
     }
   } finally {
     game.replaying = false;
+    freshen();
   }
 }
 
@@ -642,7 +767,7 @@ function zoomButton(factor) {
 }
 
 async function key(event) {
-  if (menu.shown || !game.view || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (away() || !game.view || event.ctrlKey || event.metaKey || event.altKey) return;
   if (game.modal) {
     const k = event.key.toLowerCase();
     if (k === "y" || k === "enter") $("modal").querySelector(".btn.amber").click();
@@ -725,6 +850,15 @@ async function boot() {
 /** Put a parity screen's recipe on screen (`tools/parity_next.py`): the menu's
  * through `parity.menu`, the game's through `parity.load`. */
 async function loadRecipe(recipe) {
+  if (recipe.surface === "maker") {
+    menu.hide();
+    clearTimeout(game.timer);
+    const res = await core.call("parity.maker", { recipe });
+    maker.open(res.maker);
+    status("");
+    return;
+  }
+  maker.hide();
   if (recipe.surface === "menu" || recipe.surface === "resume") {
     await openMenu();
     await menu.send("parity.menu", { recipe });
@@ -745,6 +879,6 @@ async function loadRecipe(recipe) {
 }
 
 // For headless runs (`tools/chrome.mjs --eval`): the page's state and its verbs.
-window.scNext = { game, act, endTurn, loadRecipe };
+window.scNext = { game, core, act, endTurn, loadRecipe };
 
 boot();

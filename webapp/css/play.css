@@ -307,7 +307,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--text); font-size: 14px; text-align: left; border-radius: 4px; }
 #graph .note-row.on { background: rgb(30, 34, 50); }
 #graph .note-row .turn { flex: none; min-width: 34px; }
-:root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); }
+:root { --teal: rgb(120, 180, 200); --violet: rgb(150, 130, 200); --campaign: rgb(255, 210, 63); }
+#panel .stage-hint { display: block; width: 100%; margin: 0 0 12px; padding: 0; border: none; background: none;
+  color: var(--teal); font: inherit; font-size: 14px; line-height: 22px; text-align: left; cursor: pointer; }
+#panel .match-note { font-size: 14px; margin: 0 0 6px; }
 #app.graphing #camera { bottom: calc(min(320px, 45%) + 18px); }
 
 /* --- the footer's "more" list -------------------------------------------- */
@@ -391,3 +394,26 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .portrait #graph .legend { width: auto; flex-direction: row; flex-wrap: wrap; column-gap: 18px; }
 .portrait #graph .legend .unit { width: 100%; }
 .portrait #graph .seat .name { flex: none; }
+
+/* --- play by post: the invite, the waiting veil, a line in a pill ---------- */
+#pbp.waiting { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 12, .55); text-align: center; pointer-events: none; }
+#pbp.waiting .stack { padding: 0 24px; }
+#pbp.waiting h1 { margin: 0 0 6px; font-size: 30px; font-weight: bold; }
+#pbp.waiting p { margin: 0 0 6px; color: var(--dim); }
+#pbp.waiting p.small { font-size: 14px; }
+#pbp.notice { position: absolute; left: 50%; top: 8px; z-index: 5; transform: translateX(-50%); max-width: calc(100% - 24px);
+  pointer-events: none; }
+#pbp .pill { margin: 0; padding: 2px 10px; border-radius: 5px; background: var(--bg); font-size: 14px; text-align: center; }
+#pbp.invite { position: fixed; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 12, .75); }
+#pbp.invite .panel { display: flex; flex-direction: column; gap: 8px; max-width: calc(100% - 32px); padding: 24px;
+  background: rgb(18, 20, 30); border: 2px solid rgb(60, 66, 90); border-radius: 10px; }
+#pbp.invite h1 { margin: 0; font-size: 30px; font-weight: bold; text-align: center; }
+#pbp.invite .sub { margin: 0 0 10px; font-size: 14px; color: rgb(214, 172, 92); text-align: center; }
+#pbp.invite .row { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+#pbp.invite .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+#pbp.invite .name { flex: 1; padding-right: 28px; }
+#pbp.invite .row .btn { min-width: 64px; height: 30px; font-size: 14px; }
+#pbp.invite .done { align-self: center; min-width: 140px; margin-top: 10px; }
+

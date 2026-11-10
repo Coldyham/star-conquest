@@ -210,8 +210,8 @@ def saves_dir() -> Path:
 def maps_dir() -> Path:
     """Where hand-authored maps live (gitignored), mirroring ``saves_dir``.
 
-    On the web build this is emscripten MEMFS and does not survive a reload —
-    exactly as ``saves/`` already behaves. Matching that is the consistent
-    choice; routing both through ``webstore`` is a separate improvement.
+    On pygbag's web build this is emscripten MEMFS and does not survive a
+    reload — exactly as ``saves/`` already behaves. The HTML build's worker
+    keeps it in IndexedDB, as it does the games folder (``webapp/worker.mjs``).
     """
     return data_dir() / "maps"
