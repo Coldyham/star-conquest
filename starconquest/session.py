@@ -713,10 +713,18 @@ class Session:
 
     def op_ui_empty(self) -> dict:
         """A press on empty map, or the popup's Done. Route mode keeps its group:
-        it confirms and cancels explicitly, so a stray tap must not undo the work."""
-        self._ui().press_undo = play.press_snapshot(self._ui())
-        if self._ui().mode != ROUTING:
-            play.cancel(self._ui())
+        it confirms and cancels explicitly, so a stray tap must not undo the work.
+
+        A press on nothing is over nothing, so it drops the hover too: a finger
+        leaves no pointer behind to clear it, and the side panel would keep the
+        last system pressed in place of the legend and its buttons. Done on the
+        popup is the exception: `play.cancel` leaves its source lit as the hover."""
+        ui = self._ui()
+        ui.press_undo = play.press_snapshot(ui)
+        if ui.mode != ROUTING:
+            if ui.mode != CHOOSING:
+                ui.hover = None
+            play.cancel(ui)
         return {"view": self._view()}
 
     def op_ui_unpress(self) -> dict:
