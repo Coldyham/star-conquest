@@ -555,10 +555,21 @@ Left open: startup on a real phone over a real network (*The Pyodide spike
 
 Also left open, from the plan's risks:
 
-- **A long bot turn can't be cut short.** The page shows "Thinking…", but the
-  worker runs the turn to the end. The plan's way out was to terminate the
-  worker and rebuild the game from its `GameLog` with `replay.reconstruct`,
-  which determinism makes safe.
-- **Play strength depends on the device.** actuary's `LOOK_BUDGET_S` is a
-  wall-clock budget, so a slow phone gets a weaker actuary than a desktop
-  does.
+- **The page can't cut a long bot turn short.** A turn is one synchronous
+  call in the worker: the page shows "Thinking…" and waits, and nothing
+  outside can stop it. Wall-clock budgets inside a few bots stop only their
+  own search, never the whole turn. Most bots have no budget, and every bot
+  seat decides in turn before the engine resolves. The plan's way out was to
+  terminate the worker and rebuild the game from its `GameLog` with
+  `replay.reconstruct`, which determinism makes safe.
+- **Play strength depends on the device.** knower's search stops at a
+  wall-clock budget (`SEARCH_BUDGET_S`, 150 ms). On a desktop it reaches that
+  budget with Council, and with Search on larger maps against evolved or
+  actuary-hunt, so on a slower phone those settings search less and play
+  weaker. The other wall-clock guards (evolved's look-ahead, actuary's 1 s)
+  rarely trip on a desktop. A slow phone may push some over; that hasn't been
+  measured. The game always runs with `BUDGET_SCALE` at 1.0. Against a person
+  it matters little: knower models a person's seat blind (*Seats it cannot
+  run: stand-ins and people*, knower.md), so it is slower than actuary or marshal but no harder,
+  except where a board gives it room to snowball (the tutorial's harder bonus
+  stages). It stays selectable because the leaderboard's bot scores name it.
