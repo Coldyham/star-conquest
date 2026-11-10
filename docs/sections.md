@@ -254,6 +254,7 @@ line gives only the verdict. Ideas that lost are in
 - learning.md · **Memory off: the prior alone (flag removed).** Learning beats memory-off nowhere against bots; the memory stays, to be improved against people.
 - learning.md · **Five more arms, and three combinations (deleted).** Pressed row, strike size, learned guard, joint strikes, `PRIOR_WEIGHT` 1.
 - learning.md · **The counter-strike (deleted).** An option value from a rival's learned empty rate; failed on fresh seeds; the people-profile question open.
+- learning.md · **The posted games against Learning (2026-11-10).** 30 posted games replayed: Learning is more cautious than Field against the person; `LEARN_REACH` 8 clips the curve above ratio 1.5, so the memory can only act where strikes are rare; the person takes what actuary empties; the riposte is a losing seat's mark, not a person's; one pooled multiplier learns the person faster than 31 bins; undo and rewind leave no record. **What to try next.**
 
 ## convoy.md (built, not shipped)
 - convoy.md · **The plan.** Supply per system and turn; objectives as N ships by turn t; launch at the last moment.

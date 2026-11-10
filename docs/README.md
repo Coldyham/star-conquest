@@ -108,6 +108,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `hunt_bench.py`, `hunt_predict.py`, `hunt_sweep.py`, `hunt_cost.py`, `hunt_exact.py`, `hunt_tune.py` | actuary at Hunt: paired bench, strike prediction, sweeps, CMA-ES tuning, decide cost, exact-orders check | hunter.md |
 | `learner_check.py` (`--logs public`) | actuary's rival model vs the roster or posted human games | learner.md |
 | `human_habits.py` | How people play vs roster self-play | learner.md |
+| `learning_humans.py` | Learning against the person in posted games: fate, Field counterfactual, what the memory read; `--baseline`, `--private` | learning.md |
 | `evo_bench.py`, `evo_train.py` (`--with cma`), `evo_probe.py`, `evo_losses.py` | evolved's gate, training and diagnosis | evolved.md |
 | `par_search.py` | Par search on a map (local only) | par.md |
 | `par_show.py` | Print a saved best line as playable orders by system name, the rivals' orders, and the board to expect at each turn (local only) | par.md |

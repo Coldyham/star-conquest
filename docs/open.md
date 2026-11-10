@@ -50,6 +50,7 @@ ships or is dropped, delete its line here (and add it to
 - win-turns.md · marshal: the land-grab relay, a counter-punch the turn after a garrison leaves, three-seat stalls; `FEED` 20 if the roster moves; the full ladder not re-run. *What is left*, *A second round, nothing shipped.*
 - actuary.md · Variance-seeking while behind on both income and ships (unmeasured). *Behind on income, ahead on ships.*
 - learner.md · Whether the failed gate is a power problem, and a strike curve that tells the bots apart. *The gate.*
-- learning.md · Improving Learning's memory against people (it stays; dropping it is decided against). Blocked on data: too few posted games against actuary at Learning to measure. *Memory off: the prior alone.*
+- learning.md · Improving Learning's memory against people (it stays; dropping it is decided against). A win rate still waits on lost games (`game_logs`, *Share replays*); positions are measured by `tools/learning_humans.py`. *Memory off: the prior alone*, *The posted games against Learning.*
+- learning.md · Five arms from the posted games: a chance compounded over the exposure in place of the `LEARN_REACH` clip, one pooled multiplier per rival, the pressed row with it, the stake of a system actuary empties, and recording take-backs (undo, rewind) in the log. *What to try next.*
 - learning.md · The counter-strike's people-profile question: people sit far from the prior on emptying frontiers. *The counter-strike.*
 - par.md · A stronger bound (ships needed through neutrals), a relay as one decision, successive halving for openings, node budgets instead of time, a time budget for knower rivals. *Next, if it goes further.*
