@@ -554,3 +554,132 @@ def test_a_replay_that_is_not_there_says_so_on_the_menu(session, games):
     [http] = _effects(reply, "http")
     pushed = _menu(session, "net.reply", req=http["req"], state="missing", body="")["pushed"]
     assert pushed["menu"]["status"]["text"].startswith("That replay isn't on the leaderboard")
+
+
+# --------------------------------------------------------------------------- #
+# Play by post: the roster prompt, a match created, links opened, a turn sent
+# and a settled one played onto the board. `hostio` stands in for the endpoint.
+PBP_MATCH = "00112233445566ff"
+PBP_TOKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+PBP_PAGE = {"origin": "https://star-conquest.netlify.app", "hostname": "star-conquest.netlify.app",
+            "pathname": "/next/", "hash": ""}
+
+
+@pytest.fixture
+def quick_reads(monkeypatch):
+    """Reads come on every tick rather than the cadence's seconds apart."""
+    from starconquest import pbpclient
+    monkeypatch.setattr(pbpclient, "pbp_idle_floor", lambda idle: 0)
+    monkeypatch.setattr(pbpclient, "pbp_poll_delay", lambda failures: 0)
+
+
+def _pbp_payload(turn=0, submitted=(), turns=(), seats=(1, 2), **over):
+    from starconquest import engine
+    from starconquest.settings import Settings
+    payload = {"match_id": PBP_MATCH, "settings_json": Settings(mode="random", players=2, nodes=16, seed=7).to_dict(),
+               "seed": 7, "seats": list(seats), "turn": turn, "submitted": list(submitted), "turns": list(turns),
+               "log": "", "finished": False, "rules_version": engine.RULES_VERSION, "deadline_hours": 48,
+               "turn_opened_at": "2026-09-22T12:00:00+00:00"}
+    payload.update(over)
+    return payload
+
+
+def _answer(s: Session, effect: dict, state: str, body) -> dict:
+    return _menu(s, "net.reply", req=effect["req"], state=state,
+                 body=body if isinstance(body, str) else json.dumps(body))
+
+
+def _http(reply: dict, needle: str) -> dict:
+    [effect] = [e for e in reply["effects"] if e["t"] == "http" and needle in e["url"]]
+    return effect
+
+
+def test_the_roster_prompt_creates_a_match_and_opens_on_its_invite(session, games, quick_reads):
+    _call(session, "boot", page=PBP_PAGE, store={})
+    _menu(session, "menu.open", first=True, prefill={"players": 2, "nodes": 16, "seed": 7})
+    res = _menu(session, "menu.press", key="play_by_post")
+    prompt = res["menu"]["pbp_prompt"]
+    assert prompt["title"] == "Who's playing?" and [s["checked"] for s in prompt["seats"]] == [True, True]
+    assert prompt["seats"][0]["you"] and prompt["deadline"] == "2 days"
+    assert _menu(session, "menu.press", key="start")["menu"]["pbp_prompt"]   # modal: Start is not its own
+    prompt = _menu(session, "menu.press", key="pbp_deadline_inc")["menu"]["pbp_prompt"]
+    assert prompt["deadline"] == "3 days"
+    _menu(session, "menu.pbp_text", which="title", text="Friday\x07 game")
+    reply = _call(session, "menu.press", key="pbp_confirm")
+    assert reply["result"]["menu"]["pbp_prompt"] is None and reply["result"]["action"] is None
+    create = _http(reply, "action=create")
+    sent = json.loads(create["body"])
+    assert sent["deadline_hours"] == 72 and sent["title"] == "Friday game"
+    _answer(session, create, "ok", {"match_id": sent["match_id"], "tokens": {"1": PBP_TOKEN, "2": PBP_TOKEN[::-1]}})
+    tick = _call(session, "tick")
+    assert tick["result"]["pushed"]["menu"]["status"]["text"].startswith("Match created")
+    read = _http(tick, "action=state")
+    _answer(session, read, "ok", _pbp_payload(match_id=sent["match_id"]))
+    game = _menu(session, "tick")["pushed"]["game"]
+    pbp_view = game["view"]["pbp"]
+    assert pbp_view["you"] == ["You are " + session.state.players[1].name, 1]
+    invite = pbp_view["overlay"]
+    assert invite["kind"] == "invite" and [row[0] for row in invite["rows"]] == [1, 2, -1]   # fog off: watchable
+    reply = _call(session, "pbp.copy", seat=2)
+    [clip] = _effects(reply, "clipboard")
+    assert "#pbp=" in clip["text"] and reply["result"]["view"]["pbp"]["overlay"]["rows"][1][3] == "Copied"
+    assert _menu(session, "ui.key", name="Enter")["action"] is None   # the invite is modal
+    view = _menu(session, "ui.call", method="close_invite")["view"]
+    assert view["pbp"]["overlay"] is None and view["can"]["end_turn"]
+
+
+def _seated(session) -> dict:
+    """Open a seat link to an open match at turn 0; answers the reply that
+    opened it, which already carries the next read."""
+    _call(session, "boot", page={**PBP_PAGE, "hash": f"#pbp={PBP_MATCH}:{PBP_TOKEN}"}, store={})
+    reply = _call(session, "menu.open", first=True)
+    assert reply["result"]["status"]["text"] == "Opening match..." and "resume" not in reply["result"]
+    _answer(session, _http(reply, "action=seat"), "ok", {"seat": 1})
+    read = _http(_call(session, "tick"), "action=state")
+    _answer(session, read, "ok", _pbp_payload())
+    opened = _call(session, "tick")
+    assert opened["result"]["pushed"]["game"]["view"]["pbp"]["overlay"] is None
+    return opened
+
+
+def test_end_turn_in_a_shared_match_sends_and_waits(session, games, quick_reads):
+    _seated(session)
+    reply = _call(session, "turn.end")
+    assert reply["result"]["film"] is None
+    submit = _http(reply, "action=submit")
+    view = reply["result"]["view"]
+    assert view["pbp"]["overlay"]["kind"] == "waiting" and view["pbp"]["end_word"] == "Orders sent"
+    assert not view["can"]["end_turn"]
+    tick = _call(session, "tick")   # the submission is still out: nothing moves
+    assert "pushed" not in tick["result"]
+    _answer(session, submit, "ok", {"turn": 0, "submitted": [1], "waiting": [2]})
+    pushed = _menu(session, "tick").get("pushed", {})
+    overlay = pushed["view"]["pbp"]["overlay"] if "view" in pushed else view["pbp"]["overlay"]
+    assert overlay["kind"] == "waiting" and "Waiting for" in overlay["headline"]
+
+
+def test_a_turn_settled_elsewhere_is_played_onto_the_board_with_its_film(session, games, quick_reads):
+    from starconquest import pbp
+
+    from tests.test_pbp_client import _a_move
+    opened = _seated(session)
+    match = pbp.match_from_dict(_pbp_payload())
+    rows = [_a_move(session.state, 1, 2), _a_move(session.state, 2, 2)]
+    resolved = pbp.resolve(pbp.match_from_dict(_pbp_payload(submitted=[1, 2], turns=rows)))
+    assert match is not None and resolved is not None
+    log = pbp.shareable(resolved[1]).encoded()
+    read = _http(opened, "action=state")
+    _answer(session, read, "ok", _pbp_payload(turn=1, turns=rows, log=log))
+    turn = _menu(session, "tick")["pushed"]["turn"]
+    assert turn["board"]["turn"] == 1 and turn["film"] is not None
+    assert session.state.turn == 1 and turn["view"]["can"]["end_turn"]
+
+
+def test_a_spectate_link_watches_from_no_seat(session, games, quick_reads):
+    _call(session, "boot", page={**PBP_PAGE, "hash": f"#spectate={PBP_MATCH}"}, store={})
+    reply = _call(session, "menu.open", first=True)
+    _answer(session, _http(reply, "action=state"), "ok", _pbp_payload(watchable=True))
+    view = _menu(session, "tick")["pushed"]["game"]["view"]
+    assert view["pbp"]["you"] == ["Spectating", "text"] and view["pbp"]["end_word"] == "Spectating"
+    assert view["pbp"]["overlay"]["kind"] == "notice" and not view["can"]["end_turn"]
+    assert not _effects(_call(session, "turn.end"), "http")   # a spectator sends nothing

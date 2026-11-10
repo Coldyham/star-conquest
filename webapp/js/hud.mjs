@@ -143,10 +143,46 @@ export class Hud {
       end.replaceChildren(view.route.confirm[0]);
       end.disabled = !view.route.confirm[1];
       end.classList.toggle("route", true);
+    } else if (view.pbp?.end_word && !view.can.end_turn) {
+      // A spectator's, or a shared turn already sent: nothing here to end.
+      end.replaceChildren(view.pbp.end_word);
+      end.disabled = true;
+      end.classList.toggle("route", true);
     } else {
       end.replaceChildren("End Turn ", h("span", { class: "key" }, "⏎"));
       end.disabled = !view.can.end_turn;
       end.classList.toggle("route", false);
+    }
+    this.pbp(view);
+  }
+
+  /** Play by post's overlay on the map (`serial.pbp`): the invite with each
+   * seat's link to copy, the waiting veil, or a line in a pill. */
+  pbp(view) {
+    const box = this.$("pbp");
+    const o = view.pbp?.overlay;
+    box.className = o ? o.kind : "";
+    if (!o) {
+      box.hidden = true;
+      box.replaceChildren();
+      return;
+    }
+    box.hidden = false;
+    if (o.kind === "invite") {
+      box.replaceChildren(h("div", { class: "panel", role: "dialog", "aria-modal": "true" },
+        h("h1", {}, o.title), h("p", { class: "sub" }, o.subtitle),
+        ...o.rows.map(([seat, label, role, copy, copied]) => h("div", { class: "row" },
+          h("span", { class: "swatch", style: `background:${this.color(role)}` }),
+          h("span", { class: "name", style: `color:${this.color(role)}` }, label),
+          h("button", { type: "button", class: `btn ${copied ? "active" : "blue"}`, onclick: () => this.on.copy(seat) },
+            copy))),
+        h("button", { type: "button", class: "btn green done", onclick: () => this.on.call("close_invite", []) },
+          o.done)));
+    } else if (o.kind === "waiting") {
+      box.replaceChildren(h("div", { class: "stack" }, h("h1", {}, o.headline),
+        o.detail ? h("p", {}, o.detail) : null, o.msg ? h("p", { class: "small" }, o.msg) : null));
+    } else {
+      box.replaceChildren(h("p", { class: "pill" }, o.text));
     }
   }
 
@@ -206,6 +242,9 @@ export class Hud {
     // portrait band only while nothing is in focus.
     const notes = view.notes.map(([text, role]) => h("p", { class: "wrap match-note",
       style: `color:${this.color(role)}` }, text));
+    // A shared match says which seat is ours, and the match's name, first.
+    const you = view.pbp?.you ? [h("p", { style: `color:${this.color(view.pbp.you[1])}` }, view.pbp.you[0]),
+      view.pbp.label ? h("p", { class: "wrap dim" }, view.pbp.label) : null].filter(Boolean) : [];
     const clears = [];
     if (p.clear.all) {
       clears.push(h("button", { type: "button", class: "clear", onclick: () => this.on.call("clear_all_forward", []) },
@@ -217,20 +256,20 @@ export class Hud {
     }
     if (view.route) {
       const r = view.route;
-      panel.replaceChildren(...(portrait() ? [] : notes), h("section", {}, h("h2", {}, r.title),
+      panel.replaceChildren(...you, ...(portrait() ? [] : notes), h("section", {}, h("h2", {}, r.title),
         ...r.lines.map(([text, role]) => h("p", { style: `color:${this.color(role)}` }, text)),
         h("p", { class: "wrap hint" }, r.hint)));
       return;
     }
     if (p.focus === null) {
       if (portrait()) {
-        panel.replaceChildren(...clears, ...notes, h("p", { class: "wrap dim" }, p.portrait));
+        panel.replaceChildren(...you, ...clears, ...notes, h("p", { class: "wrap dim" }, p.portrait));
         return;
       }
       const set = this.legends[p.legend];
       const text = compact() ? set.compact : touch() ? set.touch : set.keys;
       const title = p.legend === "history" ? "History" : "Star Conquest";
-      panel.replaceChildren(...notes, ...clears, h("div", { class: "legend" }, h("h2", {}, title),
+      panel.replaceChildren(...you, ...notes, ...clears, h("div", { class: "legend" }, h("h2", {}, title),
         ...text.split("\n\n").map((para) => h("p", {}, para.replace(/\n/g, " ")))));
       return;
     }
@@ -253,10 +292,11 @@ export class Hud {
       // A full-width band a few rows tall: the system on the left, its lane
       // and rule on the right (`render._draw_side_panel_body`).
       const right = [...(p.lane.length ? rows(p.lane) : []), ...(p.rule.length ? rows(p.rule_touch) : [])];
-      panel.replaceChildren(h("div", { class: "band" }, h("section", {}, rows(p.compact, p.lore)), h("section", {}, right)));
+      panel.replaceChildren(...you, h("div", { class: "band" }, h("section", {}, rows(p.compact, p.lore)),
+        h("section", {}, right)));
       return;
     }
-    const parts = [...notes, ...clears, h("section", {}, rows(p.system, p.lore))];
+    const parts = [...you, ...notes, ...clears, h("section", {}, rows(p.system, p.lore))];
     if (p.lane.length) parts.push(h("section", {}, rows(p.lane)));
     if (p.rule.length) parts.push(h("section", {}, rows(finger ? p.rule_touch : p.rule)));
     panel.replaceChildren(...parts);

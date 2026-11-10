@@ -153,6 +153,14 @@ def clear_selected(ui: Ui) -> None:
         ui.clear_forward(ui.selected)
 
 
+def close_invite(ui: Ui) -> None:
+    """Continue on the play-by-post invite overlay: put it away for good."""
+    ui.pbp_invite = ()
+    ui.pbp_invite_rects = {}
+    ui.pbp_invite_close_rect = (0, 0, 0, 0)
+    ui.pbp_invite_copied = 0
+
+
 def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     """A key in live play, by its ``KeyboardEvent.key`` name (letters lower case).
 
@@ -361,7 +369,10 @@ def dismiss_card(ui: Ui) -> None:
 
 def press_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     """A key in whichever scene is up: a card (which any key puts away),
-    history, the game-over veil, route mode, or live play."""
+    history, the game-over veil, route mode, or live play. The play-by-post
+    invite is modal ahead of them all: only its own buttons answer it."""
+    if ui.pbp_invite:
+        return None
     if card_up(state, ui):
         dismiss_card(ui)
         return None

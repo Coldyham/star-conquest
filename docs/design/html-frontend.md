@@ -308,3 +308,51 @@ lost.
 
 **Left for later:** a link pasted into an open page (`hashchange`) is not read
 until a reload, and the daily's buttons and par wait for phase 5 with the daily.
+
+## Play by post (phase 4)
+
+`/next/` plays a shared match through the same machine pygame's loop drives,
+`pbpclient.PbpClient`, held by the session and stepped by `tick` on the time
+that has passed since its last step.
+
+- **The roster prompt** is `setupmenu`'s now (`open_pbp_prompt`,
+  `pbp_press`, `confirm_pbp`, `pbp_prompt_view`), read by pygame's `menu`
+  too, which keeps only its hit-testing and drawing. Play by post goes
+  through Start's gate (a hand map's blockers), then the prompt; Create match
+  goes through the slow-setup confirm with the seats that are people, and the
+  session creates the match on a seed resolved once for the whole table. The
+  page's two text rows are native inputs (`menu.pbp_text`) and keep their own
+  text while typed into, so a late reply never takes keystrokes back.
+- **Links at boot.** A `#pbp=<match>:<token>` seat link or a `#spectate=`
+  link opens the match ("Opening match...", no resume prompt over it), unless
+  a `#log=` link took the launch.
+- **Answers are stepped, not landed.** A pbp answer waits in its mailbox
+  until the next `tick` collects it, so a read never lands mid-film: the page
+  sends no `tick` while a turn is in flight or filming (`PbpClient.step`'s
+  ``filming``). The step's `Outcome` comes back as `pushed`: a ``game`` (a
+  match opened, or rebuilt from its log, which keeps the camera:
+  ``map_fresh`` false), a ``turn`` (one settled elsewhere or resolved here,
+  with its film, played as End Turn's is), a ``menu`` reply for the menu's
+  line, or a ``view`` (who is waited on, the last call's line). Every op but
+  `tick`, `net.reply` and `game.view` counts as input for the idle clock that
+  stretches the wait between reads.
+- **End Turn sends.** In a shared match `turn.end` resolves nothing: it sends
+  our orders (`PbpClient.send`) and answers the waiting view. Nothing resolves
+  on a clock; Play and Autoplay stay dead, as in pygame.
+- **The words are `hud`'s** (`you_are`, `invite_label`, `waiting_lines`,
+  `spectator_line`, `end_turn_word`), read by `render` too; `serial.pbp`
+  picks the overlay in `render`'s order under the win veil, a briefing and
+  the cards: the invite (each row's Copy is `pbp.copy`, Continue
+  `play.close_invite`), the waiting veil, the last call's line, or a
+  spectator's. The invite is modal for keys too (`play.press_key`).
+
+All four play-by-post parity recipes shoot at their sizes, and pygame's
+screens stayed byte-identical.
+
+**Differences kept on purpose:** a pbp answer can take up to a second longer
+to show than in pygame, which polls once a frame; against a five-second read
+cadence that is not felt.
+
+**Left for later:** a seat link pasted into an open page (`hashchange`) is
+not read until a reload, as with phase 3's links.
+

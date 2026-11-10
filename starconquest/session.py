@@ -28,6 +28,7 @@ from starconquest import (ai, app, bench, campaign, daily, engine, hostio, hud, 
 from starconquest import recipe as recipes
 from starconquest import run as gauntlet_run
 from starconquest.model import GameState
+from starconquest.pbpclient import Outcome, PbpClient
 from starconquest.replay import GameLog
 from starconquest.settings import Settings, resolve_seed
 from starconquest.viewstate import CHOOSING, ROUTING, Ui
@@ -72,7 +73,12 @@ UI_CALLS = {
     "show_all_traces": lambda ui, state: ui.graph_hidden.clear(),
     "select_note": lambda ui, state, i: ui.select_note(int(i)),
     "seek_turn": lambda ui, state, turn: play.seek(ui, int(turn)),
+    "close_invite": lambda ui, state: play.close_invite(ui),
 }
+
+# Ops that are not the player's doing: they leave play-by-post's idle clock
+# running (`PbpClient.idle`, which stretches the wait between reads).
+_NOT_INPUT = ("tick", "net.reply", "game.view")
 
 
 class Session:
@@ -100,6 +106,10 @@ class Session:
         self.campaign = campaign.Watcher()
         self.fetching: share.Download | None = None
         self.waits: list[tuple[pbp.Request, Callable[[str, str], None]]] = []
+        # Play by post (`pbpclient`): one shared match's calls, stepped by
+        # `tick` on the time that has passed since the last step.
+        self.pbp = PbpClient()
+        self.stepped: float | None = None
 
     def handle(self, raw: str) -> str:
         try:
@@ -108,6 +118,8 @@ class Session:
             return json.dumps({"id": None, "ok": False, "error": f"not JSON: {err}", "effects": []})
         reply: dict = {"id": cmd.get("id")}
         fn = getattr(self, "op_" + str(cmd.get("op", "")).replace(".", "_"), None)
+        if cmd.get("op") not in _NOT_INPUT:
+            self.pbp.idle = 0
         if fn is None:
             reply.update(ok=False, error=f"no such op: {cmd.get('op')!r}")
         else:
@@ -173,6 +185,9 @@ class Session:
                         and not gauntlet_run.is_playing(log)):
                     self.resume_log = log
                 self._watch_link()
+                self._match_link()
+        if self.ui is not None and self.ui.in_pbp:
+            self.pbp.leave()
         self.state = self.ui = self.log = None
         self.history = self.live_fog = None
         self.menu.strategies = setupmenu.strategy_options()
@@ -202,7 +217,12 @@ class Session:
         """A press on the menu's control ``key`` (`setupmenu.view` names them)."""
         ms, settings, key = self.menu, self._settings(), str(key)
         if ms.confirm_unchallenge or ms.confirm_slow or ms.confirm_clear_map:
-            return self._menu(self._answer(key))
+            return self._menu(self._then(self._answer(key)))
+        if ms.pbp_prompt:
+            # Modal: only its own controls answer.
+            if key.startswith("pbp_"):
+                return self._menu(self._then(setupmenu.pbp_press(ms, settings, key)))
+            return self._menu()
         if key != "seed":
             ms.editing_seed = False
         if not (key == "strategy" or key.startswith("strategy_opt_")):
@@ -230,6 +250,11 @@ class Session:
                 self._say("Couldn't create link", False)
         elif key in ("browse_matches", "browse_configs"):
             self._browse(key)
+        elif key == "play_by_post":
+            # The same gate Start goes through (a hand map that cannot build),
+            # then the roster prompt rather than the match itself.
+            if setupmenu.start(ms, settings, "play_by_post", self._say) is not None:
+                setupmenu.open_pbp_prompt(ms, settings)
         elif key == "clear_map":
             ms.confirm_clear_map = settings.custom_map is not None
         elif key == "quit":
@@ -242,6 +267,33 @@ class Session:
             raise ValueError(f"not a menu control: {key!r}")
         setupmenu.after_edit(ms, settings)
         return self._menu(action)
+
+    def op_menu_pbp_text(self, which: str, text: str, done: bool = False) -> dict:
+        """The roster prompt's text row ``which`` (``name`` or ``title``) holds
+        ``text`` as typed; ``done`` when it loses the caret."""
+        ms = self.menu
+        if ms.pbp_prompt and which in ("name", "title"):
+            setupmenu.set_pbp_text(ms, which, str(text))
+            ms.pbp_editing = None if done else which
+        return self._menu()
+
+    def _then(self, action: str | None) -> str | None:
+        """Carry out a menu action the session owns, and pass the page the
+        rest: ``play_by_post`` creates the match (`PbpClient.create`) on the
+        setup, for the roster and deadline the prompt confirmed; the page stays
+        on the menu until the match opens (`tick`)."""
+        if action != "play_by_post":
+            return action
+        ms, settings = self.menu, self._settings()
+        if self.pbp.make is None:
+            # The seed is resolved now and sent: "roll a fresh seed" has to
+            # mean one seed for the whole table, not one each.
+            self.seed = resolve_seed(settings)
+            line = self.pbp.create(settings, self.seed, sorted(ms.pbp_roster) or None,
+                                   ms.pbp_deadline_hours, ms.pbp_public, ms.pbp_title, ms.pbp_name)
+            if line is not None:
+                self._say(*line)
+        return None
 
     def _browse(self, key: str) -> None:
         """Open one of the board's lists in this tab, as pygame's footer does."""
@@ -278,6 +330,15 @@ class Session:
         answers a confirm yes and N or Esc no; otherwise Esc closes an open
         list, and Enter (or space) starts as Start Game does."""
         ms, name = self.menu, str(name)
+        if ms.pbp_prompt:
+            if name == "Enter":
+                return self._menu(self._then(setupmenu.confirm_pbp(ms, self._settings())))
+            if name == "Escape":
+                if ms.pbp_editing is not None:
+                    ms.pbp_editing = None
+                else:
+                    setupmenu.close_pbp_prompt(ms)
+            return self._menu()
         modal = setupmenu.modal(ms, self._settings(), self.touch)
         if modal is not None:
             if name in ("y", "Y", "Enter"):
@@ -361,6 +422,13 @@ class Session:
         film to watch it by and the board it lands on."""
         assert self.state is not None and self.ui is not None and self.settings is not None
         if self.state.winner is not None:
+            return {"board": serial.board(self.state), "travel": serial.travel(self.state), "film": None,
+                    "fog": self._fog(), "view": self._view(), "snap": False, "ms": 0.0}
+        if self.ui.in_pbp:
+            # The turn advances when the last seat is in, never on a press:
+            # this sends ours and waits (`tick` collects the rest).
+            if not self.ui.awaiting_others(self.state) and not self.ui.spectating:
+                self.pbp.send(self.state, self.ui)
             return {"board": serial.board(self.state), "travel": serial.travel(self.state), "film": None,
                     "fog": self._fog(), "view": self._view(), "snap": False, "ms": 0.0}
         was_over, was_out = self.state.winner is not None, self.state.is_defeated(self.ui.human_id)
@@ -668,13 +736,75 @@ class Session:
         as `op_net_reply`'s, when the reminder's words changed."""
         if not hostio.in_worker():   # not booted: the watcher would decide it is off for good
             return {}
-        pushed = self._land()
+        before = self._view()
+        pushed = self._step_match() or self._land(before)
         return {"pushed": pushed} if pushed else {}
 
     def op_game_view(self) -> dict:
         """The play screen's view as it stands, for a page that set a pushed
         one aside while a turn was in flight."""
         return {"view": self._view()}
+
+    def op_pbp_copy(self, seat: int) -> dict:
+        """The invite overlay's Copy on ``seat``'s row: its link to the clipboard."""
+        ui = self._ui()
+        link = next((link for row, link in ui.pbp_invite if row == int(seat)), "")
+        if link and webstore.copy_to_clipboard(link):
+            ui.pbp_invite_copied = int(seat)
+        return {"view": self._view()}
+
+    def _match_link(self) -> None:
+        """A ``#pbp=<match>:<token>`` seat link or a ``#spectate=<match>`` link,
+        unless a replay link already took the launch: open the match (`tick`
+        collects it). No resume prompt over it."""
+        if self.fetching is not None:
+            return
+        invite = app.pbp_request()
+        line = self.pbp.open_link(invite, app.pbp_spectate_request() if invite is None else None)
+        if line is not None:
+            self._say(*line)
+        if self.pbp.invite is not None:
+            self.resume_log = None
+
+    def _step_match(self) -> dict:
+        """Step play-by-post's client on the time since its last step, never
+        mid-film (the page sends no `tick` while one plays), and answer what it
+        changed on screen: a match opened or rebuilt (``game``), a turn played
+        onto the board (``turn``, with its film), the menu's line (``menu``)."""
+        now = time.monotonic()
+        dt = 0 if self.stepped is None else int((now - self.stepped) * 1000)
+        self.stepped = now
+        state, ui = self.state, self.ui
+        was_over = state is not None and state.winner is not None
+        was_out = state is not None and ui is not None and state.is_defeated(ui.human_id)
+        self.pbp.idle += dt
+        heard = self.pbp.step(dt, state, ui, self.log, self._settings(), filming=False)
+        return self._heard(heard, was_over, was_out)
+
+    def _heard(self, heard: Outcome, was_over: bool, was_out: bool) -> dict:
+        if heard.status is not None:
+            self._say(*heard.status)
+        if heard.created:
+            self.resume_log = None
+        if heard.game is not None:
+            self.state, self.ui, self.log = heard.game
+            if heard.seed is not None:
+                self.seed = heard.seed
+            self.history = self.live_fog = None
+            return {"game": {**self._whole(), "legends": serial.legends(), "map_fresh": heard.opened}}
+        if heard.reel is not None:
+            state, ui = self._state(), self._ui()
+            film = heard.reel.film
+            ui.stop_film()
+            snap = ((state.winner is not None and not was_over)
+                    or (state.is_defeated(ui.human_id) and not was_out))
+            ui.deferred_view_snap = False
+            return {"turn": {"board": serial.board(state), "travel": serial.travel(state),
+                             "film": serial.film(film) if film else None, "fog": self._fog(),
+                             "view": self._view(), "snap": snap}}
+        if heard.status is not None and self.state is None:
+            return {"menu": self._menu()}
+        return {}
 
     def _watch_link(self) -> None:
         """A ``#log=<id>`` link asks to watch a posted replay: fetch it, and
@@ -706,11 +836,11 @@ class Session:
             if asked is not None:
                 self.waits.append((asked, lambda st, body: app.land_par(ui, figures, st, body)))
 
-    def _land(self) -> dict:
+    def _land(self, before: dict | None = None) -> dict:
         """Land every answer that has arrived, and keep the campaign's lookup
         current. Answers what changed on screen (`op_net_reply`'s ``pushed``)."""
         pushed: dict = {}
-        before = self._view()
+        before = before if before is not None else self._view()
         waiting = []
         for request, land in self.waits:
             got, body = request.poll()

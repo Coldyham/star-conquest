@@ -201,6 +201,16 @@ input.seed:focus { border-color: var(--m-hl-edge); }
 .mmodal .mbuttons { display: grid; grid-template-columns: 1fr 1fr; }
 .mmodal .go { border-color: var(--m-warn); }
 .mmodal .stay { background: var(--m-hl); border-color: var(--m-hl-edge); }
+.mmodal.pbp { border-color: var(--m-hl-edge); text-align: left; min-width: 360px; }
+.mmodal.pbp .mtitle { text-align: center; margin-bottom: 10px; }
+.mmodal.pbp .prow { display: flex; align-items: center; gap: 10px; min-height: 40px; margin-bottom: 10px; }
+.mmodal.pbp .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.mmodal.pbp .pname, .mmodal.pbp .plabel { flex: 1; }
+.mmodal.pbp .you { color: var(--dim); font-size: 14px; }
+.mmodal.pbp .ptext { width: 300px; max-width: 55vw; height: var(--m-ch); padding: 0 8px; border: 2px solid var(--m-btn-edge);
+  border-radius: 6px; background: var(--m-trough); color: var(--text); font: inherit; font-size: 18px; }
+.mmodal.pbp .ptext:focus { outline: none; border-color: var(--m-hl-edge); }
+.mmodal.pbp .mbuttons { display: grid; grid-template-columns: 1fr 1fr; }
 .resume { text-align: center; }
 .resume .rtitle { margin: 0; font-size: 30px; font-weight: bold; }
 .resume .rdetail { margin: 8px 0 0; font-size: 14px; color: var(--dim); }

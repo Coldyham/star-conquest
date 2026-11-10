@@ -65,12 +65,16 @@ const menu = new SetupMenu($("setup"), core, {
  * menu, and anything else redraws the play screen, once no turn is in flight. */
 function pushed(p) {
   if (p.game) {
+    // A match opened (or a replay fetched) draws its map afresh; a shared
+    // match rebuilt from its log (`map_fresh` false) keeps the camera.
     menu.hide();
     game.film = null;
-    game.map = null;
+    if (p.game.map_fresh !== false) game.map = null;
     game.legends = p.game.legends;
     adopt(p.game);
     status("");
+  } else if (p.turn) {
+    landTurn(p.turn);
   } else if (p.menu) {
     if (menu.shown) menu.draw(p.menu);
   } else if (p.view && game.view && !menu.shown) {
@@ -83,6 +87,25 @@ setInterval(() => {
   if (document.hidden || game.busy || game.film) return;
   core.call("tick").then((res) => core.push(res), () => {});
 }, TICK_MS);
+
+/** A shared match's turn, resolved by the last seat in (`Session._step_match`):
+ * its film played onto the board the page has, as End Turn's is. */
+async function landTurn(res) {
+  if (menu.shown) return;
+  game.busy = true;
+  try {
+    const before = game.view;
+    if (res.film && !before?.history) await playFilm(res.film, res.view, before);
+    game.board = fromBoard(res.board);
+    game.board_view.setTravel(res.travel);
+    if (res.snap) game.board_view.rest(res.view.snap);
+    show(res.view);
+  } finally {
+    game.busy = false;
+    freshen();
+    runQueued();
+  }
+}
 
 /** Fetch the view a push left stale while a turn was in flight. */
 function freshen() {
@@ -264,6 +287,7 @@ function adopt(res) {
       act("ui.call", { method: "step_share", args: [delta] });
     },
     footer,
+    copy: (seat) => act("pbp.copy", { seat }),
     action: actOn,
     seek,
     done: () => act("ui.empty"),

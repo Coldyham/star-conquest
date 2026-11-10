@@ -20,7 +20,7 @@ import math
 
 from starconquest import app, combat, hud, mapgen, paths, starlore, stats, turnfilm
 from starconquest.model import GameState, lane_key
-from starconquest.viewstate import CHOOSING, ROUTING, Ui
+from starconquest.viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
 # Derived figures an event's class computes, sent alongside its fields.
 _DERIVED = {
@@ -139,6 +139,7 @@ def view(state: GameState, ui: Ui) -> dict:
         "popup": popup(state, ui) if ui.mode == CHOOSING else None,
         "panel": panel(state, ui),
         "notes": [list(n) for n in hud.match_notes(ui)],
+        "pbp": pbp(state, ui),
         "scores": scores(state, ui),
         "footer": [list(b) for b in hud.footer(state, ui)],
         "more_open": ui.more_open,
@@ -170,6 +171,37 @@ def view(state: GameState, ui: Ui) -> dict:
             "review": ui.can_review(state),
         },
     }
+
+
+def pbp(state: GameState, ui: Ui) -> dict | None:
+    """A shared match: the side panel's head (`hud.you_are`), the word where
+    End Turn stands once there is no turn of ours to end, and the overlay on
+    the map, in `render`'s order under the win veil, a briefing and the cards:
+    the invite (each seat's link to copy), the waiting veil, the last call's
+    line, or a spectator's line."""
+    if not ui.in_pbp and not ui.pbp_invite:
+        return None
+    (text, role), label = hud.you_are(ui)
+    overlay = None
+    covered = (state.winner is not None or ui.history or (ui.briefing_open and ui.in_stage)
+               or ui.lore_sid in state.systems or ui.odds_card_up())
+    if covered:
+        pass
+    elif ui.pbp_invite:
+        overlay = {"kind": "invite", "title": hud.INVITE_TITLE, "subtitle": hud.INVITE_SUBTITLE,
+                   "rows": [[seat, hud.invite_label(ui, seat), "dim" if seat == SPECTATE_ROW else seat,
+                             hud.invite_copy(ui, seat), ui.pbp_invite_copied == seat]
+                            for seat, _link in ui.pbp_invite],
+                   "done": hud.INVITE_DONE}
+    elif ui.awaiting_others(state):
+        headline, detail = hud.waiting_lines(state, ui)
+        overlay = {"kind": "waiting", "headline": headline, "detail": detail, "msg": ui.pbp_msg}
+    elif ui.in_pbp and ui.pbp_msg:
+        overlay = {"kind": "notice", "text": ui.pbp_msg}
+    elif ui.spectating:
+        overlay = {"kind": "notice", "text": hud.spectator_line(state, ui)}
+    return {"you": [text, role] if ui.in_pbp else None, "label": label if ui.in_pbp else "",
+            "end_word": hud.end_turn_word(state, ui), "overlay": overlay}
 
 
 def popup(state: GameState, ui: Ui) -> dict | None:

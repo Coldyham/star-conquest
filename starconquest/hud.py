@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import math
 
-from . import coach, combat, config, fog, stats
+from . import coach, combat, config, fog, matchnames, stats
 from .model import GameState, System, lane_key, shares_even
-from .viewstate import CHOOSING, ROUTING, Ui
+from .viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
 Role = str | int
 Row = tuple[str, Role, str]
@@ -922,3 +922,66 @@ def portrait_hint(ui: Ui) -> str:
 MORE_LABELS = {"menu_button_rect": ("Menu", "Setup menu"),
                "hint_button_rect": ("✗", "✗ Hide hint"),
                "hint_apply_rect": ("✓", "✓ Apply hint")}
+
+
+# --------------------------------------------------------------------------- #
+# Play-by-post
+# --------------------------------------------------------------------------- #
+INVITE_TITLE = "Match created — copy each seat's link"
+# The one and only time these links are ever shown: `app.pbp_open` mints the
+# tokens and hands them over right here, and nothing stores them again. A
+# missed one has no second chance.
+INVITE_SUBTITLE = "Save these somewhere — they won't be shown again"
+INVITE_DONE = "Continue"
+
+
+def you_are(ui: Ui) -> tuple[tuple[str, Role], str]:
+    """The side panel's head in a shared match: which seat is ours (in its
+    colour), or that a spectator holds none; and the match's title, or its
+    pass-phrase name where it has none (whichever the lobby headlines it by)."""
+    line: tuple[str, Role] = (("Spectating", "text") if ui.spectating
+                              else (f"You are {config.player_name(ui.human_id)}", ui.human_id))
+    return line, ui.pbp_title or matchnames.phrase(ui.pbp_match)
+
+
+def invite_label(ui: Ui, seat: int) -> str:
+    """An invite row's name: the seat's, ours marked, or the spectators'."""
+    if seat == SPECTATE_ROW:
+        return "Spectators"
+    return f"{config.player_name(seat)} (you)" if seat == ui.human_id else config.player_name(seat)
+
+
+def invite_copy(ui: Ui, seat: int) -> str:
+    """An invite row's button, which says so once its link was copied."""
+    return "Copied" if ui.pbp_invite_copied == seat else "Copy"
+
+
+def seat_name(state: GameState, seat: int) -> str:
+    """What to call a seat we are waiting on: its player name, which is
+    already how every other readout names a side."""
+    player = state.players.get(seat)
+    return player.name if player is not None else f"Seat {seat}"
+
+
+def waiting_lines(state: GameState, ui: Ui) -> tuple[str, str]:
+    """The waiting veil's headline and detail, once our orders are in."""
+    names = [seat_name(state, seat) for seat in ui.pbp_waiting]
+    if not names:
+        return "Resolving the turn...", ""
+    if len(names) == 1:
+        return "Waiting for " + names[0], "Your orders are in."
+    return f"Waiting for {len(names)} players", ", ".join(names)
+
+
+def spectator_line(state: GameState, ui: Ui) -> str:
+    """Who the live turn is waiting on, for a spectator's screen."""
+    names = [seat_name(state, seat) for seat in ui.pbp_waiting]
+    return ("Waiting for " + ", ".join(names)) if names else "Resolving the turn..."
+
+
+def end_turn_word(state: GameState, ui: Ui) -> str | None:
+    """What stands where End Turn would, when there is no turn of ours to
+    end: a spectator's, or a shared turn already sent. None otherwise."""
+    if ui.spectating:
+        return "Spectating"
+    return "Orders sent" if ui.awaiting_others(state) else None

@@ -115,7 +115,7 @@ CANT_CLOSE_MSG = "Close the tab or app window to exit"
 # The menu's actions whose screens the HTML build has yet to reach
 # (`docs/design/html-frontend.md`, "How it is staged"), and what each opens.
 LATER = {"tutorial": "gauntlets and the tutorial", "daily": "the daily map", "puzzle": "the daily puzzle",
-         "play_by_post": "play by post", "create_map": "the map creator"}
+         "create_map": "the map creator"}
 LATER_MSG = "Not in this build yet: {what}"
 
 
@@ -151,6 +151,14 @@ class Menu:
     sketch_at: tuple | None = None
     sketch: MapSketch | None = None
     gauntlets: list[gauntlet.Gauntlet] = field(default_factory=gauntlet.every)
+    # The play-by-post roster prompt (`open_pbp_prompt`).
+    pbp_prompt: bool = False
+    pbp_roster: set[int] = field(default_factory=set)
+    pbp_deadline_hours: int = pbp.DEADLINE_HOURS
+    pbp_public: bool = False
+    pbp_name: str = ""
+    pbp_title: str = ""
+    pbp_editing: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -692,6 +700,10 @@ def answer_slow(ms, play: bool) -> str | None:
 # Modal words: (go, stay), with the key hint dropped on a touch screen, where
 # there is no Y/N to press
 # --------------------------------------------------------------------------- #
+def pbp_prompt_labels(touch: bool) -> tuple[str, str]:
+    return ("Create match", "Cancel") if touch else ("Create match (Enter)", "Cancel (Esc)")
+
+
 def unchallenge_labels(touch: bool) -> tuple[str, str]:
     return ("Change it anyway", "Keep the challenge") if touch else (
         "Change it anyway (Y)", "Keep the challenge (Esc)")
@@ -948,6 +960,114 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
                             "items": [{"key": k, "label": label} for k, label in BOARD_ITEMS]}},
         "hint": None if touch else KEY_HINT,
         "modal": modal(ms, settings, touch),
+        "pbp_prompt": pbp_prompt_view(ms, settings, touch),
         "sketch": sketch_view(ms),
         "dragging": ms.drag_key,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# The play-by-post roster prompt: who at the table is a person, how long their
+# clock runs, whether the lobby lists the match, and two optional words for
+# it, before the match is opened
+# --------------------------------------------------------------------------- #
+PBP_PROMPT_TITLE = "Who's playing?"
+# `pbp.DEADLINE_HOURS` is the format's own unit ("two days is what play-by-post
+# exists for"), so the stepper moves in whole days, from one day up to the
+# endpoint's own ceiling of 336h (14 days).
+PBP_DEADLINE_STEP_H = 24
+PBP_DEADLINE_MIN_H = 24
+PBP_DEADLINE_MAX_H = 336
+# The prompt's two free-text rows: (label, which, character limit).
+PBP_TEXT_ROWS = (("Your name", "name", pbp.NAME_MAX), ("Title", "title", pbp.TITLE_MAX))
+
+
+def deadline_label(hours: int) -> str:
+    days = max(1, hours // 24)
+    return "1 day" if days == 1 else f"{days} days"
+
+
+def step_deadline(ms, by: int) -> None:
+    ms.pbp_deadline_hours = max(PBP_DEADLINE_MIN_H, min(
+        PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * PBP_DEADLINE_STEP_H))
+
+
+def pbp_text(ms, which: str) -> str:
+    return ms.pbp_name if which == "name" else ms.pbp_title
+
+
+def set_pbp_text(ms, which: str, text: str) -> None:
+    """A text row's new text, reduced to printable characters within its limit."""
+    limit = next(cap for _, key, cap in PBP_TEXT_ROWS if key == which)
+    text = "".join(ch for ch in text if ch.isprintable())[:limit]
+    if which == "name":
+        ms.pbp_name = text
+    else:
+        ms.pbp_title = text
+
+
+def open_pbp_prompt(ms, settings: Settings) -> None:
+    """Open the roster prompt on its defaults: every seat a person, the format's
+    own deadline, private, and the name this installation last used."""
+    ms.pbp_prompt = True
+    ms.pbp_roster = set(range(1, settings.players + 1))
+    ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
+    ms.pbp_public = False
+    ms.pbp_name = ""
+    set_pbp_text(ms, "name", webstore.pbp_name())
+    ms.pbp_title = ""
+    ms.pbp_editing = None
+
+
+def close_pbp_prompt(ms) -> None:
+    ms.pbp_prompt = False
+    ms.pbp_editing = None
+
+
+def confirm_pbp(ms, settings: Settings, asked: tuple[str, list[str]] | None = None) -> str | None:
+    """Create match: ``"play_by_post"`` for the seats still checked (seat 1
+    always, the creator's), unless a bot in the setup warns first."""
+    close_pbp_prompt(ms)
+    return unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1}, asked)
+
+
+def pbp_press(ms, settings: Settings, key: str) -> str | None:
+    """A press on the prompt's control ``key``: a seat's box (``pbp_seat_<n>``,
+    never seat 1's, the creator's), the deadline's −/+, Publicly joinable, a
+    text row's field (``pbp_name_field``: it takes the caret), Create match or
+    Cancel. Answers ``"play_by_post"`` when the match is to be created."""
+    ms.pbp_editing = None
+    if key.startswith("pbp_seat_"):
+        seat = int(key[len("pbp_seat_"):])
+        if 2 <= seat <= settings.players:
+            ms.pbp_roster.symmetric_difference_update({seat})
+    elif key in ("pbp_deadline_dec", "pbp_deadline_inc"):
+        step_deadline(ms, -1 if key.endswith("dec") else 1)
+    elif key == "pbp_public":
+        ms.pbp_public = not ms.pbp_public
+    elif key in ("pbp_name_field", "pbp_title_field"):
+        ms.pbp_editing = key[len("pbp_"):-len("_field")]
+    elif key == "pbp_confirm":
+        return confirm_pbp(ms, settings)
+    elif key == "pbp_cancel":
+        close_pbp_prompt(ms)
+    return None
+
+
+def pbp_prompt_view(ms, settings: Settings, touch: bool) -> dict | None:
+    """The roster prompt as it stands, or None while it is shut."""
+    if not ms.pbp_prompt:
+        return None
+    go, stay = pbp_prompt_labels(touch)
+    return {
+        "title": PBP_PROMPT_TITLE,
+        "seats": [{"seat": seat, "name": config.player_name(seat), "color": _hex(config.player_color(seat)),
+                   "you": seat == 1, "checked": seat in ms.pbp_roster, "key": f"pbp_seat_{seat}"}
+                  for seat in range(1, settings.players + 1)],
+        "deadline": deadline_label(ms.pbp_deadline_hours),
+        "public": ms.pbp_public,
+        "text": [{"label": label, "key": f"pbp_{which}_field", "which": which, "text": pbp_text(ms, which),
+                  "limit": cap, "editing": ms.pbp_editing == which} for label, which, cap in PBP_TEXT_ROWS],
+        "go": {"key": "pbp_confirm", "label": go},
+        "stay": {"key": "pbp_cancel", "label": stay},
     }

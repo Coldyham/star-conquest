@@ -1071,67 +1071,17 @@ def _draw_slow(surface, ms: MenuState, w: int, h: int) -> None:
 def _pbp_prompt_labels() -> tuple[str, str]:
     """(confirm, cancel) labels; key hints dropped on a touch build, as every
     other modal here does."""
-    if config.touch_ui:
-        return ("Create match", "Cancel")
-    return ("Create match (Enter)", "Cancel (Esc)")
+    return setupmenu.pbp_prompt_labels(config.touch_ui)
 
 
-# `pbp.DEADLINE_HOURS` is the format's own unit ("two days is what play-by-post
-# exists for"), so the stepper below moves in whole days rather than exposing
-# raw hour arithmetic — a day (24h) at a time, from one day up to the endpoint's
-# own ceiling of 336h (14 days).
-_PBP_DEADLINE_STEP_H = 24
-_PBP_DEADLINE_MIN_H = 24
-_PBP_DEADLINE_MAX_H = 336
-
-
-def _deadline_label(hours: int) -> str:
-    days = max(1, hours // 24)
-    return "1 day" if days == 1 else f"{days} days"
-
-
-def _step_deadline(ms: MenuState, by: int) -> None:
-    ms.pbp_deadline_hours = max(_PBP_DEADLINE_MIN_H, min(
-        _PBP_DEADLINE_MAX_H, ms.pbp_deadline_hours + by * _PBP_DEADLINE_STEP_H))
-
-
-# The prompt's two free-text rows: (label, which, character limit).
-_PBP_TEXT_ROWS = (("Your name", "name", pbp.NAME_MAX), ("Title", "title", pbp.TITLE_MAX))
+_deadline_label = setupmenu.deadline_label
+_step_deadline = setupmenu.step_deadline
+_PBP_TEXT_ROWS = setupmenu.PBP_TEXT_ROWS
 _PBP_FIELD_W = 300
-
-
-def _pbp_text(ms: MenuState, which: str) -> str:
-    return ms.pbp_name if which == "name" else ms.pbp_title
-
-
-def _set_pbp_text(ms: MenuState, which: str, text: str) -> None:
-    limit = next(cap for _, key, cap in _PBP_TEXT_ROWS if key == which)
-    text = _filter(text, _pbp_char, limit)
-    if which == "name":
-        ms.pbp_name = text
-    else:
-        ms.pbp_title = text
-
-
-def _pbp_char(ch: str) -> bool:
-    return ch.isprintable()
-
-
-def _open_pbp_prompt(ms: MenuState, settings: Settings) -> None:
-    """Open the roster prompt on its defaults: every seat a person, the format's
-    own deadline, private, and the name this installation last used."""
-    ms.pbp_prompt = True
-    ms.pbp_roster = set(range(1, settings.players + 1))
-    ms.pbp_deadline_hours = pbp.DEADLINE_HOURS
-    ms.pbp_public = False
-    ms.pbp_name = _filter(webstore.pbp_name(), _pbp_char, pbp.NAME_MAX)
-    ms.pbp_title = ""
-    ms.pbp_editing = None
-
-
-def _close_pbp_prompt(ms: MenuState) -> None:
-    ms.pbp_prompt = False
-    ms.pbp_editing = None
+_pbp_text = setupmenu.pbp_text
+_set_pbp_text = setupmenu.set_pbp_text
+_open_pbp_prompt = setupmenu.open_pbp_prompt
+_close_pbp_prompt = setupmenu.close_pbp_prompt
 
 
 def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int) -> None:
@@ -1154,7 +1104,7 @@ def _draw_pbp_prompt(surface, ms: MenuState, settings: Settings, w: int, h: int)
     confirm, cancel = _pbp_prompt_labels()
     bw = max(f["normal"].size(s)[0] for s in (confirm, cancel)) + 2 * 18
     bh = 40
-    title = "Who's playing?"
+    title = setupmenu.PBP_PROMPT_TITLE
     name_w = max(f["normal"].size(config.player_name(seat))[0]
                  for seat in range(1, settings.players + 1))
     stepper_w = 34 + 64 + 34  # `_stepper`'s own fixed −/box/+ widths
@@ -2631,38 +2581,20 @@ def _handle_pbp_prompt(event, ms: MenuState, settings: Settings) -> str | None:
     leaves the field rather than the prompt, and Tab moves to the other field.
     """
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-        ms.pbp_editing = None
-        for _, which, _ in _PBP_TEXT_ROWS:
-            rect = ms.rects.get(f"pbp_{which}_field")
-            if rect is not None and rect.collidepoint(event.pos):
-                ms.pbp_editing = which
-                return None
-        for seat in range(2, settings.players + 1):
-            rect = ms.rects.get(f"pbp_seat_{seat}")
-            if rect is not None and rect.collidepoint(event.pos):
-                ms.pbp_roster.symmetric_difference_update({seat})
-                return None
-        for key, by in (("pbp_deadline_dec", -1), ("pbp_deadline_inc", 1)):
-            rect = ms.rects.get(key)
-            if rect is not None and rect.collidepoint(event.pos):
-                _step_deadline(ms, by)
-                return None
-        rect = ms.rects.get("pbp_public")
-        if rect is not None and rect.collidepoint(event.pos):
-            ms.pbp_public = not ms.pbp_public
+        keys = ([f"pbp_{which}_field" for _, which, _ in _PBP_TEXT_ROWS]
+                + [f"pbp_seat_{seat}" for seat in range(2, settings.players + 1)]
+                + ["pbp_deadline_dec", "pbp_deadline_inc", "pbp_public", "pbp_confirm", "pbp_cancel"])
+        hit = next((key for key in keys if ms.rects.get(key) is not None
+                    and ms.rects[key].collidepoint(event.pos)), None)
+        if hit is None:
+            ms.pbp_editing = None
             return None
-        if ms.rects.get("pbp_confirm") is not None and ms.rects["pbp_confirm"].collidepoint(event.pos):
-            _close_pbp_prompt(ms)
-            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
-        if ms.rects.get("pbp_cancel") is not None and ms.rects["pbp_cancel"].collidepoint(event.pos):
-            _close_pbp_prompt(ms)
-            return None
+        return setupmenu.pbp_press(ms, settings, hit)
     elif event.type == pygame.TEXTINPUT and ms.pbp_editing is not None:
         _set_pbp_text(ms, ms.pbp_editing, _pbp_text(ms, ms.pbp_editing) + event.text)
     elif event.type == pygame.KEYDOWN:
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            _close_pbp_prompt(ms)
-            return _unless_slow(ms, settings, "play_by_post", ms.pbp_roster | {1})
+            return setupmenu.confirm_pbp(ms, settings)
         if ms.pbp_editing is not None:
             if event.key == pygame.K_ESCAPE:
                 ms.pbp_editing = None

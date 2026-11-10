@@ -293,10 +293,7 @@ def _handle_invite_event(event, ui: Ui) -> str | None:
     if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
         return None
     if ui.pbp_invite_close_rect[2] and _point_in_rect(event.pos, ui.pbp_invite_close_rect):
-        ui.pbp_invite = ()
-        ui.pbp_invite_rects = {}
-        ui.pbp_invite_close_rect = (0, 0, 0, 0)
-        ui.pbp_invite_copied = 0
+        play.close_invite(ui)
         return None
     for seat, rect in ui.pbp_invite_rects.items():
         if rect[2] and _point_in_rect(event.pos, rect):
