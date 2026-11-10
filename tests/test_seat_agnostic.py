@@ -5,26 +5,16 @@ stamps it and nothing in the setup moves it — so until play-by-post nothing ha
 ever run the shell from anywhere else. `Ui.human_id` was always a field and the
 shell always read it, but "always read it" was an untested claim: these tests are
 what make it a checked one.
-
-Pure/headless: `main` imports pygame, but nothing exercised here draws, so the
-SDL dummy driver is enough.
 """
 
 from __future__ import annotations
 
-import os
 
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame
 
-from starconquest import main as app
-from starconquest import ai, config, fog, input, mapgen, render, replay
+from starconquest import ai, app, config, fog, mapgen, replay
 from starconquest.model import Order
 
-pygame.init()
-pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
 
 
 def _seated(seat: int, seed: int = 5, nodes: int = 16, players: int = 3):
@@ -114,21 +104,6 @@ def _waiting(seat=1):
     return state, ui
 
 
-def test_a_submitted_turn_cannot_be_ended_again():
-    """The turn advances when the last seat is in, not when somebody presses a
-    key — so End Turn has to stop being an action, not merely look inert."""
-    state, ui = _waiting()
-    event = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN)
-    assert input.handle_event(event, state, ui) is None
-
-
-def test_the_turn_can_still_be_ended_before_we_submit():
-    state, ui = _waiting()
-    ui.pbp_submitted = False
-    event = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN)
-    assert input.handle_event(event, state, ui) == "end_turn"
-
-
 def test_waiting_ends_when_the_match_does():
     """A decided match is nobody's turn."""
     state, ui = _waiting()
@@ -144,37 +119,3 @@ def test_a_game_of_our_own_never_waits():
     assert not ui.awaiting_others(state)
 
 
-def test_the_overlay_stays_inside_the_map_at_a_large_ui_scale(monkeypatch):
-    """It is centred on the viewport rather than the window, and wrapped to it —
-    a headline long enough to name two players ran clean across the side panel
-    before that, which is the kind of thing only a screenshot shows.
-    """
-    # Another test file quits pygame before this one runs, which uninitialises
-    # the font module and leaves `render._FONTS` holding fonts from the dead
-    # session: re-init and rebuild them, the way test_render does.
-    pygame.init()
-    render._FONTS.clear()
-    state, ui = _waiting()
-    ui.pbp_waiting = (2, 3)
-    config.apply_ui_scale(2.5, touch=False)
-    try:
-        drawn = []
-        original = render._text
-
-        def spy(surf, font, text, colour, **kw):
-            drawn.append((text, font.size(text)[0], kw.get("center")))
-            return original(surf, font, text, colour, **kw)
-
-        # monkeypatch, so a failure mid-draw cannot leave the spy installed for
-        # whatever test runs next (which is exactly what happened once).
-        monkeypatch.setattr(render, "_text", spy)
-        # Our own surface rather than the display's: another test file may have
-        # closed it, and this test cares about layout, not about the window.
-        render.draw(pygame.Surface((config.SCREEN_W, config.SCREEN_H)), state, ui)
-        px, _, pw, _ = config.play_rect()
-        for text, width, center in drawn:
-            if center is None or not (px <= center[0] <= px + pw):
-                continue        # HUD text, not ours
-            assert center[0] + width // 2 <= px + pw, f"{text!r} overflows the map"
-    finally:
-        config.apply_ui_scale(1.0, touch=False)

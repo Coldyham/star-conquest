@@ -1,14 +1,12 @@
 """The small persistent bits a shared link needs: a key/value store and the
 address bar.
 
-Not a pygame module — the sibling of ``softkeyboard``, written in the same
-defensive style. The browser parts go through pygbag's ``platform.window`` JS
-bridge, imported *locally* (so importing this module is safe off the web build)
-with every DOM call wrapped, so a missing or blocked API degrades to a no-op
-return rather than a crash.
+In the browser the game runs in a worker (``hostio.in_worker``) with no DOM to
+reach: storage is a mirror the page seeded at boot, and every write, copy,
+fragment and navigation is queued as an effect for the page to carry out.
 
 ``get``/``set`` are localStorage in the browser and a JSON file under
-``data_dir()`` everywhere else, so features built on them (personal bests) work on
+``data_dir()`` everywhere else (tools and tests), so features built on them (personal bests) work on
 desktop too rather than being web-only. ``share_token``/``url_token`` are
 genuinely browser-only and no-op elsewhere. Key names live in ``paths`` beside
 ``WEB_SHARED_SETTINGS_KEY``, keeping "what may I write, and where" in one place.
@@ -21,7 +19,7 @@ from __future__ import annotations
 
 import json
 
-from . import paths
+from . import hostio, paths
 from .paths import (
     WEB_ANIMATE_TURNS_KEY,
     WEB_BESTS_KEY,
@@ -52,36 +50,25 @@ def _read_file() -> dict:
 
 def get(key: str) -> str:
     """The stored string for ``key``, or ``""`` when absent or unavailable."""
-    if not is_web():
-        value = _read_file().get(key)
-        return value if isinstance(value, str) else ""
-    import platform as _platform
-
-    try:
-        value = _platform.window.localStorage.getItem(key)  # pyright: ignore[reportAttributeAccessIssue]
-        return str(value) if value else ""
-    except Exception:
-        return ""
+    if hostio.in_worker():
+        return hostio.store_get(key)
+    value = _read_file().get(key)
+    return value if isinstance(value, str) else ""
 
 
 def set(key: str, value: str) -> bool:
     """Store ``value`` under ``key``. True if it landed."""
-    if not is_web():
-        try:
-            data = _read_file()
-            data[key] = value
-            path = _file_path()
-            tmp = path.with_suffix(".json.tmp")
-            with open(tmp, "w") as fh:
-                json.dump(data, fh, indent=2)
-            tmp.replace(path)  # atomic, like GameLog.save
-            return True
-        except Exception:
-            return False
-    import platform as _platform
-
+    if hostio.in_worker():
+        hostio.store_set(key, value)
+        return True
     try:
-        _platform.window.localStorage.setItem(key, value)  # pyright: ignore[reportAttributeAccessIssue]
+        data = _read_file()
+        data[key] = value
+        path = _file_path()
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w") as fh:
+            json.dump(data, fh, indent=2)
+        tmp.replace(path)  # atomic, like GameLog.save
         return True
     except Exception:
         return False
@@ -232,17 +219,12 @@ def leaderboard_origin() -> str:
     functions are served by the game's site, so every deploy — production, a
     deploy preview, a branch deploy — answers for itself.
 
-    Everywhere else — a custom domain, localhost, desktop, Android — the
-    configured production origin, ``paths.LEADERBOARD_ORIGIN``. (Localhost can
-    call it: the functions' CORS allow-list admits a local server.)
+    Everywhere else — a custom domain, localhost, a tool — the configured
+    production origin, ``paths.LEADERBOARD_ORIGIN``. (Localhost can call it: the
+    functions' CORS allow-list admits a local server.)
     """
-    if is_web():
-        import platform as _platform
-
-        try:
-            host = str(_platform.window.location.hostname)  # pyright: ignore[reportAttributeAccessIssue]
-        except Exception:  # no DOM, nothing to read
-            host = ""
+    if hostio.in_worker():
+        host = hostio.page("hostname")
         if host.endswith(paths.NETLIFY_SUFFIX):
             return f"https://{host}"
     return paths.LEADERBOARD_ORIGIN
@@ -257,47 +239,29 @@ def leaderboard_url(path: str) -> str:
 
 def link_url(token: str) -> str:
     """The full shareable URL carrying ``token``, or ``""`` off the web."""
-    if not is_web():
-        return ""
-    import platform as _platform
-
-    try:
-        loc = _platform.window.location  # pyright: ignore[reportAttributeAccessIssue]
-        return f"{loc.origin}{loc.pathname}#{token}"
-    except Exception:
-        return ""
+    if hostio.in_worker():
+        origin = hostio.page("origin")
+        return f"{origin}{hostio.page('pathname')}#{token}" if origin else ""
+    return ""
 
 
 def set_url_fragment(token: str) -> bool:
     """Web only: replace the address bar's ``#fragment``, no reload, no new
     history entry (``history.replaceState``)."""
-    if not is_web():
-        return False
-    import platform as _platform
-
-    try:
-        _platform.window.history.replaceState(None, "", "#" + token)  # pyright: ignore[reportAttributeAccessIssue]
+    if hostio.in_worker():
+        hostio.emit("fragment", token=token)
+        hostio.set_hash(token)
         return True
-    except Exception:
-        return False
+    return False
 
 
 def copy_to_clipboard(text: str) -> bool:
     """Web only, best-effort: the write is async and fire-and-forget, so True
-    means the call was accepted, not that the paste buffer definitely changed.
-
-    The text crosses the bridge as an ASCII-only JS literal (``json.dumps``
-    escapes everything else): handed over as a ``str``, pygbag passes its UTF-8
-    bytes as Latin-1, so a shared result's "·" pasted as "Â·"."""
-    if not is_web():
-        return False
-    import platform as _platform
-
-    try:
-        _platform.window.eval(f"navigator.clipboard.writeText({json.dumps(text)}).catch(function(){{}})")  # pyright: ignore[reportAttributeAccessIssue]
+    means the call was accepted, not that the paste buffer definitely changed."""
+    if hostio.in_worker():
+        hostio.emit("clipboard", text=text)
         return True
-    except Exception:
-        return False
+    return False
 
 
 def open_url(url: str) -> bool:
@@ -306,20 +270,14 @@ def open_url(url: str) -> bool:
     On the web that is a same-tab navigation (``window.location``), so bouncing
     between the game and the board — routine on a leaderboard visit, not just a
     one-off score post — doesn't pile up tabs; the back button is what returns to
-    the game. Elsewhere it is the platform's default browser, because a desktop
-    player has just as much reason to post a score. True means the call was
+    the game. Elsewhere it is the platform's default browser. True means the call was
     accepted, not that navigation definitely happened.
     """
     if not url:
         return False
-    if is_web():
-        import platform as _platform
-
-        try:
-            _platform.window.location = url  # pyright: ignore[reportAttributeAccessIssue]
-            return True
-        except Exception:
-            return False
+    if hostio.in_worker():
+        hostio.emit("navigate", url=url)
+        return True
     try:
         import webbrowser
 
@@ -372,99 +330,18 @@ def close_window() -> bool:
 
     A page may normally only close itself if a script opened it, so this succeeds in
     an installed PWA window far more often than in an ordinary tab, and never at all
-    in some browsers. There is no other way for a web app to exit, and the
-    alternative — ending the main loop, which tears down the canvas — strands the
-    player on a blank page with no way back, so a caller that can't verify the close
-    must stay in the app instead (see ``main.leave_app``).
+    in some browsers. There is no other way for a web app to exit, so a caller
+    that can't verify the close must stay in the app instead (see
+    ``Session._leave``).
     """
-    if not is_web():
-        return False
-    import platform as _platform
-
-    try:
-        _platform.window.close()  # pyright: ignore[reportAttributeAccessIssue]
+    if hostio.in_worker():
+        hostio.emit("close")
         return True
-    except Exception:
-        return False
-
-
-def trigger_resize() -> bool:
-    """Web only: replay a browser ``resize`` event.
-
-    pygbag fits the canvas to the page on its own ``resize`` listener, but never
-    proactively — so a load that lands before the browser's layout has settled
-    (e.g. a phone's URL bar hasn't collapsed yet) leaves the canvas stretched to
-    the wrong aspect ratio until the player resizes the window by hand. Firing a
-    synthetic resize once boot has (probably) settled nudges pygbag's own
-    handler to recompute the fit itself, with no fix needed here beyond that.
-    """
-    if not is_web():
-        return False
-    import platform as _platform
-
-    try:
-        _platform.window.dispatchEvent(_platform.window.Event.new("resize"))  # pyright: ignore[reportAttributeAccessIssue]
-        return True
-    except Exception:
-        return False
-
-
-# The canvas fills the page; the framebuffer is then sized from its measured box.
-# touchAction: the game handles every gesture on the canvas itself (a pinch zooms
-# the map, `input._pinch`), so the browser must not take one for page zoom. The
-# rest stop a long press on a drawn button from selecting text or raising the
-# callout menu (the page's own stylesheet says the same, `tools/pwa/inject.py`).
-_CANVAS_STYLE = {"position": "fixed", "left": "0", "top": "0", "right": "0",
-                 "bottom": "0", "margin": "0", "width": "100%", "height": "100%",
-                 "touchAction": "none", "userSelect": "none", "webkitUserSelect": "none",
-                 "webkitTouchCallout": "none"}
-
-
-def viewport() -> tuple[int, int, float] | None:
-    """Web only: the canvas's on-screen size in CSS pixels, and the device pixel ratio.
-
-    What ``main.web_framebuffer`` sizes the framebuffer from. The game manages the
-    canvas itself: pygbag's own fit keeps the framebuffer's aspect, so it would
-    letterbox (or, racing a resize, stretch) any other shape. Each call tells
-    pygbag to keep its hands off (``user_canvas_managed``), styles the canvas to
-    fill the page, and *measures* the box that results, so the framebuffer always
-    has the shape it is shown at whatever the page's viewport meta says.
-    None off the web or if the DOM can't be read; the caller keeps its size.
-    """
-    if not is_web():
-        return None
-    import platform as _platform
-
-    try:
-        win = _platform.window  # pyright: ignore[reportAttributeAccessIssue]
-        canvas = win.canvas
-    except Exception:
-        return None
-    try:
-        win.python.config.user_canvas_managed = 1
-    except Exception:
-        pass
-    try:
-        for prop, value in _CANVAS_STYLE.items():
-            setattr(canvas.style, prop, value)
-    except Exception:
-        pass
-    try:
-        rect = canvas.getBoundingClientRect()
-        w, h = int(rect.width), int(rect.height)
-        dpr = float(win.devicePixelRatio or 1.0)
-    except Exception:
-        return None
-    return (w, h, dpr) if w > 0 and h > 0 else None
+    return False
 
 
 def url_token() -> str:
     """Web only: the ``#<token>`` fragment in the address bar, else ``""``."""
-    if not is_web():
-        return ""
-    import platform as _platform
-
-    try:
-        return str(_platform.window.location.hash).lstrip("#")  # pyright: ignore[reportAttributeAccessIssue]
-    except Exception:
-        return ""
+    if hostio.in_worker():
+        return hostio.page("hash").lstrip("#")
+    return ""

@@ -1,8 +1,7 @@
 """Move a match's replay between the game and the leaderboard.
 
-The one platform bridge that talks to a network (with ``webstore``,
-``softkeyboard`` and the web-only paths in ``main``/``menu``), written in the same
-defensive style: every call is guarded, nothing here is load-bearing, and a
+The one platform bridge that talks to a network (with ``webstore``), written
+in the same defensive style: every call is guarded, nothing here is load-bearing, and a
 failure is silent by design — a player who has just won must not be shown a
 network error about a side-effect they did not ask for.
 
@@ -36,12 +35,12 @@ to any of it: a row is a match id, a setup key and the moves. Grouping one
 person's games across sessions would need a durable client id, which is a
 tracking identifier by any other name and buys nothing this needs.
 
-Two backends, because the browser has no sockets and the desktop has no ``fetch``:
+Two backends, because the browser has no sockets and a tool has no ``fetch``:
 
-* On the web, ``platform.window`` runs one ``fetch`` and we never look at the
-  promise — the game keeps its frame rate and the upload lands or doesn't.
-* Off it, ``urllib`` on a daemon thread, for the same reason: a POST blocking the
-  event loop would freeze the win overlay for as long as the network felt like it.
+* In the browser, the worker asks the page for one ``fetch`` (``hostio``) and
+  never looks at the promise — the upload lands or doesn't.
+* Off it, ``urllib`` on a daemon thread, for the same reason: a POST must never
+  hold up the caller for as long as the network feels like it.
 
 So ``post_log`` returns whether the attempt was *started*, not whether it
 arrived — the same contract ``webstore.open_url`` documents.
@@ -50,19 +49,8 @@ arrived — the same contract ``webstore.open_url`` documents.
 has nothing to show without it: ``fetch_log`` starts a download and hands back a
 ``Download`` the caller polls once a frame. Same two backends, same guards, and
 the same "a failure is a state, not an exception" rule — a poll only ever answers
-pending, ok or error. Nothing awaits: the browser build's loop yields once per
-frame and blocking it on a network round trip would freeze the canvas.
-
-On the web the result comes back through *localStorage* rather than a ``window``
-property. Three bridge calls are involved in this feature and only two of them
-are proven by the rest of the game: writing through ``window.eval`` (how a replay
-is uploaded) and reading a stored string (how every preference and shared link
-already works). ``eval`` *returning* a value is the third, is needed nowhere else,
-and if it misbehaves it does so as an unexplained failure — so the fetch stores
-its answer and the poll reads it the way everything else does.
-
-Pure core in the sense that matters: no pygame, and no import of anything the
-headless tests can't load.
+pending, ok or error. Nothing awaits: the worker answers one message at a
+time, and blocking it on a network round trip would freeze the game.
 """
 
 from __future__ import annotations
@@ -70,20 +58,18 @@ from __future__ import annotations
 import json
 import threading
 
-from . import pbp, webstore
+from . import hostio, pbp, webstore
 from .paths import (
     LEADERBOARD_LOG_PATH,
     LEADERBOARD_POST_MODULE_PATH,
     LEADERBOARD_REPLAY_PATH,
-    WEB_REPLAY_BODY_KEY,
-    WEB_REPLAY_STATE_KEY,
     is_web,
 )
 from .replay import _MATCH_ID_RE, GameLog
 
 # How often a shared game checkpoints, in turns. Not a `config` constant: it is
 # neither balance nor aesthetics, nothing in the menu tunes it, and it belongs to
-# this module the way `main.FAST_FORWARD_MS` belongs to the loop.
+# this module.
 #
 # The trade it sets is how much of an abandoned game survives against how many
 # superseded rows a finished one leaves. Measured whole games run 5-14 KiB
@@ -197,39 +183,10 @@ def post_log(log: GameLog, game_key: str) -> bool:
     # may actually write `game_logs` lives in that function's environment. There
     # is nothing to authenticate as from here.
     headers = {"Content-Type": "application/json"}
-    return _post_web(body, headers) if is_web() else _post_desktop(body, headers)
-
-
-def _post_web(body: str, headers: dict[str, str]) -> bool:
-    """One fire-and-forget ``fetch`` through pygbag's JS bridge.
-
-    Built as a JS source string because marshalling a nested object literal across
-    the bridge is far more fragile than handing JavaScript the JSON it already
-    speaks. Every value goes through ``json.dumps``, so the payload is a *quoted
-    string literal* wherever it lands — a JSON string is a valid JS string, and
-    base64url plus JSON escaping leaves nothing that could close the quote.
-
-    The rejection handler is not optional: an unhandled promise rejection (an
-    offline tab, a CORS refusal) surfaces as a console error on a page that is
-    still mid-game, and looks like the game crashed.
-
-    Two things this leans on, both worth knowing before changing them. ``eval`` is
-    available because pygbag's own bridge needs it — a Content-Security-Policy
-    strict enough to block it would stop the game booting long before this line,
-    and ``netlify.toml`` sets none. And on a deployed page the request is
-    same-origin (the functions are the game site's own), but from a local server
-    it goes to production cross-origin, which is why the function still answers
-    the preflight and names an allowed origin in its CORS headers.
-    """
-    import platform as _platform
-
-    try:
-        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
-            f"fetch({json.dumps(log_url())},{{method:'POST',headers:{json.dumps(headers)},body:{json.dumps(body)}}}).catch(function(){{}})"
-        )
+    if hostio.in_worker():
+        hostio.emit("fire", url=log_url(), body=body)
         return True
-    except Exception:  # noqa: BLE001 — a bridge that isn't there is not an error
-        return False
+    return _post_desktop(body, headers)
 
 
 def _post_desktop(body: str, headers: dict[str, str]) -> bool:
@@ -294,7 +251,7 @@ def signed_in_name() -> pbp.Request | None:
     module = _quick_post_module()
     if not module:
         return None
-    return pbp.settle(f"import({json.dumps(module)}).then(function(m){{return m.ownName()}})")
+    return pbp.bridge(module, "ownName", [])
 
 
 def quick_post(token: str, name: str) -> pbp.Request | None:
@@ -310,11 +267,7 @@ def quick_post(token: str, name: str) -> pbp.Request | None:
     module = webstore.leaderboard_url(LEADERBOARD_POST_MODULE_PATH)
     if not module or not name:
         return None
-    return pbp.settle(
-        f"import({json.dumps(module)}).then(function(m)"
-        f"{{return m.quickPost({json.dumps(token)},{json.dumps(name)})}})"
-        ".then(function(r){return JSON.stringify(r)})"
-    )
+    return pbp.bridge(module, "quickPost", [token, name])
 
 
 def short_name(name: str) -> str:
@@ -378,51 +331,18 @@ class Download:
     is wait.
     """
 
-    def __init__(self, web: bool) -> None:
-        self._web = web
-        self._result: list[tuple[str, str]] = []   # a one-slot mailbox for the thread
+    def __init__(self) -> None:
+        self._result: list[tuple[str, str]] = []   # a one-slot mailbox
 
     @classmethod
     def ready(cls, body: str) -> Download:
         """A download that has already arrived: a replay read off disk."""
-        download = cls(web=False)
+        download = cls()
         download._result.append((OK, body))
         return download
 
     def poll(self) -> tuple[str, str]:
-        if self._web:
-            return self._poll_web()
         return self._result[0] if self._result else (PENDING, "")
-
-    def _poll_web(self) -> tuple[str, str]:
-        """Collect whatever the fetch has parked in localStorage.
-
-        Read with ``webstore.get`` rather than by evaluating JS, because that is
-        the read path the rest of the game already proves works every launch (the
-        shared-settings token, the personal bests). Handing JavaScript a string to
-        *store* and reading it back through the accessor we trust avoids depending
-        on ``window.eval`` returning a value across the bridge, which nothing else
-        here needs and which fails as a bare "error" if it misbehaves.
-
-        The slot is cleared as soon as it is collected: a stale ``ok`` left by an
-        earlier session would otherwise be read as an instant success carrying
-        somebody else's replay.
-        """
-        state = webstore.get(WEB_REPLAY_STATE_KEY)
-        if state == OK:
-            body = webstore.get(WEB_REPLAY_BODY_KEY)
-            _clear_web_slot()
-            return OK, body
-        if state in (ERROR, MISSING):
-            _clear_web_slot()
-            return state, ""
-        return PENDING, ""
-
-
-def _clear_web_slot() -> None:
-    """Empty the download mailbox. Best-effort like every other store write."""
-    webstore.set(WEB_REPLAY_STATE_KEY, "")
-    webstore.set(WEB_REPLAY_BODY_KEY, "")
 
 
 def fetch_log(match_id: str) -> Download | None:
@@ -441,31 +361,16 @@ def fetch_log(match_id: str) -> Download | None:
     # replay will not open — the URL is derived from the page's own host, so it
     # differs between production, a branch deploy and a preview.
     print(f"fetching replay: {url}")
-    return _fetch_web(url) if is_web() else _fetch_desktop(url)
+    if hostio.in_worker():
+        download = Download()
 
+        def deliver(state: str, text: str) -> None:
+            download._result.append((OK, text) if state == OK
+                                    else (MISSING if state == MISSING else ERROR, ""))
 
-def _fetch_web(url: str) -> Download | None:
-    """Kick off a ``fetch`` that parks its own result on ``window``.
-
-    The handlers are written to leave the slot in exactly one of the three states
-    whatever happens — a non-2xx is as much an error as a dead connection, and a
-    promise with no rejection handler would surface in the console as a crash.
-    """
-    import platform as _platform
-
-    state, body = json.dumps(WEB_REPLAY_STATE_KEY), json.dumps(WEB_REPLAY_BODY_KEY)
-    try:
-        _platform.window.eval(  # pyright: ignore[reportAttributeAccessIssue]
-            f"localStorage.setItem({state},'{PENDING}');localStorage.removeItem({body});"
-            f"fetch({json.dumps(url)}).then(function(r)"
-            "{return r.ok?r.text():Promise.reject(r.status)}).then(function(t)"
-            f"{{localStorage.setItem({body},t);localStorage.setItem({state},'{OK}')}})"
-            f".catch(function(e){{console.warn('replay fetch failed',e);"
-            f"localStorage.setItem({state},e===404?'{MISSING}':'{ERROR}')}})"
-        )
-        return Download(web=True)
-    except Exception:  # noqa: BLE001
-        return None
+        hostio.request(url, None, False, deliver)
+        return download
+    return _fetch_desktop(url)
 
 
 def _fetch_desktop(url: str) -> Download | None:
@@ -473,7 +378,7 @@ def _fetch_desktop(url: str) -> Download | None:
     import urllib.error
     import urllib.request
 
-    download = Download(web=False)
+    download = Download()
 
     def _get() -> None:
         try:

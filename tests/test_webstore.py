@@ -1,7 +1,8 @@
 """The key/value store behind shared links and personal bests.
 
-Off the web build `webstore` is backed by a JSON file, which is the path these
-exercise; the browser branches need `platform.window` and are unreachable here.
+Outside the browser `webstore` is backed by a JSON file, which is the path these
+exercise; the browser's side, the worker's mirror of localStorage, is
+`test_hostio.py`'s.
 Every function is written to fail soft, so the interesting cases are the broken
 ones: a missing file, unreadable JSON, an unwritable directory.
 """
@@ -175,27 +176,6 @@ def test_copy_link_reports_failure_when_the_clipboard_is_refused(monkeypatch):
     assert webstore.copy_link("tok") is False
 
 
-def test_quitting_ends_the_loop_off_the_web():
-    """Off the browser a confirmed quit really does exit."""
-    from starconquest import main
-
-    assert main.leave_app() is True
-
-
-def test_quitting_in_the_browser_keeps_the_app_alive(monkeypatch):
-    """In the browser, ending the loop would run pygame.quit() and leave the player
-    on a dead black canvas that only a force-close escapes. So a web quit asks the
-    browser to close the window and reports that we're still running, letting main
-    fall back to the setup menu instead of tearing the display down."""
-    from starconquest import main
-
-    tried = []
-    monkeypatch.setattr(main.paths, "is_web", lambda: True)
-    monkeypatch.setattr(main.webstore, "close_window", lambda: tried.append(True) or True)
-    assert main.leave_app() is False
-    assert tried == [True], "a web quit must at least attempt to close the window"
-
-
 # --- finding the leaderboard from where we are -------------------------------- #
 #
 # The board and its functions are served by the game's own site, so on a
@@ -211,12 +191,11 @@ def test_a_blank_origin_disables_every_leaderboard_feature(monkeypatch):
 
 
 def _on_page(monkeypatch, hostname):
-    class _Window:
-        location = type("L", (), {"hostname": hostname})
+    from starconquest import hostio
 
-    monkeypatch.setattr(webstore, "is_web", lambda: True)
-    monkeypatch.setitem(__import__("sys").modules, "platform",
-                        type("P", (), {"window": _Window()}))
+    monkeypatch.setattr(hostio, "_worker", True)
+    monkeypatch.setattr(hostio, "_page", {"origin": f"https://{hostname}", "hostname": hostname,
+                                          "pathname": "/play/", "hash": ""})
 
 
 def test_on_the_web_the_endpoint_is_the_pages_own(monkeypatch):
@@ -277,18 +256,3 @@ def test_stepping_the_ui_size_stops_at_either_end():
     assert webstore.step_ui_size(100, -1) == 90
     assert webstore.step_ui_size(first, -1) == first
     assert webstore.step_ui_size(last, +1) == last
-
-
-def test_copy_to_clipboard_sends_only_ascii_across_the_bridge(monkeypatch):
-    """pygbag hands a str's UTF-8 bytes to JS as Latin-1, so a "·" in a daily's
-    result pasted as "Â·". The text must cross as an escaped, ASCII-only literal."""
-    import sys
-    import types
-
-    sent = []
-    window = types.SimpleNamespace(eval=sent.append)
-    monkeypatch.setitem(sys.modules, "platform", types.SimpleNamespace(window=window))
-    monkeypatch.setattr(webstore, "is_web", lambda: True)
-    assert webstore.copy_to_clipboard("Star Conquest daily · Wed 28 Oct\nWon")
-    assert len(sent) == 1 and sent[0].isascii()
-    assert json.dumps("Star Conquest daily · Wed 28 Oct\nWon") in sent[0]

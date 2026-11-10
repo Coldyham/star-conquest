@@ -92,7 +92,7 @@ def _play(seed, *, mode="random", players=3, nodes=16, max_turns=400,
             autoplay, orders = False, (_manual_order(state, hid) if turns % 2 == 0 else [])
         else:  # pass
             autoplay, orders = False, []
-        # Mirrors `main.resolve_turn`: a match begun in autoplay has no human seat
+        # Mirrors `app.resolve_turn`: a match begun in autoplay has no human seat
         # until somebody plays a turn by hand, and that turn is what claims it. The
         # seat then decides for itself, so its orders must not also be passed in —
         # that would run its strategy twice. See `engine._claim_seat`.

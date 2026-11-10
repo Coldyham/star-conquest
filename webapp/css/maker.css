@@ -1,0 +1,167 @@
+/* The map maker (`maker.mjs`), laid out as pygame's `mapmaker`: the tool strip
+   across the top (EDIT_TOP_H), the map, the palette band under it
+   (EDIT_PALETTE_MIN_H at least), the sidebar down the right (EDIT_SIDE_W; on an
+   upright phone a band under the palette, `_PORTRAIT_SIDE_FRAC` of the
+   height) and the footer strip. Colours are `mapmaker._PANEL_*` and `widgets.BTN_*`. */
+
+:root {
+  --mk-panel: rgb(22, 25, 36);
+  --mk-edge: rgb(48, 54, 74);
+  --mk-warn: rgb(220, 150, 90);
+  --mk-bad: rgb(220, 110, 110);
+  --mk-tap: 22px;
+}
+html.touch { --mk-tap: 30px; }     /* config.TOUCH_MIN_TARGET */
+html.compact { --mk-tap: 40px; }   /* config.COMPACT_TOUCH_MIN_TARGET */
+
+#maker {
+  zoom: var(--zoom, 1);
+  position: fixed; inset: 0; z-index: 20;
+  height: calc(100vh / var(--zoom, 1));
+  height: calc(100dvh / var(--zoom, 1));
+  width: calc(100vw / var(--zoom, 1));
+  background: var(--bg);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-rows: 44px minmax(0, 1fr) auto auto;
+  grid-template-areas: "top top" "map side" "palette side" "footer side";
+  font-size: 14px;
+}
+#maker:not([hidden]) ~ #app { visibility: hidden; }
+
+#maker .btn { height: 40px; font-size: 14px; }
+.btn.dead { background: rgb(38, 42, 52); border-color: rgb(78, 84, 98); color: var(--dim); }
+.btn.danger { background: rgb(120, 46, 52); border-color: rgb(200, 96, 104); }
+#maker .dim { color: var(--dim); }
+#maker .warn { color: var(--mk-warn); }
+
+/* --- the tool strip ------------------------------------------------------- */
+.mktop {
+  grid-area: top; display: flex; align-items: center; gap: 10px; padding: 0 14px; min-width: 0;
+  background: var(--mk-panel); border-bottom: 1px solid var(--mk-edge);
+}
+.mktop .tools { display: flex; gap: 10px; align-items: center; flex: none; }
+#maker .mktop .btn { height: 32px; }
+.mktop .menu { margin-left: 10px; }
+.mkstatus { margin: 0 0 0 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mkstatus.err { color: var(--mk-bad); }
+
+/* --- the map -------------------------------------------------------------- */
+.mkmapbox { grid-area: map; position: relative; min-height: 0; min-width: 0; }
+.mkmap { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; }
+.mkmap text { font-family: var(--font); pointer-events: none; }
+.mkcamera { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 8px; }
+#maker .mkcamera .btn { height: 44px; }
+#maker .mkcamera .glyph { width: 44px; padding: 0; font-size: 22px; }
+
+/* --- the palette band ------------------------------------------------------ */
+/* Equal cells, each as wide as the widest caption (`mapmaker._draw_palette`),
+   squeezed to their share of the band, where the captions go. */
+.mkpalette {
+  grid-area: palette; min-height: 96px; display: grid; grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 114px); justify-content: center; align-items: start;
+  gap: 10px; padding: 4px 14px; background: var(--mk-panel); border-top: 1px solid var(--mk-edge);
+  overflow: hidden;
+}
+.mkpalette .swatch {
+  display: flex; flex-direction: column; align-items: center; background: none; border: none; padding: 0;
+  min-width: 0;
+}
+.mkpalette .swatch svg text { font-family: var(--font); }
+.mkpalette .caption { color: var(--dim); white-space: nowrap; margin-top: -6px; }
+.mkpalette.hinting { display: flex; justify-content: center; align-items: center; }
+.mkpalette .hint { text-align: center; color: var(--dim); }
+.mkpalette .hint p { margin: 0; line-height: 22px; }
+
+/* --- the sidebar ------------------------------------------------------------ */
+.mkside {
+  grid-area: side; overflow: auto; padding: 14px; min-height: 0;
+  background: var(--mk-panel); border-left: 1px solid var(--mk-edge);
+}
+.mkside h2 { margin: 0 0 6px; font-size: 18px; font-weight: normal; }
+.mkside p { margin: 0 0 5px; line-height: 20px; }
+.mkside .heading { margin-top: 4px; }
+.mkside .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mkside .stepper { margin: 0 0 5px; }
+.mkside .stepper .value { margin-left: auto; }
+.mkside .step {
+  width: var(--mk-tap); height: var(--mk-tap); padding: 0; line-height: 1; border-radius: 4px;
+  border: 1px solid rgb(110, 140, 200); background: rgb(40, 52, 78);
+}
+.mkside .slider { margin: 0 0 6px; }
+.mkside .slider input { width: 100%; margin: 0; accent-color: rgb(110, 140, 200); }
+/* `width`..`justify-content` undo the setup menu's square `.check` box (menu.css). */
+.mkside .check {
+  display: flex; gap: 8px; align-items: center; color: var(--dim); margin: 0 0 6px; min-height: var(--mk-tap);
+  width: auto; height: auto; padding: 0; border: none; border-radius: 0; background: none; justify-content: flex-start;
+}
+.mkside .check input { width: 18px; height: 18px; margin: 0; accent-color: rgb(110, 140, 200); }
+.mkside .buttons { display: flex; gap: 10px; margin: 5px 0 10px; }
+.mkside .buttons .btn { flex: 1; min-width: 0; }
+.mkside .swatches { display: flex; gap: 5px; margin: 0 0 8px; }
+.mkside .own {
+  width: var(--mk-tap); height: var(--mk-tap); padding: 0; font-size: 12px; border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, .25);
+}
+.mkside .own.on { border-color: var(--select); }
+.mkside .problems { margin-top: 6px; }
+.mkside .problem {
+  display: block; width: 100%; text-align: left; background: none; border: none; padding: 0;
+  margin: 0 0 5px; line-height: 20px;
+}
+.mkside .problem.bad { color: var(--mk-bad); }
+.mkside .problem.warn { color: var(--mk-warn); }
+
+/* --- the footer strip ------------------------------------------------------- */
+.mkfooter {
+  grid-area: footer; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px;
+  background: var(--mk-panel); border-top: 1px solid var(--mk-edge);
+}
+.mkfooter .left, .mkfooter .right { display: flex; gap: 10px; flex-wrap: wrap; }
+.mkfooter .right { margin-left: auto; }
+.mkfooter .filename {
+  width: 130px; height: 40px; padding: 0 8px; border-radius: 6px;
+  background: rgb(14, 16, 24); border: 2px solid rgb(110, 140, 200); color: var(--text); font: inherit;
+}
+.mkfooter .filename:focus { border-color: rgb(190, 150, 96); outline: none; }
+
+/* --- the confirm -------------------------------------------------------------- */
+.mkmodal {
+  position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 6, 12, .78); text-align: center;
+}
+.mkmodal .stack { max-width: min(640px, calc(100% - 48px)); }
+.mkmodal h1 { margin: 0 0 10px; font-size: 26px; font-weight: bold; }
+.mkmodal p { margin: 0 0 14px; color: var(--dim); }
+.mkmodal .grid { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+#maker .mkmodal .btn { font-size: 18px; }
+html.touch #maker .key { display: none; }
+
+/* --- phones --------------------------------------------------------------------- */
+html.compact .mkpalette .caption { display: none; }
+html.compact .mktop { gap: 6px; padding: 0 8px; }
+html.compact .mktop .tools { gap: 6px; }
+html.compact .mktop .menu { margin-left: 0; }
+html.compact .mkfooter { padding: 8px; gap: 8px; }
+html.compact .mkfooter .left, html.compact .mkfooter .right { gap: 8px; }
+html.compact .mkfooter .filename { width: 100px; }
+html.portrait #maker {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr) auto 30% auto;
+  grid-template-areas: "top" "map" "palette" "side" "footer";
+}
+html.portrait .mkside {
+  border-left: none; border-top: 1px solid var(--mk-edge);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; align-content: start;
+}
+/* A band the screen's width: two sliders to a row (`mapmaker._draw_sliders`). */
+html.portrait .mkside > * { grid-column: 1 / -1; }
+html.portrait .mkside > .slider:not(.bare) { grid-column: auto; }
+html.portrait .mkside > .check { grid-column: auto; line-height: 18px; }
+html.portrait .mkpalette { min-height: 0; padding: 6px 8px; gap: 4px; }
+/* A phone on its side under a browser's bars: the palette's discs at two
+   thirds, so the map keeps what height there is (its systems shrink too). */
+@media (orientation: landscape) and (max-height: 480px) {
+  html.compact .mkpalette { min-height: 0; padding: 2px 8px; }
+  html.compact .mkpalette .swatch svg { width: 44px; height: 44px; }
+}

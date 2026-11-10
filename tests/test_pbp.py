@@ -306,7 +306,7 @@ def test_a_resolved_log_and_a_fresh_rebuild_land_on_the_same_board():
 
 
 # --------------------------------------------------------------------------- #
-# The wire (both backends intercepted; nothing here touches a network)
+# The wire (the desktop backend intercepted; nothing here touches a network)
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def on_a_board(monkeypatch):
@@ -321,10 +321,9 @@ def sent(monkeypatch):
 
     def fake(url, body):
         calls.append((url, body))
-        return pbp.Request(web=False)
+        return pbp.Request()
 
     monkeypatch.setattr(pbp, "_call_desktop", fake)
-    monkeypatch.setattr(pbp, "is_web", lambda: False)
     return calls
 
 
@@ -369,79 +368,10 @@ def test_nothing_is_attempted_with_no_endpoint(monkeypatch, sent):
 
 
 def test_a_poll_answers_pending_until_the_thread_lands():
-    request = pbp.Request(web=False)
+    request = pbp.Request()
     assert request.poll() == (pbp.PENDING, "")
     request._result.append((pbp.OK, "{}"))
     assert request.poll() == (pbp.OK, "{}")
-
-
-def test_the_web_mailbox_is_cleared_once_collected(monkeypatch):
-    """A stale `ok` from an earlier session would otherwise read as an instant
-    success carrying somebody else's answer (the trap `share` documents)."""
-    state_key, body_key = pbp._web_keys(3)
-    monkeypatch.setattr(pbp.webstore, "get",
-                        lambda key: pbp.OK if key == state_key else "body")
-    cleared = []
-    monkeypatch.setattr(pbp.webstore, "set",
-                        lambda key, value: cleared.append((key, value)) or True)
-    assert pbp.Request(web=True, slot=3).poll() == (pbp.OK, "body")
-    assert (state_key, "") in cleared
-    assert (body_key, "") in cleared
-
-
-def test_two_calls_in_flight_each_collect_their_own_answer(on_a_board, monkeypatch):
-    """A poll is routinely still out when End Turn submits. With one shared
-    mailbox, whichever reply landed first was handed to whichever request was
-    collected first — so the poll read the submission's reply, which names no
-    match, and the player was told the match answered with something unreadable."""
-    import re
-
-    store: dict[str, str] = {}
-    monkeypatch.setattr(pbp.webstore, "get", lambda key: store.get(key, ""))
-    monkeypatch.setattr(pbp.webstore, "set",
-                        lambda key, value: store.__setitem__(key, value) or True)
-    keys = []
-
-    class FakeWindow:
-        @staticmethod
-        def eval(js):
-            keys.append(re.findall(r'localStorage\.setItem\("([^"]+)"', js)[0])
-
-    monkeypatch.setattr(pbp, "is_web", lambda: True)
-    monkeypatch.setitem(__import__("sys").modules, "platform",
-                        type("P", (), {"window": FakeWindow}))
-    poll = pbp.fetch_state(MATCH)
-    submit = pbp.submit(pbp.Seat(MATCH, 1, TOKEN), 0, [])
-    assert poll is not None and submit is not None
-    assert keys[0] != keys[1], "two calls in flight must not share a mailbox"
-
-    # The submission lands first, then the read: each fetch parks its reply
-    # under the keys its own call named.
-    for request, body in ((submit, '{"seat": 1}'), (poll, '{"match_id": "x"}')):
-        state_key, body_key = pbp._web_keys(request._slot)
-        store[body_key], store[state_key] = body, pbp.OK
-    assert submit.poll() == (pbp.OK, '{"seat": 1}')
-    assert poll.poll() == (pbp.OK, '{"match_id": "x"}')
-
-
-def test_the_web_call_is_valid_javascript_with_a_rejection_handler(on_a_board, monkeypatch):
-    """Inspected as the JS source string it really is — `test_share` does the
-    same. A promise with no `.catch` surfaces in the console as a crash."""
-    source = []
-
-    class FakeWindow:
-        @staticmethod
-        def eval(js):
-            source.append(js)
-
-    fake = type("P", (), {"window": FakeWindow})
-    monkeypatch.setattr(pbp, "is_web", lambda: True)
-    monkeypatch.setitem(__import__("sys").modules, "platform", fake)
-    pbp.submit(pbp.Seat(MATCH, 1, TOKEN), 0, [Order(1, 2, 3, 4)])
-    js = source[0]
-    assert ".catch(" in js, "an unhandled rejection reads as a crash"
-    assert "'POST'" in js and "application/json" in js
-    assert TOKEN in js
 
 
 def test_a_match_is_created_with_its_title_and_the_creators_name(monkeypatch):

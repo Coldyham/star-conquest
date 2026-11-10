@@ -40,7 +40,7 @@ def _won_match(max_turns: int = 400):
                 # (`settings.build_state`), and the first turn recorded as
                 # hand-played is what claims it — so the flags below are not free
                 # labelling: they have to be applied to the run as it happens, the
-                # way `main.resolve_turn` does, or the log describes a different
+                # way `app.resolve_turn` does, or the log describes a different
                 # game from the one being played.
                 by_hand = turns < 2
                 claim = hid if by_hand and state.human() is None else None

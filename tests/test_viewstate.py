@@ -66,7 +66,7 @@ def test_reset_view_ignores_unseen_systems_even_when_owned_by_a_rival():
 
 
 def test_reset_view_frames_the_whole_map_once_defeated():
-    """Defeat force-reveals fog elsewhere (main._accumulate_fog); the camera
+    """Defeat force-reveals fog elsewhere (app._accumulate_fog); the camera
     should stop hiding the map too, even if `seen` never grew past the start."""
     systems = [System(id=i, pos=(float(i * 10), 0.0)) for i in range(5)]
     state = _state(systems, human_alive=False)
@@ -240,3 +240,13 @@ def test_clear_fading_marks_drops_everything():
     ui.clear_fading_marks()
 
     assert ui.fading_fights == [] and ui.fading_hulls == []
+
+
+# --------------------------------------------------------------------------- #
+# The pure halves a frontend with its own camera and hit-testing calls
+# --------------------------------------------------------------------------- #
+def test_snap_points_are_the_seen_systems_until_nothing_is_hidden():
+    systems = [System(i, (i * 10.0, 0.0), owner_id=1 if i == 0 else 0) for i in range(4)]
+    assert sorted(_ui({0, 2}).snap_points(_state(systems))) == [0, 2]
+    assert sorted(_ui({0, 2}).snap_points(_state(systems, winner=1))) == [0, 1, 2, 3]
+    assert sorted(_ui({0}).snap_points(_state(systems, human_alive=False))) == [0, 1, 2, 3]

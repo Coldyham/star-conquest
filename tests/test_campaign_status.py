@@ -8,17 +8,12 @@ it was told, and never asks when it shouldn't.
 from __future__ import annotations
 
 import json
-import os
 import time
 
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame
 
-from starconquest import campaign, config, main, mapgen, menu, pbp, render
+from starconquest import app, campaign, config, mapgen, pbp
 from starconquest.geometry import WorldView
-from starconquest.menu import MenuState
 from starconquest.settings import Settings
 from starconquest.viewstate import Ui
 
@@ -238,90 +233,16 @@ def test_off_the_web_nothing_is_asked(monkeypatch):
     assert watch.status is None
 
 
-def _menu():
-    pygame.init()
-    menu._FONTS.clear()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
-    return screen, MenuState(), Settings.defaults()
-
-
-def _click(screen, ms, settings, key):
-    menu.draw(screen, ms, settings)
-    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=ms.rects[key].center, button=1)
-    return menu.handle_event(ev, ms, settings)
-
-
-def test_start_on_a_node_that_wouldnt_count_asks_first(monkeypatch):
-    monkeypatch.setattr(menu, "setup_warnings", lambda settings, people=None: [])
-    screen, ms, settings = _menu()
-    try:
-        ms.campaign_watch.status = status(why="not-adjacent", can=False)
-        assert _click(screen, ms, settings, "start") is None
-        assert ms.confirm_slow and ms.slow_title == "Campaign node 3"
-        menu.draw(screen, ms, settings)            # the modal draws
-        assert _click(screen, ms, settings, "slow_go") == "start"
-    finally:
-        pygame.quit()
-
-
-def test_start_on_an_open_node_just_starts(monkeypatch):
-    monkeypatch.setattr(menu, "setup_warnings", lambda settings, people=None: [])
-    screen, ms, settings = _menu()
-    try:
-        ms.campaign_watch.status = status()
-        assert _click(screen, ms, settings, "start") == "start"
-    finally:
-        pygame.quit()
-
-
-def test_a_campaign_confirm_and_a_slow_warning_share_one_modal(monkeypatch):
-    monkeypatch.setattr(menu, "setup_warnings",
-                        lambda settings, people=None: ["Knower would search 3 turns deep, not 12"])
-    screen, ms, settings = _menu()
-    try:
-        ms.campaign_watch.status = status(why="grace", graceUntil=NOW + 30 * MIN, received=time.monotonic())
-        assert _click(screen, ms, settings, "start") is None
-        assert ms.slow_lines[0].startswith("Post a win within")
-        assert ms.slow_lines[-1].startswith("Knower")
-        # The slow warning alone keeps its own heading.
-        ms.confirm_slow = False
-        ms.campaign_watch.status = None
-        assert _click(screen, ms, settings, "start") is None
-        assert ms.slow_title == ""
-    finally:
-        pygame.quit()
-
-
-def test_the_side_panel_shows_the_label_above_the_challenge_target():
-    """The reminder heads the side panel, not the top bar, which is the
-    scoreboard's alone; the challenge target follows it."""
-    pygame.init()
-    render._FONTS.clear()
-    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
-    try:
-        state = mapgen.generate_random(1, num_nodes=18, num_players=3)
-        ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
-        ui.visible = ui.seen = set(state.systems)
-        assert render._match_notes(ui) == []      # nothing to show
-        ui.campaign_label = "Node 3: post within 12 min"
-        ui.challenge_target = (40, 3)
-        texts = [text for text, _c in render._match_notes(ui)]
-        assert texts == ["Node 3: post within 12 min", "Beat 40t / 3 lost"]
-        render.draw(screen, state, ui)
-    finally:
-        pygame.quit()
-
-
 def test_main_writes_the_label_each_frame_but_never_for_a_watched_replay(monkeypatch):
     state = mapgen.generate_random(1, num_nodes=18, num_players=3)
     ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
     watch = campaign.Watcher()
     watch.status = status(why="grace", graceUntil=NOW + 30 * MIN, received=time.monotonic())
     monkeypatch.setattr(campaign, "enabled", lambda: False)   # pump is a no-op
-    main.campaign_tick(ui, Settings(seed=42), watch)
+    app.campaign_tick(ui, Settings(seed=42), watch)
     assert ui.campaign_label == "Node 3: post within 30 min"
     ui.watched = True
-    main.campaign_tick(ui, Settings(seed=42), watch)
+    app.campaign_tick(ui, Settings(seed=42), watch)
     assert ui.campaign_label is None
 
 
@@ -335,18 +256,18 @@ def test_a_game_started_after_losing_access_is_told_its_win_wont_count():
 
 def test_the_stamp_taken_at_start_rides_on_the_posted_score(monkeypatch):
     settings = Settings(seed=42)
-    state, ui, log = main.start_game(settings, 42, False)
+    state, ui, log = app.start_game(settings, 42, False)
     state.turn = 30            # a challenge with no turns reads as none at all
     watch = campaign.Watcher()
     watch.status = status(why="adjacent")
-    main.stamp_campaign(ui, watch)
+    app.stamp_campaign(ui, watch)
     assert ui.campaign_start == "adjacent"
-    shared = main.challenge_settings(settings, state, ui, 42, log)
+    shared = app.challenge_settings(settings, state, ui, 42, log)
     assert shared.challenge is not None and shared.challenge.campaign == "adjacent"
     back = Settings.from_token(shared.to_token())
     assert back.challenge is not None and back.challenge.campaign == "adjacent"
     # Nothing looked up, nothing claimed.
     watch.status = None
-    main.stamp_campaign(ui, watch)
-    again = main.challenge_settings(settings, state, ui, 42, log).challenge
+    app.stamp_campaign(ui, watch)
+    again = app.challenge_settings(settings, state, ui, 42, log).challenge
     assert again is not None and again.campaign == ""

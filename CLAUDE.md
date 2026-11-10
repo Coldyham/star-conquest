@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Star Conquest is a minimalist turn-based strategy game: a graph star map where
 systems are nodes and spacelanes are edges, one ship type, take every system to
-win. Python 3.12+, pygame for presentation, `uv` for dependency management.
+win. Python 3.12+, run in the browser (Pyodide, behind an HTML page), `uv` for
+dependency management.
 
 This file states the rules in short and how the system fits together. The
 *why* (reasons, measurements, history, rejected alternatives) lives in
@@ -31,8 +32,9 @@ are published documents for outside developers, not working notes.
 ## Commands
 
 ```sh
-uv run python main.py                          # setup menu (CLI args pre-fill it:
-                                               # --players 4 --mode symmetric --seed 42 --nodes 24)
+uv run python main.py                          # serves the game at 127.0.0.1:8000/play/ and opens it
+                                               # (flags pre-fill the menu: --players 4 --mode
+                                               # symmetric --seed 42 --nodes 24; --no-open)
 uv run python main.py --no-menu --autoplay     # AI plays every seat (demo)
 
 uv run pytest                                  # full suite (or a file / file::test)
@@ -53,6 +55,10 @@ uv run python tools/verify_scores.py --dry-run  # check each posted score's log
 uv run python tools/admin.py matches            # moderation (dry run until --yes)
 uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots column
 node --test leaderboard/tests/*.test.mjs        # the leaderboard's JS suite
+node --test webapp/tests/*.test.mjs             # the page's JS suite
+uv run python -m starconquest.serve             # the server main.py starts
+                                                 # (?players=3&seed=7 pre-fills the menu, &go plays it;
+                                                 # the spike is /play/spike.html)
 ```
 
 Measurement, tuning and generator tools (benches, censuses, CMA-ES, par
@@ -69,7 +75,7 @@ one bot or tool runs its own `tests/test_<name>.py` (knower's Council stop also
 has `tests/test_council.py`). Wording, a string choice or an asset's text runs
 the tests that read it (grep `tests/` for the file or string), not the suite.
 Run the full suite after a change to `starconquest/` logic (rules, engine,
-mapgen, replay, settings, AI, input or layout), and once before opening a PR on
+mapgen, replay, settings, AI, a press or a view), and once before opening a PR on
 such a change, not again for later wording fixes on it.
 
 **Every tool or script that runs for more than a minute records as it goes.**
@@ -83,33 +89,36 @@ scratch output.
 
 ## Architecture
 
-Where things live: `starconquest/` the game (core and shell, below);
+Where things live: `starconquest/` the game; `webapp/` the page that runs it;
 `models/` the shipped bots; `bots/` subprocess bots; `tests/` (with the
 `tests.sim` harness); `tools/` offline jobs and benches; `leaderboard/` the
 board site, its SQL (`schema.sql`), JS and Netlify functions
 (`leaderboard/netlify/functions/`); `results/` run ledgers (gitignored).
 
-A hard split between a **pure simulation core** and a **thin pygame shell**, so
-the game is testable headlessly. The boundaries are load-bearing:
+The game is **pure Python with no display of its own**, so it is testable
+headlessly. In the browser it runs in Pyodide in a Web Worker behind `session`
+(JSON in, JSON out), and the page in `webapp/` draws what it answers
+(`docs/design/html-frontend.md`). The boundaries are load-bearing:
 
-- **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`, `daily`, `stats`, `coach`, `run` (`test_no_core_module_imports_pygame`). `fog`
-  and `turnfilm` are presentation-only: the engine and AI never consult them.
-- **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
-  `mapmaker`, `main` (`starconquest/main.py`; the root `main.py` is a launcher
-  shim for pygbag).
-  - `render` reads `GameState` + `Ui`, **never mutates them, never imports
-    `engine` or `ai`**, and stores nothing time-varying: a frame is a pure
-    function of state + `Ui` + time.
-  - `input` mutates **only** `Ui` (and queues human `Order`s) and returns an
-    action string or `None` for `main` to act on.
-  - `menu`: `draw` only reads `Settings`; `handle_event` mutates
-    `MenuState`/`Settings` and returns `"start"`/`"quit"`/`None`. `main` runs a
-    `"menu"` ⇄ `"game"` state machine.
-  - **Browser bridges** (`softkeyboard`, `webstore`, `share`) are pure of pygame,
-    guarded, silent on failure, never block a frame. `share` sends **only** on
-    *Post to leaderboard* or with *Share replays* ticked. `docs/design/shell.md`.
+- **No module imports pygame** (`test_no_module_imports_pygame`): the pygame
+  shell was deleted at cutover. `fog` and `turnfilm` are presentation-only: the
+  engine and AI never consult them.
+- **Python does no I/O in the browser**: `hostio` queues effects for the page
+  and takes its replies; `sc_auth` never reaches Python. `webstore` and `share`
+  go through it there, and through a file or `urllib` in tools and tests.
+  `share` sends **only** on *Post to leaderboard* or with *Share replays* ticked.
+- **The page decides nothing.** What a press means lives in `play`, the play
+  screen's words in `hud`, the setup menu's presses, words and view in
+  `setupmenu`, the editor's in `maker`: change them there, never in the page's
+  JS alone. `viewstate.Ui` holds all transient interaction state.
+- **`serve`** is the local server `main.py` starts (`webapp/` at `/play/`, the
+  game zip built on request), never shipped in the zip (`build_next.LOCAL_ONLY`).
+- **The build** (`tools/build_web.sh`) stages the page, the pinned Pyodide and
+  the game's Python as one hashed zip (`tools/build_next.py`) at `/play/`. The
+  service worker (`tools/pwa/sw.js`) is cache-first only for what its name
+  fixes (the zip, Pyodide's versioned files, the fonts) and network-first for
+  the page and its scripts. `tools/parity_next.py` shoots the screens in
+  `tests/fixtures/parity_screens.json`.
 
 ### Turn resolution (engine.py)
 
@@ -128,8 +137,7 @@ independent) → win check → `turn += 1`. A bot sizing an attack off
 - **The engine never imports the AI.** `decide` is injected into `end_turn`;
   `ai.decide` routes by `Player.ai_strategy` through `ai.STRATEGIES` (unknown →
   `"heuristic"`). User AIs: `ai.register(name, fn)`; `ai.load_models()` loads
-  `models/*.py`. `menu` is the one shell module that imports `ai` — never copy
-  that into `render` or `input`. `models/` is committed (the web build ships it).
+  `models/*.py`. `models/` is committed (the web build ships it).
 - **Non-Python bots are subprocesses** (`botio` wire format, `tests/botproc.py`,
   `bots/<name>.bot.json`), outside `models/` since WASM can't fork. Their
   randomness is derived (`botio.decide_seed`). A degraded seat (`degraded_runs`)
@@ -147,14 +155,15 @@ preference (`webstore.animate_turns`), never a `Settings` field. Full rule list:
 - **Events carry results, not rules**: `turnfilm.Reel` never re-simulates or
   draws dice; beat order is always the engine's.
 - **Only movement spends time**; `FILM_COMBAT_MS` **must stay 0**. Every reel
-  goes through `main._primed`.
+  goes through `app._primed`.
 - **Marks outlive their film**; a jump (history, scrub, rewind) calls
   `clear_fading_marks`.
 - **Do not widen `_lane_crossings`' sort tuple** (`(when, a, b)` decides who
   rolls first; widening moves stored replays silently). Sub-turn position is
   `Fleet.progress_at` only.
-- **Fog is a union** (`Ui.sees`); `visible` is never overwritten. Deferred work
-  is paid in `main.land_film` only.
+- **Fog is a union** (`Ui.sees`); `visible` is never overwritten. The page
+  plays the film; the camera snap a deciding turn owes lands when it ends (the
+  session's `snap`).
 - **The correctness test is the history path**: turn *i*'s film on board *i-1*
   lands on board *i* (`tests/test_turnfilm.py`, `tests.sim --film`).
 
@@ -169,7 +178,7 @@ can't move a stored game; add no per-model replay floor. **Bump
 order, fight resolution or map generation from a seed. Outdated logs are
 declined. `strategies` in the log is stamped back so a random seat keeps its
 bot. **A live turn's rng is derived, never carried** (`replay.reseed`, in
-`main.resolve_turn`, never inside `end_turn`); every bot seat decides from the
+`app.resolve_turn`, never inside `end_turn`); every bot seat decides from the
 same start (`engine.decide_seat`). **Combat never draws from it**: each fight
 rolls its own stream (`engine._Dice`). Rules in full: `docs/design/core.md`,
 "Replay and history: the rules in one place".
@@ -328,29 +337,22 @@ when to re-run it, is `docs/design/ladder.md`):
 - **After changing `ai.py` or travel/combat balance, run a `tests.sim --trials`
   batch, sweeping node count and ship speed**, and watch the timeout rate.
 
-**Shell** (rules in full: `docs/design/shell.md`)
+**The page** (`webapp/`; rules and reasons: `docs/design/html-frontend.md`,
+and `docs/design/shell.md` for the pygame shell's, whose behaviour it keeps)
 
-- **Nothing that holds text gets a fixed pixel size**: use `widgets.py` and
-  `config.s()`; key font caches on `config.ui_scale`. `render`'s `_`-prefixed
-  kit globals stay swappable. `menu` lays out on a fixed 1440x960 canvas
-  (on a phone, its own: `_draw_menu_compact`).
-- **`config.touch_ui`**: drop keyboard-only strings; floor targets at
-  `config.TOUCH_MIN_TARGET`.
-- **`config.compact`** (a phone): a touch browser is scaled in CSS pixels;
-  screen regions come from `config.play_rect`/`side_panel_rect`/`footer_rect`/
-  `end_turn_rect`; the footer folds, never drops; the popup docks. A pinch
-  undoes its first finger's tap.
-  `docs/design/shell.md`, "The compact layout".
-- **Quitting goes through `main.leave_app()`.**
-- **`viewstate.Ui` holds all transient interaction state**; `main.resolve_turn`
-  expands rules into `Order`s.
+- **Layout is CSS**: nothing that holds text gets a fixed pixel size. A touch
+  screen drops keyboard-only strings; a phone (`compact`) gets its own layout,
+  where the footer folds behind "more", never drops a button, and the popup
+  docks. A pinch undoes its first finger's tap (`Ui.press_undo`).
+- **Quitting asks first** (`hud.confirm_quit`), then asks the browser to close
+  the window (`Session._leave`, the `close` effect).
+- **`app.resolve_turn` expands rules into `Order`s.**
 - **The send popup is the only ship-count editor.** Orders and rules are reached
   from the map. Forwarding-rule share arithmetic lives in `model` only
   (`Ui.forward_this_turn` is the one formula). Closing it lets its source go,
-  left as the hover (`input._cancel`); while open, another neighbour is a second
+  left as the hover (`play.cancel`); while open, another neighbour is a second
   send from the source.
-- **The Combat tab** uses `combat.preview_fight` (no `config`, no rng);
-  `test_tab_content_stays_inside_the_panel` guards it.
+- **The Combat tab** uses `combat.preview_fight` (no `config`, no rng).
 - **Route mode** is the one control that doesn't commit as you go.
 - **Training help** (`docs/design/training.md`): the send popup's forecast reads only
   what the player can see (`combat.forecast_landing`). The Hint (K) runs marshal on a
@@ -364,10 +366,10 @@ must keep drawing exactly the board it always did** (`test_symmetric.py`);
 nothing past the sectors draws from `state.rng`. Show
 `Settings.system_count()`, never raw `nodes`. **Map generation never reads a
 screen size** (`test_no_core_module_reads_a_screen_size`). The lane survey runs
-in `menu.pump`, never `draw`. `docs/design/core.md`, "Past a standard board the
-box grows".
+in `setupmenu.survey`, never while a view is built. `docs/design/core.md`,
+"Past a standard board the box grows".
 
-### Hand-authored maps (custommap.py, mapmaker.py)
+### Hand-authored maps (custommap.py, maker.py)
 
 Full list: `docs/design/hand-maps.md`, "The rules in one place". The easiest to
 break: **`"custom"` never joins `settings.MODES`**; every stored value is
@@ -375,7 +377,8 @@ concrete; never widen `WORLD_SIZE`; `CustomMap.from_dict` never raises,
 `generate_custom` asserts; `normalised()` stays idempotent and deletion goes
 through `without_node`; the editor's model is the recipe, never a `GameState`;
 `problems()` is the one validator; `tools/bot_replay._OUTCOME_MODULES` includes
-`custommap`.
+`custommap`. **The editor's rules and words live in `maker`**, read by the
+page: never in its JS alone.
 
 ### Gauntlets (gauntlet.py)
 
@@ -384,8 +387,8 @@ the tutorial is one (`starconquest/assets/gauntlets/tutorial.json`). Full rules:
 `docs/design/rules.md`, "Gauntlets". **A gauntlet is data, never `Settings`**: a
 stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup
-matches it (`menu.active_stage`). Built-in stages pin every field and a seed.
-`from_dict` never raises. Render never sees a `Gauntlet` (`main.stage_ui`).
+matches it (`setupmenu.active_stage`). Built-in stages pin every field and a seed.
+`from_dict` never raises. The play screen never sees a `Gauntlet` (`app.stage_ui`).
 **A run (`run.py`) is the one stored progress**: a single-path gauntlet with a
 target, in order, one life. It judges only its own game (`run.finish`), so a
 Retry is free play; Continue resumes that game's log, never a fresh copy.

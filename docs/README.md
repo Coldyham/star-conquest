@@ -48,6 +48,7 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/core.md`](design/core.md) | Settings tokens, the random seat, challenge links and stable digests, ship-speed growth, in-lane battles, the replay log and dice streams, star names, symmetric layouts |
 | [`design/shell.md`](design/shell.md) | Text sizing and touch, viewport margins, the send popup, forwarding rules, the Combat page, spectating, ironman, graphs, route mode |
 | [`design/turnfilm.md`](design/turnfilm.md) | The animated end of turn |
+| [`design/html-frontend.md`](design/html-frontend.md) | The move from the pygame shell to an HTML frontend over Pyodide, the parity checks that held it to the old build, and the cutover |
 | [`design/training.md`](design/training.md) | Training help: the send popup's odds forecast, the bot hint (K) that takes a game off the board, and the post-game coach |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
 | [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, generated gauntlets, stage targets, the proposed run and carry-over |
@@ -119,10 +120,15 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md |
 | `playstyle.py --baseline`, `playstyle_worker.py` | Regenerate the Playstyle bots column; the readings worker | leaderboard.md |
 | `render_board.py` | Render the board's Jinja2 pages | leaderboard.md |
-| `slim_web.py` | Slim the web build's stage: strip comments, subset the fonts (`build_web.sh` runs it) | shell.md |
+| `parity_replays.py` | Record the replay-parity corpus: seeded bot games and stored logs, a digest per turn | html-frontend.md |
+| `parity_next.py`, `parity_sheet.py` | Shoot the parity recipes in the game; contact sheets pairing them with pygame's baseline (drawn by `parity_shots.py`, deleted at cutover: redraw at a1a17ad) | html-frontend.md |
+| `fetch_pyodide.py`, `build_next.py` | The pinned, checksum-checked Pyodide; stage `/play/` (page, Pyodide, the hashed game zip; `build_web.sh` runs it) | html-frontend.md |
+| `spike_bench.py`, `chrome.mjs` | The Pyodide gate: decide times native, in Node and in Chrome; startup; download sizes; replay parity in Pyodide (its pygbag side, `spike_pygbag.py`, went with pygbag at cutover). `chrome.mjs` drives headless Chrome over DevTools with no npm | html-frontend.md |
+| `dump_film_fixtures.py` | Turn films for the JS `Reel` mirror's test | html-frontend.md |
+| `slim_web.py` | Strip comments and docstrings from the game zip's Python, every line kept (`build_next.py` runs it) | shell.md |
 | `campaign.py` | Generate this week's campaign map into `public.campaigns` | campaign.md |
 | `daily.py` | Deal and probe today's and tomorrow's daily challenge and puzzle into `public.dailies` | daily.md |
-| `try_daily.py` | Deal a weekday's daily map or puzzle (or a real day's) and open it in the desktop game, to feel and tune the spec | daily.md |
+| `try_daily.py` | Deal a weekday's daily map or puzzle (or a real day's) and open it in the game, served locally, to feel and tune the spec | daily.md |
 | `check_pbp.py` | Play a whole play-by-post match against a real endpoint | pbp.md |
 | `gen_starnames.py` | Regenerate `starnames.py`/`starlore.py` | core.md |
 | `dump_challenge_fixtures.py` | Real challenge tokens as fixtures for the board's JS decoder | core.md |

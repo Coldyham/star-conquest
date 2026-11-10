@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Star Conquest</title>
+<meta name="description" content="A minimalist turn-based strategy game: take every star system to win.">
+<meta name="theme-color" content="#0a0c14">
+<!-- The installable app: the manifest, icons and service worker sit at the site
+     root, beside the router (tools/build_web.sh), hence the absolute paths. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Star Conquest">
+<script>
+// Inside the installed app, the game was the last half open: the root router
+// (tools/pwa/root.html) reopens it at the next launch.
+try {
+  if (navigator.standalone === true || matchMedia(
+      "(display-mode: standalone), (display-mode: fullscreen)").matches) {
+    localStorage.setItem("sc_app_last", "game");
+  }
+} catch (e) {}
+</script>
+<link rel="stylesheet" href="css/play.css">
+<link rel="stylesheet" href="css/menu.css">
+<link rel="stylesheet" href="css/maker.css">
+<script type="module" src="js/play.mjs"></script>
+</head>
+<body>
+<div id="loading" role="status" aria-live="polite">
+  <svg viewBox="0 0 100 100" aria-hidden="true">
+    <g stroke="rgb(74,84,116)" stroke-width="1.6"><line x1="50" y1="46" x2="24" y2="28"/><line x1="50" y1="46" x2="78" y2="30"/><line x1="50" y1="46" x2="80" y2="72"/><line x1="50" y1="46" x2="26" y2="74"/><line x1="50" y1="46" x2="50" y2="84"/><line x1="24" y1="28" x2="26" y2="74"/><line x1="78" y1="30" x2="80" y2="72"/></g>
+    <g><circle cx="50" cy="46" r="15" fill="rgb(86,170,255)"/><circle cx="24" cy="28" r="5.8" fill="rgb(240,90,90)"/><circle cx="78" cy="30" r="6.2" fill="rgb(95,210,130)"/><circle cx="80" cy="72" r="5.5" fill="rgb(240,170,70)"/><circle cx="26" cy="74" r="7" fill="rgb(190,130,240)"/><circle cx="50" cy="84" r="4.8" fill="rgb(122,128,140)"/></g>
+  </svg>
+  <h1>STAR CONQUEST</h1>
+  <p id="loading-status">Loading the game…</p>
+</div>
+<main id="setup" hidden aria-label="Setup menu"></main>
+<main id="maker" hidden aria-label="Map maker"></main>
+<div id="app">
+  <header id="top">
+    <span id="turn">Turn 0</span>
+    <span id="lost"></span>
+    <ul id="scores"></ul>
+    <div id="tip" hidden></div>
+  </header>
+  <section id="mapbox">
+    <svg id="map" role="img" aria-label="The star map"></svg>
+    <div id="popup" hidden></div>
+    <p id="caption" aria-live="polite"></p>
+    <p id="hint-caption" hidden></p>
+    <div id="card" hidden></div>
+    <div id="pbp" hidden></div>
+    <div id="graph" hidden></div>
+    <div id="camera">
+      <button type="button" class="btn blue" id="reset-view">Reset<span class="key"> (R)</span></button>
+      <button type="button" class="btn blue glyph" id="zoom-out" aria-label="Zoom out">−</button>
+      <button type="button" class="btn blue glyph" id="zoom-in" aria-label="Zoom in">+</button>
+    </div>
+    <p id="status"></p>
+  </section>
+  <aside id="side">
+    <div id="panel"></div>
+    <button type="button" class="btn green" id="end-turn">End Turn <span class="key">⏎</span></button>
+  </aside>
+  <nav id="footer"></nav>
+  <div id="veil" hidden></div>
+  <div id="modal" hidden></div>
+  <div id="more" hidden></div>
+</div>
+</body>
+</html>

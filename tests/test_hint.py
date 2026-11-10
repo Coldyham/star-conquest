@@ -6,12 +6,12 @@ from __future__ import annotations
 import random
 
 from starconquest import ai, combat, config, engine
-from starconquest import main as game_main
+from starconquest import app
 from starconquest import settings as settings_mod
 from starconquest.geometry import WorldView
 from starconquest.model import Fleet, ForwardRule, Order
 from starconquest.replay import GameLog
-from starconquest.viewstate import CHOOSING, Ui
+from starconquest.viewstate import Ui
 from tests.test_engine import make_state
 
 
@@ -147,17 +147,17 @@ def test_a_hint_leaves_the_game_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(GameLog, "save", lambda self: None)
     before = (state.rng.getstate(), {sid: (n.owner_id, n.ships) for sid, n in state.systems.items()},
               state.players[1].ai_strategy)
-    assert game_main.press_hint(state, ui, log)    # the first press only asks
+    assert app.press_hint(state, ui, log)    # the first press only asks
     assert not ui.hinted and not ui.hint_live(state)
-    game_main.take_hint(state, ui, log)           # ...and the modal's Show takes it
+    app.take_hint(state, ui, log)           # ...and the modal's Show takes it
     assert ui.hinted and ui.hint_live(state) and log.hinted_from == state.turn
     assert all(o.owner_id == 1 and o.ships > 0 for o in ui.hint_orders)
     after = (state.rng.getstate(), {sid: (n.owner_id, n.ships) for sid, n in state.systems.items()},
              state.players[1].ai_strategy)
     assert before == after
-    assert not game_main.press_hint(state, ui, log)   # pressed again: hidden
+    assert not app.press_hint(state, ui, log)   # pressed again: hidden
     assert not ui.hint_live(state) and ui.hinted
-    assert not game_main.press_hint(state, ui, log)   # and again: shown, no second ask
+    assert not app.press_hint(state, ui, log)   # and again: shown, no second ask
     assert ui.hint_live(state)
 
 
@@ -233,121 +233,3 @@ def test_the_log_keeps_a_hint_only_on_the_branch_that_saw_it():
     assert log.hinted_from is None
 
 
-# -- the footer ---------------------------------------------------------------- #
-def _screen(w: int = config.SCREEN_W, h: int = config.SCREEN_H):
-    import pygame
-    from starconquest import render
-    pygame.init()
-    config.SCREEN_W, config.SCREEN_H = w, h
-    config.apply_ui_scale(1.0)
-    render._FONTS.clear()
-    return pygame.display.set_mode((w, h))
-
-
-def _footer_ui(state):
-    from starconquest import mapgen
-    ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
-    ui.visible = ui.seen = set(state.systems)
-    return ui
-
-
-def _reset_screen():
-    import pygame
-    from starconquest import render
-    config.SCREEN_W, config.SCREEN_H = config.BASE_SCREEN_W, config.BASE_SCREEN_H
-    config.apply_ui_scale(1.0)
-    render._FONTS.clear()
-    pygame.quit()
-
-
-def test_a_shown_hint_splits_into_hide_and_apply():
-    import pygame
-    from starconquest import input as game_input, render
-    screen = _screen()
-    try:
-        state, ui, _ = _game()
-        ui.view = _footer_ui(state).view
-        ui.hint_orders = game_main.hint_orders(state, 1)
-        ui.hint_turn = state.turn
-        assert ui.hint_left(state)
-        render.draw(screen, state, ui)
-        hide, apply = pygame.Rect(ui.hint_button_rect), pygame.Rect(ui.hint_apply_rect)
-        assert hide.w and apply.w and hide.right < apply.x
-        game_input.handle_event(pygame.event.Event(
-            pygame.MOUSEBUTTONDOWN, pos=apply.center, button=1), state, ui)
-        assert not ui.hint_live(state) and ui.pending
-        render.draw(screen, state, ui)
-        assert ui.hint_button_rect[2] and not ui.hint_apply_rect[2]
-    finally:
-        _reset_screen()
-
-
-def test_clear_outlasts_history_in_a_squeeze():
-    """Clear is something to do, History something to look at: a narrowing strip
-    folds History away first."""
-    from starconquest import mapgen, render
-    try:
-        for w in range(480, config.BASE_SCREEN_W + 1, 40):
-            screen = _screen(w, 700)
-            state = mapgen.generate_random(1, num_nodes=18, num_players=3)
-            state.turn = 3
-            ui = _footer_ui(state)
-            render.draw(screen, state, ui)
-            if not ui.clear_button_rect[2]:
-                assert not ui.history_button_rect[2], w
-    finally:
-        _reset_screen()
-
-
-# -- the forecast's breakdown -------------------------------------------------- #
-def _attack_popup():
-    from starconquest import mapgen
-    s = _inbound()
-    ui = Ui(view=WorldView(mapgen.map_bounds(s), config.play_rect()), human_id=1)
-    ui.visible = ui.seen = set(s.systems)
-    ui.selected = 0
-    ui.begin_send(s, 1)
-    ui.set_send_count(s, 25)
-    return s, ui
-
-
-def test_the_forecast_row_opens_its_breakdown_and_any_press_closes_it():
-    import pygame
-    from starconquest import input as game_input, render
-    screen = _screen()
-    try:
-        s, ui = _attack_popup()
-        render.draw(screen, s, ui)
-        row = pygame.Rect(ui.forecast_rect)
-        assert row.w and pygame.Rect(ui.popup_rect).contains(row)
-        game_input.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=row.center, button=1), s, ui)
-        assert ui.odds_card_up() and ui.chosen == 25
-        render.draw(screen, s, ui)
-        game_input.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_x, mod=0, unicode="x"), s, ui)
-        assert not ui.odds_open and ui.mode == CHOOSING and ui.pending   # spent closing it
-
-        ui.visible = {0}                       # a garrison out of view: no breakdown
-        ui.seen = set(s.systems)
-        render.draw(screen, s, ui)
-        assert not ui.forecast_rect[2]
-    finally:
-        _reset_screen()
-
-
-def test_the_breakdown_adds_up_to_the_fight_it_forecasts():
-    from starconquest import render
-    _screen()
-    try:
-        s, ui = _attack_popup()
-        made = render._odds_card(s, ui)
-        assert made is not None
-        rows = {item[1]: item[2] for item in made[3] if item[0] == "row"}
-        held = int(rows["At 1 now"])
-        built = int(rows["Built in the 3 turns before you land"])
-        inbound = int(next(v for k, v in rows.items() if "fleets landing by then" in k))
-        assert held + built + inbound == int(rows["It will hold"]) == 20
-        assert int(rows["Your send"]) == int(rows["You land with"]) == 25
-        notes = " ".join(item[1] for item in made[3] if item[0] == "note")
-        assert "4 ships also land" in notes and "Jitter" in notes
-    finally:
-        _reset_screen()

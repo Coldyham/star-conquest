@@ -1,0 +1,1852 @@
+{
+ "variant": "web",
+ "sizes": {
+  "desktop": [
+   1440,
+   960,
+   1.0,
+   false
+  ],
+  "phone": [
+   412,
+   870,
+   2.625,
+   true
+  ],
+  "phone-land": [
+   870,
+   412,
+   2.625,
+   true
+  ]
+ },
+ "clock_ms": 1000,
+ "screens": [
+  {
+   "name": "menu-basic",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": []
+  },
+  {
+   "name": "menu-combat",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "tab",
+     "combat"
+    ]
+   ]
+  },
+  {
+   "name": "menu-advanced",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "tab",
+     "advanced"
+    ]
+   ]
+  },
+  {
+   "name": "menu-ai",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "tab",
+     "ai"
+    ]
+   ]
+  },
+  {
+   "name": "menu-ai-strategies",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "tab",
+     "ai"
+    ],
+    [
+     "menu",
+     "strategy_open",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "menu-daily-list",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "daily_open",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "menu-board-list",
+   "surface": "menu",
+   "sizes": [
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "board_open",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "menu-pbp-prompt",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "pbp_prompt",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "menu-slow-confirm",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "confirm_slow",
+     true
+    ],
+    [
+     "menu",
+     "slow_title",
+     "This setup is slow"
+    ],
+    [
+     "menu",
+     "slow_lines",
+     [
+      "Seat 2 (knower, Search) thinks for up to a second a turn."
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "menu-resume-prompt",
+   "surface": "resume",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     6
+    ]
+   ]
+  },
+  {
+   "name": "game-opening",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": []
+  },
+  {
+   "name": "game-midgame",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "game-selected",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "select",
+     2
+    ]
+   ]
+  },
+  {
+   "name": "game-send-popup",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "select",
+     2
+    ],
+    [
+     "ui",
+     "begin_send",
+     9
+    ]
+   ]
+  },
+  {
+   "name": "game-send-odds-card",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "select",
+     2
+    ],
+    [
+     "ui",
+     "begin_send",
+     9
+    ],
+    [
+     "set",
+     "odds_open",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "game-forward-tab",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "select",
+     2
+    ],
+    [
+     "ui",
+     "begin_send",
+     9,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "game-orders-and-rules",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "select",
+     2
+    ],
+    [
+     "ui",
+     "begin_send",
+     9
+    ],
+    [
+     "ui",
+     "send_half"
+    ],
+    [
+     "ui",
+     "close_send"
+    ],
+    [
+     "select",
+     11
+    ],
+    [
+     "ui",
+     "begin_send",
+     2,
+     true
+    ],
+    [
+     "ui",
+     "close_send"
+    ]
+   ]
+  },
+  {
+   "name": "game-route-mode",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "ui",
+     "begin_route"
+    ],
+    [
+     "ui",
+     "route_tap",
+     2
+    ],
+    [
+     "ui",
+     "route_tap",
+     11
+    ],
+    [
+     "ui",
+     "route_tap",
+     0
+    ]
+   ]
+  },
+  {
+   "name": "game-hint",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "hint"
+    ]
+   ]
+  },
+  {
+   "name": "game-lore",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "set",
+     "lore_sid",
+     2
+    ]
+   ]
+  },
+  {
+   "name": "game-footer-more",
+   "surface": "game",
+   "sizes": [
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "set",
+     "more_open",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "game-fog",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22,
+    "fog_sight": 1,
+    "fog_scout": 2
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "game-symmetric-hub",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "mode": "symmetric",
+    "layout": "hub",
+    "players": 4
+   },
+   "seed": 11,
+   "steps": [
+    [
+     "turns",
+     10
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "game-big-board",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 5,
+    "nodes": 40
+   },
+   "seed": 12,
+   "steps": [
+    [
+     "turns",
+     20
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "game-custom-map",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {},
+   "seed": 13,
+   "steps": [
+    [
+     "map",
+     {
+      "v": 1,
+      "n": [
+       [
+        599,
+        555,
+        2,
+        11,
+        0
+       ],
+       [
+        535,
+        869,
+        2,
+        10,
+        0
+       ],
+       [
+        814,
+        403,
+        5,
+        5,
+        0
+       ],
+       [
+        892,
+        202,
+        5,
+        4,
+        0
+       ],
+       [
+        537,
+        666,
+        4,
+        5,
+        0
+       ],
+       [
+        167,
+        224,
+        3,
+        6,
+        0
+       ],
+       [
+        565,
+        62,
+        3,
+        7,
+        0
+       ],
+       [
+        432,
+        195,
+        5,
+        6,
+        0
+       ],
+       [
+        611,
+        423,
+        3,
+        6,
+        0
+       ],
+       [
+        109,
+        585,
+        2,
+        9,
+        0
+       ],
+       [
+        574,
+        324,
+        4,
+        8,
+        0
+       ],
+       [
+        143,
+        863,
+        2,
+        12,
+        2
+       ],
+       [
+        399,
+        897,
+        4,
+        7,
+        0
+       ],
+       [
+        387,
+        681,
+        3,
+        6,
+        0
+       ],
+       [
+        670,
+        736,
+        4,
+        7,
+        0
+       ],
+       [
+        723,
+        125,
+        2,
+        12,
+        3
+       ],
+       [
+        142,
+        464,
+        4,
+        8,
+        0
+       ],
+       [
+        837,
+        519,
+        2,
+        12,
+        1
+       ],
+       [
+        350,
+        437,
+        1,
+        18,
+        0
+       ],
+       [
+        1000,
+        379,
+        5,
+        6,
+        0
+       ],
+       [
+        1000,
+        543,
+        4,
+        8,
+        0
+       ],
+       [
+        1000,
+        684,
+        4,
+        9,
+        0
+       ],
+       [
+        1000,
+        813,
+        4,
+        7,
+        0
+       ],
+       [
+        1000,
+        234,
+        5,
+        8,
+        0
+       ],
+       [
+        1000,
+        84,
+        5,
+        6,
+        0
+       ],
+       [
+        0,
+        111,
+        4,
+        9,
+        0
+       ],
+       [
+        0,
+        339,
+        2,
+        11,
+        4
+       ],
+       [
+        0,
+        607,
+        4,
+        9,
+        0
+       ],
+       [
+        0,
+        831,
+        3,
+        9,
+        0
+       ]
+      ],
+      "l": [
+       [
+        0,
+        4
+       ],
+       [
+        0,
+        8
+       ],
+       [
+        0,
+        14
+       ],
+       [
+        0,
+        17
+       ],
+       [
+        1,
+        4
+       ],
+       [
+        1,
+        12
+       ],
+       [
+        1,
+        14
+       ],
+       [
+        1,
+        22
+       ],
+       [
+        2,
+        3
+       ],
+       [
+        2,
+        17
+       ],
+       [
+        2,
+        19
+       ],
+       [
+        3,
+        15
+       ],
+       [
+        3,
+        19
+       ],
+       [
+        3,
+        23
+       ],
+       [
+        3,
+        24
+       ],
+       [
+        4,
+        13
+       ],
+       [
+        4,
+        14
+       ],
+       [
+        5,
+        25
+       ],
+       [
+        5,
+        26
+       ],
+       [
+        6,
+        7
+       ],
+       [
+        6,
+        10
+       ],
+       [
+        6,
+        15
+       ],
+       [
+        7,
+        10
+       ],
+       [
+        8,
+        10
+       ],
+       [
+        8,
+        18
+       ],
+       [
+        9,
+        16
+       ],
+       [
+        9,
+        18
+       ],
+       [
+        9,
+        27
+       ],
+       [
+        10,
+        18
+       ],
+       [
+        11,
+        28
+       ],
+       [
+        12,
+        13
+       ],
+       [
+        13,
+        18
+       ],
+       [
+        16,
+        18
+       ],
+       [
+        16,
+        26
+       ],
+       [
+        16,
+        27
+       ],
+       [
+        17,
+        19
+       ],
+       [
+        17,
+        20
+       ],
+       [
+        17,
+        21
+       ],
+       [
+        19,
+        20
+       ],
+       [
+        19,
+        23
+       ],
+       [
+        20,
+        21
+       ],
+       [
+        21,
+        22
+       ],
+       [
+        23,
+        24
+       ],
+       [
+        25,
+        26
+       ],
+       [
+        27,
+        28
+       ]
+      ]
+     }
+    ],
+    [
+     "turns",
+     8
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "game-over-win",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 2,
+    "nodes": 12,
+    "ai_strategy": [
+     "marshal",
+     "rusherplus"
+    ]
+   },
+   "seed": 21,
+   "steps": [
+    [
+     "until_over",
+     300
+    ]
+   ]
+  },
+  {
+   "name": "game-over-loss",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 2,
+    "nodes": 12,
+    "ai_strategy": [
+     "rusherplus",
+     "marshal"
+    ]
+   },
+   "seed": 21,
+   "steps": [
+    [
+     "until_over",
+     300
+    ]
+   ]
+  },
+  {
+   "name": "history-midgame",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "history",
+     8
+    ]
+   ]
+  },
+  {
+   "name": "history-graph",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "history",
+     8
+    ],
+    [
+     "set",
+     "history_graph",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "history-graph-full",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     14
+    ],
+    [
+     "history",
+     8
+    ],
+    [
+     "set",
+     "history_graph",
+     true
+    ],
+    [
+     "set",
+     "graph_full",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "history-finished-coach",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 2,
+    "nodes": 12,
+    "ai_strategy": [
+     "marshal",
+     "rusherplus"
+    ]
+   },
+   "seed": 21,
+   "steps": [
+    [
+     "until_over",
+     300
+    ],
+    [
+     "history",
+     -1
+    ]
+   ]
+  },
+  {
+   "name": "confirm-quit",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     4
+    ],
+    [
+     "overlay",
+     "quit"
+    ]
+   ]
+  },
+  {
+   "name": "confirm-rewind",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     8
+    ],
+    [
+     "history",
+     3
+    ],
+    [
+     "overlay",
+     "rewind"
+    ]
+   ]
+  },
+  {
+   "name": "confirm-hint",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     4
+    ],
+    [
+     "overlay",
+     "hint"
+    ]
+   ]
+  },
+  {
+   "name": "stage-briefing",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {},
+   "seed": 0,
+   "steps": [
+    [
+     "stage",
+     "tutorial",
+     0
+    ]
+   ]
+  },
+  {
+   "name": "stage-playing",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {},
+   "seed": 0,
+   "steps": [
+    [
+     "stage",
+     "tutorial",
+     1
+    ],
+    [
+     "set",
+     "briefing_open",
+     false
+    ],
+    [
+     "turns",
+     3
+    ]
+   ]
+  },
+  {
+   "name": "pbp-invite",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "set",
+     "pbp_match",
+     "m-parity"
+    ],
+    [
+     "set",
+     "pbp_title",
+     "Parity match"
+    ],
+    [
+     "set",
+     "pbp_invite",
+     [
+      [
+       1,
+       "https://example.invalid/play/#pbp=one"
+      ],
+      [
+       2,
+       "https://example.invalid/play/#pbp=two"
+      ],
+      [
+       3,
+       "https://example.invalid/play/#pbp=three"
+      ],
+      [
+       0,
+       "https://example.invalid/play/#spectate=m-parity"
+      ]
+     ]
+    ]
+   ]
+  },
+  {
+   "name": "pbp-waiting",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone",
+    "phone-land"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     5
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "set",
+     "pbp_match",
+     "m-parity"
+    ],
+    [
+     "set",
+     "pbp_submitted",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "pbp-spectating",
+   "surface": "game",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {
+    "players": 3,
+    "nodes": 22
+   },
+   "seed": 7,
+   "steps": [
+    [
+     "turns",
+     5
+    ],
+    [
+     "set",
+     "show_help",
+     false
+    ],
+    [
+     "set",
+     "pbp_match",
+     "m-parity"
+    ],
+    [
+     "set",
+     "human_id",
+     0
+    ]
+   ]
+  },
+  {
+   "name": "maker-blank",
+   "surface": "maker",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {},
+   "steps": []
+  },
+  {
+   "name": "maker-map",
+   "surface": "maker",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "settings": {},
+   "steps": [
+    [
+     "map",
+     {
+      "v": 1,
+      "n": [
+       [
+        599,
+        555,
+        2,
+        11,
+        0
+       ],
+       [
+        535,
+        869,
+        2,
+        10,
+        0
+       ],
+       [
+        814,
+        403,
+        5,
+        5,
+        0
+       ],
+       [
+        892,
+        202,
+        5,
+        4,
+        0
+       ],
+       [
+        537,
+        666,
+        4,
+        5,
+        0
+       ],
+       [
+        167,
+        224,
+        3,
+        6,
+        0
+       ],
+       [
+        565,
+        62,
+        3,
+        7,
+        0
+       ],
+       [
+        432,
+        195,
+        5,
+        6,
+        0
+       ],
+       [
+        611,
+        423,
+        3,
+        6,
+        0
+       ],
+       [
+        109,
+        585,
+        2,
+        9,
+        0
+       ],
+       [
+        574,
+        324,
+        4,
+        8,
+        0
+       ],
+       [
+        143,
+        863,
+        2,
+        12,
+        2
+       ],
+       [
+        399,
+        897,
+        4,
+        7,
+        0
+       ],
+       [
+        387,
+        681,
+        3,
+        6,
+        0
+       ],
+       [
+        670,
+        736,
+        4,
+        7,
+        0
+       ],
+       [
+        723,
+        125,
+        2,
+        12,
+        3
+       ],
+       [
+        142,
+        464,
+        4,
+        8,
+        0
+       ],
+       [
+        837,
+        519,
+        2,
+        12,
+        1
+       ],
+       [
+        350,
+        437,
+        1,
+        18,
+        0
+       ],
+       [
+        1000,
+        379,
+        5,
+        6,
+        0
+       ],
+       [
+        1000,
+        543,
+        4,
+        8,
+        0
+       ],
+       [
+        1000,
+        684,
+        4,
+        9,
+        0
+       ],
+       [
+        1000,
+        813,
+        4,
+        7,
+        0
+       ],
+       [
+        1000,
+        234,
+        5,
+        8,
+        0
+       ],
+       [
+        1000,
+        84,
+        5,
+        6,
+        0
+       ],
+       [
+        0,
+        111,
+        4,
+        9,
+        0
+       ],
+       [
+        0,
+        339,
+        2,
+        11,
+        4
+       ],
+       [
+        0,
+        607,
+        4,
+        9,
+        0
+       ],
+       [
+        0,
+        831,
+        3,
+        9,
+        0
+       ]
+      ],
+      "l": [
+       [
+        0,
+        4
+       ],
+       [
+        0,
+        8
+       ],
+       [
+        0,
+        14
+       ],
+       [
+        0,
+        17
+       ],
+       [
+        1,
+        4
+       ],
+       [
+        1,
+        12
+       ],
+       [
+        1,
+        14
+       ],
+       [
+        1,
+        22
+       ],
+       [
+        2,
+        3
+       ],
+       [
+        2,
+        17
+       ],
+       [
+        2,
+        19
+       ],
+       [
+        3,
+        15
+       ],
+       [
+        3,
+        19
+       ],
+       [
+        3,
+        23
+       ],
+       [
+        3,
+        24
+       ],
+       [
+        4,
+        13
+       ],
+       [
+        4,
+        14
+       ],
+       [
+        5,
+        25
+       ],
+       [
+        5,
+        26
+       ],
+       [
+        6,
+        7
+       ],
+       [
+        6,
+        10
+       ],
+       [
+        6,
+        15
+       ],
+       [
+        7,
+        10
+       ],
+       [
+        8,
+        10
+       ],
+       [
+        8,
+        18
+       ],
+       [
+        9,
+        16
+       ],
+       [
+        9,
+        18
+       ],
+       [
+        9,
+        27
+       ],
+       [
+        10,
+        18
+       ],
+       [
+        11,
+        28
+       ],
+       [
+        12,
+        13
+       ],
+       [
+        13,
+        18
+       ],
+       [
+        16,
+        18
+       ],
+       [
+        16,
+        26
+       ],
+       [
+        16,
+        27
+       ],
+       [
+        17,
+        19
+       ],
+       [
+        17,
+        20
+       ],
+       [
+        17,
+        21
+       ],
+       [
+        19,
+        20
+       ],
+       [
+        19,
+        23
+       ],
+       [
+        20,
+        21
+       ],
+       [
+        21,
+        22
+       ],
+       [
+        23,
+        24
+       ],
+       [
+        25,
+        26
+       ],
+       [
+        27,
+        28
+       ]
+      ]
+     }
+    ]
+   ]
+  }
+ ]
+}
