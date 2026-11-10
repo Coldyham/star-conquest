@@ -661,7 +661,7 @@ def briefing_close(touch: bool, portrait: bool) -> str:
     touch screen the hint sits in the side panel, under the map upright."""
     if touch:
         where = "below the map" if portrait else "at the right"
-        return f"Tap anywhere to begin · tap the hint {where} to read this again"
+        return f"Tap outside the card to begin · tap the hint {where} to read this again"
     return "Press any key to begin · B shows this again"
 
 
@@ -845,7 +845,7 @@ def lore_card(lore, touch: bool) -> tuple[tuple[str, ...], str, tuple[str, ...]]
     """A star info card's paragraphs, close line and notes (`starlore.Lore`)."""
     origin = lore.origin or "The IAU catalogue gives no origin for this name."
     notes = (f"Source: {lore.reference}",) if lore.reference else ()
-    close = "Tap anywhere to close" if touch else "Press any key to close"
+    close = "Tap outside the card to close" if touch else "Press any key to close"
     return (origin,), close, notes
 
 

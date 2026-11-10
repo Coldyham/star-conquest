@@ -1146,7 +1146,7 @@ def _draw_odds_card(surface, state: GameState, ui: Ui) -> None:
     for i, col in enumerate(laid):
         cx = x + i * (col_w + pad)
         _draw_odds_column(surface, col, kind, cx, y, cx + col_w, floor)
-    close = "Tap anywhere to close" if config.touch_ui else "Press any key to close"
+    close = "Tap outside the card to close" if config.touch_ui else "Press any key to close"
     _text(surface, small, close, config.COLOR_TEXT_DIM,
           center=(card.centerx, card.bottom - pad - _row_h() // 2))
 
