@@ -720,7 +720,13 @@ in [`campaign.md`](campaign.md).
   `test_an_autoplay_demo_plays_the_same_game_the_bot_column_does`, which reads
   77 turns apart on its setup without it. `_hand_over` is still what does it
   in the harness, because a posted *human* setup carries `autoplay: False` and
-  so has nothing for that stamp to fire on. Leaving the flag set once looked
+  so has nothing for that stamp to fire on. Not always: a win played after
+  watching a bot and rewinding to the start was posted with it on
+  (`ef931f94e2cfa965`), built with no human seat, and stopped the worker's run;
+  `bot_replay._settings_for` now clears `autoplay` (outside the key, and the seat
+  is handed over anyway), and a row that still can't be replayed is skipped, not
+  fatal. The game no longer posts such a setup (`app.forget_unplayed_bot`,
+  `core.md`). Leaving the flag set once looked
   necessary — a token can only ever say "seat 1 is a bot" as `autoplay: true`,
   never as an actual flag, so a live, token-driven Watch link could only ever
   reconstruct the *handicapped* version. That is fixed from both ends now: the
