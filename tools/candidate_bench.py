@@ -207,7 +207,11 @@ def _record(state, pid, root, rec) -> None:
     plans = rec["plans"]
     if not plans:
         return                  # a zero-ply search returns the default unsearched
-    labels = [_label(rec["labels"][id(p)]) if id(p) in rec["labels"] else POSTURES[i]
+    k = sys.modules[ai.STRATEGIES["knower"].__module__]
+    closer = getattr(k, "CLOSER", None)
+    labels = [_label(rec["labels"][id(p)]) if id(p) in rec["labels"]
+              else "closer" if closer is not None and k._SOURCE.get(id(p)) == closer
+              else POSTURES[i]
               for i, p in enumerate(plans)]
     chosen = next((i for i, p in enumerate(plans) if p is root), None)
     phase = phase_of(state, pid)
