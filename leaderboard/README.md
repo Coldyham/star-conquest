@@ -731,7 +731,9 @@ through the `public_replays` view, refuses a malformed id before it reaches a
 query string, and answers "unpublished" and "missing" identically.
 
 `tests/gauntlet-build.test.mjs` covers what a gauntlet may be (`checkBody`, the
-limits, the id) and the page's draft, and `tests/gauntlet-handler.test.mjs` drives
+limits, the id) and the page's draft with its lanes, `tests/gauntlet-graph.test.mjs`
+the diagram's layout against `tests/fixtures/gauntlet-layout.json` (which
+`tests/test_gauntlet.py` reads too, with the game's `gauntlet.layout`), and `tests/gauntlet-handler.test.mjs` drives
 `gauntlet.mjs` over a stub PostgREST. `tests/fixtures/gauntlet.json` is a
 gauntlet built from three real links, which `tests/test_gauntlet.py` reads with
 the game's own `Gauntlet.from_dict`; regenerate it with

@@ -201,6 +201,18 @@ Two things Phase 1 did that this plan had left to Phase 2:
 
 ## Phase 2: the graph view replaces the stage list (`menu.py`)
 
+**Stale: re-plan before building.** This phase was written for the pygame
+`menu.py`, deleted at the HTML cutover. The stage list now lives in
+`setupmenu.py` (its words and presses) and `webapp/js/menu.mjs` (drawing it),
+so the view below is a `setupmenu` view plus page drawing, not `stagegraph.py`.
+**The layout landed with Phase 3** (2026-11-11): `gauntlet.layout`, its JS
+mirror `leaderboard/js/gauntlet-graph.mjs`, and the shared fixture at
+`leaderboard/tests/fixtures/gauntlet-layout.json` (not `tests/fixtures/`,
+beside the lanes fixture). It takes no `shown` argument: hidden stages are
+laid out like any other and the drawer leaves them out. Still to do: the
+graph in the game's Gauntlets list, its scrolling, node states and the
+detail strip.
+
 `_draw_tutorial` / `_handle_tutorial` (menu.py:764-913) become a graph panel in
 the same modal. The heading, gauntlet picker, notes, Leave, Copy link and Close
 all stay.
@@ -299,6 +311,23 @@ Tests:
   match the cells, and a hidden lane draws nothing.
 
 ## Phase 3: lanes on the board's gauntlet page (`gauntlet.html`, `gauntlet-page.mjs`, `gauntlet-build.mjs`, new `gauntlet-graph.mjs`)
+
+**Built 2026-11-11.** The reasons as built are in `docs/design/gauntlet.md`,
+*Lanes on the board*. Where the build differs from what follows:
+- **Lane gates have a fourth choice, "Win in N turns"** (typed in, with an
+  optional ships-lost cap), beside the stage target's three. A stored lane
+  target opens as typed turns, or as the best bot's when it says `beat`.
+- **`buildBody` sorts lanes by (from, to)**, so the stored body (and its id)
+  doesn't depend on the order the author clicked chips in.
+- **A draft with no stage open from the start is refused** before Save
+  ("tick at least one stage…"), rather than left to `from_dict`'s default.
+- **The diagram's marks**: starts get a bar on the left, goals a ★ and a gold
+  border, stages reached only through a gate a dashed border, hidden ones a
+  dotted border. A lane that skips columns arcs over the stages it skips; a
+  lane back or within a column dips below.
+- **`branches()` is gone** with its warning.
+- Not done: a click on stage A then B in the diagram to toggle a lane (the
+  plan's "later step"), and the end-to-end check on a deploy preview.
 
 The page keeps its stage cards: one pasted link per stage, title, briefing,
 hint, target, ↑/↓, Remove. Phase 3 adds the graph to them. Nothing in the game

@@ -272,8 +272,9 @@ the link `/play/#g=<id>`. A `.json` download of the same file is for desktop.
   as a settings token), read by `gauntlet.inline_data`. The page never offers
   it; it is for a build with no board and for tests.
 - **Opening `gauntlet.html#<id>` loads a stored gauntlet as a draft.** Remixing
-  or fixing one is open, edit, save. A branching gauntlet loads as a linear
-  one: the page edits order only, and `lanes` waits for a page that draws them.
+  or fixing one is open, edit, save. Its lanes, starts, lane targets and hidden
+  marks come with it (*Lanes on the board*, below), and **Open a .json file**
+  loads a desktop or generated gauntlet the board never saw the same way.
 - **Listing is an admin's decision at the author's request.** The author can tick
   "Ask for it to be listed publicly" (`wants_listing`); `tools/admin.py
   list-gauntlet` sets `listed`, and only a listed row is readable with the
@@ -936,5 +937,57 @@ or an alternate route to the end. Built as Phase 1 of
 - **The board stores what the game reads.** `checkBody` takes the same lane
   keys and refuses what `from_dict` would drop (a hidden lane with no target, a
   bad target); `leaderboard/tests/fixtures/gauntlet-lanes.json` is read by both
-  suites. Until the page draws lanes, opening a branching gauntlet there says
-  that saving would make it linear (`branches`).
+  suites. The board's page now edits lanes (*Lanes on the board*).
+
+### Lanes on the board (built 2026-11-11)
+
+The board's gauntlet page edits the graph: Phase 3 of
+`graphical-gauntlet-maker.md`. Nothing in the game changed.
+
+- **The maker is the board page, grown, not an editor in the game.** A
+  gauntlet's lanes have no length and the game draws no geometry, so what the
+  map maker would lend (placing, dragging, pan and zoom) is what a gauntlet
+  doesn't need, while everything a stage does need is already on the board:
+  pasted links, briefings, the link's score and the best bot as targets (only
+  the board reads `bot_scores`), `checkBody`, Save and listing. HTML forms also
+  edit text better on a phone.
+- **Lanes join stages by a draft key, never by place.** Each draft stage gets a
+  `key` from the draft's `next_key` counter when it is made, so ↑/↓ and Remove
+  never rewire a lane. `draft.lanes` is `{from, to, two_way, aim, target,
+  hidden}` by key, `draft.start` a list of keys (`gauntlet-build.mjs`).
+- **A linear gauntlet saves exactly the body it saved before**, so its id holds:
+  `buildBody` numbers stages in list order and writes `lanes` and `start` only
+  when they differ from what `from_dict` assumes without them. A new draft and
+  **+ Add a stage** join the new stage from the last one, so an author who never
+  touches a lane gets today's gauntlet. A draft kept before lanes reads back as
+  that chain (`readDraft`).
+- **Each card**: *Open from the start*; a row of **Leads to** chips, one per
+  other stage, lit where a lane runs (past 16 stages only the lit ones show,
+  the rest behind "+ Lane to…"); a "Reached from" note, so either end explains
+  a lane; **+ After** (a stage below, with a lane from this one) and **+
+  Branch** (a stage beside it, with this one's lanes in, so a fork). Where the
+  other end already has a one-way lane back, the chip offers "↔ make two-way":
+  the format keeps a pair's first lane and drops the second.
+- **A lit chip opens the lane's options**: two-way; a gate (none, turns typed
+  in, the near stage's link score, or the best bot on it: the stage target's
+  choices plus one, through the same `applyAim`); hidden, only when gated; the
+  derived label (`laneLabel`) as it is set; remove. A bot gate is read again on
+  Save, as a stage's is.
+- **A stage's place is computed, never stored** (`gauntlet.layout`, mirrored by
+  `gauntlet-graph.mjs`): the column is ungated depth, so the main path reads
+  left to right and a shortcut is a long arrow; a stage reached only through
+  gated lanes is one column past its shallowest source, walked level by level
+  so list order never moves it; an unreached stage takes a last column. The
+  row is list order, then one pass sorting each column by its parents' mean
+  row, not iterated, so the author's order (↑/↓) decides most of the picture
+  and a small edit never reshuffles it. Hidden stages are laid out too, so
+  revealing one moves nothing. `leaderboard/tests/fixtures/gauntlet-layout.json`
+  is read by both suites. A stored position (an `at` per stage) was decided
+  against: the author would be placing what `layout` already places.
+- **The diagram above the cards is read-only**: arrows, dashed gated lanes with
+  their short target, dotted hidden ones, a bar on starts and ★ on goals; a
+  stage no start reaches is red with a note, and a gated lane that is a stage's
+  only way in is amber (a warning: that is what a bonus stage is). *As a new
+  player sees it* drops hidden lanes and the stages only they reach, leaving the
+  gap the game will leave. Clicking a stage scrolls to its card; hovering a chip
+  lights its lane. It scrolls sideways in its own box.

@@ -1455,6 +1455,84 @@ a.cal-day:hover { outline: 1px solid var(--cyan); }
   border: 1px solid var(--green);
 }
 .gauntlet-form #problem { color: var(--gold); }
+.gauntlet-form .label {
+  margin-top: 0.5rem;
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+.gauntlet-form label.file-open {
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--dim);
+  color: var(--dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.gauntlet-form label.file-open:hover { color: var(--ink); }
+
+/* A stage's "Leads to" chips: lit where a lane runs from it. */
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chips select { width: auto; }
+button.chip {
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px dashed var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: none;
+  animation: none;
+}
+button.chip:hover { color: var(--ink); border-color: var(--dim); background: transparent; }
+button.chip.lit { border: 1px solid var(--cyan); color: var(--cyan); background: #0b1a2c; }
+button.chip.open { border-color: var(--gold); color: var(--gold); }
+.stage-from { margin: 0; color: var(--dim); font-size: 0.8rem; }
+.stage-from:empty { display: none; }
+.lane-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0;
+  padding: 0.25rem 0.8rem 0.8rem;
+  border: 1px solid var(--gold);
+}
+.lane-options legend { padding: 0 0.4rem; color: var(--gold); font-size: 0.8rem; }
+.lane-turns input[type="number"] { width: 6rem; }
+.lane-turns[hidden] { display: none; }
+.lane-label { margin: 0; color: var(--cyan); font-size: 0.8rem; }
+.lane-label:empty { display: none; }
+.stage.flash { animation: card-flash 1.2s ease-out; }
+@keyframes card-flash { from { border-color: var(--gold); box-shadow: 0 0 18px rgba(255, 210, 63, 0.5); } }
+
+/* The diagram: scrolls sideways in its own box, so 64 stages never widen the page. */
+.diagram-box { margin-top: 1rem; }
+.diagram { overflow-x: auto; border: 1px solid var(--line); background: #070a18; }
+.diagram svg { display: block; font-family: var(--mono); font-size: 11px; }
+.diagram .lane path { fill: none; stroke: var(--dim); stroke-width: 1.5; }
+.diagram .lane .head { fill: var(--dim); }
+.diagram .lane.gated path { stroke-dasharray: 6 4; }
+.diagram .lane.hidden path { stroke-dasharray: 2 4; }
+.diagram .lane.warn path { stroke: var(--gold); }
+.diagram .lane.warn .head { fill: var(--gold); }
+.diagram .lane.lit path { stroke: var(--magenta); stroke-width: 3; }
+.diagram .lane.lit .head { fill: var(--magenta); }
+.diagram .lane .gate { fill: var(--gold); font-size: 10px; paint-order: stroke; stroke: #070a18; stroke-width: 4px; }
+.diagram .stage-node { cursor: pointer; }
+.diagram .stage-node rect { fill: var(--panel); stroke: var(--cyan); stroke-width: 1.2; }
+.diagram .stage-node text { fill: var(--ink); }
+.diagram .stage-node .start-bar { fill: var(--cyan); stroke: none; }
+.diagram .stage-node.goal rect:first-child { stroke: var(--gold); }
+.diagram .stage-node.off-path rect:first-child { stroke-dasharray: 5 3; }
+.diagram .stage-node.hidden rect:first-child { stroke-dasharray: 2 3; }
+.diagram .stage-node.stranded rect:first-child { stroke: var(--bad); }
+.diagram .stage-node.stranded text { fill: var(--bad); }
+.diagram .stage-node:hover rect:first-child, .diagram .stage-node:focus rect:first-child { stroke-width: 2.5; }
+.diagram-box #diagram-note:empty { display: none; }
+.diagram-key { margin: 0.4rem 0 0; color: var(--dim); font-size: 0.8rem; }
 .gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
 
 /* -- the generate form (gauntlet.html) --------------------------------------- */

@@ -392,6 +392,9 @@ matches it (`setupmenu.active_stage`). Built-in stages pin every field and a see
 **A run (`run.py`) is the one stored progress**: a single-path gauntlet with a
 target, in order, one life. It judges only its own game (`run.finish`), so a
 Retry is free play; Continue resumes that game's log, never a fresh copy.
+**A stage's place on the graph is computed (`gauntlet.layout`, mirrored by
+`gauntlet-graph.mjs`; `gauntlet-layout.json`), never stored**; the board page
+edits lanes by draft key, and a linear draft builds exactly its old body.
 **A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
 `/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
 page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but

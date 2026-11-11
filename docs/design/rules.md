@@ -604,6 +604,11 @@ Reasons: `docs/design/gauntlet.md`.
   one before it. **Every stage must be reachable from a start**
   (`gauntlet.problems`): the board's `checkBody` refuses a gauntlet that fails,
   `tools/gauntlet_check.py` will not play one, and the built-ins are held to it.
+- **A stage's place on the graph is computed, never stored** (`gauntlet.layout`,
+  mirrored by the board's `gauntlet-graph.mjs`; both read
+  `leaderboard/tests/fixtures/gauntlet-layout.json`). The board page edits
+  lanes by draft key, never by place, and a draft whose lanes were never
+  touched builds exactly the linear body it always did, so its id holds.
 - **A stage is active only while the setup still matches it**
   (`gauntlet.stage_of`, `menu.active_stage`); the banner warns, it never locks.
   A challenge link's setup is never a stage.
