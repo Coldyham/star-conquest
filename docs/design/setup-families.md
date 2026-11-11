@@ -1,9 +1,11 @@
 # Setup families
 
 How the board groups setups beyond "same settings, different seed". The main
-list has three levels: **By game** (one card per map), **By config** (the same
-setup with the seed set aside, `sc_config_key`) and **By family** (configs
-linked to the older config each was most likely branched from). Every card also
+list has three levels: **By map** (one card per map, `?group=game`), **By
+setup** (the same setup with the seed set aside, `?group=config`,
+`sc_config_key`) and **By family** (configs linked to the older config each was
+most likely branched from). Players see "setup"; the code and tables say
+"config" (`docs/glossary.md`). Every card also
 carries a **pace** chip. Code: `leaderboard/js/families.mjs` (pure), drawn by
 `home.mjs`'s `familyCard` and `paceBadge`.
 
@@ -97,11 +99,11 @@ replayed yesterday reads as new.
 
 `?group=family` (`listing.mjs`'s `viewKind`). It reads every config at once
 (`familyQueries().all`), since a tree needs all of its members, so it has no
-"Show more". The filters run as the By config query cut to `config_key`
+"Show more". The filters run as the By setup query cut to `config_key`
 (`familyQueries().match`). A family with no matching member is dropped, and a
 non-matching member stays in its tree, dimmed. Families come most recently
 active first, and Order flips that. Each row links to the config's own list,
-the existing drill-down. "Random setup" stays on By config.
+the existing drill-down. "Random setup" stays on By setup.
 
 ## Decided against
 

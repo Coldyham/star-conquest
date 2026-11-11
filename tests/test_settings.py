@@ -864,24 +864,20 @@ def test_a_setup_without_a_map_prunes_the_key_from_its_token():
     assert "custom_map" not in Settings().token_dict()
 
 
-def test_no_core_module_imports_pygame():
-    """The hard split the whole layout rests on — it is what lets `tests/sim` and
-    most of the suite run with no display. There is no violation today, and this
-    change adds both a new core module (`custommap`) and a new shell one
-    (`mapmaker`), so pin it rather than rely on nobody noticing.
+def test_no_module_imports_pygame():
+    """The game runs in the browser's Pyodide, which has no pygame, and the
+    headless tests and `tests/sim` run it with no display. The pygame shell is
+    gone, so no module of the game or of its bots may import it again.
 
-    Parsed rather than grepped: every one of these modules says "no pygame" in its
-    own docstring, so a substring search passes nothing and fails everything.
+    Parsed rather than grepped: docstrings still say "no pygame", so a
+    substring search passes nothing and fails everything.
     """
     import ast
     import pathlib
 
-    core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
-            "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
-            "campaign", "gauntlet", "stats", "dealer", "gauntletgen", "daily", "coach", "run")
-    pkg = pathlib.Path(__file__).resolve().parent.parent / "starconquest"
-    for name in core:
-        tree = ast.parse((pkg / f"{name}.py").read_text())
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for path in sorted([*(root / "starconquest").glob("*.py"), *(root / "models").glob("*.py")]):
+        tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 names = [a.name for a in node.names]
@@ -890,7 +886,7 @@ def test_no_core_module_imports_pygame():
             else:
                 continue
             assert not any(n.split(".")[0] == "pygame" for n in names), \
-                f"{name}.py is core and must not import pygame"
+                f"{path.name} must not import pygame"
 
 
 def test_no_core_module_reads_a_screen_size():
@@ -909,7 +905,8 @@ def test_no_core_module_reads_a_screen_size():
     }
     core = ("model", "geometry", "mapgen", "combat", "engine", "ai", "botio",
             "settings", "fog", "replay", "turnfilm", "custommap", "pbp", "matchnames",
-            "campaign", "gauntlet", "stats", "dealer", "gauntletgen", "daily", "coach", "run")
+            "campaign", "gauntlet", "stats", "dealer", "gauntletgen", "daily", "coach", "run",
+            "hostio", "pbpclient", "serial", "session", "bench", "play", "hud", "recipe", "setupmenu", "maker")
     root = pathlib.Path(__file__).resolve().parent.parent
     paths = [root / "starconquest" / f"{name}.py" for name in core]
     paths += sorted((root / "models").glob("*.py"))

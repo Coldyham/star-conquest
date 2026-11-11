@@ -59,7 +59,7 @@ from . import paths, pbp, webstore
 from .settings import Settings
 import itertools
 
-# Package-relative, like `uifont._ASSETS`, so the web build ships the files with
+# Package-relative, so the web build ships the files with
 # the package (`tools/build_web.sh` copies `starconquest/` whole).
 _ASSETS = Path(__file__).resolve().parent / "assets" / "gauntlets"
 

@@ -89,7 +89,7 @@ from tools.bot_replay import (
 )
 
 # `leaderboard/js/config.mjs`'s GAME_URL_FALLBACK: where a printed seat link opens.
-GAME_URL = "https://star-conquest.netlify.app/game/"
+GAME_URL = "https://star-conquest.netlify.app/play/"
 
 # `leaderboard/js/auth.mjs`'s ACCOUNT_DOMAIN (tests/test_leaderboard_sync.py).
 ACCOUNT_DOMAIN = "star-conquest.netlify.app"

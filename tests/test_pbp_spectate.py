@@ -9,21 +9,13 @@ show every player what none of them should see.
 
 from __future__ import annotations
 
-import os
 
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame
 import pytest
 
-from starconquest import main as app
-from starconquest import ai, config, engine, model, pbp, replay, viewstate, webstore
-from starconquest import input as game_input
+from starconquest import ai, app, config, engine, model, pbp, replay, viewstate, webstore
 from starconquest.settings import Settings
 
-pygame.init()
-pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
 
 MATCH = "00112233445566ff"
 TOKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
@@ -149,25 +141,6 @@ def test_a_spectator_can_write_nothing():
     assert not pbp.remember(seat)
 
 
-def test_a_spectator_has_no_turn_to_end_and_nothing_to_send():
-    _, state, ui, _ = _watching()
-    enter = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="\r")
-    assert game_input.handle_event(enter, state, ui) is None
-    assert not ui.can_route(state)
-    # A press on a system selects nothing, since nothing on the board is ours,
-    # but it does bring the system up in the side panel: on touch there is no
-    # pointing at it. Empty space puts it away again.
-    sid = next(iter(state.systems))
-    pos = ui.view.to_screen(state.systems[sid].pos)
-    game_input.handle_event(
-        pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), state, ui)
-    assert ui.selected is None and not ui.pending
-    assert ui.hover == sid
-    game_input.handle_event(
-        pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(-50, -50), button=1), state, ui)
-    assert ui.hover is None
-
-
 def test_a_spectator_steps_to_the_board_the_players_resolved():
     """Stepping applies the resolver's record, exactly as a seat's client does."""
     ai.load_models()
@@ -194,62 +167,6 @@ def test_a_spectator_never_touches_a_seats_saved_rules():
     moved = _parsed(_payload(turn=1, log=pbp.shareable(log).encoded()))
     app.resolve_turn(state, ui, local, Settings(), script=pbp.settled_turn(moved, 0))
     assert pbp.remembered_rules(MATCH) == rules
-
-
-def test_a_spectator_is_never_told_they_conquered_a_draw():
-    _, state, ui, _ = _watching()
-    from starconquest import render
-    state.winner = 0
-    assert all(not text.startswith("Conquered") for _k, text, _c in render._result_lines(state, ui))
-
-
-def _drawn(monkeypatch, state, ui) -> list[str]:
-    from starconquest import render
-    pygame.init()
-    render._FONTS.clear()        # another file may have quit pygame
-    drawn: list[str] = []
-    monkeypatch.setattr(render, "_label_pill",
-                        lambda surface, font, text, *a: drawn.append(text))
-    real_text = render._text
-    monkeypatch.setattr(render, "_text", lambda surface, font, text, *a, **k:
-                        (drawn.append(text), real_text(surface, font, text, *a, **k))[1])
-    render.draw(pygame.Surface((config.SCREEN_W, config.SCREEN_H)), state, ui)
-    return drawn
-
-
-def test_the_spectators_screen_says_who_the_turn_is_waiting_on(monkeypatch):
-    match, state, ui, _ = _watching(submitted=[1])
-    app.pbp_adopt(match, pbp.spectator(MATCH), ui)
-    drawn = _drawn(monkeypatch, state, ui)
-    assert any("Waiting for" in line and state.players[2].name in line for line in drawn)
-    assert "Spectating" in drawn
-    assert not any(line.startswith("You are") for line in drawn)
-    assert ui.end_turn_rect[2] == 0, "no End Turn to press"
-    assert ui.clear_button_rect[2] == 0, "nothing to clear"
-    assert not any("send its garrison" in line for line in drawn), "no how-to-send help"
-    assert not any(line.endswith(" lost") for line in drawn), "neutral's losses are nobody's"
-
-
-def test_a_spectator_reads_a_neutral_system_as_nobodys(monkeypatch):
-    """Neutral's id is the spectator's, but its systems are not theirs to send from."""
-    _, state, ui, _ = _watching()
-    ui.hover = next(sid for sid, s in state.systems.items() if s.owner_id == 0)
-    drawn = _drawn(monkeypatch, state, ui)
-    assert not any(" free / " in line for line in drawn)
-    assert any(line.startswith("Ships: ") for line in drawn)
-
-
-def test_the_invite_overlay_offers_the_spectate_link(monkeypatch):
-    state, ui, _ = _open(_parsed(_payload()), pbp.Seat(MATCH, 1, TOKEN))
-    ui.pbp_invite = ((1, "seat-1-link"), (viewstate.SPECTATE_ROW, "watch-link"))
-    drawn = _drawn(monkeypatch, state, ui)
-    assert "Spectators" in drawn
-    assert viewstate.SPECTATE_ROW in ui.pbp_invite_rects
-    rect = ui.pbp_invite_rects[viewstate.SPECTATE_ROW]
-    press = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
-                               pos=(rect[0] + rect[2] // 2, rect[1] + rect[3] // 2), button=1)
-    assert game_input.handle_event(press, state, ui) == "pbp_copy_seat"
-    assert ui.pbp_copy_seat == viewstate.SPECTATE_ROW
 
 
 def test_a_spectator_reads_quickly_while_the_match_moves_and_slowly_once_it_stops():

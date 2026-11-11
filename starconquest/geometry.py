@@ -18,10 +18,6 @@ def dist(a: Point, b: Point) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def lerp(a: Point, b: Point, t: float) -> Point:
-    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-
-
 def point_segment_dist(p: Point, a: Point, b: Point) -> float:
     """Shortest distance from point ``p`` to the closed segment ``a``-``b``.
 
@@ -249,7 +245,6 @@ class WorldView:
         else:
             lo, hi = sy + sh - pad - wy1 * scale, sy + pad - wy0 * scale
             self.off_y = max(lo, min(hi, self.off_y))
-
 
     def _clamp_room(self, room: float) -> None:
         """The freer clamp: any pan at all, so long as each axis keeps

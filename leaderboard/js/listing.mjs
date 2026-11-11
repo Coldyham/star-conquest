@@ -123,7 +123,7 @@ export function filtersFromParams(params) {
   if (known) filters.sort = sort;
   // Blank is the sort's own direction, so a link without `dir` keeps reading
   // the way it always did, and changing the sort resets it. A sort this view
-  // doesn't have (By config's "maps" on By game) drops its direction with it.
+  // doesn't have (By setup's "maps" on By map) drops its direction with it.
   const dir = params.get("dir");
   if (DIRS.includes(dir) && (known || !sort) && dir !== sortFor(filters).dir) filters.dir = dir;
   return filters;

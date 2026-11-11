@@ -613,3 +613,150 @@ and acts on it; whether acting on it wins still needs people to play it.
 
 **Not measured:** knower at Predict and Search, the speed cells, wide jitter,
 other weights, and play against a person.
+
+## The posted games against Learning (2026-11-10, `tools/learning_humans.py`)
+
+What the public replays say about Learning against a person, read turn by turn.
+Every log a posted score made public (`public_replays`, 470 rows, 458 under the
+current rules) was replayed; 74 current games have an actuary seat facing a
+person with ten or more hand turns, 30 of them at Learning (`aux` 2, or a
+stored 12 that `AUX_OVER` reads as Learning), 41 seats at Field. On every
+Learning turn the shipped bot was asked for its orders on the same board and
+Field was asked for its; the person's every (source, target) pair next to an
+actuary system was scored against what they did. Every posted game is a win
+for the person, so none of this is a win rate; it is where the memory had
+something to say and whether it did. Each game is a line in
+`results/learning-humans/games.jsonl`.
+
+**The shipped bot reproduces every game since 2026-10-14 move for move** (19
+games, 1,261 turns). The eleven older games match 31-94% of turns: they were
+played by Learning on Planned, before the Field refit. The Field counterfactuals
+below are computed with the shipped code in every game.
+
+**Learning is more cautious against the person than Field, not less.** On the
+1,185 Learning turns on the person's border, 78% of orders are Field's exactly.
+Where they differ, Learning keeps *more* on that border (14.1 ships a turn to
+Field's 12.2), sends less at the person (2.8 to 3.7) and less anywhere (6.3 to
+8.5). Per border system it garrisons thinner than Field on 49 system-turns and
+thicker on 122. The design intent was the opposite: to relax the pessimistic
+risk where a rival will not strike.
+
+**Why: the reach clips the whole curve above ratio 1.5.** `LEARN_REACH` 8
+reads any curve value of 1/8 or more as a certain strike. The prior crosses
+1/8 at a ratio of about 1.3, so on the person's pairs next to Learning the
+chance read as certain on 1% of pairs under ratio 1, 15% at 1-1.5, 74% at
+1.5-2 and 100% from 2 up. The memory can only move a decision where the
+rival's garrison is smaller than ours. And there, thinning our garrison moves
+the rival's ratio from under 1 towards 1.5, where the read chance climbs from
+0.26 to 1: holding ships has a marginal value in Learning that Field, which
+counts the garrison in full either way, does not see. So Learning holds. This
+is the structural reason "Memory off" found nothing: the bins the memory
+could change are the ones where the strike is rare.
+
+**What the person does, against the prior.** Per-source strike rate on
+player-held targets, unpressed, over all 422 current posted games with ten or
+more hand turns (35,617 pairs), then on the 2,213 pairs next to Learning:
+
+    ratio        all games    prior    next to Learning    memory read   read as certain
+    under 1        0.056      0.040          0.043            0.033            1%
+    1-1.5          0.135      0.100          0.143            0.080           15%
+    1.5-2          0.220      0.224          0.273            0.179           74%
+    2-3            0.292      0.329          0.257            0.288          100%
+    3 and up       0.309      0.329          0.239            0.273          100%
+
+The person's curve is flatter than the roster's: more willing at long odds,
+less compelled at short ones. The memory moves the right way in every band but
+by a third of the gap at most, and every band where it reads the person as
+less eager than the prior is clipped to certain anyway.
+
+**The person's launches at Learning systems** (356): 32% came from a source
+Learning read as less than certain, all at ratios under 1.5, and 94% of those
+took the system. They are not strikes at a thin garrison that held: the
+target's median garrison at launch was 1 ship, and on half of the person's
+launches at actuary systems the garrison launched out before the fleet landed
+(66% when the source was weaker than the target). The person takes what
+actuary leaves, not what it holds. The per-turn strike rate on an actuary
+system by its garrison is 26% at 0, 25% at 1, 28% at 2-3, 16% at 4-7 and 7%
+at 8 or more.
+
+**The riposte, and why it is not a trait.** Within five turns the person
+retook 63% of what Learning captured from them (68% from Field), while
+Learning retook 23% of what the person took (Field 21%). That looked like the
+person-specific habit a memory could price: a capture that will not hold is
+worth less. The roster baseline (`--baseline`: Learning in 60 three-seat games
+at 18 systems against marshal, thinker and evolved, seeds 1-20) says it is the
+mark of a losing seat, not of a person: pooled, rivals retook 37% of
+Learning's captures and it retook 50%; in the 21 games Learning lost, 59% and
+27%, the person's numbers. Rivals also pounce on an empty Learning system
+*more* often than the person (38% a turn at 0 ships, 30% at 1), so the person
+is not a faster opportunist either.
+
+**One number learns the person faster than 31 bins.** A single multiplier on
+the prior curve, m = (strikes + 4) / (strikes the prior expected + 4), read
+over every pair the person offered and applied as min(1, m x prior), was
+scored on the person's pairs next to actuary in turn order, each pair
+predicted before it was counted:
+
+    boards seen     n     rate    pooled    binned memory    prior
+    0-10           143    0.273   0.2083       0.2113        0.2099
+    10-25          547    0.197   0.1440       0.1476        0.1465
+    25-50        1,198    0.174   0.1232       0.1299        0.1281
+    50 and up    2,338    0.135   0.1008       0.1024        0.1083
+    all          4,226            0.1164       0.1197        0.1223
+
+The binned memory does not beat the prior until it has seen fifty boards; the
+multiplier is ahead of both from the first ten. One game offers about 84 pairs
+spread over 31 bins against a prior worth 4 in each, so a bin learns almost
+nothing in a game. The person's multiplier at the end of a game ranges from
+0.91 to 1.49 (quartiles, median 1.15): the same person is a different striker
+from game to game, which is a case for in-game learning over a stored profile.
+
+**Caveats.**
+- Every posted game is a win for the person, and all but a handful are the
+  author's ([`learner.md`](learner.md), "Predicting people").
+- **A posted log is the line the person settled on.** Undo and rewind
+  (`GameLog.truncate`) drop the turns taken back and record nothing, so a
+  habit read off a posted game is a habit with hindsight. That bites hardest
+  in the short daily puzzles, where every ship counts and a turn is replayed
+  until it works, and least in a long game lived with. The 97% success of the
+  person's strikes is partly that. A per-turn count of take-backs in the log
+  (written as `hinted_from` is, the moment it happens) would let a reader
+  weight hand turns, and would cost no rules version.
+- Lost and abandoned games exist only in `game_logs`, uploaded by a player with
+  *Share replays* ticked; `--private` reads them with the secret key. They are
+  the only unbiased signal of play against a person.
+
+### What to try next
+
+Each is an arm behind a flag, measured as "Memory off" was (paired against
+Learning on fresh seeds, the same gate), and scored first on the posted games
+with `tools/learning_humans.py`, which costs nothing.
+
+1. **A chance over the exposure, not a clip.** A garrison left thin is thin
+   for every turn of the horizon, and each turn is another chance the rival
+   strikes: price a source at 1 - (1 - p)^T, T the turns our garrison stays
+   below it on the timeline, in place of min(1, 8p). At p 0.14 over 6 turns
+   that is 0.6, where the clip says 1; at p 0.3 it is 0.88. The whole curve
+   then matters, so the memory can act where the person actually differs from
+   the prior, and the K sweep's lesson (below 6 it thins and is punished) is
+   kept by the compounding rather than a constant.
+2. **One multiplier per rival, pooled over the bins.** As measured above, with
+   the binned counts kept for `tools/learner_check.py` and the Playstyle
+   panel. Cheap, and the first arm to run, since the posted-game score already
+   favours it. It would also let a bot's seat be read within a game.
+3. **The pressed row, again, with 1.** It leaned better alone ("Five more
+   arms"); with the clip gone the pressed prior (0.08 against 0.04 at low
+   ratios) is read where it differs.
+4. **Price what we leave, not what we hold.** The person's captures are of
+   systems actuary emptied. The ledger already prices an emptied system's risk
+   at its stake; the question is whether the stake of a 1-production frontier
+   system is right when its loss hands the rival a source next to the next
+   one. A learned "takes what I leave" rate would not separate the person from
+   the roster (above), so this is a pricing question for actuary.md, not a
+   memory.
+5. **Measure against people, not instead of them.** Turn *Share replays* on,
+   so lost games reach `game_logs`, and read them with `--private`: a win rate
+   by stop is the only gate that counts. Record take-backs in the log. A
+   stand-in person for self-play is worth building only if it first beats
+   "the person holds" on `learner_check.py --logs public`'s Brier, as a
+   `GUESSES` entry; knower's blind plan, marshal and actuary all failed that.

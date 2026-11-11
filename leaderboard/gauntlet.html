@@ -12,7 +12,7 @@
   </nav>
   <!-- A gauntlet is a run of maps played in order, each with a briefing card
        and a one-line hint: the game's tutorial is one. This page builds one
-       from game links and stores it (/api/gauntlet), which hands back a short
+       from map links and stores it (/api/gauntlet), which hands back a short
        link that opens it in the game, or builds the link that has the game
        generate one. Nothing about progress is stored: a
        player's clears are their own wins, kept in their own browser. -->
@@ -45,7 +45,7 @@
 
   <nav class="sorts ways" aria-label="How to make it">
     <button id="way-gen-tab" class="btn" type="button" data-way="gen" aria-controls="way-gen">Generate</button>
-    <button id="way-build-tab" class="btn ghost" type="button" data-way="build" aria-controls="way-build">Build from game links</button>
+    <button id="way-build-tab" class="btn ghost" type="button" data-way="build" aria-controls="way-build">Build from map links</button>
   </nav>
 
   <!-- Generate: the page builds a spec, the game deals the maps and plays test

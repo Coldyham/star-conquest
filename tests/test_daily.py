@@ -231,22 +231,37 @@ def test_a_daily_remembered_before_the_puzzle_is_a_board(store):
     assert game_daily.daily_of(a) == ("2026-10-26", "board")
 
 
-def test_the_result_line_gives_nothing_away():
+def test_a_dailys_setup_carries_its_banner_until_a_knob_moves(store):
+    from starconquest import setupmenu
     s = daily.candidates(MONDAY, limit=1)[0]
-    text = game_daily.result_line("2026-10-28", s, 23, 7)
-    assert text.splitlines()[:2] == [f"Star Conquest daily · Wed 28 Oct · {s.system_count()} systems",
-                                     "Won in 23 turns, 7 ships lost"]
-    assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#daily")
+    ms = setupmenu.Menu()
+    plain = setupmenu.view(ms, s)["subtitle"]
+    game_daily.remember("2026-11-10", s)
+    banner = setupmenu.view(ms, s)["subtitle"]
+    assert [line["text"] for line in banner][:1] == ["DAILY MAP #14 · Tue 10 Nov"]
+    assert banner[1]["text"] == daily.dealer.describe(s)
+    s.seed += 1
+    assert setupmenu.view(ms, s)["subtitle"] == plain
 
 
-def test_a_puzzle_result_names_its_opponent():
+def test_the_result_line_gives_nothing_away():
+    """Wordle-short: the day's number and the result, then the link. No date,
+    map size, opponent or seed."""
+    s = daily.candidates(MONDAY, limit=1)[0]
+    text = game_daily.result_line("2026-10-28", 23, 7)
+    assert text.splitlines()[0] == "Star Conquest daily #1 - 23 turns, 7 ships"
+    assert str(s.seed) not in text and text.splitlines()[-1].endswith("/play/#daily")
+    puzzle = game_daily.result_line("2026-11-07", 8, 9, "puzzle")
+    assert puzzle.splitlines()[0] == "Star Conquest puzzle #11 - 8 turns, 9 ships"
+    assert puzzle.splitlines()[-1].endswith("/play/#puzzle")
+    assert game_daily.number(game_daily.FIRST_DAY) == 1
+
+
+def test_a_puzzle_label_names_its_opponent():
     for w, name in ((1, "heuristic+lean"), (3, "Thinker · Claudebot"), (6, "Actuary · Field")):
         s = daily.candidates(MONDAY + dt.timedelta(days=w), limit=1, kind="puzzle")[0]
-        text = game_daily.result_line("2026-10-28", s, 9, 2, "puzzle")
-        assert text.splitlines()[0] == (f"Star Conquest daily puzzle · Wed 28 Oct · {s.system_count()} systems"
-                                        f" vs {name}")
-        assert str(s.seed) not in text and text.splitlines()[-1].endswith("/game/#puzzle")
-        assert game_daily.label("2026-10-28", s, "puzzle").endswith(f"vs {name}")
+        assert game_daily.banner("2026-10-28", s, "puzzle")[1].endswith(f"vs {name}")
+        assert game_daily.banner("2026-11-07", s, "puzzle")[0] == "DAILY PUZZLE #11 · Sat 7 Nov"
 
 
 # --------------------------------------------------------------------------- #
@@ -298,3 +313,16 @@ def test_the_board_says_it_in_the_games_words():
         text = game_daily.par_note(par, turns, lost)
         assert f'"{text}"' in tests, text
         assert text.split("!")[0] + "!" in js
+
+
+
+def test_the_boards_result_line_is_the_games(monkeypatch):
+    """`leaderboard/js/daily.mjs`'s `resultLine` (the daily page's "Copy daily
+    result") copies what the end screen copies: the JS test pins these strings."""
+    tests = (Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "daily.test.mjs").read_text()
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_origin", lambda: "https://example.org/")
+    for day, turns, lost, kind in (("2026-11-08", 12, 3, game_daily.BOARD), ("2026-11-08", 7, 0, game_daily.PUZZLE)):
+        text = game_daily.result_line(day, turns, lost, kind)
+        assert '"' + text.replace("\n", "\\n") + '"' in tests, text
+    monkeypatch.setattr(game_daily.webstore, "leaderboard_origin", lambda: "")
+    assert f'"{game_daily.result_line("2026-10-28", 9, 1)}"' in tests

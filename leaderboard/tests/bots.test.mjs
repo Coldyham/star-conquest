@@ -58,7 +58,8 @@ test("a bot off its default stop is a two-part chip, each half its own filter", 
     assert.equal(stop.textContent, "council");
     assert.equal(plain.attrs.href, "index.html?bot=marshal");
     assert.equal(botChips({ bots: ["knower", "knower:1"] })[0].textContent, "knower");
-    assert.deepEqual(botChips({ bots: ["heuristic"] }), []);
+    const [lone] = botChips({ bots: ["heuristic"] });
+    assert.equal(lone.attrs.href, "index.html?bot=heuristic");
   } finally {
     globalThis.document.createElement = real;
   }

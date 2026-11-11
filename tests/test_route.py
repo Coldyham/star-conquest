@@ -2,22 +2,16 @@
 confirm to lay a forwarding chain from each of them to it.
 
 The planning half is pure logic over a hand-built graph (as test_fog.py does),
-so most of this needs no display. The gesture half drives real pygame events
-through input.py, like test_input.py.
+so none of this needs a display.
 """
 
 from __future__ import annotations
 
-import os
 
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame
 
-from starconquest import main
-from starconquest import config, mapgen, model, render
-from starconquest import input as game_input
+from starconquest import app
+from starconquest import combat, config, mapgen, model
 from starconquest.geometry import WorldView
 from starconquest.model import ForwardRule, GameState, Player, System
 from starconquest.viewstate import IDLE, ROUTING, Ui
@@ -253,6 +247,27 @@ def test_a_split_rule_is_replaced_even_when_one_lane_agrees():
     assert ui.auto_forward[1] == ForwardRule({2: 100}, 0)
 
 
+def test_a_routed_rule_does_not_make_the_next_tap_a_forward():
+    """The "set up this turn" helper is for a rule being built from the popup. A
+    route is a finished plan: a tap from one of its systems opens on Send, even
+    one whose popup-made rule the route replaced, and a lane added there replaces
+    the route's rule (Cancel puts it back) rather than splitting it."""
+    s = _graph([(0, 1), (1, 2), (1, 3)], {sid: 1 for sid in range(4)})
+    ui = _ui(s)
+    ui.auto_forward[1] = ForwardRule({3: 100}, 0)
+    ui.forward_set_on[1] = s.turn
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 2)
+    ui.confirm_route(s)
+    assert not ui.opens_on_forward(s, 0) and not ui.opens_on_forward(s, 1)
+    ui.selected = 1
+    ui.begin_send(s, 3)
+    ui.set_forward_mode(s, True)
+    assert ui.auto_forward[1] == ForwardRule({3: 100}, 0)
+    ui.cancel_send()
+    assert ui.auto_forward[1] == ForwardRule({2: 100}, 0)
+
+
 def test_a_split_lane_back_into_the_plan_is_a_cycle():
     """A loop down one lane of a split traps that share, so it counts."""
     s = _line(4, owned={0, 1, 2, 3})
@@ -338,7 +353,7 @@ def test_confirmed_rules_expand_into_orders_at_end_of_turn():
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
     ui.confirm_route(s)
-    orders = main.auto_forward_orders(s, ui)
+    orders = app.auto_forward_orders(s, ui)
     assert {(o.source_id, o.dest_id, o.ships) for o in orders} == {(0, 1, 5), (1, 2, 5)}
 
 
@@ -366,395 +381,6 @@ def test_route_mode_is_not_offered_when_there_is_nothing_to_plan():
     s.winner = None
     s.players[1].alive = False               # what the engine's win check writes
     assert ui.can_route(s) is False          # knocked out
-
-
-# --------------------------------------------------------------------------- #
-# The drag box (needs a display for the view/screen mapping)
-# --------------------------------------------------------------------------- #
-def _screen() -> pygame.Surface:
-    screen = pygame.display.get_surface()
-    assert screen is not None
-    return screen
-
-
-def _display_setup():
-    pygame.init()
-    pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
-    render._FONTS.clear()   # a previous test's pygame.quit() killed the cached ones
-    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
-    ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
-    ui.seen = set(state.systems)
-    ui.visible = set(state.systems)
-    return state, ui
-
-
-def test_box_selects_only_our_own_systems_inside_it():
-    state, ui = _display_setup()
-    try:
-        px, py, pw, ph = config.play_rect()
-        ui.add_route_box(state, (px, py, pw, ph))      # the whole viewport
-        mine = {sid for sid, s in state.systems.items() if s.owner_id == 1}
-        assert ui.route_sel == mine
-        assert all(state.systems[sid].owner_id == 1 for sid in ui.route_sel)
-    finally:
-        pygame.quit()
-
-
-def test_box_is_additive():
-    state, ui = _display_setup()
-    try:
-        mine = sorted(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        for sid in mine:
-            x, y = ui.view.to_screen(state.systems[sid].pos)
-            ui.add_route_box(state, (x - 2, y - 2, 4, 4))
-        assert ui.route_sel == set(mine)
-    finally:
-        pygame.quit()
-
-
-def test_box_is_clipped_to_the_map_viewport():
-    """A box dragged over the side panel must not pick up systems hidden there —
-    to_screen projects every system, but only the drawing is clipped."""
-    state, ui = _display_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        # park that system under the side panel, then box the panel column
-        x = config.SCREEN_W - config.HUD_RIGHT_W // 2
-        y = config.SCREEN_H // 2
-        sx, sy = ui.view.to_screen(state.systems[home].pos)
-        ui.view.pan(x - sx, y - sy)
-        ui.add_route_box(state, (config.SCREEN_W - config.HUD_RIGHT_W, 0,
-                                 config.HUD_RIGHT_W, config.SCREEN_H))
-        assert home not in ui.route_sel
-    finally:
-        pygame.quit()
-
-
-def test_box_follows_the_camera_when_zoomed():
-    state, ui = _display_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.view.zoom_at(ui.view.to_screen(state.systems[home].pos), 2.0)
-        x, y = ui.view.to_screen(state.systems[home].pos)
-        ui.add_route_box(state, (x - 6, y - 6, 12, 12))
-        assert home in ui.route_sel
-    finally:
-        pygame.quit()
-
-
-def test_a_tap_always_aims():
-    """One primary meaning, whatever is under it — a pick, a rival's system, an
-    empty neutral. Aiming is never destructive."""
-    state, ui = _display_setup()
-    try:
-        ui.route_rally = False            # chain-only gesture: a tap aims
-        a = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        b = state.systems[a].neighbors[0]
-        state.systems[b].owner_id = 1     # a second system, as any mid-game has
-        ui.route_sel = {a, b}
-
-        ui.route_tap(state, a)                  # one of our own picks
-        assert ui.route_dest == a and ui.route_sel == {a, b}
-        theirs = next(sid for sid, s in state.systems.items() if s.owner_id != 1)
-        ui.route_tap(state, theirs)              # a rival's system
-        assert ui.route_dest == theirs and ui.route_sel == {a, b}
-    finally:
-        pygame.quit()
-
-
-def test_a_second_tap_on_the_target_un_aims_and_drops_it():
-    """The remove gesture: it has to be a second tap, because the first one is
-    already spoken for by aiming."""
-    state, ui = _display_setup()
-    try:
-        ui.route_rally = False            # chain-only gesture: a second tap un-aims
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.route_sel = {home}
-        ui.route_tap(state, home)
-        assert ui.route_dest == home and ui.route_sel == {home}
-        ui.route_tap(state, home)
-        assert ui.route_dest is None and ui.route_sel == set()
-    finally:
-        pygame.quit()
-
-
-def test_un_aiming_something_that_was_never_picked_drops_nothing():
-    state, ui = _display_setup()
-    try:
-        ui.route_rally = False            # chain-only gesture
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        theirs = next(sid for sid, s in state.systems.items() if s.owner_id != 1)
-        ui.route_sel = {home}
-        ui.route_tap(state, theirs)
-        ui.route_tap(state, theirs)
-        assert ui.route_dest is None and ui.route_sel == {home}
-    finally:
-        pygame.quit()
-
-
-# --------------------------------------------------------------------------- #
-# The gesture path, through input.handle_event
-# --------------------------------------------------------------------------- #
-def _ev(kind, **kw):
-    return pygame.event.Event(kind, **kw)
-
-
-def _press(state, ui, pos, button=1):
-    return game_input.handle_event(_ev(pygame.MOUSEBUTTONDOWN, pos=pos, button=button), state, ui)
-
-
-def _release(state, ui, pos, button=1):
-    return game_input.handle_event(_ev(pygame.MOUSEBUTTONUP, pos=pos, button=button), state, ui)
-
-
-def _motion(state, ui, pos, held=True):
-    return game_input.handle_event(
-        _ev(pygame.MOUSEMOTION, pos=pos, rel=(0, 0), buttons=(1 if held else 0, 0, 0)), state, ui)
-
-
-def _key(state, ui, key):
-    return game_input.handle_event(_ev(pygame.KEYDOWN, key=key, mod=0, unicode=""), state, ui)
-
-
-def _tap(state, ui, sid):
-    pos = ui.view.to_screen(state.systems[sid].pos)
-    _press(state, ui, pos)
-    return _release(state, ui, pos)
-
-
-def _empty_pos(state, ui):
-    """A point in the map viewport with no system under it."""
-    px, py, pw, ph = config.play_rect()
-    for x in range(px + 5, px + pw - 5, 7):
-        for y in range(py + 5, py + ph - 5, 7):
-            if game_input.pick_node(state, ui, (x, y)) is None:
-                return (x, y)
-    raise AssertionError("no empty point in the viewport")
-
-
-def _routed_setup():
-    """A live map already in route mode, in chain sub-mode (this file's default;
-    `_rally_setup` opts into rally)."""
-    state, ui = _display_setup()
-    game_input.handle_event(_ev(pygame.KEYDOWN, key=pygame.K_g, mod=0, unicode="g"), state, ui)
-    ui.begin_route()
-    ui.route_rally = False
-    return state, ui
-
-
-def test_g_toggles_the_mode():
-    state, ui = _display_setup()
-    try:
-        assert _key(state, ui, pygame.K_g) == "toggle_route"
-        ui.begin_route()
-        # inside the mode G is handled locally, and leaves it
-        assert _key(state, ui, pygame.K_g) is None
-        assert ui.mode == IDLE
-    finally:
-        pygame.quit()
-
-
-def test_a_tap_through_input_aims_and_then_un_aims():
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        _tap(state, ui, home)
-        assert ui.route_dest == home
-        _tap(state, ui, home)
-        assert ui.route_dest is None
-    finally:
-        pygame.quit()
-
-
-def test_walking_the_target_over_every_pick_keeps_the_group():
-    """The reported bug, at the gesture level: aiming at each pick in turn used to
-    empty the group one system at a time."""
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        for n in state.systems[home].neighbors[:2]:
-            state.systems[n].owner_id = 1
-        picks = {home} | set(state.systems[home].neighbors[:2])
-        ui.route_sel = set(picks)
-        for sid in sorted(picks):
-            _tap(state, ui, sid)
-            assert ui.route_sel == picks, f"aiming at {sid} disturbed the group"
-            assert ui.route_sources() == picks - {sid}
-    finally:
-        pygame.quit()
-
-
-def test_a_drag_from_empty_space_boxes_a_selection():
-    state, ui = _routed_setup()
-    try:
-        px, py, pw, ph = config.play_rect()
-        start = _empty_pos(state, ui)
-        _press(state, ui, start)
-        assert ui.route_press is True and ui.route_box is False
-        _motion(state, ui, (px + pw - 3, py + ph - 3))
-        assert ui.route_box is True          # promoted past the threshold
-        _release(state, ui, (px + pw - 3, py + ph - 3))
-        assert ui.route_sel                  # picked up whatever was in the box
-        assert ui.route_box is False and ui.route_press is False
-    finally:
-        pygame.quit()
-
-
-def test_a_tap_on_empty_space_selects_nothing_and_clears_nothing():
-    """This mode cancels explicitly, so a stray tap must not undo the group."""
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.route_sel = {home}
-        pos = _empty_pos(state, ui)
-        _press(state, ui, pos)
-        _release(state, ui, pos)             # never moved: no box
-        assert ui.route_sel == {home}
-    finally:
-        pygame.quit()
-
-
-def test_box_then_tap_is_the_whole_flow():
-    """The one gesture pair the mode is built around: drag a group, tap a target."""
-    state, ui = _routed_setup()
-    try:
-        px, py, pw, ph = config.play_rect()
-        start = _empty_pos(state, ui)
-        _press(state, ui, start)
-        _motion(state, ui, (px + pw - 3, py + ph - 3))
-        _release(state, ui, (px + pw - 3, py + ph - 3))
-        assert ui.route_sel                       # a group, in one drag
-        home = next(iter(ui.route_sel))
-        nbr = state.systems[home].neighbors[0]
-        _tap(state, ui, nbr)
-        assert ui.route_dest == nbr and ui.route_plan
-    finally:
-        pygame.quit()
-
-
-def test_cancel_button_drops_the_plan_without_writing_it():
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.route_sel = {home}
-        _tap(state, ui, nbr)
-        ui.route_cancel_rect = (300, 100, 60, 20)
-        _press(state, ui, (310, 110))
-        assert ui.mode == IDLE and ui.auto_forward == {}
-    finally:
-        pygame.quit()
-
-
-def test_confirm_button_writes_the_plan():
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.route_sel = {home}
-        _tap(state, ui, nbr)
-        ui.route_confirm_rect = (400, 100, 60, 20)
-        _press(state, ui, (410, 110))
-        assert ui.auto_forward == {home: ForwardRule({nbr: 100}, 0)}
-        assert ui.mode == IDLE
-    finally:
-        pygame.quit()
-
-
-def test_esc_cancels_the_route_rather_than_quitting():
-    state, ui = _routed_setup()
-    try:
-        assert _key(state, ui, pygame.K_ESCAPE) is None
-        assert ui.mode == IDLE
-    finally:
-        pygame.quit()
-
-
-def test_enter_confirms_instead_of_ending_the_turn():
-    """The turn can't be ended from route mode at all, so the most obvious key
-    keeps pointing at the most obvious action."""
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        nbr = state.systems[home].neighbors[0]
-        ui.route_sel = {home}
-        ui.route_dest = nbr
-        ui.recompute_route(state)
-        assert _key(state, ui, pygame.K_RETURN) is None    # not "end_turn"
-        assert ui.auto_forward == {home: ForwardRule({nbr: 100}, 0)}
-    finally:
-        pygame.quit()
-
-
-def test_x_clears_the_group_but_stays_in_the_mode():
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.route_sel = {home}
-        ui.set_route_dest(state, state.systems[home].neighbors[0])
-        _key(state, ui, pygame.K_x)
-        assert ui.route_sel == set() and ui.route_dest is None
-        assert ui.mode == ROUTING
-    finally:
-        pygame.quit()
-
-
-def test_render_zeroes_end_turn_so_it_cannot_be_hit_while_routing():
-    state, ui = _routed_setup()
-    try:
-        screen = _screen()
-        render.draw(screen, state, ui)
-        assert ui.end_turn_rect == (0, 0, 0, 0)
-        # and the live-play strip is out of service too
-        assert ui.play_pause_rect == (0, 0, 0, 0)
-        assert ui.autoplay_button_rect == (0, 0, 0, 0)
-        assert ui.history_button_rect == (0, 0, 0, 0)
-    finally:
-        pygame.quit()
-
-
-def test_render_suppresses_clear_forwarding_while_routing():
-    """It would mutate auto_forward underneath the preview."""
-    state, ui = _display_setup()
-    try:
-        screen = _screen()
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.auto_forward[home] = ForwardRule({state.systems[home].neighbors[0]: 100}, 0)
-        render.draw(screen, state, ui)
-        assert ui.clear_forward_rect != (0, 0, 0, 0)   # normally offered
-        ui.begin_route()
-        render.draw(screen, state, ui)
-        assert ui.clear_forward_rect == (0, 0, 0, 0)
-    finally:
-        pygame.quit()
-
-
-def test_resolving_a_turn_drops_any_open_plan():
-    """A plan is only valid for the ownership it was computed against."""
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        ui.route_sel = {home}
-        main.resolve_turn(state, ui)
-        assert ui.mode == IDLE and ui.route_sel == set()
-    finally:
-        pygame.quit()
-
-
-def test_history_mode_retires_the_route_button():
-    """Every rect render didn't draw is zeroed, or a stale one keeps answering
-    clicks — history mode draws no footer at all."""
-    state, ui = _display_setup()
-    try:
-        render.draw(_screen(), state, ui)
-        assert ui.route_button_rect[2] > 0
-        ui.history = True
-        ui.history_max = ui.history_turn = 0
-        render.draw(_screen(), state, ui)
-        assert ui.route_button_rect == (0, 0, 0, 0)
-        assert ui.route_cancel_rect == (0, 0, 0, 0)
-    finally:
-        pygame.quit()
 
 
 # --------------------------------------------------------------------------- #
@@ -812,7 +438,8 @@ def test_an_un_owned_rally_point_is_legal():
     s = _line(4, owned={0, 1, 2})
     s.systems[3].owner_id = 2
     ui = _rally(s, {3})
-    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0), 2: ForwardRule({3: 100}, 0)}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0),
+                             2: ForwardRule({3: 100}, 0, smart=True)}   # 2 borders the rival
     assert ui.route_unroutable == set()
 
 
@@ -862,16 +489,44 @@ def test_a_rally_plan_reports_the_rules_it_replaces():
     assert ui.route_replaces == {3}
 
 
-def test_a_rally_point_forwarding_back_into_the_field_is_a_cycle():
-    """The only shape a rally loop can take: the plan rules every system it
-    reaches, so the sink's own leftover rule is the one edge that can close one."""
+def test_a_rally_point_forwarding_back_into_the_field_is_cleared_not_a_cycle():
+    """The one shape a rally loop could take — the sink's own leftover rule — is a
+    rule rally clears, so it never closes one."""
     s = _line(3, owned=range(3))
     ui = _ui(s)
     ui.route_rally = True
     ui.auto_forward[0] = ForwardRule({1: 100}, 0)     # the rally point pushes straight back out
     ui.route_sel = {0}
     ui.recompute_route(s)
-    assert ui.route_cycles == {0, 1}
+    assert ui.route_clears == {0}
+    assert ui.route_cycles == set()
+
+
+def test_rally_clears_every_rule_it_does_not_rewrite():
+    """A new front opens on a system still forwarding to the old one: rallying
+    there must stop it draining the new front, and a pocket's rule goes too."""
+    s = _graph([(0, 1), (1, 2), (3, 4)], {sid: 1 for sid in range(5)})
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[2] = ForwardRule({1: 100}, 0)     # pointed away from the new front
+    ui.auto_forward[3] = ForwardRule({4: 100}, 2)     # in a pocket rally can't reach
+    ui.route_sel = {2}
+    ui.recompute_route(s)
+    assert ui.route_clears == {2, 3}
+    ui.confirm_route(s)
+    assert ui.auto_forward == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0)}
+
+
+def test_chain_leaves_rules_it_does_not_reach_alone():
+    """Chain answers "push these there", not "where should everything go"."""
+    s = _line(4, owned=range(4))
+    ui = _ui(s)
+    ui.auto_forward[3] = ForwardRule({2: 100}, 0)
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 1)
+    assert ui.route_clears == set()
+    ui.confirm_route(s)
+    assert ui.auto_forward[3] == ForwardRule({2: 100}, 0)
 
 
 def test_rally_confirm_breaks_the_cycle_rather_than_arming_it():
@@ -965,94 +620,6 @@ def test_rally_is_the_default_sub_mode():
     s = _line(3, owned=range(3))
     ui = Ui(view=WorldView(mapgen.map_bounds(s), config.play_rect()), human_id=1)
     assert ui.route_rally is True
-
-
-# --------------------------------------------------------------------------- #
-# Rally sub-mode: gestures and render
-# --------------------------------------------------------------------------- #
-def _rally_setup():
-    """A live map already in route mode, switched to rally."""
-    state, ui = _routed_setup()
-    ui.set_route_rally(state, True)
-    return state, ui
-
-
-def test_tab_switches_sub_mode():
-    state, ui = _routed_setup()
-    try:
-        assert ui.route_rally is False
-        _key(state, ui, pygame.K_TAB)
-        assert ui.route_rally is True and ui.mode == ROUTING
-        _key(state, ui, pygame.K_TAB)
-        assert ui.route_rally is False
-    finally:
-        pygame.quit()
-
-
-def test_the_footer_button_switches_sub_mode():
-    """One button, naming the sub-mode it is in and switching when pressed."""
-    state, ui = _routed_setup()
-    try:
-        render.draw(_screen(), state, ui)
-        assert ui.route_mode_rect[2] > 0
-        rx, ry, rw, rh = ui.route_mode_rect
-        _press(state, ui, (rx + rw // 2, ry + rh // 2))
-        assert ui.route_rally is True
-        render.draw(_screen(), state, ui)
-        rx, ry, rw, rh = ui.route_mode_rect
-        _press(state, ui, (rx + rw // 2, ry + rh // 2))
-        assert ui.route_rally is False
-    finally:
-        pygame.quit()
-
-
-def test_a_tap_through_input_toggles_a_rally_point():
-    state, ui = _rally_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        _tap(state, ui, home)
-        assert ui.route_sel == {home} and ui.route_dest is None
-        _tap(state, ui, home)
-        assert ui.route_sel == set()
-    finally:
-        pygame.quit()
-
-
-def test_a_drag_from_empty_space_pans_instead_of_boxing_in_rally():
-    """Rally picks are all taps, so drag goes back to panning — the one gesture
-    chain mode has to give up for its selection box."""
-    state, ui = _rally_setup()
-    try:
-        px, py, pw, ph = config.play_rect()
-        # zoom about the middle, so the pan clamp has slack in every direction
-        ui.view.zoom_at((px + pw // 2, py + ph // 2), 2.0)
-        start = _empty_pos(state, ui)
-        before = ui.view.to_screen(state.systems[0].pos)
-        _press(state, ui, start)
-        assert ui.pan_active is True and ui.route_press is False
-        _motion(state, ui, (start[0] + 40, start[1] + 40))
-        _release(state, ui, (start[0] + 40, start[1] + 40))
-        assert ui.view.to_screen(state.systems[0].pos) != before
-        assert ui.route_sel == set() and ui.route_box is False
-    finally:
-        pygame.quit()
-
-
-def test_render_draws_a_rally_plan_without_a_destination():
-    """Rally leaves `route_dest` None, so every preview layer — the sink rings
-    especially, which chain mode reaches through `route_dest` — has to cope."""
-    state, ui = _rally_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        for nbr in state.systems[home].neighbors:   # something for the field to rule
-            state.systems[nbr].owner_id = 1
-        ui.route_tap(state, home)
-        assert ui.route_plan and ui.route_dest is None
-        render.draw(_screen(), state, ui)
-        assert ui.route_confirm_rect[2] > 0       # the confirm takes the End Turn slot
-        assert ui.end_turn_rect == (0, 0, 0, 0)
-    finally:
-        pygame.quit()
 
 
 # --------------------------------------------------------------------------- #
@@ -1206,50 +773,107 @@ def test_auto_rally_replaces_the_picks_rather_than_adding_to_them():
     assert ui.route_sel == {2}
 
 
-def test_auto_rally_does_nothing_when_nothing_is_threatened():
-    s = _line(3, owned={0, 1})
+def test_auto_rally_does_nothing_with_nothing_to_pick():
+    """No rival in reach and no neutral left to border: no front of any kind."""
+    s = _line(3, owned=range(3))
     ui = _rally(s, {0})
+    assert ui.auto_rally_picks(s) == set()
     ui.auto_rally(s)
     assert ui.route_sel == {0}             # the player's own picks are left alone
 
 
-def test_the_auto_route_button_is_drawn_only_in_rally_mode_with_a_front():
-    state, ui = _routed_setup()
-    try:
-        render.draw(_screen(), state, ui)
-        assert ui.route_auto_rect == (0, 0, 0, 0)      # chain mode never offers it
-        ui.set_route_rally(state, True)
-        render.draw(_screen(), state, ui)
-        assert bool(ui.route_auto_rect[2]) == bool(ui.threatened_systems(state))
-    finally:
-        pygame.quit()
+def test_auto_rally_with_nothing_threatened_picks_the_neutral_border():
+    """Before any rival is in reach, the front is the one we expand across."""
+    s = _graph([(0, 1), (1, 2), (1, 3), (3, 4)], {0: 1, 1: 1, 3: 1})   # 2 and 4 neutral
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1, 3}
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0)}
 
 
-def test_the_auto_route_button_picks_the_front():
-    state, ui = _rally_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        for nbr in state.systems[home].neighbors:      # guarantee a front to find
-            state.systems[nbr].owner_id = 2
-        render.draw(_screen(), state, ui)
-        assert ui.route_auto_rect[2] > 0
-        ax, ay, aw, ah = ui.route_auto_rect
-        _press(state, ui, (ax + aw // 2, ay + ah // 2))
-        assert ui.route_sel == ui.threatened_systems(state)
-    finally:
-        pygame.quit()
+def test_a_rival_front_outranks_the_neutral_border():
+    s = _line(5, owned={1, 2, 3})
+    s.systems[4].owner_id = 2              # 3 faces a rival; 1 borders neutral 0
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {3}
 
 
-def test_t_picks_the_front_in_rally_mode_only():
-    state, ui = _routed_setup()
-    try:
-        home = next(sid for sid, s in state.systems.items() if s.owner_id == 1)
-        for nbr in state.systems[home].neighbors:
-            state.systems[nbr].owner_id = 2
-        _key(state, ui, pygame.K_t)
-        assert ui.route_sel == set()       # chain mode: T is not one of its keys
-        ui.set_route_rally(state, True)
-        _key(state, ui, pygame.K_t)
-        assert ui.route_sel == ui.threatened_systems(state)
-    finally:
-        pygame.quit()
+def _inbound(s, dest, ships, turns=1, owner=2):
+    s.players.setdefault(owner, Player(owner, "E", (0, 0, 0)))
+    s.fleets.append(model.Fleet(owner_id=owner, source_id=dest, dest_id=dest, ships=ships,
+                                turns_total=turns, turns_remaining=turns))
+
+
+def test_a_threatened_system_rally_routes_through_gets_a_smart_hold():
+    """It keeps what the attack needs and passes the rest on, so feeding the
+    front never strips a system under attack."""
+    s = _line(4, owned=range(4))
+    _inbound(s, 1, 3)
+    ui = _rally(s, {3})
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0, smart=True)
+    assert ui.route_plan[0] == ForwardRule({1: 100}, 0)
+    assert ui.route_newly_smart() == {1}
+
+
+def test_rally_never_disarms_a_smart_hold():
+    s = _line(3, owned=range(3))
+    ui = _ui(s)
+    ui.route_rally = True
+    ui.auto_forward[0] = ForwardRule({2: 100}, 0, smart=True)
+    ui.route_sel = {2}
+    ui.recompute_route(s)
+    assert ui.route_plan[0].smart and ui.route_newly_smart() == set()
+
+
+def test_auto_rally_passes_through_an_attacked_system_that_can_hold():
+    """Behind the front, rival ships inbound but a garrison that keeps them off:
+    not a rally point, a smart hold on the way to the front."""
+    s = _line(5, owned={0, 1, 2, 3})
+    s.systems[4].owner_id = 2              # 3 is the front
+    s.systems[1].ships = 20
+    _inbound(s, 1, 3)
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {3}
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0, smart=True)
+
+
+def test_auto_rally_rallies_on_an_attacked_system_that_cannot_hold():
+    s = _line(5, owned={0, 1, 2, 3})
+    s.systems[4].owner_id = 2
+    s.systems[1].ships = 1
+    _inbound(s, 1, 30)
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1, 3}
+
+
+def test_auto_rally_with_no_front_rallies_on_every_threatened_system():
+    """Nowhere to pass ships on to, so a system under attack is a rally point
+    whether or not it could hold alone."""
+    s = _line(3, owned=range(3))
+    s.systems[1].ships = 20
+    _inbound(s, 1, 3)
+    ui = _rally(s, set())
+    ui.auto_rally(s)
+    assert ui.route_sel == {1}
+
+
+def test_holds_unaided_counts_what_is_built_before_each_wave():
+    s = _line(2, owned={0, 1})
+    s.systems[0].ships, s.systems[0].production, s.systems[0].prod_progress = 0, 1, 0
+    _inbound(s, 0, 1, turns=5)
+    assert combat.holds_unaided(s, 0, 1)           # five hulls built by the time it lands
+    _inbound(s, 0, 40, turns=2)
+    assert not combat.holds_unaided(s, 0, 1)
+
+
+def test_route_sids_take_only_our_own_systems():
+    state = _line(5, owned={0, 1, 3})
+    ui = _ui(state)
+    ui.begin_route()
+    ui.add_route_sids(state, [0, 2, 3, 99])
+    assert ui.route_sel == {0, 3}
+
+

@@ -15,7 +15,7 @@ have the games feed the same tools a played game does. The match is a real
 `human_habits` and the game's own history and Watch read it like any other, and
 every call rebuilds the board from it with `replay.reconstruct`, so nothing here
 can drift from what the engine would replay. Turns are resolved the way
-`main.resolve_turn` does it (`replay.reseed`, then `engine.end_turn` with the
+`app.resolve_turn` does it (`replay.reseed`, then `engine.end_turn` with the
 seat's orders and `ai.decide` for every other seat).
 
 The view honours the setup's fog the way the shell does: full detail only for
@@ -95,7 +95,7 @@ def par_for_key(key: str) -> list[str]:
 def rebuild(log_path: Path) -> tuple[replay.GameLog, GameState, Settings, set[int], dict]:
     """The board after every recorded turn, plus the seat's fog memory: every
     system ever seen and each rival's last sighted totals, folded turn by turn
-    as the shell folds them (`main._accumulate_fog`)."""
+    as the shell folds them (`app._accumulate_fog`)."""
     log = replay.load(log_path)
     seen: set[int] = set()
     intel: dict[int, tuple[int, int, float]] = {}

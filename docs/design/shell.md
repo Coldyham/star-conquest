@@ -1,5 +1,10 @@
 # Shell design notes: layout and controls
 
+The pygame shell this describes was deleted at cutover
+([`html-frontend.md`](html-frontend.md), "The cutover (phase 8)"); the page
+keeps its behaviour, so the reasons here still hold. Names of shell modules
+(`render`, `input`, `menu`, `widgets`, `main`) are as they were.
+
 Why the pygame shell behaves as it does. It covers text sizing and touch
 targets, viewport margins, the send popup, the menu's Combat page, spectating
 after a loss, and route mode (chain and rally). Headings match the rules in
@@ -262,6 +267,13 @@ footer button and main's `toggle_history` both ask. A spectator who has been
 knocked out still can't open History, or they could rewind and play on; once
 the game has a winner, *History & coach* on the win overlay is offered as usual.
 
+*Undo* (U, the footer) is History's *Rewind to here* on the turn before, in one
+press and with no confirm (`main.apply_rewind` on `turn_count - 1`). It is a
+rewind, so `Ui.can_undo` asks `can_review` first (ironman hides it with
+History), and adds live play of an undecided game of our own: a decided game
+rewinds from History, which forks it, and a play-by-post match is never ours to
+rewind. A run game plays ironman, so it has none.
+
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and
 someone chasing a posted result would otherwise only learn it at the end.
@@ -447,7 +459,8 @@ somewhere (a rally point, or a planned system) get a share. The no-cycle guarant
 untouched: every lane of a split steps strictly nearer, so the potential still
 decreases along every edge.
 
-**Auto-route** picks every threatened system as a rally point in one press — the front
+**Auto-route** picks the threatened systems as rally points in one press (which ones:
+see "A threatened system the plan passes through gets a smart hold", below) — the front
 line as one gesture, which is the shape rally is for. "Threatened" is the AI's own
 `_threat` (a rival, not neutral, holding a neighbour, or rival ships inbound), copied
 into `viewstate` rather than imported, since the shell computes its derived stats
@@ -455,8 +468,8 @@ locally and `render`/`input` may not reach into `ai`. It discloses nothing fog h
 a neighbour of a system we hold is one hop away, and a fleet inbound to one ends at a
 system we hold, so both are in full view at any sight tier. It replaces the picks
 rather than adding to them — a "do the obvious thing" button has to mean the same
-whatever came before — and render leaves it out entirely when nothing is threatened,
-so it is drawn exactly when it would do something.
+whatever came before. With nothing threatened it falls back to the neutral border
+(below), so it is always drawn in rally.
 
 A richer version was considered and dropped: a rally point that claims only the
 systems closer to it than to a front. It is a better *idea* and a much worse control —
@@ -468,6 +481,42 @@ you can see on the map before confirming.
 a confirm blows away hand-made rules the plan disagrees with. That is what "everything
 flows to the nearest point" means, and the panel's `N replaced` count is the
 disclosure — the same line chain mode has, doing much more work here.
+
+**And it clears every rule it doesn't rewrite.** A rule on a rally point, or in a
+pocket no rally point reaches, used to survive a confirm. That made sense when a
+system had one rule and a rally point's was usually a hand-made attack; with split
+rules and auto-route it was the trap: a new front opens on a system still forwarding
+to the old one, one press of auto-route makes it a rally point, and its old rule goes
+on draining the new front until the next turn shows it. So a rally plan is the whole
+of the empire's forwarding: everything else goes in `route_clears`, is drawn in the
+overwrite tint, counted as `N cleared`, and deleted on confirm. The cleared rules are
+also what made rally's one possible loop (a sink still forwarding back into the
+field), so rally can no longer loop at all. Chain still leaves alone what it doesn't
+reach: it answers "push *these* there", not "where should everything go".
+
+**A threatened system the plan passes through gets a smart hold.** Rally rules every
+system it reaches, so a system behind the front with rival ships inbound — or a
+frontier system the player didn't pick — would forward its garrison away under the
+attack. `_plan_rally` arms a smart hold on any threatened system it rules: it keeps
+what the heaviest wave needs (`combat.smart_hold`) and passes the rest on. It never
+disarms one, and a hand-set hold is kept underneath, as `_add_hop` keeps every hold.
+
+So auto-route no longer rallies on every threatened system. The front
+(`Ui.frontier_systems`) is always a rally point; a system threatened only by inbound
+ships is one only when it can't keep them off alone — `combat.holds_unaided`, its
+garrison plus what it builds by the turn each wave lands, against `hold_count` of that
+wave. One that can hold is left to the plan, so it passes its surplus on rather than
+soaking up everything nearer to it than the front is; one that can't is a sink, so
+ships gather to save it. With no front at all there is nowhere to pass ships on to, so
+every threatened system is a rally point, as before.
+
+**With nothing threatened, auto-route rallies on the neutral border.** Before any rival
+is in reach — the opening, or a quiet corner of a big map — the button used to vanish,
+yet "gather where the empire meets the unclaimed" is the same one-press question with
+the expansion front as the answer: every system we hold next to a neutral one
+(`Ui.border_systems`). A rival front, or any threat, still outranks it entirely. So
+the button is always drawn in rally: a seat bordering neither a rival nor a neutral
+holds the whole map or nothing, and the game is over either way.
 
 **The sub-mode is sticky; the proposal is not.** `reset_route` runs every turn from
 `main.resolve_turn`, so clearing `route_rally` there would drag the player back to
@@ -560,6 +609,24 @@ between "keep N" and "send N%" was mocked up and rejected: "keep N" really means
 to be a percent, and the switch had to explain that. Splitting the two quantities
 by what they are about removes the switch altogether.
 
+**A smart hold sizes itself against the heaviest wave.** In practice a hold was
+set to beat the largest turn's worth of enemy ships flying in (a retaliatory 2 held
+by 3, or several 1s landing together) and taken off once they were dealt with. The
+hold row's "smart" chip (`ForwardRule.smart`) does that every turn:
+`combat.heaviest_wave` sums the rival ships landing on the system per turn, every
+lane and rival together, and `combat.hold_count` keeps the fewest ships that beat
+the largest of them on every roll, read off `preview_fight`'s corner most in the
+attacker's favour (the defending edge, `edge_defending`, exactly, so a near tie
+that would wipe both sides out counts as lost). Production and our own inbound
+fleets are not counted, so it errs safe. Every fleet bound for a system we hold is
+drawn (`render._fleet_shown`), so it reads nothing the player cannot count.
+`Ui.hold_of` is the one figure, used by `forward_this_turn`, the popup, the badge
+("smart N", shown even at 0 so it reads as armed) and the panel. −/+ on a smart
+hold take it back by hand from the figure it had reached. Where the row is too
+narrow for "holds" and the chip, the chip alone reads "hold", or a lit "smart".
+The log stores `"smart": true` only on a smart rule, so other rules are stored
+as before.
+
 **Adding a lane splits evenly; removing one undoes it.** `model.shares_with` gives
 the new lane an even cut of what is being sent and shrinks the others in
 proportion, so 100 becomes 50/50 becomes 34/33/33, a lone 50% becomes 25/25 (the
@@ -571,7 +638,9 @@ lane joins, or the new lane would be born idle.
 
 **Splitting is for this turn's rule; an older one is replaced.** Adding a lane
 splits only a rule set up this turn (`Ui.forward_set_on`, stamped when the popup
-arms a lane or a route is confirmed). A rule from an earlier turn is what the
+arms a lane). A route's rules are not stamped, and a route clears the stamp from
+any rule it replaces: a route is a finished plan, so a tap from one of its
+systems afterwards is almost always a one-shot send, not another lane of it. A rule from an earlier turn is what the
 player set up *then*; a new lane on a later turn almost always means "send here
 now", so it replaces the whole rule with that lane at 100% and hold 0. The old
 rule is kept aside (`Ui.forward_replaced`) so Cancel or the Send tab puts it back.
@@ -636,7 +705,7 @@ a bare "Alcyone").
 
 Before the first frame a visitor downloads pygbag's runtime (CPython and
 pygame-ce compiled to WebAssembly, from the pygame-web CDN under a versioned
-path) and the game's own archive (`/game/starconquest.tar.gz`), then the
+path) and the game's own archive (`/play/starconquest.tar.gz`), then the
 "Loading, please wait" box stays up while Python compiles the game from source.
 
 **The archive was mostly things the game never reads.** Measured on the deployed
@@ -668,6 +737,28 @@ and the game could not start offline. A pygame-web fix published in place
 under the same version reaches a player one visit late, as a redeploy of the
 game already does. Checked in Chromium with a stand-in CDN: the runtime loads
 from the cache with the CDN down.
+
+**The runtime is served from our own origin** (`tools/mirror_runtime.py`,
+`tools/record_runtime.mjs`, `tools/pwa/runtime_files.txt`). A school's Smoothwall
+filter blocked `pygame-web.github.io`: the board (our domain) loaded, the game sat
+on "Loading, please wait" forever. The build now mirrors the 12 runtime files into
+`web/cdn/` and rewrites the page's script URL, but that alone was not enough:
+checked in Chromium with that host blocked, the game still hung on a request for
+the package index, which the runtime's `pep0723` module reads from `$PYGPI`
+(pygbag's own tools use `$PYGPY`; it is not documented) and whose own `-CDN-` key
+also names the old host. The mirror patches `cpythonrc.py` to default `PYGPI` to
+`<origin>/cdn/` and the index's `-CDN-` to `/cdn/`. With both, the game reaches
+its menu with the host blocked (zero requests to it). Every file is downloaded
+and checked before anything is written: if the list is missing, lacks a core file
+(a recording cut short), names another pygbag version than the built page, a
+download fails, or an anchor moves with a pygbag upgrade, nothing is written and
+the game keeps the remote CDN; the step never fails the build. A pointed page with
+a file missing would be worse than no mirror: a 404 from our own origin for every
+visitor. The service worker went to `starconquest-v4` with the move, and drops a
+cached page whose network answer is now a redirect, or a returning player's cached
+`/game/` page (loading the blocked CDN) would win forever. After a pygbag upgrade rerun
+`node tools/record_runtime.mjs` and repeat the blocked-host check. The game is also
+served at `/play/`, not `/game/` (some filters match the word); `/game/*` redirects.
 
 **Not done.** The runtime's own size is pygbag's, not ours. Shipping `.pyc` to
 skip compiling: pygbag's packer drops `.pyc` (`filtering.SKIP_EXT`). Importing

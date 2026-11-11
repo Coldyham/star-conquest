@@ -6,8 +6,8 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
-  addDays, addMonths, bestOnTheDay, dailyMark, dayParam, monthWeeks, opponents, parNote, playerDays, playerStreaks,
-  postedOn, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parNote, playerDays, playerStreaks,
+  postedOn, resultLine, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
 test("days are UTC dates, Monday first", () => {
@@ -17,6 +17,11 @@ test("days are UTC dates, Monday first", () => {
   assert.equal(addDays("2026-10-31", 1), "2026-11-01");
   assert.equal(addDays("2026-03-01", -1), "2026-02-28");
   assert.equal(shortDate("2026-10-28"), "Wed 28 Oct");
+  assert.equal(dayNumber("2026-10-28"), 1);
+  assert.equal(dayNumber("2026-11-07"), 11);
+  assert.equal(dayNumber("2027-03-29"), 153);  // across the clocks changing: UTC days
+  assert.equal(numberPrefix("2026-11-07"), "#11 · ");
+  assert.equal(numberPrefix("2026-10-27"), "");
   assert.ok(validDay("2026-10-28"));
   for (const bad of ["2026-02-30", "2026-1-01", "today", "", null, "2026-10-28x"]) {
     assert.ok(!validDay(bad), String(bad));
@@ -238,4 +243,13 @@ test("the par's congratulation is only for a score that met it, in the game's wo
   assert.equal(parNote(likely, 10, 4), "");
   assert.equal(parNote(likely, 11, 0), "");
   assert.equal(parNote(null, 10, 3), "");
+});
+
+test("a daily's result line is the game's, word for word", () => {
+  // tests/test_daily.py checks the game says these same strings.
+  assert.equal(resultLine("2026-11-08", 12, 3, "board", "https://example.org/"),
+    "Star Conquest daily #12 - 12 turns, 3 ships\nhttps://example.org/play/#daily");
+  assert.equal(resultLine("2026-11-08", 7, 0, "puzzle", "https://example.org"),
+    "Star Conquest puzzle #12 - 7 turns, 0 ships\nhttps://example.org/play/#puzzle");
+  assert.equal(resultLine("2026-10-28", 9, 1, "board", ""), "Star Conquest daily #1 - 9 turns, 1 ships");
 });

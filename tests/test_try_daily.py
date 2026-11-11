@@ -65,3 +65,11 @@ def test_one_of_a_weekday_a_day_or_the_week_is_asked_for():
     for argv in ([], ["sat", "--week"], ["sat", "--day", "2026-11-01"]):
         with pytest.raises(SystemExit):
             try_daily.parse_args(argv)
+
+
+def test_the_deal_opens_as_a_setup_link_on_the_local_game():
+    """The menu reads a setup token in the address at boot; ``?go`` starts it."""
+    s = Settings(players=3, nodes=14, seed=9)
+    assert try_daily.page_url(s, False, 8000) == f"http://127.0.0.1:8000/play/#{s.to_token()}"
+    assert try_daily.page_url(s, True, 8000).startswith("http://127.0.0.1:8000/play/?go#")
+    assert Settings.from_token(try_daily.page_url(s, True, 8000).split("#", 1)[1]) == s

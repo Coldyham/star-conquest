@@ -49,6 +49,19 @@ def test_each_stage_is_recorded_once_and_a_rerun_repeats_nothing(tmp_path):
     assert ledger.read_text() == first
 
 
+def test_a_cut_off_pass_runs_again_only_when_given_more_time_or_room():
+    cut = {"exact": False, "seconds": 302.2, "budget": 300.0, "max_frontier": 1_000_000}
+    assert par_best.settled(cut, 300.0, 1_000_000)
+    assert not par_best.settled(cut, 1800.0, 1_000_000)
+    assert not par_best.settled(cut, 300.0, 2_000_000)
+    assert par_best.settled({**cut, "exact": True}, 1800.0, 2_000_000)
+    assert not par_best.settled(None, 300.0, 1_000_000)
+    old = {"exact": False, "seconds": 302.2}   # recorded before the limits were
+    assert par_best.settled(old, 300.0, 1_000_000) and not par_best.settled(old, 1800.0, 1_000_000)
+    rows = [{"stage": "k", "first": 4, "k": 4, "exact": False}, {"stage": "k", "first": 4, "k": 4, "exact": True}]
+    assert par_best.latest(rows, "k", lambda r: (r["first"], r["k"])) == [rows[1]]
+
+
 def test_a_pass_looks_only_for_something_better_than_the_best_so_far(tmp_path):
     args = par_best.argparse.Namespace(levels="all", k_budget=50.0, max_frontier=1000, max_turns=60,
                                        turn_first=True)

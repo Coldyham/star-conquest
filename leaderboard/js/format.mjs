@@ -239,15 +239,13 @@ export function fogBadge(game, group = "game") {
 
 /**
  * One chip per opponent (game_summary.bots, through `profiles`), linking to the
- * main list filtered to that bot — omitted entirely when every seat is the
- * built-in heuristic, since that's the common case and would otherwise repeat on
- * every card. A bot off its default stop is a two-part chip, "knower · council":
+ * main list filtered to that bot, heuristic included: it is a bot like any
+ * other, and its chip is the way to its filter. A bot off its default stop is a two-part chip, "knower · council":
  * the family half finds every stop of it, the stop half that stop alone. Strategy
  * names come from models/*.py drop-ins, so textContent only.
  */
 export function botChips(game) {
   const shown = profiles(game.bots);
-  if (shown.length === 1 && shown[0] === "heuristic") return [];
   const link = (bot, text, cls = null) =>
     el("a", { class: cls, href: `index.html?bot=${encodeURIComponent(bot)}`, text });
   return shown.map((profile) => {

@@ -11,9 +11,11 @@ ships or is dropped, delete its line here (and add it to
 - leaderboard.md · A hard cutover that marks unkeyed logs posted well after the keyed-dice deploy as unverified; needs the real deploy date plus a grace period for stale service workers. *Checked scores.*
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
 - campaign.md · Whether to bring back campaign fleets once claimed names are taken up widely: opt-in identity, whether arrival needs a notification, and whether wait timers make it a chore. *Revisit if claimed names take hold.*
+- campaign.md · The daily allowance of moves: whether to build it, its rate (`ceil(field / 4)` fitted to one solo player on 12 nodes), whether a home claim starts the bank, and whether a retake outside the grace costs less. *A daily allowance of moves (proposed).*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
+- html-frontend.md · Startup on a real phone over a real network, which the spike and the cutover could not measure; retiring `tools/parity_next.py`/`parity_sheet.py` once the pygame baseline is no longer needed; aborting a long bot turn (terminate the worker, rebuild from the log); actuary's wall-clock look budget making its strength depend on the device. *The cutover (phase 8)*, *The Pyodide spike (phase 0)*.
 - leaderboard.md · Watch links on an owner's own scores while their map is embargoed: `replay.mjs` asking Auth who calls, as `pbp.mjs` does, and serving that owner's logs past `public_replays`. *Claimed names.*
 - training.md · Drill stages and a tutorial stage each for rusherplus, evolved and knower; choosing the hint's advisor. *Proposed, not built.*
 - gauntlet.md · The roguelite run beyond the linear run built in *Runs*: branching, lane gates, lives and boons (`graphical-gauntlet-maker.md`), and a seeded run graph with stages dealt like the campaign's. *The gauntlet: proposed, not built.*
@@ -49,6 +51,7 @@ ships or is dropped, delete its line here (and add it to
 - win-turns.md · marshal: the land-grab relay, a counter-punch the turn after a garrison leaves, three-seat stalls; `FEED` 20 if the roster moves; the full ladder not re-run. *What is left*, *A second round, nothing shipped.*
 - actuary.md · Variance-seeking while behind on both income and ships (unmeasured). *Behind on income, ahead on ships.*
 - learner.md · Whether the failed gate is a power problem, and a strike curve that tells the bots apart. *The gate.*
-- learning.md · Improving Learning's memory against people (it stays; dropping it is decided against). Blocked on data: too few posted games against actuary at Learning to measure. *Memory off: the prior alone.*
+- learning.md · Improving Learning's memory against people (it stays; dropping it is decided against). A win rate still waits on lost games (`game_logs`, *Share replays*); positions are measured by `tools/learning_humans.py`. *Memory off: the prior alone*, *The posted games against Learning.*
+- learning.md · Five arms from the posted games: a chance compounded over the exposure in place of the `LEARN_REACH` clip, one pooled multiplier per rival, the pressed row with it, the stake of a system actuary empties, and recording take-backs (undo, rewind) in the log. *What to try next.*
 - learning.md · The counter-strike's people-profile question: people sit far from the prior on emptying frontiers. *The counter-strike.*
 - par.md · A stronger bound (ships needed through neutrals), a relay as one decision, successive halving for openings, node budgets instead of time, a time budget for knower rivals. *Next, if it goes further.*

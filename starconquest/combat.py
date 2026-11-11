@@ -406,6 +406,59 @@ def garrison_after(state: GameState, sid: int, turns: int) -> int:
     return node.ships + built
 
 
+def hold_count(attackers: int, jitter: float, advantage: float) -> int:
+    """The fewest ships a garrison needs to keep its system against ``attackers``
+    on every roll: the defending edge (`edge_defending`), read exactly off the
+    corner most in the attacker's favour, so a near tie that would annihilate both
+    sides and leave the system neutral counts as lost. 0 against nobody."""
+    return _hold_count(max(0, int(attackers)), round(max(0.0, float(jitter)), 6),
+                       round(float(advantage), 6))
+
+
+@functools.lru_cache(maxsize=1024)
+def _hold_count(attackers: int, jitter: float, advantage: float) -> int:
+    if attackers <= 0:
+        return 0
+    d = max(1, attackers + 1)
+    while preview_fight(attackers, d, jitter, advantage).best.winner != DEFENDER:
+        d += 1
+    return d
+
+
+def heaviest_wave(state: GameState, sid: int, owner: int) -> int:
+    """The most ships anyone but ``owner`` lands on ``sid`` in any one turn, every
+    lane and every rival together, from the fleets already flying there. A fleet
+    bound for a system ``owner`` holds is in full view (`render._fleet_shown`), so
+    a player is told nothing they could not count on the map."""
+    waves: dict[int, int] = {}
+    for f in state.fleets:
+        if f.dest_id == sid and f.owner_id not in (owner, 0):
+            waves[f.turns_remaining] = waves.get(f.turns_remaining, 0) + f.ships
+    return max(waves.values(), default=0)
+
+
+def smart_hold(state: GameState, sid: int, owner: int) -> int:
+    """What a smart hold keeps back at ``sid``: enough to hold against its
+    heaviest incoming wave on every roll (`hold_count`), under the rules in force.
+    Production and our own inbound fleets are not counted, so it errs safe."""
+    return hold_count(heaviest_wave(state, sid, owner),
+                      float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE))
+
+
+def holds_unaided(state: GameState, sid: int, owner: int) -> bool:
+    """Can ``sid`` keep every wave flying in on what it holds and builds by the
+    turn each lands, with nothing sent to it? Each wave is priced as `smart_hold`
+    prices the heaviest (`hold_count`), so a system that passes keeps itself
+    under a smart hold however the rest of its ships are forwarded."""
+    waves: dict[int, int] = {}
+    for f in state.fleets:
+        if f.dest_id == sid and f.owner_id not in (owner, 0):
+            waves[f.turns_remaining] = waves.get(f.turns_remaining, 0) + f.ships
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+    return all(garrison_after(state, sid, t) >= hold_count(n, jitter, advantage)
+               for t, n in waves.items())
+
+
 def forecast_landing(state: GameState, owner: int, dest_id: int, turns: int, landing: int) -> Forecast:
     """``landing`` of ``owner``'s ships reaching ``dest_id`` in ``turns`` turns,
     priced against the garrison they will find, under the rules in force.

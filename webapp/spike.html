@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Star Conquest (next)</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/next.css">
+<script type="module" src="js/spike.mjs"></script>
+</head>
+<body>
+<header>
+  <h1>Star Conquest <span class="tag">next · Pyodide spike</span></h1>
+  <p id="status">Loading Python…</p>
+</header>
+<main>
+  <section class="board">
+    <svg id="map" role="img" aria-label="The star map"></svg>
+    <p id="caption" aria-live="polite"></p>
+  </section>
+  <aside>
+    <form id="setup">
+      <label>Bots <input id="bots" value="marshal, actuary, thinker, heuristic" spellcheck="false"></label>
+      <label>Systems <input id="nodes" type="number" min="8" max="60" value="24"></label>
+      <label>Seed <input id="seed" type="number" placeholder="random"></label>
+      <label class="check"><input id="animate" type="checkbox" checked> Animate turns</label>
+      <div class="buttons">
+        <button type="submit">New game</button>
+        <button type="button" id="play">Play</button>
+        <button type="button" id="step">Step</button>
+      </div>
+    </form>
+    <dl id="stats"></dl>
+  </aside>
+</main>
+</body>
+</html>

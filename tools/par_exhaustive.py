@@ -414,10 +414,19 @@ def checkpoint_signature(args: argparse.Namespace, seed: int) -> dict:
             "from_launches": args.from_launches}
 
 
+CHECKPOINT_CHUNK = 50_000   # boards per pickle: one pickle of a whole frontier needs memory beside it
+
+
 def save_checkpoint(path: Path, state: dict) -> None:
+    """The search's state, then its frontier in chunks (each pickled on its own)."""
+    layer = state["layer"]
+    chunks = [layer[i:i + CHECKPOINT_CHUNK] for i in range(0, len(layer), CHECKPOINT_CHUNK)]
+    header = {k: v for k, v in state.items() if k != "layer"} | {"chunks": len(chunks)}
     tmp = path.with_suffix(".tmp")
     with tmp.open("wb") as f:
-        pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(header, f, protocol=pickle.HIGHEST_PROTOCOL)
+        for chunk in chunks:
+            pickle.dump(chunk, f, protocol=pickle.HIGHEST_PROTOCOL)
     os.replace(tmp, path)
 
 
@@ -431,6 +440,8 @@ def load_checkpoint(path: Path, signature: dict) -> dict | None:
     try:
         with path.open("rb") as f:
             state = pickle.load(f)
+            if isinstance(state, dict) and "chunks" in state:
+                state["layer"] = [board for _ in range(state.pop("chunks")) for board in pickle.load(f)]
     except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):   # torn or foreign: start over
         return None
     if not isinstance(state, dict) or not isinstance(state.get("signature"), dict):

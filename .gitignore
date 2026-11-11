@@ -29,3 +29,6 @@ games/
 
 # Bot-tuning sweep ledger (tools/sweep.py)
 results/
+
+# Pinned Pyodide runtime for the HTML build (tools/fetch_pyodide.py)
+/.cache/

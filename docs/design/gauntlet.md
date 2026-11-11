@@ -147,6 +147,16 @@ No way out moved to seed 2350. Of the alternatives measured there, Search with
 Field let one bot win (knower at Council, 128 / 93) and Search with Learning
 none; 1705 with knower at Predict and actuary at Hunt was also unbeaten.
 
+**Defender's edge runs at 1.1** (2026-11-07; it was 1.05). At 1.05 the odds
+card's "5 holding it fight like 5.25" was too small a difference to notice. The
+worry was rusherplus, which sends at `target.ships + 2` and never prices the
+advantage, throwing ships at neutrals. Measured on the stage's map, seeds
+4016-4023, with heuristic, thinker, marshal and actuary in the human's seat (32
+games a setting): rusherplus's attacks on neutrals failed 12.3% of the time at
+1.0, 12.7% at 1.05, 14.4% at 1.1 and 16.4% at 1.15 (69, 92, 116 and 179 ships
+thrown away). The human seat won 29, 28, 32 and 31 of 32. Changing the setup
+made the stage a new, uncleared one, as above.
+
 **How the seeds were chosen.** Each stage's setup was played on 24 candidate
 seeds by marshal, evolved, thinker, heuristic and rusherplus in the human's seat
 (`tests.sim.play_settings`), and a seed picked per stage for a rising loss count:
@@ -221,10 +231,10 @@ difficulty.
 
 ## Gauntlets made on the board
 
-The board's gauntlet page builds a gauntlet from game links: one pasted link
+The board's gauntlet page builds a gauntlet from map links: one pasted link
 per stage (the menu's Get Link, or a challenge link with its score dropped),
 each with a title, briefing paragraphs and a hint. Saving stores it and gives
-the link `/game/#g=<id>`. A `.json` download of the same file is for desktop.
+the link `/play/#g=<id>`. A `.json` download of the same file is for desktop.
 
 - **Stored, not carried in the link.** A whole gauntlet fits in a fragment (the
   ten-stage tutorial is about 3 KB deflated), but storing it keeps the link short,
@@ -351,7 +361,7 @@ preview is that measurement ("In the game", below).
   probes the web can afford, and is step 3's first job.
 - **The form belongs on the board.** Checkboxes and ranges are cheap in HTML
   and costly on the menu's fixed pygame canvas. The page builds a spec link
-  (`/game/#gauntlet-spec=<token>`) and the game deals and measures.
+  (`/play/#gauntlet-spec=<token>`) and the game deals and measures.
 
 ### The spec
 
@@ -617,7 +627,7 @@ every seed.
 ### On the board
 
 The generate form sits on `gauntlet.html`, one of two ways under the page's
-shared name, author and listing box (Generate, or Build from game links; the
+shared name, author and listing box (Generate, or Build from map links; the
 page remembers which it showed, and a `#<id>` remix opens on Build).
 `leaderboard/js/gauntlet-spec.mjs` turns it into a spec (`buildSpec`, pure,
 `leaderboard/tests/gauntlet-spec.test.mjs`) and `gauntlet-gen-page.mjs` is the
@@ -701,7 +711,7 @@ the best bot". The working plan for the rest is
   or a fork after the game is decided is free play: `main.run_ui` marks only
   the run's own game, and the run has already recorded the result. So none of
   them is blocked. They just aren't the run. While the game is undecided it
-  plays ironman, as the daily does (no History, so no rewind), and the Hint is
+  plays ironman (no History or Undo, so no rewind), and the Hint is
   not offered (`Ui.can_hint`).
 - **Quitting doesn't escape a bad game.** Continue run resumes the step's own
   log, never a fresh copy of the stage (`main.open_run`), and so does the boot

@@ -9,41 +9,35 @@ it here and in `CLAUDE.md` together.
 
 ## Architecture
 
-The whole point of the layout is a hard split between a **pure simulation core**
-and a **thin pygame presentation shell**, so the entire game is testable
-headlessly. Respect these boundaries — they are load-bearing, not stylistic:
+The game is **pure Python with no display of its own**, so the entire game is
+testable headlessly. In the browser it runs in Pyodide in a Web Worker behind
+`session` (JSON in, JSON out), and the page in `webapp/` draws what it answers.
+Respect these boundaries — they are load-bearing, not stylistic:
 
-- **Core — imports no pygame:** `model`, `geometry`, `mapgen`, `combat`,
-  `engine`, `ai`, `botio`, `settings`, `fog`, `replay`, `turnfilm`, `custommap`,
-  `pbp`, `matchnames`, `campaign`, `gauntlet`, `dealer`, `gauntletgen`. `tests/test_settings.py::test_no_core_module_imports_pygame`
-  parses for it. `fog` (visibility) and `turnfilm` (playback, which the engine
-  writes into and never reads back) are presentation-only: the engine and AI
-  never consult them.
-- **Shell — the only pygame modules:** `render`, `input`, `menu`, `widgets`,
-  `mapmaker`, and `main`. `main` is `starconquest/main.py`, like every other
-  module; the root `main.py` is only a launcher shim, kept there because
-  `tools/build_web.sh` hands pygbag a `main.py` at the top of its stage dir.
-  Tests import it as `from starconquest import main`.
-  - `render.py` reads `GameState` + `Ui` and draws; it **never mutates them and
-    never imports `engine` or `ai`** (derived stats like threat are local
-    helpers). It stores nothing time-varying: a frame is a pure function of
-    `GameState` + `Ui` + time (`_flow_phase` reads the clock; playback reads
-    `Ui.film`/`Ui.film_ms`), so a test drives a film frame by setting a field.
-  - `input.py` mutates **only** `Ui` (and queues human `Order`s), and returns an
-    action string (`"end_turn"`, `"toggle_play"`, `"toggle_autoplay"`,
-    `"toggle_history"`, `"rewind"`, `"restart"`, `"retry"`, `"menu"`) or `None`
-    for `main.py` to act on.
-  - `menu.py` has the same split: `draw` only reads `Settings`, `handle_event`
-    mutates `MenuState`/`Settings` and returns `"start"`/`"quit"`/`None`;
-    `menu.pump` is a per-frame poll for text that never reaches the SDL queue.
-    `main.py` runs a `"menu"` ⇄ `"game"` state machine.
-  - **Browser bridges** — `softkeyboard` (focuses a hidden DOM input so a touch
-    keyboard appears), `webstore` (address bar, clipboard, key/value store; a
-    JSON file under `data_dir()` off the web) and `share` (the one that talks to
-    a network: posts replays, fetches one to watch as a polled `Download`). All
-    pure of pygame, guarded everywhere, silent on failure, never blocking a
-    frame. `share` sends **only** on *Post to leaderboard* or with *Share
-    replays* ticked. Detail: `docs/design/shell.md`, "Browser bridges".
+- **No module imports pygame.** `tests/test_settings.py::test_no_module_imports_pygame`
+  parses every module of `starconquest/` and `models/` for it. The pygame shell
+  (`render`, `input`, `menu`, `widgets`, `mapmaker`, `main`'s loop,
+  `softkeyboard`, `uifont`) was deleted at cutover
+  (`docs/design/html-frontend.md`, "The cutover"). `fog` (visibility) and
+  `turnfilm` (playback, which the engine writes into and never reads back) are
+  presentation-only: the engine and AI never consult them.
+- **Python does no I/O in the browser.** `hostio` queues effects (storage
+  writes, fetches, the clipboard, the address bar, a download, closing the
+  window) for the page and takes its replies; the board's sign-in session
+  (`sc_auth`) never reaches Python. The bridges — `webstore` (address bar,
+  clipboard, key/value store; a JSON file under `data_dir()` outside the
+  browser) and `share` (posts replays, fetches one to watch as a polled
+  `Download`; `urllib` on a daemon thread outside the browser) — are guarded
+  everywhere and silent on failure. `share` sends **only** on *Post to
+  leaderboard* or with *Share replays* ticked.
+- **The page decides nothing.** What a press means lives in `play` (the play
+  screen), `setupmenu` (the setup menu) and `maker` (the map editor); the
+  words on screen in `hud`, `setupmenu` and `maker`. The page sends the
+  session a press and draws the view it answers; change a rule or a word in
+  Python, never in the page's JS alone.
+- **`serve` is the local server** the root `main.py` starts (`webapp/` at
+  `/play/`, the game zip built whenever a source changes), and the one module
+  never shipped in the zip (`tools/build_next.py`'s `LOCAL_ONLY`).
 
 ### Turn resolution (engine.py)
 
@@ -355,7 +349,7 @@ already resolve simultaneously. The rationale for each rule is in
   so a `RULES_VERSION` bump needs nothing from it. The public reads a day once
   it starts (the policy on `dailies`); `/api/daily` answers the game
   (`starconquest/daily.py`), which applies the setup to the menu as a link
-  does, remembers it by challenge key (`daily.remember`), plays it ironman and
+  does, remembers it by challenge key (`daily.remember`), follows the ironman preference (Undo, U, takes a turn back) and
   copies a result line instead of a challenge link. `daily_games` matches a day
   to its maps by jsonb equality. **A day's map is embargoed until the day ends**
   (`game_embargoes`, as a live campaign week is), so the best score posted on
@@ -384,7 +378,7 @@ already resolve simultaneously. The rationale for each rule is in
   nobody else. Detail: `docs/design/daily.md`, "The puzzle's
   par".
 - **The game and the board are one site.** The root `netlify.toml` builds both;
-  the game is at `/game/`, the board at `/board/`, functions at `/api/`, and
+  the game is at `/play/`, the board at `/board/`, functions at `/api/`, and
   `tools/pwa/root.html` routes the root. It is also the installed app's
   `start_url`, reopening the half last open (`sc_app_last`). Endpoints are built at call time from
   `LEADERBOARD_*_PATH`, never stored. `paths.LEADERBOARD_ORIGIN` blank disables
@@ -514,7 +508,8 @@ already resolve simultaneously. The rationale for each rule is in
 - **A forwarding rule is a system's hold plus a share per lane**
   (`model.ForwardRule`); the share arithmetic lives in `model` only, and
   `Ui.forward_this_turn` is the one formula behind both the orders and every
-  number shown. Detail: `docs/design/shell.md`, "Forwarding rules".
+  number shown. A smart hold is sized each turn by `combat.smart_hold`, read
+  only through `Ui.hold_of`. Detail: `docs/design/shell.md`, "Forwarding rules".
 - **Losing makes the human a spectator**: the whole board is revealed once
   `is_defeated(human_id)`, and fast forward (`main.FAST_FORWARD_MS`) is offered.
 - **The Combat tab teaches the square law from the real code**:

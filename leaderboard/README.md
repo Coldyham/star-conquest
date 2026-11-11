@@ -11,7 +11,7 @@ step is the pages themselves: each `*.html` here is a Jinja2 template extending
 the footer's shared links, so a menu entry is added in one place. It is served
 from the game's own Netlify site: `tools/build_web.sh` runs
 [`tools/render_board.py`](../tools/render_board.py) to render the pages into
-`web/board/` (the site root sends visitors here; the game is at `/game/`) and the
+`web/board/` (the site root sends visitors here; the game is at `/play/`) and the
 root `netlify.toml` bundles
 `netlify/functions/` to answer at `/api/`. The game itself works without it.
 
@@ -23,14 +23,14 @@ root `netlify.toml` bundles
 | [`game.html?key=…`](game.html) | one map's high-score table, sortable by turns or ships lost, plus how every bot did on it |
 | [`user.html?u=…`](user.html) | one player's card, with their running daily streaks and badges — see below and "Badges". On your own card (the menu's *You*), or with no name chosen, it also holds your account: make one (a private login and password) and claim a name nobody has used, so only you can post under it — see "Claimed names" below |
 | [`campaign.html?week=…`](campaign.html) | the weekly campaign: a meta-map of challenges to take and hold — see below |
-| [`puzzle.html?day=…`](puzzle.html), [`daily.html?day=…`](daily.html) | the daily puzzle (the menu's default) and board: one map a day for everyone, with Play (`/game/#daily`), the day's standings and streaks — see below |
-| [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/game/#puzzle`), standings and its own streaks — see "Daily" |
+| [`puzzle.html?day=…`](puzzle.html), [`daily.html?day=…`](daily.html) | the daily puzzle (the menu's default) and board: one map a day for everyone, with Play (`/play/#daily`), the day's standings and streaks — see below |
+| [`puzzle.html?day=…`](puzzle.html) | the daily puzzle: a small duel a day won in the fewest turns, with Play (`/play/#puzzle`), standings and its own streaks — see "Daily" |
 | [`crowns.html?week=…`](crowns.html) | the weekly contest: who holds the most contested records, and who stole one this week — see below |
 | [`submit.html`](submit.html) | paste a challenge link to post a score, or a plain settings link to share the setup |
 | [`account.html`](account.html) | forwards old links to the player card's account panel |
 | [`privacy.html`](privacy.html) | the privacy notice: what the site and Supabase Auth store, why, and how to have it removed. Update it with any change to what is collected, sign-in included |
-| [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/game/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
-| [`gauntlet.html`](gauntlet.html) | make a gauntlet: the name, author and "Ask for it to be listed publicly" first, shared by the two ways below it. Build from game links: one link per stage, each with a briefing and a hint; saving gives a `/game/#g=<id>` link that opens it in the game's Gauntlets list. `gauntlet.html#<id>` opens a saved one to remix. Generate: builds a `/game/#gauntlet-spec=` link instead; the game deals the maps, plays test bots on them and orders them by difficulty, and saves the result here under the author's name only when the listing box was ticked; each Advanced and Combat slider is a min/max pair (`js/gauntlet-spec.mjs`) |
+| [`gauntlets.html`](gauntlets.html) | the public gauntlets: every listed one (`tools/admin.py list-gauntlet`), newest first, with Play (`/play/#g=<id>`) and Remix (`gauntlet.html#<id>`); the menu's one Gauntlets entry opens it, and tabs on it and on `gauntlet.html` move between the two |
+| [`gauntlet.html`](gauntlet.html) | make a gauntlet: the name, author and "Ask for it to be listed publicly" first, shared by the two ways below it. Build from map links: one link per stage, each with a briefing and a hint; saving gives a `/play/#g=<id>` link that opens it in the game's Gauntlets list. `gauntlet.html#<id>` opens a saved one to remix. Generate: builds a `/play/#gauntlet-spec=` link instead; the game deals the maps, plays test bots on them and orders them by difficulty, and saves the result here under the author's name only when the listing box was ticked; each Advanced and Combat slider is a min/max pair (`js/gauntlet-spec.mjs`) |
 
 The main list's search, sort and filters live in the URL, so every view is a
 link, and all of them run server-side ([`js/listing.mjs`](js/listing.mjs), pinned by
@@ -210,7 +210,7 @@ it rolled. That badge reads the setup's non-default knobs until someone gives it
 real name (`configLabel`, [`js/setup.mjs`](js/setup.mjs)) — free, since
 `Settings.token_dict()` already prunes `settings_json` to the diff from defaults.
 
-The main list's **By config** toggle switches from one row per map to one row per
+The main list's **By setup** toggle (`?group=config`) switches from one row per map to one row per
 config, rolled up from `public.config_summary` — how many maps and scores it has and
 when it was last played, still newest-first. Clicking a config row (or a config
 badge anywhere else) drills back into the ordinary per-game list filtered to that
@@ -833,9 +833,11 @@ test bot within a turn cap that grows from 80 to 110.
   `dailies`; the secret key is its only writer). The policy hides a day until it
   starts, so tomorrow's map can't be practised.
 - **The game fetches it** (`/api/daily`, read-only with the publishable key):
-  the menu's Daily ▸ Daily board or a `#daily` / `#daily=<day>` link puts the setup on
-  the menu. A daily plays ironman, and its win offers *Copy daily result*, a
-  spoiler-free line, where other maps offer *Challenge a friend*.
+  the menu's Daily ▸ Daily map or a `#daily` / `#daily=<day>` link puts the setup on
+  the menu. A daily follows the player's ironman preference (so Undo can take a
+  turn back), and its win offers *Copy daily result*, a
+  spoiler-free line, where other maps offer *Challenge a friend*. The daily
+  page offers the same line again to a signed-in player with a win posted that day.
 - **Embargoed until the day ends** (`game_embargoes`, as a campaign node is
   for its week): replays and every score but the leader stay hidden, so the
   best score posted on the day is the day's winner. The map page marks it *Led
@@ -879,7 +881,7 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
 | Bots | a win with each `LADDER_ORDER` bot in a seat |
 | Daily puzzle | a daily puzzle won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
-| Daily board | the same three, on the daily board |
+| Daily map | the same three, on the daily map |
 | Play-by-post | a turn played in a match · a match won |
 
 **Derived, never stored**, like crowns and the campaign. Wins count only through

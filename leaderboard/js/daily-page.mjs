@@ -9,14 +9,15 @@
 // how many turns, never the other scores. It never even fetches today's turns
 // or ships lost: only the names that have won, for the streaks.
 
-import { configured, inList, select } from "./api.mjs";
+import { configured, eq, inList, select } from "./api.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, opponents, parNote, postedOn, shortDate, standings, streaks, validDay, weekdayOf,
+  addDays, bestOnTheDay, dayParam, numberPrefix, opponents, parNote, postedOn, resultLine, shortDate, standings, streaks, validDay,
+  weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
 import { clear, el, leaderLink, setupSummary, showError, userHref } from "./format.mjs";
 import { mountNav } from "./nav.mjs";
-import { ownPar } from "./post.mjs";
+import { ownName, ownPar } from "./post.mjs";
 
 // How far back streaks are read. A streak reaching back that far shows as
 // "60+", since it may run further.
@@ -39,9 +40,9 @@ const day = validDay(asked) && asked < today ? asked : today;
 const isToday = day === today;
 
 const dayHref = (d) => (d === today ? page : `${page}?day=${d}`);
-const playHref = (d) => (d === today ? `../game/#${fragment}` : `../game/#${fragment}=${d}`);
+const playHref = (d) => (d === today ? `../play/#${fragment}` : `../play/#${fragment}=${d}`);
 
-/** The Board/Puzzle tabs keep the day being looked at. */
+/** The Map/Puzzle tabs keep the day being looked at. */
 function keepDayInTabs() {
   if (isToday) return;
   for (const a of document.querySelectorAll('nav[aria-label="Dailies"] a')) {
@@ -53,7 +54,7 @@ function keepDayInTabs() {
 function drawDays() {
   clear(daysNav).append(
     el("a", { class: "btn", href: dayHref(addDays(day, -1)), "aria-label": "Previous day", text: "‹" }),
-    el("span", { class: "week-label", text: isToday ? `Today · ${shortDate(day)}` : shortDate(day) }),
+    el("span", { class: "week-label", text: `${isToday ? "Today · " : ""}${numberPrefix(day)}${shortDate(day)}` }),
     isToday
       ? el("span", { class: "btn ghost", "aria-hidden": "true", text: "›" })
       : el("a", { class: "btn", href: dayHref(addDays(day, 1)), "aria-label": "Next day", text: "›" }),
@@ -75,7 +76,7 @@ function drawToday(row, keys) {
   clear(todayBox).append(el("div", { class: "card" }, [
     el("div", { class: "card-body" }, [
       el("div", { class: "card-main" }, [
-        el("strong", { text: `${WEEKDAYS[weekdayOf(day)]}'s ${kind === "puzzle" ? "puzzle" : "map"}` }),
+        el("strong", { text: `${numberPrefix(day)}${WEEKDAYS[weekdayOf(day)]}'s ${kind === "puzzle" ? "puzzle" : "map"}` }),
         el("div", { class: "card-meta", text: setupSummary(asGame(row)) + (bots.length ? ` · vs ${bots.join(", ")}` : "") }),
         keys.length
           ? el("div", { class: "card-meta" }, [el("a", { href: `game.html?key=${encodeURIComponent(keys[0])}`, text: "Map page" })])
@@ -94,6 +95,37 @@ async function drawOwnPar() {
   const note = par ? parNote(par, par.my_turns, par.my_lost) : "";
   if (!note) return;
   todayBox.append(el("p", { class: "par-note", text: note }));
+}
+
+/** The end screen's "Copy daily result", for a signed-in player who has posted
+ * a win on this day's daily: their best counted score, as `resultLine` words it.
+ * Their own figures only, so an embargoed day gives nothing away. */
+async function drawOwnResult(keys) {
+  if (!keys.length) return;
+  const name = await ownName();
+  if (!name) return;
+  let best;
+  try {
+    [best] = await select(`counted_scores?select=turns,lost&game_key=${inList(keys)}`
+      + `&user_name=${eq(name)}&order=turns.asc,lost.asc&limit=1`);
+  } catch {
+    return;   // a convenience: the rest of the page stands without it
+  }
+  if (!best) return;
+  const text = resultLine(day, best.turns, best.lost, kind, location.origin);
+  const status = el("span", { class: "share-status", role: "status" });
+  const field = el("pre", { class: "share-text", "aria-label": "Your result", text });
+  const copy = el("button", { class: "btn", type: "button", text: "Copy daily result" });
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      status.textContent = "Copied — paste it anywhere";
+    } catch {
+      getSelection().selectAllChildren(field);
+      status.textContent = "Selected: copy it from here";
+    }
+  });
+  todayBox.append(el("div", { class: "own-result" }, [field, el("div", { class: "own-result-row" }, [copy, status])]));
 }
 
 /** Today, under embargo: who is ahead and by how many turns, from
@@ -121,7 +153,7 @@ function drawLeader(summaries) {
  * winner, and scores posted after the day (with its replays out) marked as
  * later. */
 function drawStandings(rows) {
-  standingsTitle.textContent = `Standings, ${shortDate(day)}`;
+  standingsTitle.textContent = `Standings, ${numberPrefix(day)}${shortDate(day)}`;
   const table = standings(rows);
   const winner = bestOnTheDay(rows, day);
   clear(standingsBox).append(table.length
@@ -185,7 +217,11 @@ async function load() {
       select(`daily_games?select=day,game_key&kind=eq.${kind}&day=gte.${from < day ? from : day}`),
     ]);
     drawToday(rows[0], games.filter((g) => g.day === day).map((g) => g.game_key));
-    if (rows[0]) drawOwnPar();   // its own fetch, never holding up the standings
+    if (rows[0]) {
+      // Their own fetches, never holding up the standings.
+      const keys = games.filter((g) => g.day === day).map((g) => g.game_key);
+      drawOwnPar().then(() => drawOwnResult(keys));
+    }
 
     // Today's map is embargoed: its names only (for the streaks), and its
     // standing from game_summary's aggregate. Every past day's in full.

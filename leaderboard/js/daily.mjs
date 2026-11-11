@@ -12,6 +12,19 @@ export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 // A day's two dailies (`dailies.kind`): the board, and the puzzle, a small duel
 // won in the fewest turns.
 export const KINDS = ["board", "puzzle"];
+// Day 1 of both kinds' numbering ("puzzle #11"); the game's daily.FIRST_DAY.
+export const FIRST_DAY = "2026-10-28";
+
+/** `day`'s number, 1 on FIRST_DAY; below 1 before it. */
+export function dayNumber(day) {
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${FIRST_DAY}T00:00:00Z`)) / DAY_MS) + 1;
+}
+
+/** "#11 · " for a numbered day, "" before the first. */
+export function numberPrefix(day) {
+  const n = dayNumber(day);
+  return n >= 1 ? `#${n} · ` : "";
+}
 
 /**
  * Who a day's setup is played against, each bot once, as the board names a
@@ -222,6 +235,19 @@ export function dailyMark(entry, today) {
     button: puzzle ? "Daily puzzle page" : "Daily page",
     href: entry.day === today ? page : `${page}?day=${entry.day}`,
   };
+}
+
+/**
+ * The spoiler-free lines a daily win copies, in the game's words
+ * (`starconquest/daily.py`'s `result_line`; tests/test_daily.py keeps the two
+ * alike): the day's number and the result, then a link that opens today's daily
+ * of the kind, never this day's. `origin` is the site's ("" leaves the link off,
+ * as the game does with no board configured).
+ */
+export function resultLine(day, turns, lost, kind, origin) {
+  const puzzle = kind === "puzzle";
+  const head = `Star Conquest ${puzzle ? "puzzle" : "daily"} #${dayNumber(day)} - ${turns} turns, ${lost} ships`;
+  return origin ? `${head}\n${origin.replace(/\/+$/, "")}/play/#${puzzle ? "puzzle" : "daily"}` : head;
 }
 
 /**

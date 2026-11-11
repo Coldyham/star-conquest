@@ -1,14 +1,14 @@
 """Forwarding rules: a system's hold, and a share of what is left per lane.
 
 The share arithmetic is pure (`model`); the editing flow is `Ui` state, also
-pygame-free; `main.auto_forward_orders` is where the two become this turn's orders.
+pygame-free; `app.auto_forward_orders` is where the two become this turn's orders.
 """
 
 from __future__ import annotations
 
-from starconquest import config, main, model
+from starconquest import app, combat, config, model, replay
 from starconquest.geometry import WorldView
-from starconquest.model import ForwardRule, GameState, Player, System
+from starconquest.model import Fleet, ForwardRule, GameState, Player, System
 from starconquest.viewstate import CHOOSING, Ui
 
 
@@ -235,6 +235,65 @@ def test_hold_is_the_systems_and_stays_in_range():
     assert ui.auto_forward[0].hold == config.FORWARD_HOLD_MAX
 
 
+def _incoming(state, ships: int, turns: int, owner: int = 2, src: int = 4) -> None:
+    """An enemy fleet of ``ships`` landing on system 0 in ``turns`` turns."""
+    state.fleets.append(Fleet(owner_id=owner, source_id=src, dest_id=0,
+                              ships=ships, turns_total=turns, turns_remaining=turns))
+
+
+def test_smart_hold_is_the_edge_against_the_heaviest_wave(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 100}, 0, smart=True)
+    assert ui.hold_of(state, 0) == 0                    # nothing coming: hold nothing
+    _incoming(state, 2, 3)
+    assert ui.hold_of(state, 0) == 3                    # a retaliatory 2 is held by 3
+    # several 1s: those landing on the same turn are one wave, whatever their lane
+    _incoming(state, 1, 1)
+    _incoming(state, 1, 2)
+    _incoming(state, 1, 2, owner=3)
+    _incoming(state, 1, 2, src=1)
+    assert combat.heaviest_wave(state, 0, 1) == 3
+    assert ui.hold_of(state, 0) == combat.hold_count(3, 0.10, 1.0) == 4
+    assert ui.forward_this_turn(state, 0) == {1: 12 - 4}
+    # our own fleets flying in are no threat
+    _incoming(state, 9, 2, owner=1, src=1)
+    assert ui.hold_of(state, 0) == 4
+
+
+def test_hold_count_clears_every_roll_including_a_mutual_wipe():
+    for jitter, adv in ((0.1, 1.0), (0.2, 1.3), (0.0, 1.0)):
+        for e in range(1, 30):
+            d = combat.hold_count(e, jitter, adv)
+            assert combat.preview_fight(e, d, jitter, adv).best.winner == combat.DEFENDER
+            assert combat.preview_fight(e, d - 1, jitter, adv).best.winner != combat.DEFENDER or d - 1 <= e
+    assert combat.hold_count(0, 0.1, 1.0) == 0
+
+
+def test_stepping_a_smart_hold_takes_it_back_by_hand_from_its_figure(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state, ui = _hub(), _ui()
+    ui.auto_forward[0] = ForwardRule({1: 100}, 5)
+    ui.edit_forward(state, 0, 1)
+    _incoming(state, 2, 1)
+    ui.toggle_smart_hold()
+    assert ui.auto_forward[0].smart and ui.hold_of(state, 0) == 3
+    ui.step_hold(1, state)
+    assert ui.auto_forward[0] == ForwardRule({1: 100}, 4, smart=False)
+    ui.toggle_smart_hold()
+    ui.toggle_smart_hold()
+    assert ui.auto_forward[0] == ForwardRule({1: 100}, 4, smart=False)
+
+
+def test_a_smart_hold_survives_the_log_and_old_rules_read_as_by_hand():
+    rules = {0: ForwardRule({1: 100}, 2, smart=True), 3: ForwardRule({1: 100}, 2)}
+    raw = replay.rules_to_dict(rules)
+    assert "smart" not in raw["3"]
+    assert replay.rules_from_dict(raw) == rules
+
+
 def test_clearing_dangerous_lanes_leaves_the_safe_ones():
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 50, 4: 50})
@@ -251,7 +310,7 @@ def test_clearing_dangerous_lanes_leaves_the_safe_ones():
 def test_orders_send_each_lane_its_share_after_the_hold():
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 50, 2: 50}, 3)
-    orders = main.auto_forward_orders(state, ui)
+    orders = app.auto_forward_orders(state, ui)
     assert sorted((o.dest_id, o.ships) for o in orders) == [(1, 5), (2, 4)]
     assert ui.forward_this_turn(state, 0) == {1: 5, 2: 4}   # what the popup shows
 
@@ -261,9 +320,9 @@ def test_a_half_rule_sends_half_of_whatever_is_there():
     garrison as it grows."""
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 50})
-    assert [o.ships for o in main.auto_forward_orders(state, ui)] == [6]
+    assert [o.ships for o in app.auto_forward_orders(state, ui)] == [6]
     state.systems[0].ships = 30
-    assert [o.ships for o in main.auto_forward_orders(state, ui)] == [15]
+    assert [o.ships for o in app.auto_forward_orders(state, ui)] == [15]
 
 
 def test_manual_orders_come_out_of_the_surplus_first():
@@ -272,13 +331,13 @@ def test_manual_orders_come_out_of_the_surplus_first():
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 100}, 2)
     ui.pending.append(Order(1, 0, 3, 4))
-    assert [(o.dest_id, o.ships) for o in main.auto_forward_orders(state, ui)] == [(1, 6)]
+    assert [(o.dest_id, o.ships) for o in app.auto_forward_orders(state, ui)] == [(1, 6)]
 
 
 def test_a_zero_share_lane_sends_nothing():
     state, ui = _hub(), _ui()
     ui.auto_forward[0] = ForwardRule({1: 0, 2: 100})
-    assert [(o.dest_id, o.ships) for o in main.auto_forward_orders(state, ui)] == [(2, 12)]
+    assert [(o.dest_id, o.ships) for o in app.auto_forward_orders(state, ui)] == [(2, 12)]
 
 
 def test_taking_a_split_lane_to_nothing_deletes_just_that_lane():
@@ -301,3 +360,18 @@ def test_a_lane_emptied_by_another_lanes_rise_stays_and_comes_back():
     ui.focus_lane(2)
     ui.set_share(50)
     assert ui.auto_forward[0].shares == {1: 50, 2: 50}
+
+
+def test_a_fraction_along_the_slider_sets_the_count_or_the_snapped_share():
+    state, ui = _hub(), _ui()
+    ui.reset_selection()
+    ui.selected = 0
+    ui.begin_send(state, 4)
+    lo, hi, _ = ui.slider_range(state)
+    ui.set_slider_fraction(state, 0.5)
+    assert ui.slider_range(state)[2] == round(lo + 0.5 * (hi - lo))
+    ui.set_slider_fraction(state, 7.0)      # clamped
+    assert ui.slider_range(state)[2] == hi
+    _forward(state, ui, 0, 1)
+    ui.set_slider_fraction(state, 0.33)
+    assert ui.edited_share() % config.FORWARD_SNAP_PCT == 0

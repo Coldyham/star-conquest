@@ -565,7 +565,7 @@ def travel_turns_at_length(length_ly: float, turn: int) -> int:
     """Turns to cross a lane of ``length_ly`` if launched on ``turn``.
 
     Derives straight from the lane's real length and the current speed, so it
-    matches what's shown alongside it (length, "Fleet speed") exactly — unlike
+    matches what's shown alongside it (length, "Ship speed") exactly — unlike
     ``travel_turns_at``, there's no previously-rounded-up figure to double-round.
     """
     return max(1, math.ceil(length_ly / ship_speed(turn)))
@@ -621,44 +621,6 @@ def side_panel_rect(history: bool = False) -> tuple[int, int, int, int]:
     foot = HUD_BOTTOM_H if history else END_TURN_H
     top = 0 if compact else HUD_TOP_H
     return (SCREEN_W - HUD_RIGHT_W, top, HUD_RIGHT_W, SCREEN_H - top - foot)
-
-
-def top_bar_w() -> int:
-    """The top bar's width: the screen's, or on a landscape phone the map's,
-    the side column taking the rest (`side_panel_rect`)."""
-    return SCREEN_W - HUD_RIGHT_W if compact and not portrait else SCREEN_W
-
-
-def footer_rect(history: bool = False) -> tuple[int, int, int, int]:
-    """The button strip (the history scrubber's bar while reviewing): under the
-    map, or the screen's full width in history. In portrait it sits above End
-    Turn, and in history spans both rows."""
-    if portrait:
-        y = SCREEN_H - END_TURN_H - HUD_BOTTOM_H
-        return (0, y, SCREEN_W, SCREEN_H - y if history else HUD_BOTTOM_H)
-    if history:
-        return (0, SCREEN_H - HUD_BOTTOM_H, SCREEN_W, HUD_BOTTOM_H)
-    return (0, SCREEN_H - HUD_BOTTOM_H, SCREEN_W - HUD_RIGHT_W, HUD_BOTTOM_H)
-
-
-def end_turn_rect() -> tuple[int, int, int, int]:
-    """The End Turn block: the foot of the right-hand column, or the full width
-    of a portrait screen's foot."""
-    if portrait:
-        return (0, SCREEN_H - END_TURN_H, SCREEN_W, END_TURN_H)
-    return (SCREEN_W - HUD_RIGHT_W, SCREEN_H - END_TURN_H, HUD_RIGHT_W, END_TURN_H)
-
-
-def end_turn_face_rect() -> tuple[int, int, int, int]:
-    """Where the End Turn bar is drawn inside `end_turn_rect`: the whole block in
-    landscape; in portrait, off the side edges (rounded corners) and lifted
-    `PORTRAIT_FOOT_INSET` above the foot (the gesture bar). Only the drawing
-    shrinks: a press anywhere in `end_turn_rect` counts."""
-    x, y, w, h = end_turn_rect()
-    if not portrait:
-        return (x, y, w, h)
-    top = HUD_PAD // 2
-    return (x + HUD_PAD, y + top, w - 2 * HUD_PAD, h - top - PORTRAIT_FOOT_INSET)
 
 
 def play_rect() -> tuple[int, int, int, int]:

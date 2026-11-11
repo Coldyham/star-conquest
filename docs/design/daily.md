@@ -359,18 +359,25 @@ create table if not exists public.dailies (
   set; blank disables it) and a **`#daily` launch link** (`#daily=<day>` for a
   past one). Either fetches the day (`main.open_daily`, polled like a gauntlet
   fetch, `main.land_daily`) and applies it to the menu as a setup, as a pasted
-  challenge link does, stashing it as a shared link's setup is. The status line
-  reads "Daily · Wed 28 Oct: Symmetric · 4 players · 16 systems · fog · vs
-  thinker, rusherplus". A
+  challenge link does, stashing it as a shared link's setup is. While the
+  setup is still the daily's, the menu's subtitle carries a banner, as a
+  challenge link's and a gauntlet stage's do (`setupmenu.daily_lines`,
+  `daily.banner`): "DAILY MAP #14 · Tue 10 Nov", then "Symmetric · 4 players ·
+  16 systems · fog · vs thinker, rusherplus" and your best. It is derived from
+  the setup's key, so it stays until a knob moves, and never flashes on the
+  status line (which on a phone shares the side column with the map sketch). A
   best on it is `webstore.best` on its key, derived as every best is.
 - **Known by its key** (`daily.remember`, `WEB_DAILIES_KEY`, a fortnight of
   keys): `main.new_ui` stamps `Ui.daily_day` on a game whose setup is a
   remembered daily.
 - **A fetch is not a send.** The game sends only on *Post to leaderboard* or
   *Share replays* (and a generated gauntlet asked to be listed); the daily is a GET of public rows, as the campaign lookup is.
-- **Ironman on the daily.** A daily plays ironman whatever the local
-  preference (`webstore.ironman`), so History stays hidden until the game is
-  decided. It is a courtesy, not a check: like every local best, it is trusted.
+- **No forced ironman on the daily.** A daily once played ironman whatever
+  the local preference; since 2026-11-07 it follows `webstore.ironman` like any
+  game, because a puzzle is exactly where a player wants to take a move back.
+  Ironman was a courtesy, never a check (every local best is trusted), so
+  nothing on the board changes. The footer's *Undo* (U, `Ui.can_undo`) is
+  History's rewind to the turn before in one press, with no confirm.
 - **Copy daily result** takes *Challenge a friend*'s place on a daily's win
   overlay (same button, same C key), since everyone already has the map. It
   puts a spoiler-free line on the clipboard (`main.copy_daily_result`,
@@ -378,19 +385,33 @@ create table if not exists public.dailies (
   address bar:
 
   ```
-  Star Conquest daily · Wed 28 Oct · 16 systems
-  Won in 64 turns, 21 ships lost
-  https://star-conquest.netlify.app/game/#daily
+  Star Conquest puzzle #11 - 8 turns, 9 ships
+  https://star-conquest.netlify.app/play/#puzzle
   ```
+
+  Wordle-short since 2026-11-07: the day's number (`daily.number`, 1 on
+  `FIRST_DAY`, 2026-10-28, for both kinds) and the result, nothing about the
+  map. It named the date, the board's size and a puzzle's opponent before;
+  less said makes a reader curious. The same number heads the menu's banner on
+  a daily's setup ("DAILY PUZZLE #11 · Sat 7 Nov") and the board's daily
+  pages (day picker, card and standings; `daily.mjs`'s `FIRST_DAY`, kept equal
+  by `test_leaderboard_sync`). Days before the first carry none.
 
   The line carries no setup and no moves. The link opens today's daily, not
   the poster's game.
+
+  The board's daily pages offer it again (the author, 2026-11-09), since the
+  overlay is easy to leave without it: a signed-in player with a counted win
+  on the day sees their best score there as the line and a *Copy daily
+  result* button (`daily-page.mjs`'s `drawOwnResult`; `daily.mjs`'s
+  `resultLine`, kept word for word by `test_the_boards_result_line_is_the_games`).
+  It reads only their own score, so an embargoed day gives nothing away.
 
 ## On the board
 
 `daily.html` (joins `render_board.PAGES`), on `base.html` like every page:
 
-- **Today**: the setup in a line, the opponents, a Play link (`../game/#daily`)
+- **Today**: the setup in a line, the opponents, a Play link (`../play/#daily`)
   and a link to its map page once somebody has posted. While the day runs the
   map is embargoed (see "The day's winner"), so the page shows what game.html
   shows of an embargoed map: who is ahead, by how many turns, and how many
@@ -456,10 +477,10 @@ UTC, as a live campaign node's are until its week ends (`campaign.md`,
 Three badges on the player card (`leaderboard/README.md`, "Badges"; the
 author, 2026-10-28), derived like the rest (`badges.mjs`'s `dailyRecord`):
 
-- **Board done**: a counted win on any day's daily, whenever posted.
-- **Board winner of the day**: the best score posted on a day (`bestOnTheDay`), once
+- **Map done**: a counted win on any day's daily, whenever posted.
+- **Map winner of the day**: the best score posted on a day (`bestOnTheDay`), once
   that day has ended. Later scores never take it.
-- **Full board week**: every day of one Monday-to-Sunday week won. A day won later
+- **Full map week**: every day of one Monday-to-Sunday week won. A day won later
   from the archive counts, as it mends a streak.
 
 A win autoplayed through (`hand` 0) counts for none, as on the standings. A
@@ -561,13 +582,13 @@ weakest first as the worker plays them:
   game still gets its board), a Daily puzzle item under the menu's Daily button, and
   `#puzzle` (`#puzzle=<day>`). `daily.remember` keeps each key's day and kind
   (a day alone, from before the puzzle, is a board), a fortnight of both.
-  Ironman and *Copy daily result* as for the board, with the line naming the
+  The ironman preference and *Copy daily result* as for the board, with the line naming the
   puzzle and its opponent:
 
   ```
   Star Conquest daily puzzle · Wed 28 Oct · 6 systems vs Rusherplus
   Won in 11 turns, 3 ships lost
-  https://star-conquest.netlify.app/game/#puzzle
+  https://star-conquest.netlify.app/play/#puzzle
   ```
 
 - **The board**: `puzzle.html`, a tab beside `daily.html` (the two share one
@@ -581,7 +602,7 @@ weakest first as the worker plays them:
 - **Streaks and badges are per kind** (the author, 2026-10-28): a puzzle
   streak and true streak of its own, and Puzzle done, Puzzle winner of the day
   and Full puzzle week beside the board's three (`badges.mjs`, groups "Daily
-  puzzle" then "Daily board", the puzzle first since it became the default;
+  puzzle" then "Daily map", the puzzle first since it became the default;
   `dailyRecord` is run once per kind).
 - **The board starts bigger** (the author, 2026-10-28): 11 systems and 3
   players on Monday, never a duel, so the two never overlap (see "The board

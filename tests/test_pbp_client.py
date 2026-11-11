@@ -1,41 +1,32 @@
 """Play-by-post: the shell half — opening a match, submitting, and stepping it on.
 
 `test_pbp.py` pins the pure module: links, seats, and the determinism two clients
-must agree on. This pins what `main` does with it, and the property that matters
+must agree on. This pins what `app` does with it, and the property that matters
 most is at the join between the two: **the turn the shell plays onto a live board
 must be the same turn another client rebuilds from the stored log.** One is
-`main.resolve_turn` (resolving with the wire's orders, or stepping with the
+`app.resolve_turn` (resolving with the wire's orders, or stepping with the
 resolver's record), the other is `pbp.resolve`/`pbp.rebuild`, and they are
 different code paths. If they ever disagree, the match has silently forked and
 nothing on either screen would say so.
-
-Pure/headless: `main` imports pygame, but nothing here draws.
 """
 
 from __future__ import annotations
 
 import copy
 import json
-import os
 from pathlib import Path
 
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame
 import pytest
 
-from starconquest import main as app
+from starconquest import app
 from starconquest import ai, config, engine, pbp, replay, webstore
 from starconquest.model import ForwardRule, GameState, Order
-from starconquest.paths import WEB_AUTH_KEY
 from starconquest.settings import Settings
 from starconquest.viewstate import Ui
 
 ROOT = Path(__file__).resolve().parents[1]
 
-pygame.init()
-pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
 
 MATCH = "00112233445566ff"
 TOKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
@@ -360,7 +351,7 @@ def test_a_refused_resolve_rebuilds_from_the_log_that_won():
 # --------------------------------------------------------------------------- #
 def test_the_shell_steps_a_turn_to_the_board_another_client_rebuilds():
     """The property the whole thin-server design rests on, at the one seam this
-    branch adds: `main.resolve_turn` advances a board already on screen, while
+    branch adds: `app.resolve_turn` advances a board already on screen, while
     `pbp.resolve` rebuilds from the opening. Different code, same inputs, and a
     disagreement is a forked match neither screen would mention."""
     _, state, ui, log = _opened()
@@ -521,24 +512,6 @@ def test_only_the_rate_limit_counts_as_being_told_to_slow_down():
     assert not app.pbp_throttled('{"error": "stale turn"}')
     assert not app.pbp_throttled("")
     assert not app.pbp_throttled("<!doctype html>")
-
-
-def test_a_refusal_stays_on_screen_once_the_veil_drops(monkeypatch):
-    """The refusal hands the board back, which drops the waiting overlay in the
-    same frame. Its reason has to be drawn somewhere else, or the press reads as
-    having done nothing."""
-    from starconquest import render
-    pygame.init()
-    render._FONTS.clear()        # another file may have quit pygame
-    _, state, ui, _ = _opened()
-    ui.pbp_submitted = True
-    app.pbp_heard(ui, pbp.ERROR, '{"error": "stale turn"}')
-    drawn = []
-    monkeypatch.setattr(render, "_label_pill",
-                        lambda surface, font, text, *a: drawn.append(text))
-    render.draw(pygame.Surface((config.SCREEN_W, config.SCREEN_H)), state, ui)
-    assert not ui.awaiting_others(state)
-    assert app.PBP_ENDPOINT_MSGS["stale turn"] in drawn
 
 
 # --------------------------------------------------------------------------- #
@@ -1145,17 +1118,3 @@ def test_a_match_opened_under_a_name_carries_the_sign_in(monkeypatch):
     assert sent == [True, False]
 
 
-def test_a_signed_web_call_reads_the_session_in_js(monkeypatch):
-    evaluated = []
-
-    class _Window:
-        def eval(self, code):
-            evaluated.append(code)
-
-    import platform as _platform
-    monkeypatch.setattr(_platform, "window", _Window(), raising=False)
-    assert pbp._call_web("https://x/api/pbp?action=create", "{}", signed=True) is not None
-    assert pbp._call_web("https://x/api/pbp?action=submit", "{}") is not None
-    assert f'localStorage.getItem("{WEB_AUTH_KEY}")' in evaluated[0]
-    assert "h.Authorization='Bearer '+a.access_token" in evaluated[0]
-    assert "Authorization" not in evaluated[1], "an unsigned call sends no session"

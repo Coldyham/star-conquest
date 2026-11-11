@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from starconquest import paths, replay, share
+from starconquest import replay, share
 from starconquest.model import Order
 from starconquest.settings import Settings
 
@@ -160,42 +160,6 @@ def test_post_sends_the_row_and_no_credentials(configured, sent):
     assert set(headers) == {"Content-Type"}
 
 
-def test_web_backend_hands_javascript_a_quoted_payload(configured, monkeypatch):
-    """The fetch is built as JS source, so the log must land inside a *string
-    literal* — every value goes through json.dumps for exactly that reason."""
-    scripts: list[str] = []
-
-    class _Window:
-        def eval(self, script):
-            scripts.append(script)
-
-    monkeypatch.setattr(share, "is_web", lambda: True)
-    monkeypatch.setitem(__import__("sys").modules, "platform",
-                        type("P", (), {"window": _Window()}))
-    log = _log()
-    assert share.post_log(log, "abc123") is True
-    script = scripts[0]
-    assert script.startswith("fetch(")
-    # A rejected promise on a page that is still mid-game must not surface as an
-    # uncaught error in the console.
-    assert ".catch(" in script
-    # The body reaches JS as one quoted literal — JSON inside JSON, so the log's
-    # own quotes arrive escaped and nothing in it can close the string early.
-    assert json.dumps(json.dumps(share.row_for(log, "abc123"))) in script
-    assert log.encoded() in script      # ...and the payload really is in there
-
-
-def test_a_broken_bridge_is_not_an_error(configured, monkeypatch):
-    class _Window:
-        def eval(self, script):
-            raise RuntimeError("no DOM here")
-
-    monkeypatch.setattr(share, "is_web", lambda: True)
-    monkeypatch.setitem(__import__("sys").modules, "platform",
-                        type("P", (), {"window": _Window()}))
-    assert share.post_log(_log(), "abc123") is False
-
-
 def test_a_refused_connection_is_not_an_error(configured, monkeypatch):
     """The desktop backend runs on a daemon thread and nobody reads the result;
     a dead endpoint must not reach the caller either."""
@@ -221,31 +185,11 @@ def watchable(monkeypatch):
 MATCH = "00112233445566ff"
 
 
-class _EvalWindow:
-    """A stand-in JS bridge: records what it was asked to run, and runs nothing.
-
-    Deliberately returns nothing useful — the point of the localStorage mailbox is
-    that no value has to come *back* through `eval`.
-    """
-
-    def __init__(self):
-        self.scripts = []
-
-    def eval(self, script):
-        self.scripts.append(script)
-
-
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     """Back the preference store with a tmp file, so a poll reads what the browser
     would have written without touching the developer's own store."""
     monkeypatch.setattr(share.webstore, "_file_path", lambda: tmp_path / "kv.json")
-
-
-def _bridge(monkeypatch, window):
-    monkeypatch.setattr(share, "is_web", lambda: True)
-    monkeypatch.setitem(__import__("sys").modules, "platform",
-                        type("P", (), {"window": window}))
 
 
 def test_an_id_that_the_game_could_not_have_minted_is_never_requested(watchable):
@@ -258,81 +202,6 @@ def test_an_id_that_the_game_could_not_have_minted_is_never_requested(watchable)
 def test_no_endpoint_means_nothing_to_watch(monkeypatch):
     monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
     assert share.fetch_log(MATCH) is None
-
-
-def test_the_web_fetch_stores_its_own_result_and_handles_every_ending(watchable, monkeypatch):
-    """The JS is fire-and-forget, so it must leave the slot in exactly one of the
-    three states whatever happens — a non-2xx is as much an end as a dead socket,
-    and a poll that never sees one waits for ever."""
-    window = _EvalWindow()
-    _bridge(monkeypatch, window)
-    assert share.fetch_log(MATCH) is not None
-    script = window.scripts[0]
-    assert f"?id={MATCH}" in script
-    # Written into localStorage, not onto `window`: the poll reads it back through
-    # `webstore.get`, the one read path the rest of the game proves every launch.
-    assert "localStorage.setItem" in script
-    assert paths.WEB_REPLAY_STATE_KEY in script and paths.WEB_REPLAY_BODY_KEY in script
-    assert "Promise.reject" in script and ".catch(" in script
-    assert f"'{share.OK}'" in script and f"'{share.ERROR}'" in script
-
-
-def test_polling_reports_pending_then_the_body(watchable, monkeypatch, store):
-    _bridge(monkeypatch, _EvalWindow())
-    download = share.fetch_log(MATCH)
-    assert download is not None
-    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.PENDING)
-    assert download.poll() == (share.PENDING, "")
-
-    share.webstore.set(paths.WEB_REPLAY_BODY_KEY, "the-encoded-log")
-    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.OK)
-    assert download.poll() == (share.OK, "the-encoded-log")
-
-
-def test_a_collected_result_is_cleared_so_it_cannot_be_read_twice(watchable, monkeypatch, store):
-    """A stale `ok` left by an earlier session would otherwise be collected as an
-    instant success carrying somebody else's replay."""
-    _bridge(monkeypatch, _EvalWindow())
-    download = share.fetch_log(MATCH)
-    assert download is not None
-    share.webstore.set(paths.WEB_REPLAY_BODY_KEY, "the-encoded-log")
-    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.OK)
-    assert download.poll()[0] == share.OK
-    assert download.poll() == (share.PENDING, "")
-    assert share.webstore.get(paths.WEB_REPLAY_BODY_KEY) == ""
-
-
-def test_a_failed_fetch_polls_as_an_error_not_an_exception(watchable, monkeypatch, store):
-    _bridge(monkeypatch, _EvalWindow())
-    download = share.fetch_log(MATCH)
-    assert download is not None
-    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.ERROR)
-    assert download.poll() == (share.ERROR, "")
-
-
-def test_no_such_replay_is_its_own_answer(watchable, monkeypatch, store):
-    """"The board says there is no such replay" and "the board did not answer"
-    send the player to different places, so they are not the same state."""
-    _bridge(monkeypatch, _EvalWindow())
-    download = share.fetch_log(MATCH)
-    assert download is not None
-    share.webstore.set(paths.WEB_REPLAY_STATE_KEY, share.MISSING)
-    assert download.poll() == (share.MISSING, "")
-
-
-def test_the_web_fetch_tells_a_404_apart_from_a_dead_connection(watchable, monkeypatch):
-    window = _EvalWindow()
-    _bridge(monkeypatch, window)
-    share.fetch_log(MATCH)
-    assert f"e===404?'{share.MISSING}'" in window.scripts[0]
-
-
-def test_an_empty_slot_reads_as_pending_rather_than_as_a_failure(watchable, monkeypatch, store):
-    """The state between starting the fetch and the browser answering."""
-    _bridge(monkeypatch, _EvalWindow())
-    download = share.fetch_log(MATCH)
-    assert download is not None
-    assert download.poll() == (share.PENDING, "")
 
 
 def test_the_desktop_fetch_returns_the_body_off_the_loop(watchable, monkeypatch):
@@ -400,10 +269,6 @@ def test_a_refused_download_polls_as_an_error(watchable, monkeypatch):
 # --------------------------------------------------------------------------- #
 # Quick post
 # --------------------------------------------------------------------------- #
-def _web_bridge(monkeypatch, window):
-    """Quick post's mailbox is `pbp.settle`'s, which asks `pbp.is_web` itself."""
-    _bridge(monkeypatch, window)
-    monkeypatch.setattr(share.pbp, "is_web", lambda: True)
 
 
 def test_quick_post_is_offered_only_on_the_web_with_a_name(configured, monkeypatch):
@@ -414,51 +279,6 @@ def test_quick_post_is_offered_only_on_the_web_with_a_name(configured, monkeypat
     assert share.quick_post_name() == "Ada"
     monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
     assert share.quick_post_name() == ""          # no board at all
-
-
-def test_quick_post_runs_the_boards_own_module_into_a_mailbox(configured, monkeypatch, store):
-    """The game files no score itself: it imports the entry form's posting module
-    and parks how it settles where a poll collects it."""
-    window = _EvalWindow()
-    _web_bridge(monkeypatch, window)
-    request = share.quick_post("eNoTOKEN", 'Ada "the" Bold')
-    assert request is not None
-    script = window.scripts[0]
-    assert f'import("https://example.test{paths.LEADERBOARD_POST_MODULE_PATH}")' in script
-    assert 'm.quickPost("eNoTOKEN","Ada \\"the\\" Bold")' in script
-    assert ".catch(" in script and "localStorage.setItem" in script
-
-    state_key = f"{paths.WEB_PBP_STATE_KEY}:{request._slot}"
-    body_key = f"{paths.WEB_PBP_BODY_KEY}:{request._slot}"
-    assert request.poll() == (share.pbp.PENDING, "")
-    share.webstore.set(body_key, '{"game_key":"k"}')
-    share.webstore.set(state_key, share.pbp.OK)
-    assert request.poll() == (share.pbp.OK, '{"game_key":"k"}')
-
-
-def test_quick_post_needs_the_web_a_board_and_a_name(configured, monkeypatch):
-    monkeypatch.setattr(share.pbp, "is_web", lambda: False)
-    assert share.quick_post("eNoTOKEN", "Ada") is None
-    _web_bridge(monkeypatch, _EvalWindow())
-    assert share.quick_post("eNoTOKEN", "") is None
-    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
-    assert share.quick_post("eNoTOKEN", "Ada") is None
-
-
-def test_the_signed_in_name_is_the_boards_own_lookup(configured, monkeypatch):
-    """The game asks post.mjs's ownName rather than reading the session itself;
-    off the web, or with no board, it doesn't ask."""
-    monkeypatch.setattr(share, "is_web", lambda: False)
-    assert share.signed_in_name() is None
-    window = _EvalWindow()
-    _web_bridge(monkeypatch, window)
-    monkeypatch.setattr(share, "is_web", lambda: True)
-    assert share.signed_in_name() is not None
-    script = window.scripts[0]
-    assert f'import("https://example.test{paths.LEADERBOARD_POST_MODULE_PATH}")' in script
-    assert "m.ownName()" in script
-    monkeypatch.setattr(share.webstore, "leaderboard_origin", lambda: "")
-    assert share.signed_in_name() is None
 
 
 def _answer(**fields) -> str:

@@ -4,12 +4,9 @@ version = "0.1.0"
 description = "A minimalist sci-fi turn-based strategy game (graph-node star map conquest)."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    # pygame-ce (Community Edition): a drop-in for pygame (same `import pygame`,
-    # same API surface this game uses) that is actively maintained and is what
-    # pygbag compiles to WebAssembly for the browser build.
-    "pygame-ce>=2.5",
-]
+# The game needs nothing beyond the standard library: it runs in the browser
+# (Pyodide), served on this machine by `starconquest/serve.py`.
+dependencies = []
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -18,11 +15,10 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
-    # Web (browser/WebAssembly) build tooling — see tools/build_web.sh.
-    "pygbag>=0.9.3",
-    "pip",            # pygbag's build/dev server shells out to `python -m pip`
     "jinja2>=3.1.6",  # the leaderboard pages are templates — see tools/render_board.py
-    "fonttools>=4.68.0",  # the web build subsets its fonts — see tools/slim_web.py
+    # Only as an image library, for two offline tools: the home-screen icons
+    # (tools/pwa/make_icons.py) and the parity contact sheets (tools/parity_sheet.py).
+    "pygame-ce>=2.5",
 ]
 
 [tool.ruff.lint]
@@ -33,5 +29,5 @@ ignore = ["S110", "S112", "RUF023", "I001", "ISC004"]
 
 [tool.ruff.lint.per-file-ignores]
 # The browser/storage bridges: every DOM or filesystem call is guarded wholesale.
-"starconquest/{webstore,softkeyboard,paths,settings,main}.py" = ["BLE001"]
+"starconquest/{webstore,paths,settings}.py" = ["BLE001"]
 "tools/{check_bot,config_census}.py" = ["BLE001"]
