@@ -58,6 +58,26 @@ def test_a_win_stores_the_exact_replay_a_watch_link_would_play():
     assert decoded.strategies[seat.id] == seat.ai_strategy == job.bot
 
 
+def test_a_map_posted_with_autoplay_on_replays_as_the_plain_map():
+    """A win played after watching a bot and rewinding to the start was posted
+    with autoplay on and the bot left in seat 1. Built as posted, that setup has
+    no human seat, and `play_settings` raised and stopped the whole run. The
+    seat is handed to the replayed bot anyway, so the row replays exactly as
+    the same map posted with autoplay off."""
+    plain = Settings(mode="random", players=3, nodes=16, seed=12)
+    posted = Settings.from_dict(plain.to_dict())
+    posted.autoplay = True
+    posted.ai_strategy[0], posted.ai[0].aux = "knower", 3.0
+    rebuilt = bot_replay._settings_for({"settings_json": posted.to_dict(), "seed": 12})
+    assert rebuilt is not None
+    cfg, seed = rebuilt
+    assert not cfg.autoplay and cfg.challenge_key() == posted.challenge_key()
+    ai.load_models()
+    ours = sim.play_settings(cfg, seed, "marshal", max_turns=60)
+    theirs = sim.play_settings(plain, 12, "marshal", max_turns=60)
+    assert (ours.won, ours.turns, ours.lost) == (theirs.won, theirs.turns, theirs.lost)
+
+
 def test_a_loss_stores_no_replay():
     """No Watch link is offered for a loss (`botOrder` doesn't even rank one),
     so nothing is worth keeping — and the row must actively blank these
