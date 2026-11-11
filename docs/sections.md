@@ -207,6 +207,7 @@ line gives only the verdict. Ideas that lost are in
 - council.md · **evolved as one more borrowed candidate** (shipped 2026-10-20). Details in knower.md.
 - council.md · **actuary at Hunt in Field's place (measured, not shipped).** Stronger but far past the browser's search guard, so decided against; without its look-ahead only a lean.
 - council.md · **Stripped frontiers are trades, not mistakes.** `_cover` and `LOSS_PENALTY` both lose or null; the habit is style.
+- council.md · **Playing for the soonest win (`FAST_CLOSE`, 2026-11-11).** Council stockpiles once ahead (puzzles: 70 turns from 3:1 to the win against a person's 13); a win ranks by its turn, a 3:1 lead ranks lines by the rivals' material, the search rolls on past the horizon, and a closer pools whole garrisons; faster on puzzles and every win-turns cell, no wins lost; the bait-and-drain lines people play are not candidates.
 - council.md · **What it costs.** Browser timing, guards on slow devices, the gentler-jitter test exemption.
 - council.md · **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
 

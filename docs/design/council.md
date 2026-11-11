@@ -281,6 +281,69 @@ mostly gone. That matches plain Hunt against Field head to head, 50.8%
 of Hunt's lead, and two near-equal candidates mostly trade which of two similar
 lines wins. A lean, not adopted.
 
+## Playing for the soonest win (`FAST_CLOSE`, 2026-11-11)
+
+**What prompted it.** On the daily puzzle Council misses par by a median of 3
+turns over the first 15 days (1.56 times par), and the blind bots by 8-18.
+Against the best human line on each of 14 days both won, split at the 3:1 and
+9:1 income leads ([`win-turns.md`](win-turns.md)), Council took 124 turns to 3:1
+against the person's 113, but 70 from 3:1 to the win against 13. Once ahead it
+stockpiles: on 2026-11-01 its ships climbed from 10 to 48 over 25 turns, where
+the person won in 10 holding about 12. People spend ships to the end. Two causes
+in the search:
+
+- A line that wins scores 1.0 whatever ply it wins on, so a win on ply 2 and one
+  on ply 8 tie, and the tie keeps the default.
+- Once the judge rates every line near 1, the pick is decided by noise, which
+  favours the line holding the most.
+
+Tracing 2026-10-30, 11-01 and 11-03 showed a third: the judge read 0.99 for 18
+turns while the rival kept one system, and no candidate won inside the horizon
+(longest lane + 5, 8 plies there), because none pools ships for one strike on a
+system three turns off; each turn's pick was a different bot's line, so the plays
+added up to no plan.
+
+**What it does** (`models/knower.py`, Council only):
+
+- A won line ranks by the turn it wins on, soonest first.
+- Once the real board shows a 3:1 income lead (`CLOSE_SHARE` 0.75), a line the
+  judge rates at least `CLOSE_AT` (0.95) ranks by the rivals' remaining material,
+  weighed as `_evaluate` weighs it, and never by our own ships.
+- In that state, if no line won inside the horizon, every line rolls on a ply at a
+  time until one wins or `CLOSE_DEEPER` (3) times the horizon is spent, under the
+  same deadline as the rest of the search.
+- In that state too, while `_evaluate` says we are ahead, a closer is offered: it
+  picks the rival system it can take soonest on every roll (`combat.sure_count`
+  against the garrison at landing), routes through our own systems only, and sends
+  whole garrisons a hop whenever their distance equals the strike's; the rest wait.
+  It plays its own line on in the rollouts.
+
+**Measurements** (`tools/puzzle_bench.py` on the 15 stored puzzles and 100 dealt;
+`tools/win_turns.py --quick`; the base is main at 1c6fd7e, run from a worktree):
+
+| | Base | Judge-gated (first build) | 3:1-gated (shipped) |
+| --- | --- | --- | --- |
+| Puzzles: better / worse / same | | 59 / 24 / 32 | **59 / 7 / 49** |
+| Puzzles: mean turns, z | 19.9 | -1.20, -3.2 | **-1.48, -6.5** |
+| Weak bots: beats base, z | | 67.8%, +8.7 | **73.2%, +14.2** |
+| Weak bots: turns | | -6.2% | -4.4% |
+| Weak bots: before 3:1 / after | | +1.3 / -4.6 | **0.0** / -2.2 |
+| marshal, actuary: beats base, z | | | **73.9%, +11.1** |
+| marshal, actuary: wins, turns | | | +0.3 pt, -6.5% |
+
+No puzzle or game won by the base was lost. The judge-gated build, which closed
+whenever the judge read 0.95, played worse before 3:1 because on small boards the
+judge reads that early (2026-10-30: from turn 1). Against marshal and actuary
+ships lost fell in every cell. A game costs about the same (it is shorter); a turn
+costs up to about 1.5 times as much on small boards with the guards lifted.
+
+**What is left.** On puzzles the gap to par is still most of it (about 18.5 turns
+against par near 8-10). The person's 10-turn line on 2026-10-30 took a rival
+system on turn 4, held it while the rival threw fleets at it against the
+defender's advantage, and took the drained home with 4 ships. Lines like that
+(baiting a predictable rival, softening strikes, relays; [`par.md`](par.md),
+"Beyond K launches") are not among Council's candidates.
+
 ## What it costs
 
 In the browser (CPython on WebAssembly, about 2× native), median per decide:
