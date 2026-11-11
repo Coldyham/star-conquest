@@ -38,6 +38,7 @@ ships or is dropped, delete its line here (and add it to
 
 ## Bot research
 - ladder.md · The slow cell (24 nodes, 3 ly/turn) predates actuary; `tests.sim` has no ship-speed flag to re-run it. *Re-running it.*
+- council.md · The bounce: a bait lost when a later turn sends its cover elsewhere (10 of 114); checking the bite more than one turn ahead; a version for Search. *The bounce*, *What is left.*
 - knower.md · Bait openings at Search (a wall between two rivals emptied): a lean on screening seeds; confirm on fresh seeds and read at Council. *Baiting in a free-for-all.*
 - knower.md · Not built: the remnant strike, and a person's launch folded in as uncertain. *Pile-ups under the garrison-fights-last rule.*
 - council.md · Closing the middle-game gap to people on the posted maps. *Against the posted maps and the people who posted them.*

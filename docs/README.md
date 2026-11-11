@@ -100,6 +100,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `fold_check.py` | A stop plays as the bot folded into it | bot-families.md |
 | `gen_bot_stops.py` | Regenerate the board's `bot-stops.mjs` | bot-families.md |
 | `win_turns.py` | Turns to win; `--label NEW --base OLD` pairs two trees | win-turns.md |
+| `puzzle_bench.py` | Turns to win on the stored and dealt daily puzzles; `--set` a bot constant, `--tree` another checkout, `--base` pairs two | council.md |
 | `candidate_bench.py` | A bot as one more knower candidate, paired | knower.md, council.md |
 | `pileup_bench.py`, `bait_bench.py` | knower's pile-up pricing; Search offered bait openings | knower.md |
 | `mp_tactics.py`, `guard_census.py` | marshal's multiplayer tactics; is the guard a pool | marshal.md |
@@ -108,6 +109,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `hunt_bench.py`, `hunt_predict.py`, `hunt_sweep.py`, `hunt_cost.py`, `hunt_exact.py`, `hunt_tune.py` | actuary at Hunt: paired bench, strike prediction, sweeps, CMA-ES tuning, decide cost, exact-orders check | hunter.md |
 | `learner_check.py` (`--logs public`) | actuary's rival model vs the roster or posted human games | learner.md |
 | `human_habits.py` | How people play vs roster self-play | learner.md |
+| `bait_census.py` | Thinned frontier systems in the posted games: bit, held, bounced back, by seat | council.md |
 | `learning_humans.py` | Learning against the person in posted games: fate, Field counterfactual, what the memory read; `--baseline`, `--private` | learning.md |
 | `evo_bench.py`, `evo_train.py` (`--with cma`), `evo_probe.py`, `evo_losses.py` | evolved's gate, training and diagnosis | evolved.md |
 | `par_search.py` | Par search on a map (local only) | par.md |

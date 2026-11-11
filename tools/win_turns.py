@@ -17,7 +17,8 @@ Council, ``actuary:3`` Hunt). An opponent line-up is one seat, which takes every
 other seat, or one seat per other seat joined by ``+`` (``heuristic+rusherplus``
 on a three-seat cell); a line-up plays only the cells it fits. Every seed is
 played with the bot in each seat in turn, the line-up rotated with it, so start
-position cancels. Cells are ``mode:nodes:ly:players``. Wall-clock guards are
+position cancels. Cells are ``mode:nodes:ly:players``; a symmetric mode may name
+its layout (``symmetric/core:13:6:2``). Wall-clock guards are
 lifted, so a game is the same on any machine.
 
 Each arm reads, per cell and line-up: the share of games won and how many hit
@@ -199,8 +200,11 @@ def schedule(bots: list[Seat], lineups: list[tuple[Seat, ...]], cells: list[Cell
 def play(game: Game) -> dict:
     """One game, read from the bot's seat: the ledger row, less the tree's stamp."""
     cell = game.cell
-    cfg = Settings(mode=cell.mode, nodes=cell.nodes, players=cell.players,
+    mode, _, layout = cell.mode.partition("/")
+    cfg = Settings(mode=mode, nodes=cell.nodes, players=cell.players,
                    ship_ly_per_turn=cell.ly, autoplay=True)
+    if layout:
+        cfg.layout = layout
     for i, seat in enumerate(game.seats):
         cfg.ai_strategy[i] = seat.name
         cfg.ai[i] = seat.params

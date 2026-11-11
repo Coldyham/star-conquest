@@ -103,6 +103,7 @@ docs/design/knower.md.
 from __future__ import annotations
 
 import copy
+import heapq
 import math
 import random
 import sys
@@ -1038,6 +1039,10 @@ def _search(state, pid, orc, turns: int, deadline):
             break            # nothing left to learn; the verdicts are already in
         lines = (_policy_advance if _COUNCIL else _advance)(lines, pid, humans)
 
+    if _COUNCIL and FAST_CLOSE:
+        closing = _closing(state, pid)
+        lines = _close_deeper(lines, pid, humans, turns, deadline, closing)
+        return _fast_pick(lines, pid, closing).root
     best = lines[0]          # the default, so an exact tie keeps it
     for line in lines[1:]:
         if line.score > best.score:
@@ -1083,6 +1088,17 @@ def _candidates(state, pid, orc, base):
         if plan is not None:
             if _COUNCIL:
                 _SOURCE[id(plan)] = borrowed
+            yield plan
+    if _COUNCIL and FAST_CLOSE and _evaluate(state, pid) > 0 and _closing(state, pid):
+        plan = _closer_plan(state, pid)
+        if plan is not None:
+            _SOURCE[id(plan)] = CLOSER
+            yield plan
+    if _COUNCIL and BOUNCE:
+        humans = frozenset(q for q, p in state.players.items() if p.is_human)
+        plan = _bounce_plan(state, pid, orc, base, humans)
+        if plan is not None:
+            _SOURCE[id(plan)] = BOUNCE_TAG
             yield plan
 
 
@@ -1158,6 +1174,279 @@ COST_VS_KNOWER = 2.5
 COST_COUNCIL_LINES = 7          # ...measured over this many Council lines (`_council_lines`)
 
 _COUNCIL = False                # a Council seat is deciding (single-threaded, as `_DEPTH`)
+
+# Council plays for the soonest win once it is safely ahead: a line that wins
+# sooner outranks one that wins later, and once we hold `CLOSE_SHARE` of the
+# players' income, a line the judge rates at least `CLOSE_AT` is ranked by what
+# the rivals have left, not by our own ships.
+FAST_CLOSE = True
+CLOSE_AT = 0.95
+CLOSE_SHARE = 0.75               # a 3:1 income lead
+CLOSE_DEEPER = 3.0               # how far past the horizon, as a multiple of it
+
+
+def _rival_material(state, pid) -> float:
+    """What every rival still holds, weighed as `_evaluate` weighs material."""
+    total = 0.0
+    for p in state.players.values():
+        if p.is_neutral or p.id == pid:
+            continue
+        systems, ships, prod = _material(state, p.id)
+        total += EVAL_PRODUCTION * prod + EVAL_SYSTEMS * systems + EVAL_SHIPS * ships
+    return total
+
+
+def _closing(state, pid) -> bool:
+    """We hold `CLOSE_SHARE` of the players' income."""
+    income: dict[int, float] = defaultdict(float)
+    for s in state.systems.values():
+        if s.owner_id != 0 and s.production > 0:
+            income[s.owner_id] += 1.0 / s.production
+    total = sum(income.values())
+    return total > 0 and income[pid] / total >= CLOSE_SHARE
+
+
+def _close_rank(line, pid, closing) -> tuple:
+    """A line's rank under `FAST_CLOSE`: a win by its turn, then, while
+    ``closing``, a line past `CLOSE_AT` by the rivals' material, then the
+    judge's value."""
+    board = line.board
+    if board.winner is not None:
+        return (3, -board.turn) if board.winner == pid else (0, 0.0)
+    value = line.score.get() if isinstance(line.score, _Lazy) else float(line.score)
+    if closing and value >= CLOSE_AT:
+        return (2, -_rival_material(board, pid))
+    return (1, value)
+
+
+def _close_deeper(lines, pid, humans, turns, deadline, closing):
+    """Once a line is past `CLOSE_AT` and none has won, roll every line on, a
+    ply at a time, until one wins or `CLOSE_DEEPER` times the horizon is
+    spent, so a finish just past the horizon is seen."""
+    def judged(line):
+        return line.score.get() if isinstance(line.score, _Lazy) else float(line.score)
+
+    if not closing or any(line.board.winner is not None for line in lines):
+        return lines
+    if max(judged(line) for line in lines) < CLOSE_AT:
+        return lines
+    for _ in range(int(turns * (CLOSE_DEEPER - 1))):
+        if time.perf_counter() > deadline:
+            break
+        lines = _policy_advance(lines, pid, humans)
+        if any(line.board.winner == pid for line in lines):
+            break
+    return lines
+
+
+def _fast_pick(lines, pid, closing):
+    """The line `FAST_CLOSE` plays; an exact tie keeps the earlier candidate."""
+    best, best_rank = lines[0], _close_rank(lines[0], pid, closing)
+    for line in lines[1:]:
+        rank = _close_rank(line, pid, closing)
+        if rank > best_rank:
+            best, best_rank = line, rank
+    return best
+
+
+# The closer: a Council candidate, offered while we are ahead on material, that
+# pools whole garrisons through our own systems into one strike on the rival
+# system it can take soonest on every roll. It plays its own line on in the
+# rollouts, so it is picked only where finishing that way scores best.
+CLOSER = ("closer", None)        # its `_SOURCE` tag, never a registered bot
+CLOSER_REACH = 30                # the latest strike, in turns, it will plan
+
+
+def _paths_in(state, pid, target):
+    """``{own system: (turns to target, next hop)}``, going through our own
+    systems only, so nothing is fought on the way in."""
+    best = {target: (0, target)}
+    heap = [(0, target)]
+    while heap:
+        d, sid = heapq.heappop(heap)
+        if d > best[sid][0]:
+            continue
+        for nbr in state.systems[sid].neighbors:
+            if state.systems[nbr].owner_id != pid:
+                continue
+            lane = state.travel_turns(nbr, sid)
+            if lane is None:
+                continue
+            nd = d + lane
+            if nbr not in best or nd < best[nbr][0]:
+                best[nbr] = (nd, sid)
+                heapq.heappush(heap, (nd, nbr))
+    del best[target]
+    return best
+
+
+def _closer_plan(state, pid):
+    """The closer's orders this turn, or None when no strike within
+    `CLOSER_REACH` takes a rival system on every roll."""
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+    pick = None
+    for target in state.systems.values():
+        if target.owner_id in (0, pid):
+            continue
+        paths = _paths_in(state, pid, target.id)
+        flying = {}
+        for f in state.fleets:
+            if f.owner_id == pid and f.dest_id == target.id:
+                flying[f.turns_remaining] = flying.get(f.turns_remaining, 0) + f.ships
+        for h in sorted({d for d, _ in paths.values()} | set(flying)):
+            if h > CLOSER_REACH or (pick is not None and h > pick[0]):
+                break
+            landing = flying.get(h, 0) + sum(
+                combat.garrison_after(state, sid, h - d) for sid, (d, _) in paths.items() if d <= h)
+            garrison = combat.forecast_landing(state, pid, target.id, h, landing).garrison
+            need = max(garrison + 1, combat.sure_count(garrison, jitter, advantage))
+            if landing >= need:
+                if pick is None or (h, need) < pick[:2]:
+                    pick = (h, need, paths)
+                break
+    if pick is None:
+        return None
+    h, _, paths = pick
+    return [Order(pid, sid, hop, state.systems[sid].ships)
+            for sid, (d, hop) in sorted(paths.items())
+            if d == h and state.systems[sid].ships > 0]
+
+
+# The bounce: a Council candidate that sends part of a frontier garrison one hop
+# back to a cover, having checked with the rival's own `decide` that the thinned
+# system draws a strike, and that our ships in reach hold it when it lands. Its
+# line sends them in.
+BOUNCE = True
+BOUNCE_TAG = ("bounce", None)    # its `_SOURCE` tag, never a registered bot
+BOUNCE_SHARES = (1.0, 2 / 3, 0.5, 1 / 3)   # of the spare garrison, each tried
+BOUNCE_MIN = 3                   # the smallest strike worth drawing
+BOUNCE_PAIRS = 3                 # baits checked a decide, most tempting first
+BOUNCE_PAD = 1.5                 # the garrison its line gathers, over the count that holds
+_BOUNCES: dict[int, tuple] = {}  # id(opening) -> (bait, strike drawn, turn it lands)
+
+
+def _strikes_on(board, pid, humans):
+    """``{system: (ships, soonest flight)}``: what every rival launches at our
+    systems from ``board``, asked of each rival's own `decide`."""
+    out: dict[int, tuple[int, int]] = {}
+    for q in sorted(board.players):
+        player = board.players[q]
+        if q == pid or player.is_neutral or not player.alive:
+            continue
+        try:
+            orders = _rollout_decide(board, q, humans) or []
+        except Exception:                 # noqa: BLE001 — a broken rival is their problem
+            continue
+        for o in orders:
+            if getattr(o, "owner_id", None) != q or o.dest_id not in board.systems:
+                continue
+            if board.systems[o.dest_id].owner_id != pid:
+                continue
+            flight = board.travel_turns(o.source_id, o.dest_id)
+            if flight is None:
+                continue
+            ships, soonest = out.get(o.dest_id, (0, flight))
+            out[o.dest_id] = (ships + min(o.ships, board.systems[o.source_id].ships), min(soonest, flight))
+    return out
+
+
+def _bounce_pairs(state, pid, orc):
+    """``[(bait, cover, lane)]``, most tempting first: a system of ours next to a
+    rival, with no hostile fleet inbound or predicted, and the nearest system of
+    ours to send its ships to."""
+    struck = {f.dest_id for f in state.fleets if f.owner_id not in (0, pid)}
+    if orc is not None:
+        struck |= {f.dest_id for f in orc.post.fleets if f.owner_id not in (0, pid)}
+    pairs = []
+    for s in state.systems.values():
+        if s.owner_id != pid or s.id in struck:
+            continue
+        rivals = [n for n in s.neighbors if state.systems[n].owner_id not in (0, pid)]
+        covers = [(state.travel_turns(s.id, n) or 99, -state.systems[n].ships, n)
+                  for n in s.neighbors if state.systems[n].owner_id == pid]
+        if rivals and covers:
+            lane, _, cover = min(covers)
+            pairs.append((-sum(state.systems[n].ships for n in rivals), s.id, cover, lane))
+    return [(a, b, lane) for _, a, b, lane in sorted(pairs)]
+
+
+def _own_landing(board, pid, sid, within) -> int:
+    """Our ships already flying to ``sid`` that land within ``within`` turns."""
+    return sum(f.ships for f in board.fleets
+               if f.owner_id == pid and f.dest_id == sid and f.turns_remaining <= within)
+
+
+def _bounce_plan(state, pid, orc, base, humans):
+    """The default plan with the bounce that draws the largest strike we hold, or
+    None. Whatever the default plan sends the bait stays home instead. A strike
+    the rival launches anyway, with the default plan played, is not one the bait
+    drew. The strike is held if the garrison, our fleets landing on it and every
+    ship of ours that can still reach it once the strike is launched make the
+    count that holds on every roll (`combat.hold_count`)."""
+    pairs = _bounce_pairs(state, pid, orc)[:BOUNCE_PAIRS]
+    if not pairs:
+        return None
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+    anyway = _strikes_on(_rollout(state, pid, base, humans, _priv(state, pid, _SALT_ROLLOUT)),
+                         pid, humans)
+    best = None
+    for a, b, lane in pairs:
+        if a in anyway:
+            continue
+        kept = [o for o in base if o.dest_id != a]
+        spare = state.systems[a].ships - sum(o.ships for o in kept if o.source_id == a)
+        for sent in sorted({int(spare * share) for share in BOUNCE_SHARES}, reverse=True):
+            if sent < 1:
+                continue
+            plan = [*kept, Order(pid, a, b, sent)]
+            board = _rollout(state, pid, plan, humans, _priv(state, pid, _SALT_ROLLOUT))
+            if board.systems[a].owner_id != pid:
+                continue
+            ships, flight = _strikes_on(board, pid, humans).get(a, (0, 0))
+            if ships < BOUNCE_MIN:
+                continue
+            reach = sum(board.systems[n].ships for n in board.systems[a].neighbors
+                        if board.systems[n].owner_id == pid
+                        and (board.travel_turns(n, a) or 99) <= flight)
+            if lane >= 2 and 2 * lane - 1 <= flight:
+                reach += sent             # still flying to the cover, and back in time
+            home = combat.garrison_after(board, a, flight) + _own_landing(board, pid, a, flight)
+            if home + reach < combat.hold_count(ships, jitter, advantage):
+                continue
+            if best is None or ships > best[0]:
+                best = (ships, plan, (a, ships, state.turn + flight))
+    if best is None:
+        return None
+    _BOUNCES[id(best[1])] = best[2]
+    return best[1]
+
+
+def _bounce_on(board, pid, bounce):
+    """A bounce line's next turn: the default plan, with the bait holding and,
+    until the strike lands, our systems in reach sending it what holds the strike
+    with `BOUNCE_PAD` to spare, the farthest first."""
+    a, ships, lands = bounce
+    plan = _plan(board, pid, None)
+    if board.turn > lands or board.systems[a].owner_id != pid:
+        return plan
+    within = lands - board.turn + 1       # a lane this long still lands in time
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+    need = (math.ceil(combat.hold_count(ships, jitter, advantage) * BOUNCE_PAD)
+            - combat.garrison_after(board, a, within) - _own_landing(board, pid, a, within))
+    near = sorted(((board.travel_turns(n, a) or 99, n) for n in board.systems[a].neighbors
+                   if board.systems[n].owner_id == pid), reverse=True)
+    help_, held = [], {a}
+    for lane, n in near:
+        if need <= 0:
+            break
+        held.add(n)                       # in reach or not yet, it keeps its ships for this
+        if lane <= within and board.systems[n].ships > 0:
+            send = min(board.systems[n].ships, need)
+            help_.append(Order(pid, n, a, send))
+            need -= send
+    return [o for o in plan if o.source_id not in held] + help_
+
+
 _SOURCE: dict[int, tuple] = {}  # id(opening) -> the (name, aux) that proposed it
 _EVAL = None                    # `_council_eval`, loaded on a Council seat's first decide
 
@@ -1167,11 +1456,13 @@ def _council(state, pid):
     global _COUNCIL
     _COUNCIL = True
     _SOURCE.clear()
+    _BOUNCES.clear()
     try:
         return _decide(state, pid, SEARCH_DEPTH_MAX)
     finally:
         _COUNCIL = False
         _SOURCE.clear()
+        _BOUNCES.clear()
 
 
 def _council_eval():
@@ -1239,7 +1530,11 @@ def _policy_advance(lines, pid, humans):
             continue
         plan = None
         src = _SOURCE.get(id(line.root))
-        if src is not None:
+        if src == CLOSER:
+            plan = _closer_plan(line.board, pid)
+        elif src == BOUNCE_TAG:
+            plan = _bounce_on(line.board, pid, _BOUNCES[id(line.root)])
+        elif src is not None:
             plan = _external_plan(line.board, pid, src, _SALT_POLICY + i)
         if plan is None:
             plan = _plan(line.board, pid, None)
@@ -1250,8 +1545,9 @@ def _policy_advance(lines, pid, humans):
 
 
 def _council_lines() -> int:
-    """Lines a Council decide rolls out: Search's, and `COUNCIL_CANDIDATES`."""
-    return _lines() + len(COUNCIL_CANDIDATES)
+    """Lines a Council decide rolls out: Search's, `COUNCIL_CANDIDATES` and the
+    closer."""
+    return _lines() + len(COUNCIL_CANDIDATES) + (1 if FAST_CLOSE else 0) + (1 if BOUNCE else 0)
 
 
 def _council_warning(settings, council, seats, people=()) -> list[str]:
