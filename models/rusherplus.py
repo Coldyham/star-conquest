@@ -21,7 +21,7 @@ def decide(state, pid):
             orders.append(Order(pid, sys.id, target.id, send))
             continue
 
-        send = (sys.ships + reinforced_by - 1) - attacked_by
+        send = min(((sys.ships + reinforced_by - 1) - attacked_by), sys.ships)
         if send > target.ships + 1:              # only commit when we'd likely win
             orders.append(Order(pid, sys.id, target.id, send))
     return orders
