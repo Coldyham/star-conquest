@@ -273,7 +273,7 @@ line gives only the verdict. Ideas that lost are in
 - evolved.md · **Training it** (CMA-ES, the turn-40 share); **measuring it** (the +4 bar); **why multi-seat is short** (no blind remedy).
 
 ## chaotic.md
-- chaotic.md · **How it plays.** A fresh pool bot each turn (no oracle, no memory, no weak baseline); the pick derived from seed, turn and seat; the entry at its own stop.
+- chaotic.md · **How it plays.** A fresh pool bot each turn (no oracle, no memory; the weak baselines in on purpose); marshal's pincers become lone feints; the pick derived from seed, turn and seat; the entry at its own stop.
 - chaotic.md · **Why this is not the dispatcher the random seat refused.** The pool holds no oracle, so `is_oracle_seat` is always False and knower runs it exactly.
 - chaotic.md · **Where it stands.** Unranked, in no random pool; between marshal and thinker.
 

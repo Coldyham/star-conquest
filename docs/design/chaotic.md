@@ -3,16 +3,23 @@
 `models/chaotic.py`. Proposed 2026-11-11 as "a bot option which is really
 random": each turn the seat hands its whole decision to one entry of
 `chaotic.POOL`, picked afresh, so there is no single style to read off its
-opening, yet every turn's moves are a real bot's and so reasonable.
+opening, yet every turn's moves are a real bot's.
 
 ## How it plays
 
 - **The pool** is every rule bot stop that neither predicts nor remembers:
   actuary Greedy, Field and Hunt; marshal; evolved Off and On; thinker
-  Claudebot and Thinker. Left out: knower (an oracle), actuary Learning (it
-  remembers between turns, and would see only the turns it was dealt), and the
-  weak baselines heuristic and rusherplus (their turns would not all be
-  reasonable).
+  Claudebot and Thinker; and the weak baselines heuristic and rusherplus, in
+  on purpose (2026-11-11): a wider spread of moves is harder to read, and it
+  cuts actuary's share of turns from 3 in 8 to 3 in 10. Left out: knower (an
+  oracle) and actuary Learning (it remembers between turns, and would see only
+  the turns it was dealt).
+- **The point is to be unreadable, not strong.** marshal is the one pool bot
+  that staggers a pincer: it launches the far wave and re-derives the near one
+  next turn, which fires only if marshal is dealt again (1 turn in 10). So most
+  of chaotic's pincers are a lone far wave, an unplanned feint against a player
+  who knows marshal. Holding the bot while its own strike is in flight would
+  finish them, at the cost of some predictability; not built.
 - **The pick is derived, never drawn**: `random.Random(f"{seed}:chaotic:{turn}:{pid}")`
   off `state.seed` and `state.turn`, the construction `botio.decide_seed` and
   the random seat use. Nothing comes from `state.rng`, so a chaotic seat moves
@@ -38,7 +45,7 @@ knower's slow-setup warning prices a chaotic seat.
 ## Where it stands
 
 Not in `ai.LADDER_ORDER` (it sorts after the ladder in the dropdown) and not
-in any `settings.RANDOM_POOLS`. First reading, 12-node default boards, both
-seatings, 40 seeds: 21% against marshal, 91% against thinker, 6/6 against
-heuristic (`tools/check_bot.py`). Somewhere between marshal and thinker, as
-an average of its pool would suggest.
+in any `settings.RANDOM_POOLS`. Default boards, both seatings, 40 seeds,
+against marshal / thinker: 21% / 91% with the eight-entry pool, 12% / 81% once
+heuristic and rusherplus joined (6/6 against heuristic either way,
+`tools/check_bot.py`). Still between marshal and thinker.

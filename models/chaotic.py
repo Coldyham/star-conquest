@@ -37,13 +37,14 @@ from starconquest import ai, config
 # every chaotic seat plays from then on (a stored game never moves: a replay
 # asks no seat to decide). `name:stop`, as in `settings.RANDOM_POOLS`. Left out:
 # knower (an oracle), actuary:2 (Learning remembers between turns, and would
-# see only the turns it was dealt), and the weak baselines heuristic and
-# rusherplus.
+# see only the turns it was dealt). The weak baselines heuristic and
+# rusherplus are in on purpose: a wider spread of moves is harder to read.
 POOL: tuple[str, ...] = (
     "actuary:0", "actuary:1", "actuary:3",
     "marshal",
     "evolved:0", "evolved:1",
     "thinker:0", "thinker:1",
+    "heuristic", "rusherplus",
 )
 
 IS_ORACLE = False
