@@ -344,6 +344,45 @@ defender's advantage, and took the drained home with 4 ships. Lines like that
 (baiting a predictable rival, softening strikes, relays; [`par.md`](par.md),
 "Beyond K launches") are not among Council's candidates.
 
+## Baiting a covered frontier (2026-11-11, built, measured, deleted)
+
+**The idea** (the author's): against most bots a person wins by baiting. Two
+systems closer to each other than to any rival can bounce ships between them and
+break the strikes a rival throws, and on a `core` map the centre reaches the ring
+sooner than anything else, so everything can sit there and reinforce outward.
+heuristic does it by accident, marshal and actuary lower their defend margins
+when relief is in range, and marshal's wedge retreat was worse without an
+oracle. Council's rollouts run each rival's own code, and knower's Phase 1 answers
+a fleet in flight from any neighbour that lands in time, so only the first move
+was missing.
+
+**The arm.** A Council candidate: a system of ours next to a rival, with no
+hostile fleet inbound and nothing the default plan sends it, is coverable if a
+system of ours has a lane to it shorter than any rival's reach. The candidate is
+the default plan with the coverable system's spare garrison moved to its cover:
+the most tempting one emptied (`one`), every one (`all`), or half or a third of
+the most tempting one's (`half`, `third`). Bait lines play on by the default plan.
+
+**What it read** (Council with the fast close, both arms):
+
+- *Offered and picked.* The 15 stored puzzles: a cover in 34 of 196 decides,
+  offered in 21, never picked, in any mode. Six games each of symmetric core,
+  wheel and hub and random 18 at 6 ly/turn against thinker, heuristic and
+  rusherplus: offered in 3-21% of decides, picked in 0-2%.
+- *Offering it.* 115 puzzles: 112 identical, 3 faster (-0.21 turns, z -1.4). 30
+  seeds each of core 13 against thinker and heuristic, wheel 13 against thinker
+  and random 11 against rusherplus: -0.17 to +0.23 turns, nothing significant.
+- *Forcing it* (`half` played whenever offered and its judged value is within
+  0.05 of the best line's): slower in every cell, +4.5 (z +3.7), +1.8 (z +2.4),
+  +4.9 (z +3.2) and +1.6 (z +3.0) turns, no wins changed.
+
+The rollouts were right to turn it down: an empty system draws only the strike
+an empty system needs, and a thinned one loses tempo Council spends better
+pressing. A person's bait pays against bots because it outlasts them over many
+turns; Council already wins those games faster than the bait would. Deleted;
+`tools/puzzle_bench.py --set` and `win_turns.py`'s layout cells
+(`symmetric/core:13:6:2`) stay.
+
 ## What it costs
 
 In the browser (CPython on WebAssembly, about 2× native), median per decide:

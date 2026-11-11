@@ -12,7 +12,8 @@ so a rerun plays the same ones); ``--dealt N`` deals N more off the puzzle spec 
 days from 2030-01-01 (``daily.candidates``' first candidate, unprobed), kept in
 ``dealt.json``. Guards are lifted, so a game is the same on any machine.
 
-``--tree DIR`` plays the code in another checkout (a ``git worktree`` of the base),
+``--set NAME=VALUE`` sets a constant of the bot's module for the run (a Python
+literal, e.g. ``--set 'BAIT=("one",)'``). ``--tree DIR`` plays the code in another checkout (a ``git worktree`` of the base),
 so two trees are compared on the same puzzles. Rows append to
 ``results/puzzle_bench/<label>/<bot>.jsonl`` as each game finishes; a rerun plays
 only what is missing. ``--base`` pairs each puzzle both labels won and reports
@@ -22,6 +23,7 @@ the difference in turns, and the wins either side lost.
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime as dt
 import json
 import math
@@ -67,12 +69,15 @@ def dealt_puzzles(n: int) -> dict[str, dict]:
             if k < f"dealt:{DEALT_FROM + dt.timedelta(days=n)}"}
 
 
-def play(tree: str, key: str, stage: dict, bot: str, aux: float | None) -> dict:
+def play(tree: str, key: str, stage: dict, bot: str, aux: float | None,
+         consts: dict[str, object] | None = None) -> dict:
     sys.path.insert(0, tree)
     from starconquest import ai, settings as S
     from starconquest.settings import Settings
     from tests import sim
     ai.load_models(Path(tree) / "models")
+    for name, value in (consts or {}).items():
+        setattr(sys.modules[ai.STRATEGIES[bot].__module__], name, value)
     assert Path(S.__file__).is_relative_to(tree), S.__file__
     ai.set_budget_scale(math.inf)
     cfg = Settings.from_dict(stage)
@@ -110,7 +115,8 @@ def run(args, puzzles: dict[str, dict]) -> None:
         path = ledger(args.label, bot)
         path.parent.mkdir(parents=True, exist_ok=True)
         with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context("spawn")) as ex, path.open("a") as f:
-            futs = {ex.submit(play, tree, k, v, name, float(aux) if aux else None): k for k, v in todo}
+            futs = {ex.submit(play, tree, k, v, name, float(aux) if aux else None, args.set): k
+                    for k, v in todo}
             for i, fut in enumerate(as_completed(futs), 1):
                 row = fut.result()
                 f.write(json.dumps(row) + "\n")
@@ -163,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", help="pair against this label's rows")
     ap.add_argument("--jobs", type=int, default=22)
     ap.add_argument("--report", action="store_true", help="report from the ledgers only")
+    ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                    help="a constant of the bot's module, as a Python literal; repeatable")
     args = ap.parse_args(argv)
+    args.set = {k: ast.literal_eval(v) for k, _, v in (s.partition("=") for s in args.set)}
     if not args.report:
         puzzles = {**(stored_puzzles() if args.stored else {}), **dealt_puzzles(args.dealt)}
         run(args, puzzles)

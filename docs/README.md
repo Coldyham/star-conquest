@@ -100,7 +100,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `fold_check.py` | A stop plays as the bot folded into it | bot-families.md |
 | `gen_bot_stops.py` | Regenerate the board's `bot-stops.mjs` | bot-families.md |
 | `win_turns.py` | Turns to win; `--label NEW --base OLD` pairs two trees | win-turns.md |
-| `puzzle_bench.py` | Turns to win on the stored and dealt daily puzzles; `--tree` plays another checkout, `--base` pairs two | council.md |
+| `puzzle_bench.py` | Turns to win on the stored and dealt daily puzzles; `--set` a bot constant, `--tree` another checkout, `--base` pairs two | council.md |
 | `candidate_bench.py` | A bot as one more knower candidate, paired | knower.md, council.md |
 | `pileup_bench.py`, `bait_bench.py` | knower's pile-up pricing; Search offered bait openings | knower.md |
 | `mp_tactics.py`, `guard_census.py` | marshal's multiplayer tactics; is the guard a pool | marshal.md |
