@@ -103,6 +103,7 @@ docs/design/knower.md.
 from __future__ import annotations
 
 import copy
+import heapq
 import math
 import random
 import sys
@@ -1038,6 +1039,9 @@ def _search(state, pid, orc, turns: int, deadline):
             break            # nothing left to learn; the verdicts are already in
         lines = (_policy_advance if _COUNCIL else _advance)(lines, pid, humans)
 
+    if _COUNCIL and FAST_CLOSE:
+        lines = _close_deeper(lines, pid, humans, turns, deadline)
+        return _fast_pick(lines, pid).root
     best = lines[0]          # the default, so an exact tie keeps it
     for line in lines[1:]:
         if line.score > best.score:
@@ -1083,6 +1087,11 @@ def _candidates(state, pid, orc, base):
         if plan is not None:
             if _COUNCIL:
                 _SOURCE[id(plan)] = borrowed
+            yield plan
+    if _COUNCIL and FAST_CLOSE and _evaluate(state, pid) > 0:
+        plan = _closer_plan(state, pid)
+        if plan is not None:
+            _SOURCE[id(plan)] = CLOSER
             yield plan
 
 
@@ -1158,6 +1167,129 @@ COST_VS_KNOWER = 2.5
 COST_COUNCIL_LINES = 7          # ...measured over this many Council lines (`_council_lines`)
 
 _COUNCIL = False                # a Council seat is deciding (single-threaded, as `_DEPTH`)
+
+# Council plays for the soonest win once it is safely ahead: a line that wins
+# sooner outranks one that wins later, and a line the judge rates at least
+# `CLOSE_AT` is ranked by what the rivals have left, not by our own ships.
+FAST_CLOSE = True
+CLOSE_AT = 0.95
+CLOSE_DEEPER = 3.0               # how far past the horizon, as a multiple of it
+
+
+def _rival_material(state, pid) -> float:
+    """What every rival still holds, weighed as `_evaluate` weighs material."""
+    total = 0.0
+    for p in state.players.values():
+        if p.is_neutral or p.id == pid:
+            continue
+        systems, ships, prod = _material(state, p.id)
+        total += EVAL_PRODUCTION * prod + EVAL_SYSTEMS * systems + EVAL_SHIPS * ships
+    return total
+
+
+def _close_rank(line, pid) -> tuple:
+    """A line's rank under `FAST_CLOSE`: a win by its turn, then a line past
+    `CLOSE_AT` by the rivals' material, then the judge's value."""
+    board = line.board
+    if board.winner is not None:
+        return (3, -board.turn) if board.winner == pid else (0, 0.0)
+    value = line.score.get() if isinstance(line.score, _Lazy) else float(line.score)
+    if value >= CLOSE_AT:
+        return (2, -_rival_material(board, pid))
+    return (1, value)
+
+
+def _close_deeper(lines, pid, humans, turns, deadline):
+    """Once a line is past `CLOSE_AT` and none has won, roll every line on, a
+    ply at a time, until one wins or `CLOSE_DEEPER` times the horizon is
+    spent, so a finish just past the horizon is seen."""
+    def judged(line):
+        return line.score.get() if isinstance(line.score, _Lazy) else float(line.score)
+
+    if any(line.board.winner is not None for line in lines):
+        return lines
+    if max(judged(line) for line in lines) < CLOSE_AT:
+        return lines
+    for _ in range(int(turns * (CLOSE_DEEPER - 1))):
+        if time.perf_counter() > deadline:
+            break
+        lines = _policy_advance(lines, pid, humans)
+        if any(line.board.winner == pid for line in lines):
+            break
+    return lines
+
+
+def _fast_pick(lines, pid):
+    """The line `FAST_CLOSE` plays; an exact tie keeps the earlier candidate."""
+    best, best_rank = lines[0], _close_rank(lines[0], pid)
+    for line in lines[1:]:
+        rank = _close_rank(line, pid)
+        if rank > best_rank:
+            best, best_rank = line, rank
+    return best
+
+
+# The closer: a Council candidate, offered while we are ahead on material, that
+# pools whole garrisons through our own systems into one strike on the rival
+# system it can take soonest on every roll. It plays its own line on in the
+# rollouts, so it is picked only where finishing that way scores best.
+CLOSER = ("closer", None)        # its `_SOURCE` tag, never a registered bot
+CLOSER_REACH = 30                # the latest strike, in turns, it will plan
+
+
+def _paths_in(state, pid, target):
+    """``{own system: (turns to target, next hop)}``, going through our own
+    systems only, so nothing is fought on the way in."""
+    best = {target: (0, target)}
+    heap = [(0, target)]
+    while heap:
+        d, sid = heapq.heappop(heap)
+        if d > best[sid][0]:
+            continue
+        for nbr in state.systems[sid].neighbors:
+            if state.systems[nbr].owner_id != pid:
+                continue
+            lane = state.travel_turns(nbr, sid)
+            if lane is None:
+                continue
+            nd = d + lane
+            if nbr not in best or nd < best[nbr][0]:
+                best[nbr] = (nd, sid)
+                heapq.heappush(heap, (nd, nbr))
+    del best[target]
+    return best
+
+
+def _closer_plan(state, pid):
+    """The closer's orders this turn, or None when no strike within
+    `CLOSER_REACH` takes a rival system on every roll."""
+    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
+    pick = None
+    for target in state.systems.values():
+        if target.owner_id in (0, pid):
+            continue
+        paths = _paths_in(state, pid, target.id)
+        flying = {}
+        for f in state.fleets:
+            if f.owner_id == pid and f.dest_id == target.id:
+                flying[f.turns_remaining] = flying.get(f.turns_remaining, 0) + f.ships
+        for h in sorted({d for d, _ in paths.values()} | set(flying)):
+            if h > CLOSER_REACH or (pick is not None and h > pick[0]):
+                break
+            landing = flying.get(h, 0) + sum(
+                combat.garrison_after(state, sid, h - d) for sid, (d, _) in paths.items() if d <= h)
+            garrison = combat.forecast_landing(state, pid, target.id, h, landing).garrison
+            need = max(garrison + 1, combat.sure_count(garrison, jitter, advantage))
+            if landing >= need:
+                if pick is None or (h, need) < pick[:2]:
+                    pick = (h, need, paths)
+                break
+    if pick is None:
+        return None
+    h, _, paths = pick
+    return [Order(pid, sid, hop, state.systems[sid].ships)
+            for sid, (d, hop) in sorted(paths.items())
+            if d == h and state.systems[sid].ships > 0]
 _SOURCE: dict[int, tuple] = {}  # id(opening) -> the (name, aux) that proposed it
 _EVAL = None                    # `_council_eval`, loaded on a Council seat's first decide
 
@@ -1239,7 +1371,9 @@ def _policy_advance(lines, pid, humans):
             continue
         plan = None
         src = _SOURCE.get(id(line.root))
-        if src is not None:
+        if src == CLOSER:
+            plan = _closer_plan(line.board, pid)
+        elif src is not None:
             plan = _external_plan(line.board, pid, src, _SALT_POLICY + i)
         if plan is None:
             plan = _plan(line.board, pid, None)
@@ -1250,8 +1384,9 @@ def _policy_advance(lines, pid, humans):
 
 
 def _council_lines() -> int:
-    """Lines a Council decide rolls out: Search's, and `COUNCIL_CANDIDATES`."""
-    return _lines() + len(COUNCIL_CANDIDATES)
+    """Lines a Council decide rolls out: Search's, `COUNCIL_CANDIDATES` and the
+    closer."""
+    return _lines() + len(COUNCIL_CANDIDATES) + (1 if FAST_CLOSE else 0)
 
 
 def _council_warning(settings, council, seats, people=()) -> list[str]:
