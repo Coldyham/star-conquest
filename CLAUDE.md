@@ -394,7 +394,11 @@ target, in order, one life. It judges only its own game (`run.finish`), so a
 Retry is free play; Continue resumes that game's log, never a fresh copy.
 **A stage's place on the graph is computed (`gauntlet.layout`, mirrored by
 `gauntlet-graph.mjs`; `gauntlet-layout.json`), never stored**; the board page
-edits lanes by draft key, and a linear draft builds exactly its old body.
+edits lanes by draft key, and a linear draft builds exactly its old body. The
+game's list and the board draw it with one drawer, `webapp/js/stagegraph.mjs`
+(the board imports it from `/play/`; it decides nothing): a tap selects
+(`MenuState.stage_pick`), a second tap plays, and a hidden lane is drawn only
+once met.
 **A gauntlet made on the board (`gauntlet.html`) is stored, never its progress**:
 `/api/gauntlet` is the only writer of the `gauntlets` table, both it and the
 page check with `gauntlet-build.mjs`'s `checkBody`, and a row never changes but

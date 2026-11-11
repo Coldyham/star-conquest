@@ -3,7 +3,7 @@
 //
 // The page cannot generate a gauntlet: picking stages of rising difficulty means
 // playing bots on them, and only the game has an engine. So the form builds a
-// spec (`starconquest/dealer.py`'s `Spec`, docs/design/gauntlet.md, "Generated
+// spec (`starconquest/dealer.py`'s `Spec`, docs/design/gauntlet-gen.md, "Generated
 // gauntlets") and a link that hands it to the game, `/play/#gauntlet-spec=<token>`,
 // which deals, plays and picks, then opens the result on its Tutorial list.
 //

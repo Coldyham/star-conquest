@@ -609,6 +609,12 @@ Reasons: `docs/design/gauntlet.md`.
   `leaderboard/tests/fixtures/gauntlet-layout.json`). The board page edits
   lanes by draft key, never by place, and a draft whose lanes were never
   touched builds exactly the linear body it always did, so its id holds.
+- **The game's list and the board's diagram share one drawer**
+  (`webapp/js/stagegraph.mjs`, imported by the board from `/play/` so the game
+  never depends on `/board/` offline); it decides nothing. In the list a tap
+  selects (`MenuState.stage_pick`) and a second tap or Play plays; a locked
+  stage selects but never plays; a hidden lane is drawn, and named in the
+  strip, only once met.
 - **A stage is active only while the setup still matches it**
   (`gauntlet.stage_of`, `menu.active_stage`); the banner warns, it never locks.
   A challenge link's setup is never a stage.

@@ -1511,26 +1511,46 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 /* The diagram: scrolls sideways in its own box, so 64 stages never widen the page. */
 .diagram-box { margin-top: 1rem; }
 .diagram { overflow-x: auto; border: 1px solid var(--line); background: #070a18; }
-.diagram svg { display: block; font-family: var(--mono); font-size: 11px; }
-.diagram .lane path { fill: none; stroke: var(--dim); stroke-width: 1.5; }
-.diagram .lane .head { fill: var(--dim); }
-.diagram .lane.gated path { stroke-dasharray: 6 4; }
-.diagram .lane.hidden path { stroke-dasharray: 2 4; }
-.diagram .lane.warn path { stroke: var(--gold); }
-.diagram .lane.warn .head { fill: var(--gold); }
-.diagram .lane.lit path { stroke: var(--magenta); stroke-width: 3; }
-.diagram .lane.lit .head { fill: var(--magenta); }
-.diagram .lane .gate { fill: var(--gold); font-size: 10px; paint-order: stroke; stroke: #070a18; stroke-width: 4px; }
-.diagram .stage-node { cursor: pointer; }
-.diagram .stage-node rect { fill: var(--panel); stroke: var(--cyan); stroke-width: 1.2; }
-.diagram .stage-node text { fill: var(--ink); }
-.diagram .stage-node .start-bar { fill: var(--cyan); stroke: none; }
-.diagram .stage-node.goal rect:first-child { stroke: var(--gold); }
-.diagram .stage-node.off-path rect:first-child { stroke-dasharray: 5 3; }
-.diagram .stage-node.hidden rect:first-child { stroke-dasharray: 2 3; }
-.diagram .stage-node.stranded rect:first-child { stroke: var(--bad); }
-.diagram .stage-node.stranded text { fill: var(--bad); }
-.diagram .stage-node:hover rect:first-child, .diagram .stage-node:focus rect:first-child { stroke-width: 2.5; }
+/* The stages and lanes are drawn by the game's own drawer (/play/js/stagegraph.mjs):
+ * buttons in a grid at their cells, the lanes an SVG layer over them. */
+.diagram .sg { position: relative; display: grid; column-gap: 2.5rem; row-gap: 1.1rem; width: max-content;
+  padding: 2.2rem 1rem 1.8rem; }
+.diagram .sg-lanes { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible;
+  font-family: var(--mono); font-size: 10px; }
+.diagram .sg-lane path { fill: none; stroke: var(--dim); stroke-width: 1.5; }
+.diagram .sg-lane .sg-head { fill: var(--dim); }
+.diagram .sg-lane.sg-gated path { stroke-dasharray: 6 4; }
+.diagram .sg-lane.sg-hidden path { stroke-dasharray: 2 4; }
+.diagram .sg-lane.sg-warn path { stroke: var(--gold); }
+.diagram .sg-lane.sg-warn .sg-head { fill: var(--gold); }
+.diagram .sg-lane.sg-lit path { stroke: var(--magenta); stroke-width: 3; }
+.diagram .sg-lane.sg-lit .sg-head { fill: var(--magenta); }
+.diagram .sg-lane .sg-short { fill: var(--gold); paint-order: stroke; stroke: #070a18; stroke-width: 4px; }
+.diagram button.sg-node {
+  position: relative;
+  margin: 0;
+  padding: 0.45rem 0.7rem 0.45rem 0.9rem;
+  border: 1.5px solid var(--cyan);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: left;
+  box-shadow: none;
+  animation: none;
+}
+.diagram button.sg-node:hover { background: #10283f; }
+.diagram .sg-node .sg-place { position: absolute; top: -0.6rem; left: 0.4rem; padding: 0 0.25rem;
+  background: #070a18; color: var(--dim); font-size: 0.65rem; }
+.diagram .sg-node.sg-start { box-shadow: inset 5px 0 0 var(--cyan); }
+.diagram .sg-node.sg-goal { border-color: var(--gold); }
+.diagram .sg-node.sg-goal .sg-title::before { content: "★ "; color: var(--gold); }
+.diagram .sg-node.sg-off-path { border-style: dashed; }
+.diagram .sg-node.sg-hidden { border-style: dotted; }
+.diagram .sg-node.sg-stranded { border-color: var(--bad); color: var(--bad); }
 .diagram-box #diagram-note:empty { display: none; }
 .diagram-key { margin: 0.4rem 0 0; color: var(--dim); font-size: 0.8rem; }
 .gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }

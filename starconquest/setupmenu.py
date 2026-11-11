@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from . import ai, combat, config, daily, gauntlet, hud, mapgen, pbp, webstore
+from . import ai, combat, config, daily, gauntlet, hud, mapgen, paths, pbp, webstore
 from . import run as gauntlet_run
 from .model import AiParams
 from .settings import (ADV_COMBAT, ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY,
@@ -173,6 +173,9 @@ class Menu:
     gauntlet_note: tuple[str, str, bool] | None = None
     runs: list = field(default_factory=list)
     run_confirm: str = ""
+    # The stage the list's graph has selected (`pick_default`): a tap selects,
+    # a second tap or Play plays.
+    stage_pick: int | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -1256,6 +1259,7 @@ def open_tutorial(ms, settings: Settings, say: Say, pick: str | None = None) -> 
     ms.runs = gauntlet_run.runs()
     ms.run_confirm = ""
     ms.gauntlet_note = None
+    ms.stage_pick = None
     ids = [g.id for g in ms.gauntlets]
     if pick is None and ms.stage_at:
         pick = ms.stage_at[0]
@@ -1349,6 +1353,7 @@ class StageRow:
     status: str
     colour: tuple[int, int, int]
     here: bool
+    short: str = ""    # the status in a word or two, for a node on the graph
 
 
 def stage_rows(ms, settings: Settings, g: gauntlet.Gauntlet) -> list[StageRow]:
@@ -1376,18 +1381,21 @@ def stage_rows(ms, settings: Settings, g: gauntlet.Gauntlet) -> list[StageRow]:
         aim = f" · {stage.target.short()}" if stage.target is not None else ""
         if stage.id in done and mine is not None:
             status, colour = f"✓ {mine[0]} turns / {mine[1]} lost", START_BORDER
+            short = f"✓ {mine[0]}/{mine[1]}"
         elif mine is not None:     # won, short of the target: "18 turns · target 14"
             status, colour = f"{mine[0]} turns / {mine[1]} lost{aim}", HIGHLIGHT
+            short = f"{mine[0]}/{mine[1]}"
         elif open_:
-            status, colour = ("next" if bests else "start here") + aim, HIGHLIGHT
+            short = "next" if bests else "start here"
+            status, colour = short + aim, HIGHLIGHT
         else:
             gate = gauntlet.way_in(g, stage.id)
             if gate is not None:
                 aim = f" · {gate[0]}: {gate[1].short()}"
-            status, colour = "locked" + aim, DISABLED_TEXT
+            status, colour, short = "locked" + aim, DISABLED_TEXT, "locked"
         if stage.id == run_on:
-            status, colour = "run · " + status, START_BORDER
-        rows.append(StageRow(stage, i, open_, status, colour, stage.id == here))
+            status, colour, short = "run · " + status, START_BORDER, "run · " + short
+        rows.append(StageRow(stage, i, open_, status, colour, stage.id == here, short))
     return rows
 
 
@@ -1410,14 +1418,94 @@ def tutorial_press(ms, settings: Settings, key: str, web: bool, say: Say,
     elif key in ("gauntlet_pick_dec", "gauntlet_pick_inc") and ms.gauntlets:
         step = 1 if key.endswith("inc") else -1
         ms.gauntlet_pick = (ms.gauntlet_pick + step) % len(ms.gauntlets)
-    elif key.startswith("stage_") and g is not None:
+        ms.stage_pick = None
+    elif key == "stage_play" and g is not None:
+        return play_pick(ms, settings, g, begin)
+    elif key == "stage_edit" and g is not None:
+        edit_on_board(ms, g, say)
+    elif key.startswith("stage_") and g is not None and key[len("stage_"):].isdigit():
         sid = int(key[len("stage_"):])
-        found = ms.stage_bests.get(g.id, {})
-        if (sid in gauntlet.open_stages(g, gauntlet.cleared(g, found), set(found), found)
-                and load_stage(ms, settings, g, sid) is not None):
-            ms.tutorial_open = False
-            return begin("start")
+        if sid == picked_stage(ms, settings, g):
+            return play_pick(ms, settings, g, begin)
+        if any(r.stage.id == sid for r in stage_rows(ms, settings, g)):
+            ms.stage_pick = sid
     return None
+
+
+def play_pick(ms, settings: Settings, g: gauntlet.Gauntlet,
+              begin: Callable[[str], str | None]) -> str | None:
+    """Play the selected stage, if it is open: load it and start through
+    ``begin``, the gate Start goes through. A locked one only stays selected."""
+    sid = picked_stage(ms, settings, g)
+    rows = {r.stage.id: r for r in stage_rows(ms, settings, g)}
+    if sid is None or not rows[sid].open or load_stage(ms, settings, g, sid) is None:
+        return None
+    ms.tutorial_open = False
+    return begin("start")
+
+
+def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
+    """The selected stage, settled: the pick if it is still shown, else the
+    stage being played, the run's, the first open stage not yet cleared, the
+    first start, in that order (and kept, so arrows step from it)."""
+    rows = stage_rows(ms, settings, g)
+    shown = {r.stage.id for r in rows}
+    if ms.stage_pick not in shown:
+        bests = ms.stage_bests.get(g.id, {})
+        done = gauntlet.cleared(g, bests)
+        here = next((r.stage.id for r in rows if r.here), None)
+        run_on = run_stage(ms, g)
+        fresh = next((r.stage.id for r in rows if r.open and r.stage.id not in done), None)
+        start = next((s for s in g.start if s in shown), None)
+        ms.stage_pick = next((s for s in (here, run_on, fresh, start) if s in shown),
+                             rows[0].stage.id if rows else None)
+    return ms.stage_pick
+
+
+# Arrow keys on the list's graph, by `KeyboardEvent.key` name: (columns, rows).
+STEPS = {"ArrowLeft": (-1, 0), "ArrowRight": (1, 0), "ArrowUp": (0, -1), "ArrowDown": (0, 1)}
+
+
+def step_pick(ms, settings: Settings, g: gauntlet.Gauntlet, dx: int, dy: int) -> None:
+    """Move the selection to the nearest shown stage that way on the graph, by
+    cell: the closest column (or row) that way, then the nearest across it. At
+    an edge it stays put."""
+    sid = picked_stage(ms, settings, g)
+    if sid is None:
+        return
+    cells = gauntlet.layout(g)
+    shown = [r.stage.id for r in stage_rows(ms, settings, g)]
+    c, r = cells[sid]
+
+    def ahead(other: int) -> tuple[int, int] | None:
+        oc, orow = cells[other]
+        along, across = (oc - c, orow - r) if dx else (orow - r, oc - c)
+        if along * (dx or dy) <= 0:
+            return None
+        return abs(along), abs(across)
+
+    best = min(((ahead(o), o) for o in shown if o != sid and ahead(o) is not None), default=None)
+    if best is not None:
+        ms.stage_pick = best[1]
+
+
+def board_draft(g: gauntlet.Gauntlet) -> str:
+    """Where ``g`` opens as a draft on the board's maker, or "" for one the
+    board never stored (a built-in, a desktop file, a generated one): only a
+    stored row has an id of the board's shape."""
+    if not gauntlet.on_board(g):
+        return ""
+    base = webstore.leaderboard_url(paths.LEADERBOARD_MAKER_PATH)
+    return f"{base}#{g.id}" if base else ""
+
+
+def edit_on_board(ms, g: gauntlet.Gauntlet, say: Say) -> None:
+    """Open ``g`` on the board's gauntlet page as a draft to edit."""
+    url = board_draft(g)
+    if url and webstore.open_url(url):
+        say_gauntlet(ms, g.id, f"Opening {g.name} on the board", True, say)
+    else:
+        say_gauntlet(ms, g.id, "Couldn't open the board", False, say)
 
 
 def _run_press(ms, settings: Settings, g: gauntlet.Gauntlet, key: str, armed: str, say: Say,
@@ -1454,6 +1542,72 @@ def _run_press(ms, settings: Settings, g: gauntlet.Gauntlet, key: str, armed: st
     return begin(action)
 
 
+def graph_view(ms, settings: Settings, g: gauntlet.Gauntlet) -> dict:
+    """The gauntlet as the list's graph draws it (`webapp/js/stagegraph.mjs`):
+    each shown stage at its `gauntlet.layout` cell with its short status, and
+    the lanes between shown stages. A hidden lane is drawn only once met (its
+    near stage's best meets its gate), so it never gives a bonus away."""
+    rows = stage_rows(ms, settings, g)
+    cells = gauntlet.layout(g)
+    ends = gauntlet.goals(g)
+    pick = picked_stage(ms, settings, g)
+    run_on = run_stage(ms, g)
+    shown = {r.stage.id for r in rows}
+    bests = ms.stage_bests.get(g.id, {})
+    nodes = []
+    for r in rows:
+        sid = r.stage.id
+        marks = [m for m, on in (("start", sid in g.start), ("goal", sid in ends), ("run", sid == run_on),
+                                 ("here", r.here), ("picked", sid == pick)) if on]
+        col, row = cells[sid]
+        nodes.append({"key": f"stage_{sid}", "col": col, "row": row, "place": str(r.index + 1),
+                      "title": r.stage.title, "status": r.short, "color": _hex(r.colour),
+                      "open": r.open, "marks": marks})
+    lanes = []
+    for a, b in g.lanes:
+        gate = g.lane_targets.get((a, b))
+        mine = bests.get(a)
+        hidden = (a, b) in g.hidden
+        if a not in shown or b not in shown or (hidden and not (mine is not None and gate.met(mine))):
+            continue
+        lanes.append({"from": f"stage_{a}", "to": f"stage_{b}", "gated": gate is not None,
+                      "short": gate.short() if gate is not None else "", "hidden": hidden,
+                      "two_way": (a, b) in g.two_way})
+    return {"nodes": nodes, "lanes": lanes, "focus": f"stage_{pick}" if pick is not None else None}
+
+
+def pick_view(ms, settings: Settings, g: gauntlet.Gauntlet, web: bool) -> dict | None:
+    """The strip under the graph: the selected stage, its progress, its target
+    and each way on with what it needs, with Play (and Edit on the board for a
+    gauntlet stored there)."""
+    sid = picked_stage(ms, settings, g)
+    rows = {r.stage.id: r for r in stage_rows(ms, settings, g)}
+    if sid is None:
+        return None
+    r = rows[sid]
+    lines = [{"text": r.status, "color": _hex(r.colour)}]
+    if r.stage.target is not None:
+        lines.append({"text": f"Target: {r.stage.target.text()}", "color": _hex(HIGHLIGHT)})
+    plain = [g.stage(b).title for b in sorted(g.onward(sid, gated=False), key=g.position)
+             if b in rows]
+    if plain:
+        lines.append({"text": "Leads to " + ", ".join(plain), "color": _hex(DISABLED_TEXT)})
+    bests = ms.stage_bests.get(g.id, {})
+    for a, b, lane in g.ways():
+        gate = g.lane_targets.get(lane)
+        if a != sid or gate is None:
+            continue
+        mine = bests.get(a)
+        if lane in g.hidden and not (mine is not None and gate.met(mine)):
+            continue       # a hidden way says nothing until it is met
+        label = gauntlet.lane_label(g, a, b) or gauntlet.GATED
+        lines.append({"text": f"{label} to {g.stage(b).title}: {gate.text()}", "color": _hex(WARN)})
+    edit = bool(web and board_draft(g))
+    return {"title": f"{r.index + 1} · {r.stage.title}", "lines": lines,
+            "play": {"key": "stage_play", "label": "Play", "enabled": r.open},
+            "edit": {"key": "stage_edit", "label": "Edit on the board"} if edit else None}
+
+
 def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True) -> dict | None:
     """The Tutorial list as it stands, or None while it is shut."""
     g = picked_gauntlet(ms) if ms.tutorial_open else None
@@ -1470,9 +1624,8 @@ def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True) -> dict
     return {
         "heading": "Pick a gauntlet, then a stage" if picker else "Pick a stage",
         "picker": {"name": g.name, "at": f"{ms.gauntlet_pick + 1}/{len(ms.gauntlets)}"} if picker else None,
-        "stages": [{"key": f"stage_{r.stage.id}", "title": f"{r.index + 1:>2}  {r.stage.title}",
-                    "open": r.open, "status": r.status, "color": _hex(r.colour), "here": r.here}
-                   for r in stage_rows(ms, settings, g)],
+        "graph": graph_view(ms, settings, g),
+        "pick": pick_view(ms, settings, g, web),
         "run": {"text": row[0], "buttons": [{"key": k, "label": label,
                                              "warn": k == "run_abandon" or ms.run_confirm == k}
                                             for k, label in row[1]]} if row is not None else None,

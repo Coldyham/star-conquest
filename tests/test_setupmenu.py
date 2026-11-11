@@ -142,3 +142,84 @@ def test_survey_measures_once_and_waits_for_a_drag(menu):
     assert not setupmenu.survey(menu, settings, sketch=True)
     view = setupmenu.view(menu, settings)
     assert view["sketch"]["kind"] == "sample" and view["sketch"]["homes"]
+
+
+# --------------------------------------------------------------------------- #
+# The gauntlet list's graph (`graph_view`, `pick_view`, `step_pick`)
+# --------------------------------------------------------------------------- #
+def _forked(bests: dict[int, tuple[int, int]]):
+    """0 → 1 → 3, 0 → 2 → 3 (a fork that rejoins), and a hidden bonus 3 → 4
+    behind 10 turns; ``bests`` stands in for the player's wins."""
+    from starconquest import gauntlet
+    g = gauntlet.Gauntlet.from_dict({"id": "fork", "name": "Fork", "stages": [
+        {"id": i, "title": f"S{i}", "settings": Settings(players=2, nodes=8, seed=40 + i).to_dict()}
+        for i in range(5)],
+        "lanes": [[0, 1], [0, 2], [1, 3], [2, 3], [3, 4, {"turns": 10, "hidden": True}]]})
+    ms = setupmenu.Menu()
+    ms.gauntlets, ms.tutorial_open = [g], True
+    ms.stage_bests = {"fork": bests}
+    return ms, g
+
+
+def test_the_graph_draws_each_shown_stage_at_its_cell_and_hides_an_unmet_bonus():
+    ms, g = _forked({0: (20, 5)})
+    view = setupmenu.graph_view(ms, Settings(), g)
+    assert json.loads(json.dumps(view)) == view
+    cells = {n["key"]: (n["col"], n["row"]) for n in view["nodes"]}
+    assert cells == {"stage_0": (0, 0), "stage_1": (1, 0), "stage_2": (1, 1), "stage_3": (2, 0)}
+    assert [(n["key"], n["open"]) for n in view["nodes"]] == [
+        ("stage_0", True), ("stage_1", True), ("stage_2", True), ("stage_3", False)]
+    assert "start" in view["nodes"][0]["marks"] and "goal" in view["nodes"][3]["marks"]
+    assert {(lane["from"], lane["to"]) for lane in view["lanes"]} == {
+        ("stage_0", "stage_1"), ("stage_0", "stage_2"), ("stage_1", "stage_3"), ("stage_2", "stage_3")}
+    # Selected: the first open stage not yet cleared.
+    assert view["focus"] == "stage_1" and "picked" in view["nodes"][1]["marks"]
+
+
+def test_a_hidden_lane_is_drawn_once_met():
+    ms, g = _forked({0: (20, 5), 1: (20, 5), 3: (12, 0)})
+    view = setupmenu.graph_view(ms, Settings(), g)
+    assert not any(lane["to"] == "stage_4" for lane in view["lanes"])     # 12 turns: not met
+    assert "stage_4" not in {n["key"] for n in view["nodes"]}
+    ms, g = _forked({0: (20, 5), 1: (20, 5), 3: (9, 0)})
+    view = setupmenu.graph_view(ms, Settings(), g)
+    [bonus] = [lane for lane in view["lanes"] if lane["to"] == "stage_4"]
+    assert bonus["gated"] and bonus["hidden"] and bonus["short"] == "target 10"
+    ms.stage_pick = 3
+    lines = [line["text"] for line in setupmenu.pick_view(ms, Settings(), g, web=True)["lines"]]
+    assert "Bonus to S4: Win in 10 turns or fewer" in lines
+
+
+def test_a_tap_selects_and_a_second_plays_but_never_a_locked_stage():
+    ms, g = _forked({0: (20, 5)})
+    began: list[str] = []
+    settings = Settings()
+    press = lambda key: setupmenu.tutorial_press(ms, settings, key, True, _say()[1],
+                                                 lambda action: began.append(action) or action)
+    assert press("stage_3") is None and ms.stage_pick == 3 and not began   # locked: selected only
+    assert setupmenu.pick_view(ms, settings, g, True)["play"]["enabled"] is False
+    assert press("stage_3") is None and ms.tutorial_open
+    assert press("stage_2") is None and ms.stage_pick == 2
+    assert press("stage_2") == "start" and began == ["start"] and not ms.tutorial_open
+    assert ms.stage_at == ("fork", 2)
+
+
+def test_the_arrows_step_by_cell_and_stop_at_an_edge():
+    ms, g = _forked({0: (20, 5)})
+    settings = Settings()
+    ms.stage_pick = 0
+    for name, want in [("ArrowRight", 1), ("ArrowDown", 2), ("ArrowDown", 2), ("ArrowRight", 3),
+                       ("ArrowRight", 3), ("ArrowLeft", 1), ("ArrowLeft", 0), ("ArrowUp", 0)]:
+        setupmenu.step_pick(ms, settings, g, *setupmenu.STEPS[name])
+        assert ms.stage_pick == want, name
+
+
+def test_only_a_gauntlet_the_board_stored_offers_edit_on_the_board():
+    from starconquest import gauntlet
+    stored = gauntlet.Gauntlet.from_dict({"id": "hard-mode-0123456789ab", "stages": [{"id": 0, "settings": {}}]})
+    made = gauntlet.Gauntlet.from_dict({"id": "gen-0123456789ab", "stages": [{"id": 0, "settings": {}}]})
+    assert gauntlet.on_board(stored) and not gauntlet.on_board(made)
+    assert setupmenu.board_draft(stored).endswith("/board/gauntlet.html#hard-mode-0123456789ab")
+    assert setupmenu.board_draft(made) == ""
+    ms, g = _forked({})
+    assert setupmenu.pick_view(ms, Settings(), g, True)["edit"] is None

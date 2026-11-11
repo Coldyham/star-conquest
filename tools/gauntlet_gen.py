@@ -18,7 +18,7 @@ across the whole spread. The last stage may be a map no probe won (but every
 probe game finished), unless ``--no-unwon-last``.
 
 With ``--targets`` (or ``--targets fastest``) each stage some probe won gets a
-target: the slowest (or the fastest) probe win plus ``--target-slack`` turns. Design: docs/design/gauntlet.md, "Generated gauntlets".
+target: the slowest (or the fastest) probe win plus ``--target-slack`` turns. Design: docs/design/gauntlet-gen.md, "Generated gauntlets".
 
 Every game is a line in ``results/gauntlet_gen/<run>.jsonl`` the moment it
 finishes; the run's spec, seed and rounds head the file, and a rerun plays only

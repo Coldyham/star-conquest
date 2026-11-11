@@ -31,6 +31,8 @@ import {
   setStart, setupProblem, stageSetup, targetScore, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
+// The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
+import { drawGraph } from "/play/js/stagegraph.mjs";
 import { inflate } from "./inflate-browser.mjs";
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -566,161 +568,74 @@ function renderStage(stage, i, dupes) {
 
 // -- the diagram ---------------------------------------------------------------
 // Drawn from the body the draft builds, so a stage is placed where the game's
-// `gauntlet.layout` will place it. Read-only: a click on a stage scrolls to its
+// `gauntlet.layout` will place it, by the game's own drawer (stagegraph.mjs,
+// the one its gauntlet list uses). Read-only: a click on a stage scrolls to its
 // card, and hovering a chip lights its lane.
 
-const SVG = "http://www.w3.org/2000/svg";
-const COL_W = 152;
-const ROW_H = 64;
-const NODE_W = 108;
-const NODE_H = 34;
-const PAD = 16;
-const LOOP = 26;   // how far a lane back or within a column dips below its nodes
+let diagram = null;   // what drawGraph answered, to light a lane with
 
-function svg(tag, attrs = {}, children = []) {
-  const node = document.createElementNS(SVG, tag);
-  for (const [key, value] of Object.entries(attrs)) if (value !== null && value !== undefined) node.setAttribute(key, value);
-  for (const child of [].concat(children)) if (child) node.append(child);
-  return node;
-}
-
-function clip(text, n = 13) {
-  return [...text].length > n ? `${[...text].slice(0, n - 1).join("")}…` : text;
-}
-
-/** A small arrowhead at `tip`, pointing away from `from`. */
-function arrowhead([x, y], [fx, fy]) {
-  const len = Math.hypot(x - fx, y - fy) || 1;
-  const [ux, uy] = [(x - fx) / len, (y - fy) / len];
-  const back = [x - ux * 8, y - uy * 8];
-  const pts = [[x, y], [back[0] - uy * 4, back[1] + ux * 4], [back[0] + uy * 4, back[1] - ux * 4]];
-  return svg("polygon", { points: pts.map((p) => p.join(",")).join(" "), class: "head" });
-}
-
-function drawDiagram() {
-  const box = $("diagram");
-  if (!box) return;
-  const body = buildBody(draft);
-  const graph = graphOf(body);
+/** The draft as the drawer takes it: stages at their cells, the lanes between. */
+function diagramView() {
+  const graph = graphOf(buildBody(draft));
   const cells = layout(graph);
-  const keyOf = (sid) => draft.stages[sid]?.key;
   const player = view === "player";
-  const unseen = player ? hiddenStages(graph) : new Set();
+  const hiddenOnly = hiddenStages(graph);
+  const unseen = player ? hiddenOnly : new Set();
   const reached = reachable(graph);
   const plain = depths(graph);
   const ends = goals(graph);
-  const hiddenOnly = hiddenStages(graph);
-  const cols = Math.max(1, ...[...cells.values()].map(([c]) => c + 1));
-  const rows = Math.max(1, ...[...cells.values()].map(([, r]) => r + 1));
-  const width = PAD * 2 + (cols - 1) * COL_W + NODE_W;
-  const height = PAD * 2 + LOOP + (rows - 1) * ROW_H + NODE_H + LOOP;
-  const at = (sid) => {
-    const [c, r] = cells.get(sid);
-    return [PAD + c * COL_W, PAD + LOOP + r * ROW_H];
-  };
-
-  const lanes = svg("g", { class: "lanes" });
-  for (const [a, b] of graph.lanes) {
-    const pair = `${a},${b}`;
-    if (player && (graph.hidden.has(pair) || unseen.has(a) || unseen.has(b))) continue;
-    const [ax, ay] = at(a);
-    const [bx, by] = at(b);
-    let start, end, c1, c2;
-    const step = cells.get(b)[0] - cells.get(a)[0];
-    if (step > 1) {
-      // A long lane (a shortcut) arcs over the stages it skips.
-      start = [ax + NODE_W / 2 + 8, ay];
-      end = [bx + NODE_W / 2 - 8, by];
-      const top = Math.min(ay, by) - LOOP;
-      c1 = [start[0], top];
-      c2 = [end[0], top];
-    } else if (step === 1) {
-      start = [ax + NODE_W, ay + NODE_H / 2];
-      end = [bx, by + NODE_H / 2];
-      const dx = (end[0] - start[0]) / 2;
-      c1 = [start[0] + dx, start[1]];
-      c2 = [end[0] - dx, end[1]];
-    } else {
-      start = [ax + NODE_W / 2 + 8, ay + NODE_H];
-      end = [bx + NODE_W / 2 - 8, by + NODE_H];
-      c1 = [start[0], start[1] + LOOP];
-      c2 = [end[0], end[1] + LOOP];
-    }
-    const gate = graph.gates.get(pair);
-    // A gated lane that is its far stage's only way in: players reach that stage
-    // only by meeting the target (amber, a warning, not a block).
-    const only = gate && ways(graph).every((w) => w.to !== b || graph.gates.has(w.lane));
-    const classes = ["lane", gate ? "gated" : "", graph.hidden.has(pair) ? "hidden" : "", only ? "warn" : ""];
-    const group = svg("g", { class: classes.filter(Boolean).join(" "), "data-lane": `${keyOf(a)}-${keyOf(b)}` }, [
-      svg("path", { d: `M${start} C${c1} ${c2} ${end}` }),
-      arrowhead(end, c2),
-      graph.twoWay.has(pair) ? arrowhead(start, c1) : null,
-    ]);
-    if (gate) {
-      const mid = [0.125 * start[0] + 0.375 * c1[0] + 0.375 * c2[0] + 0.125 * end[0],
-                   0.125 * start[1] + 0.375 * c1[1] + 0.375 * c2[1] + 0.125 * end[1]];
-      group.append(svg("text", { x: mid[0], y: mid[1] - 5, "text-anchor": "middle", class: "gate" }, [shortTarget(gate)]));
-      group.append(svg("title", {}, [`${laneLabel(graph, a, b)}: ${targetText(gate)}`
-                                     + `${graph.hidden.has(pair) ? ", hidden until met" : ""}${only ? ". The only way in." : ""}`]));
-    }
-    lanes.append(group);
-  }
-
-  const nodes = svg("g", { class: "nodes" });
-  for (const sid of graph.ids) {
-    if (unseen.has(sid)) continue;
-    const stage = draft.stages[sid];
-    const [x, y] = at(sid);
+  const keyOf = (sid) => `card-${draft.stages[sid].key}`;
+  const words = { start: "open from the start", goal: "ends the gauntlet", stranded: "no start reaches it",
+                  "off-path": "reached only through a gate", hidden: "hidden until met" };
+  const nodes = graph.ids.filter((sid) => !unseen.has(sid)).map((sid) => {
     const marks = [];
     if (graph.start.includes(sid)) marks.push("start");
     if (ends.has(sid)) marks.push("goal");
     if (!reached.has(sid)) marks.push("stranded");
     else if (!plain.has(sid)) marks.push("off-path");
     if (hiddenOnly.has(sid)) marks.push("hidden");
-    const words = { start: "open from the start", goal: "ends the gauntlet", stranded: "no start reaches it",
-                    "off-path": "reached only through a gate", hidden: "hidden until met" };
-    const group = svg("g", { class: ["stage-node", ...marks].join(" "), tabindex: "0", role: "button",
-                             "data-key": String(stage.key) }, [
-      svg("rect", { x, y, width: NODE_W, height: NODE_H, rx: 3 }),
-      graph.start.includes(sid) ? svg("rect", { x, y, width: 5, height: NODE_H, class: "start-bar" }) : null,
-      svg("text", { x: x + NODE_W / 2 + 2, y: y + NODE_H / 2 + 4, "text-anchor": "middle" },
-          [`${ends.has(sid) ? "★ " : ""}${clip(nameOf(stage))}`]),
-      svg("title", {}, [[`Stage ${sid + 1}: ${nameOf(stage)}`, ...marks.map((m) => words[m])].join(" · ")]),
-    ]);
-    const go = () => {
-      const card = document.getElementById(`card-${stage.key}`);
+    const [col, row] = cells.get(sid);
+    return { key: keyOf(sid), col, row, place: String(sid + 1), title: nameOf(draft.stages[sid]), open: true,
+             marks, tip: [`Stage ${sid + 1}: ${nameOf(draft.stages[sid])}`, ...marks.map((m) => words[m])].join(" · ") };
+  });
+  const lanes = [];
+  for (const [a, b] of graph.lanes) {
+    const pair = `${a},${b}`;
+    if (player && (graph.hidden.has(pair) || unseen.has(a) || unseen.has(b))) continue;
+    const gate = graph.gates.get(pair);
+    // A gated lane that is its far stage's only way in: players reach that stage
+    // only by meeting the target (amber, a warning, not a block).
+    const only = Boolean(gate) && ways(graph).every((w) => w.to !== b || graph.gates.has(w.lane));
+    lanes.push({ from: keyOf(a), to: keyOf(b), gated: Boolean(gate), short: gate ? shortTarget(gate) : "",
+                 hidden: graph.hidden.has(pair), two_way: graph.twoWay.has(pair), warn: only });
+  }
+  const stranded = graph.ids.filter((sid) => !reached.has(sid)).map((sid) => nameOf(draft.stages[sid]));
+  return { nodes, lanes, stranded, columns: Math.max(1, ...[...cells.values()].map(([c]) => c + 1)) };
+}
+
+function drawDiagram() {
+  const box = $("diagram");
+  if (!box) return;
+  const shape = diagramView();
+  diagram = drawGraph(box, shape, {
+    label: `The gauntlet's shape: ${shape.nodes.length} stages in ${shape.columns} columns`,
+    onPress: (key) => {
+      const card = document.getElementById(key);
       if (!card) return;
       card.scrollIntoView({ behavior: "smooth", block: "start" });
       card.classList.remove("flash");
       void card.offsetWidth;   // restart the animation
       card.classList.add("flash");
-    };
-    group.addEventListener("click", go);
-    group.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        go();
-      }
-    });
-    nodes.append(group);
-  }
-
-  clear(box).append(svg("svg", {
-    width, height, viewBox: `0 0 ${width} ${height}`, role: "img",
-    "aria-label": `The gauntlet's shape: ${graph.ids.length} stages in ${cols} columns`,
-  }, [lanes, nodes]));
-  const stranded = graph.ids.filter((sid) => !reached.has(sid));
-  $("diagram-note").textContent = stranded.length
-    ? `No start reaches ${stranded.map((sid) => nameOf(draft.stages[sid])).join(", ")}: join it from a stage, or tick it as open from the start.`
+    },
+  });
+  $("diagram-note").textContent = shape.stranded.length
+    ? `No start reaches ${shape.stranded.join(", ")}: join it from a stage, or tick it as open from the start.`
     : "";
 }
 
 /** Light the lane between two stage keys (either way), or none. */
 function lightLane(pair) {
-  for (const node of document.querySelectorAll("#diagram [data-lane]")) {
-    const [a, b] = node.dataset.lane.split("-").map(Number);
-    node.classList.toggle("lit", Boolean(pair) && ((a === pair[0] && b === pair[1]) || (a === pair[1] && b === pair[0])));
-  }
+  diagram?.light(pair ? `card-${pair[0]}` : null, pair ? `card-${pair[1]}` : null);
 }
 
 function showView(which) {

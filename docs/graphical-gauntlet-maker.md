@@ -201,6 +201,21 @@ Two things Phase 1 did that this plan had left to Phase 2:
 
 ## Phase 2: the graph view replaces the stage list (re-planned 2026-11-11 for the HTML game)
 
+**Built 2026-11-11.** The reasons as built are in `docs/design/gauntlet.md`,
+*The graph view*. Where the build differs from what follows:
+- **The strip names a gated way only once it is shown**: a hidden lane says
+  nothing in the strip until met, as on the graph.
+- **`gauntlet.on_board`** decides Edit on the board: the board's id shape and
+  not a generated `gen-<hash>` (which has the same shape). The maker's path is
+  `paths.LEADERBOARD_MAKER_PATH`; `LEADERBOARD_GAUNTLET_PATH` was already the
+  API's.
+- **The columns are `minmax(6rem, max-content)`**, so a column is as wide as its
+  widest title.
+- **`gauntlet.md` was split** first: *Generated gauntlets* is now
+  `gauntlet-gen.md`.
+- Not done: a new parity screen for a branching gauntlet (the tutorial's
+  existing screen covers the drawer), and fading edges on the scrolling box.
+
 The first plan for this phase drew the graph into the pygame `menu.py` with a
 new shell module, `stagegraph.py`, and had to rebuild in pygame what a browser
 gives for free: clipping, a scroll offset in `MenuState`, drag-versus-tap

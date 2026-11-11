@@ -565,11 +565,17 @@ class Session:
     def op_menu_key(self, name: str) -> dict:
         """A key on the menu, by its ``KeyboardEvent.key`` name: Y or Enter
         answers a confirm yes and N or Esc no; otherwise Esc closes an open
-        list, and Enter (or space) starts as Start Game does."""
+        list, and Enter (or space) starts as Start Game does. On the gauntlet
+        list the arrows move its selection by cell and Enter plays it."""
         ms, name = self.menu, str(name)
         if ms.tutorial_open and not (ms.confirm_slow or ms.confirm_unchallenge):
+            g = setupmenu.picked_gauntlet(ms)
             if name == "Escape":
                 ms.tutorial_open = False
+            elif name in setupmenu.STEPS and g is not None:
+                setupmenu.step_pick(ms, self._settings(), g, *setupmenu.STEPS[name])
+            elif name == "Enter" and g is not None:
+                return self._menu(self._then(setupmenu.play_pick(ms, self._settings(), g, self._begin)))
             return self._menu()
         if ms.pbp_prompt:
             if name == "Enter":

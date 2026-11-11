@@ -693,6 +693,13 @@ def link_id(fragment: str) -> str | None:
     return gid if _ID_RE.match(gid) else None
 
 
+def on_board(g: Gauntlet) -> bool:
+    """Is ``g`` a row the board stored, so its maker can open it as a draft: an
+    id of the board's shape that the generator didn't mint (``gen-<hash>``,
+    `gauntletgen.Job.gid`, which only a gauntlet named "Gen…" could share)."""
+    return bool(_ID_RE.match(g.id)) and not g.id.startswith("gen-")
+
+
 def inline_data(fragment: str) -> dict | None:
     """The gauntlet file a ``#gauntlet=<payload>`` fragment carries, or None.
     Tolerant like ``Settings.from_token``: plain JSON or deflated, and anything

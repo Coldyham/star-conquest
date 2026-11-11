@@ -723,9 +723,16 @@ def test_the_tutorial_list_starts_a_stage_with_its_briefing(session, games):
     _call(session, "boot", page=PAGE, store={})
     _menu(session, "menu.open", first=True)
     tut = _menu(session, "menu.press", key="tutorial")["menu"]["tutorial"]
-    assert tut["heading"] and tut["stages"][0]["open"] and tut["buttons"][-1]["key"] == "tutorial_close"
-    first = tut["stages"][0]["key"]
+    nodes = tut["graph"]["nodes"]
+    assert tut["heading"] and nodes[0]["open"] and tut["buttons"][-1]["key"] == "tutorial_close"
+    first = nodes[0]["key"]
+    assert tut["graph"]["focus"] == first and tut["pick"]["play"]["enabled"]   # the first stage, selected
     assert _menu(session, "menu.press", key="get_link")["menu"]["tutorial"] is not None   # modal: ignored
+    # A tap on another stage selects it; a second tap on the selected one plays it.
+    tut = _menu(session, "menu.press", key=nodes[1]["key"])["menu"]["tutorial"]
+    assert tut["graph"]["focus"] == nodes[1]["key"] and not tut["pick"]["play"]["enabled"]   # locked: shown, not played
+    assert _menu(session, "menu.press", key=nodes[1]["key"])["menu"]["tutorial"] is not None
+    _menu(session, "menu.press", key=first)
     res = _menu(session, "menu.press", key=first)
     if res["action"] is None:   # a slow-setup or campaign ask first
         res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
@@ -821,7 +828,8 @@ def test_a_gauntlet_link_is_fetched_kept_and_opened_on_the_list(session, games):
     body = json.dumps({"gauntlet": _chain_data("mine-0123456789ab")})
     pushed = _menu(session, "net.reply", req=http["req"], state="ok", body=body)["pushed"]
     tut = pushed["menu"]["menu"]["tutorial"]
-    assert tut is not None and tut["stages"][0]["title"].strip().endswith("Stage 0")
+    assert tut is not None and tut["graph"]["nodes"][0]["title"] == "Stage 0"
+    assert tut["pick"]["edit"]["key"] == "stage_edit"     # stored on the board: it can be edited there
     assert any(b["key"] == "tutorial_copy" for b in tut["buttons"])
     reply = _call(session, "menu.press", key="tutorial_copy")
     assert any(e["t"] == "clipboard" and "#gauntlet=" in e["text"] for e in reply["effects"])
@@ -840,7 +848,8 @@ def test_a_spec_link_generates_a_gauntlet_a_slice_at_a_time(session, games):
             break
     assert not res.get("generating")
     tut = res["menu"]["tutorial"]
-    assert tut is not None and len(tut["stages"]) >= 1
+    assert tut is not None and len(tut["graph"]["nodes"]) >= 1
+    assert tut["pick"]["edit"] is None      # generated here, never stored on the board
 
 
 # --------------------------------------------------------------------------- #

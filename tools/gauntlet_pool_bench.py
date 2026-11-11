@@ -26,7 +26,7 @@ prefixes of the same order, read from the same games.
 
 A probe is a bot name, ``name:aux`` for a stop of its knob (``thinker:0`` is
 Claudebot), or one of ``TWEAKS`` (heuristic with its reserve at 0). Design:
-docs/design/gauntlet.md, "Generated gauntlets", "Dealing fewer candidates".
+docs/design/gauntlet-gen.md, "Dealing fewer candidates".
 
 Every probe game is a line in ``results/gauntlet_pool/<seed>.jsonl`` the moment
 it finishes; a rerun plays only the games not there.
@@ -52,7 +52,7 @@ from starconquest.model import AiParams
 from starconquest.settings import Settings, build_state
 
 RESULTS = ROOT / "results" / "gauntlet_pool"
-# The first run's spec (docs/design/gauntlet.md, "The first run").
+# The first run's spec (docs/design/gauntlet-gen.md, "The first run").
 SPEC = {"stages": 8,
         "rules": {"mode": {"fix": "symmetric"}, "systems": {"range": [13, 29]},
                   "ship_speed_growth_pct": {"fix": 0}, "home_production": {"fix": 2},

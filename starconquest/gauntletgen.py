@@ -4,7 +4,7 @@ sequence — pure core, no pygame.
 The dealing is ``dealer``'s. This is the rest of the pipeline, shared by the
 game (a ``#gauntlet-spec=`` link, run a slice per frame by ``Job.step``) and by
 ``tools/gauntlet_gen.py`` (every game at once, in a process pool), so both
-measure and pick the same way. Design: ``docs/design/gauntlet.md``, "Generated
+measure and pick the same way. Design: ``docs/design/gauntlet-gen.md``, "Generated
 gauntlets".
 
 A probe game is the leaderboard bot column's (``tests.sim.play_settings``): the

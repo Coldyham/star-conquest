@@ -51,7 +51,8 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/html-frontend.md`](design/html-frontend.md) | The move from the pygame shell to an HTML frontend over Pyodide, the parity checks that held it to the old build, and the cutover |
 | [`design/training.md`](design/training.md) | Training help: the send popup's odds forecast, the bot hint (K) that takes a game off the board, and the post-game coach |
 | [`design/hand-maps.md`](design/hand-maps.md) | The hand-drawn map recipe and the map creator |
-| [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, generated gauntlets, stage targets, the proposed run and carry-over |
+| [`design/gauntlet.md`](design/gauntlet.md) | Gauntlets and the tutorial: the format, board-made gauntlets, stage targets, lanes and the graph view, runs, carry-over |
+| [`design/gauntlet-gen.md`](design/gauntlet-gen.md) | Generated gauntlets: the spec, dealing and probing, where it runs, the generate form |
 | [`design/leaderboard.md`](design/leaderboard.md) | The offline bot column, checked scores, watching a replay, versioning, playstyle readings, one site with templated pages |
 | [`design/campaign.md`](design/campaign.md) | The weekly campaign: crowns, embargoes, the grace period, campaign fleets (decided against) |
 | [`design/daily.md`](design/daily.md) | The daily challenge: the spec, systems by weekday, ship speed fitted to the map, made by the worker, storage, in the game and on the board; the daily puzzle |
@@ -120,7 +121,7 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `par_exhaustive.py` | Exhaustive search for the best score on a small setup: every order set, or every plan of up to K launches; `--turn-only`, checkpoints (local only) | par.md |
 | `puzzle_par.py` | Each stored daily puzzle's par (`par_best` on its own settings) into `puzzle_pars`, only ever improved; the hourly worker's `puzzle-par` job | daily.md, par.md |
 | `seat_play.py` | Play a posted map's seat by hand | seat-play.md |
-| `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md |
+| `gauntlet_check.py`, `gauntlet_gen.py`, `gauntlet_pool_bench.py` | The tutorial rises in difficulty; deal, probe and pick a gauntlet; the probe pool | gauntlet.md, gauntlet-gen.md |
 | `playstyle.py --baseline`, `playstyle_worker.py` | Regenerate the Playstyle bots column; the readings worker | leaderboard.md |
 | `render_board.py` | Render the board's Jinja2 pages | leaderboard.md |
 | `parity_replays.py` | Record the replay-parity corpus: seeded bot games and stored logs, a digest per turn | html-frontend.md |
