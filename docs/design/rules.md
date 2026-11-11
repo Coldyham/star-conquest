@@ -471,6 +471,12 @@ already resolve simultaneously. The rationale for each rule is in
   re-applied by `reconstruct` from the `"ai"` flags), not by pressing Take
   control. `resolve_turn` must pass `human_orders=None` for an unclaimed seat, or
   its strategy runs twice. Resuming, rewinding or watching always lands paused.
+- **A human seat's bot is part of the setup only once it has played a turn.**
+  When a match's first turn is ended by hand (a rewind to the start after
+  watching a bot, Take control before turn 1, or a seat-1 bot left on the hidden
+  AI tab), `app.forget_unplayed_bot` puts that seat back to the default bot and
+  autoplay off in the log, the board and the settings, so the win keys to the
+  map it was opened as (a campaign node, a daily). Detail: `docs/design/core.md`.
   Detail: `docs/design/core.md`.
 - **`tests/sim.py` is a demo harness, a test fixture and the tournament host**
   (`check_invariants`, `--ladder`, `--swap`, `--external`, `play_settings`,

@@ -720,6 +720,21 @@ intact.
     before it can be read is the thing history exists to prevent. It costs
     nothing now that the claim is separate: waiting decides nothing, so who
     plays on is handed back with the clock stopped.
+  - **A human seat's bot belongs to the setup only once it has played a
+    turn** (`app.forget_unplayed_bot`). Seat 1's bot and params are in
+    `challenge_key`, and the AI tab shows that seat only while Autoplay is on.
+    So a player who watched Council take a campaign node, rewound to the start
+    and won it by hand posted the win to a different map (`ef931f94e2cfa965`
+    rather than node 6's key, week of 2026-11-09), though Council decided none
+    of the turns played. Now the first turn ended by hand, with no turn
+    before it, puts the seat back to the default bot and autoplay off in the
+    log (a copy of its dict: a fork shares its parent's), the live board and
+    the settings the score posts from. That changes nothing a replay
+    reproduces: a claimed seat is never asked to decide, a predicting opponent
+    models a person's seat without reading its bot (`knower._model_for`), and
+    with autoplay off a rebuild claims the seat from the start, as this
+    turn's own claim already did. Once the bot has decided a turn it stays in
+    the setup, because it really played part of that game.
 
 ## Whole-number floats don't survive the browser
 

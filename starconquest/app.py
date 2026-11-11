@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -1239,6 +1239,46 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     return ui.forward_orders(state)
 
 
+def forget_unplayed_bot(state: GameState, ui: Ui, log: GameLog, settings: Settings | None) -> None:
+    """A match whose first turn was ended by hand is a person's game from the
+    start, so the bot the human seat was set up with is no part of it: put the
+    seat back to the default bot and autoplay off, in the log, the live board and
+    ``settings``, so the match keys to the map it was opened as.
+
+    Without this, a seat-1 bot (only on the AI tab while Autoplay is on) moves
+    ``challenge_key`` though it never decided a turn: watch Council play a
+    campaign node, rewind to the start, win it by hand, and the win posts to a
+    different map. Safe for the record because a claimed seat is never asked to
+    decide, and a predicting opponent models a person's seat without reading its
+    bot (``knower._model_for``); claiming it from the start, as ``autoplay`` off
+    now does on a rebuild, is what this first turn's claim already did. Once the
+    seat's bot has played a turn it stays, as it really did play.
+    """
+    seat = ui.human_id
+    index = seat - 1
+    recorded = Settings.from_dict(log.settings)
+    plain = Settings()
+    if (not recorded.autoplay and recorded.ai_strategy[index] == plain.ai_strategy[index]
+            and recorded.ai[index] == plain.ai[index]):
+        return
+    # A copy, not an edit in place: a fork shares its parent's dict (`GameLog.fork`).
+    data = copy.deepcopy(log.settings)
+    data["autoplay"] = False
+    data["ai_strategy"][index] = plain.ai_strategy[index]
+    data["ai"][index] = asdict(plain.ai[index])
+    log.settings = data
+    if settings is not None:
+        settings.autoplay = False
+        settings.ai_strategy[index] = plain.ai_strategy[index]
+        settings.ai[index] = AiParams()
+    player = state.players.get(seat)
+    if player is not None:
+        player.ai_strategy, player.ai_params = plain.ai_strategy[index], AiParams()
+        if seat in log.strategies:
+            log.strategies[seat] = player.ai_strategy
+    ui.seat_bots = seat_bot_labels(state)
+
+
 def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
                  settings: Settings | None = None,
                  seat_orders: dict[int, list[Order]] | None = None,
@@ -1325,6 +1365,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         # were in force — recorded before `prune_forward` below drops any that this
         # turn killed, so the log holds the rules the turn was actually played with.
         log.record_turn(record, human_ai=ui.autoplay, rules=ui.auto_forward)
+        if log.turn_count == 1 and not ui.autoplay and seat_orders is None and script is None:
+            forget_unplayed_bot(state, ui, log, settings)
         if state.winner is not None:
             log.mark_finished(state.winner)
         try:
