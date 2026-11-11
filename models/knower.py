@@ -1040,8 +1040,9 @@ def _search(state, pid, orc, turns: int, deadline):
         lines = (_policy_advance if _COUNCIL else _advance)(lines, pid, humans)
 
     if _COUNCIL and FAST_CLOSE:
-        lines = _close_deeper(lines, pid, humans, turns, deadline)
-        return _fast_pick(lines, pid).root
+        closing = _closing(state, pid)
+        lines = _close_deeper(lines, pid, humans, turns, deadline, closing)
+        return _fast_pick(lines, pid, closing).root
     best = lines[0]          # the default, so an exact tie keeps it
     for line in lines[1:]:
         if line.score > best.score:
@@ -1088,7 +1089,7 @@ def _candidates(state, pid, orc, base):
             if _COUNCIL:
                 _SOURCE[id(plan)] = borrowed
             yield plan
-    if _COUNCIL and FAST_CLOSE and _evaluate(state, pid) > 0:
+    if _COUNCIL and FAST_CLOSE and _evaluate(state, pid) > 0 and _closing(state, pid):
         plan = _closer_plan(state, pid)
         if plan is not None:
             _SOURCE[id(plan)] = CLOSER
@@ -1169,10 +1170,12 @@ COST_COUNCIL_LINES = 7          # ...measured over this many Council lines (`_co
 _COUNCIL = False                # a Council seat is deciding (single-threaded, as `_DEPTH`)
 
 # Council plays for the soonest win once it is safely ahead: a line that wins
-# sooner outranks one that wins later, and a line the judge rates at least
-# `CLOSE_AT` is ranked by what the rivals have left, not by our own ships.
+# sooner outranks one that wins later, and once we hold `CLOSE_SHARE` of the
+# players' income, a line the judge rates at least `CLOSE_AT` is ranked by what
+# the rivals have left, not by our own ships.
 FAST_CLOSE = True
 CLOSE_AT = 0.95
+CLOSE_SHARE = 0.75               # a 3:1 income lead
 CLOSE_DEEPER = 3.0               # how far past the horizon, as a multiple of it
 
 
@@ -1187,26 +1190,37 @@ def _rival_material(state, pid) -> float:
     return total
 
 
-def _close_rank(line, pid) -> tuple:
-    """A line's rank under `FAST_CLOSE`: a win by its turn, then a line past
-    `CLOSE_AT` by the rivals' material, then the judge's value."""
+def _closing(state, pid) -> bool:
+    """We hold `CLOSE_SHARE` of the players' income."""
+    income: dict[int, float] = defaultdict(float)
+    for s in state.systems.values():
+        if s.owner_id != 0 and s.production > 0:
+            income[s.owner_id] += 1.0 / s.production
+    total = sum(income.values())
+    return total > 0 and income[pid] / total >= CLOSE_SHARE
+
+
+def _close_rank(line, pid, closing) -> tuple:
+    """A line's rank under `FAST_CLOSE`: a win by its turn, then, while
+    ``closing``, a line past `CLOSE_AT` by the rivals' material, then the
+    judge's value."""
     board = line.board
     if board.winner is not None:
         return (3, -board.turn) if board.winner == pid else (0, 0.0)
     value = line.score.get() if isinstance(line.score, _Lazy) else float(line.score)
-    if value >= CLOSE_AT:
+    if closing and value >= CLOSE_AT:
         return (2, -_rival_material(board, pid))
     return (1, value)
 
 
-def _close_deeper(lines, pid, humans, turns, deadline):
+def _close_deeper(lines, pid, humans, turns, deadline, closing):
     """Once a line is past `CLOSE_AT` and none has won, roll every line on, a
     ply at a time, until one wins or `CLOSE_DEEPER` times the horizon is
     spent, so a finish just past the horizon is seen."""
     def judged(line):
         return line.score.get() if isinstance(line.score, _Lazy) else float(line.score)
 
-    if any(line.board.winner is not None for line in lines):
+    if not closing or any(line.board.winner is not None for line in lines):
         return lines
     if max(judged(line) for line in lines) < CLOSE_AT:
         return lines
@@ -1219,11 +1233,11 @@ def _close_deeper(lines, pid, humans, turns, deadline):
     return lines
 
 
-def _fast_pick(lines, pid):
+def _fast_pick(lines, pid, closing):
     """The line `FAST_CLOSE` plays; an exact tie keeps the earlier candidate."""
-    best, best_rank = lines[0], _close_rank(lines[0], pid)
+    best, best_rank = lines[0], _close_rank(lines[0], pid, closing)
     for line in lines[1:]:
-        rank = _close_rank(line, pid)
+        rank = _close_rank(line, pid, closing)
         if rank > best_rank:
             best, best_rank = line, rank
     return best
