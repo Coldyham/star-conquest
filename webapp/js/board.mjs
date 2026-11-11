@@ -350,7 +350,10 @@ export class BoardView {
     const source = view?.source ?? null;
     const valid = source !== null ? this.nbrs.get(source) : new Set();
     const human = view?.human ?? null;
-    const carrying = new Set(board.fleets.map((f) => `${Math.min(f.src, f.dst)}-${Math.max(f.src, f.dst)}`));
+    // A fleet is drawn when it is ours or touches a system we see; only a drawn
+    // fleet may show its lane, or a rival's hidden flight leaks as a bare line.
+    const drawn = board.fleets.filter((f) => human === null || f.owner === human || sees(f.src) || sees(f.dst));
+    const carrying = new Set(drawn.map((f) => `${Math.min(f.src, f.dst)}-${Math.max(f.src, f.dst)}`));
     this.taken = [];   // labels a star name must not land on
     this.floor = new Map();   // a badged system's name goes under its badge
 
@@ -418,11 +421,7 @@ export class BoardView {
       node.ring.setAttribute("d", frac > 0 ? arcPath(r + RING_GAP, frac) : "");
     }
 
-    const shapes = [];
-    for (const f of board.fleets) {
-      if (f.owner === human || sees(f.src) || sees(f.dst) || human === null) shapes.push(this.fleet(f, travel));
-    }
-    this.fleetLayer.replaceChildren(...shapes);
+    this.fleetLayer.replaceChildren(...drawn.map((f) => this.fleet(f, travel)));
     this.drawMarks(look?.marks ?? null);
     this.drawNames(look, fogState);
     this.drawDrag(look, human);

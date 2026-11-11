@@ -112,6 +112,21 @@ def test_a_lane_press_reopens_the_order_on_it(session):
     assert view["pending"] == []
 
 
+def test_a_press_on_empty_map_drops_the_hover(session):
+    """A finger leaves no pointer to clear the hover, so a press on nothing must:
+    else the panel keeps the last system and hides the legend's buttons."""
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    view = _call(session, "ui.empty")["result"]["view"]   # Done: its source stays lit
+    assert view["mode"] == "idle" and view["panel"]["focus"] == home
+    view = _call(session, "ui.empty")["result"]["view"]
+    assert view["panel"]["focus"] is None and view["panel"]["legend"] == "live"
+    _call(session, "ui.hover", sid=nbr)
+    view = _call(session, "ui.empty")["result"]["view"]
+    assert view["panel"]["focus"] is None
+
+
 def test_a_pinch_puts_back_what_its_first_finger_pressed(session):
     """The first finger's press reaches the session before a second makes it a
     pinch; ``ui.unpress`` takes that press back, once."""
