@@ -10,11 +10,14 @@ the middle of ``tests/sim`` is not one either.
 
 It checks the things a game cannot tell you it is unhappy about. ``engine.
 apply_order`` *drops* an illegal order rather than complaining, so a bot can
-spend a whole match issuing orders that never happen and look merely weak;
-mutating the state corrupts replays rather than failing; and a bot that draws
-from the global ``random`` plays differently on every run, which is invisible
-until a leaderboard score cannot be reproduced. Those three are silent by
-design, which is exactly why they are worth a tool.
+spend a whole match issuing orders that never happen and look merely weak; it
+quietly cuts a count to what the system holds, so a bot can attack with fewer
+ships than it priced the fight at; mutating the state corrupts replays rather
+than failing; and a bot that draws from the global ``random`` plays differently
+on every run, which is invisible until a leaderboard score cannot be
+reproduced. Those are silent by design, which is exactly why they are worth a
+tool. The order checks read every turn of the games it plays, not just the
+opening: most of what goes wrong needs fleets in flight.
 
 Strength is measured last and separately: passing every check means the bot is
 *valid*, not good.
@@ -23,7 +26,6 @@ Strength is measured last and separately: passing every check means the bot is
 from __future__ import annotations
 
 import argparse
-import copy
 import sys
 import traceback
 from pathlib import Path
@@ -31,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from starconquest import ai, engine, mapgen
+from starconquest import ai, mapgen
 from starconquest.model import GameState, Order
 from tests import sim
 
@@ -72,6 +74,44 @@ def _why_illegal(state: GameState, order: Order, pid: int) -> str | None:
     if order.ships <= 0:
         return f"{order.ships} ships is not a launch"
     return None
+
+
+def _order_problems(state: GameState, orders: list[Order], pid: int
+                    ) -> tuple[list[tuple[Order, str]], list[tuple[Order, int]]]:
+    """``(dropped, oversized)`` for one turn's orders, read in listed order as
+    the engine applies them: each order the engine would discard, with why,
+    and each count above what its source still holds after the earlier
+    orders from it, with that remainder."""
+    dropped: list[tuple[Order, str]] = []
+    oversized: list[tuple[Order, int]] = []
+    left: dict[int, int] = {}
+    for order in orders:
+        why = _why_illegal(state, order, pid)
+        if why is not None:
+            dropped.append((order, why))
+            continue
+        held = left.get(order.source_id, state.systems[order.source_id].ships)
+        if held <= 0:
+            dropped.append((order, f"system {order.source_id} has no ships left "
+                                   "to send after your earlier orders from it"))
+            continue
+        if order.ships > held:
+            oversized.append((order, held))
+        left[order.source_id] = held - min(order.ships, held)
+    return dropped, oversized
+
+
+def _checked(decide, pid: int, found: dict[str, list]):
+    """``decide``, noting the turn and problems of every answer it gives as
+    ``pid`` into ``found`` (`_order_problems`)."""
+    def wrapper(state: GameState, seat: int):
+        orders = decide(state, seat)
+        if seat == pid and isinstance(orders, list) and all(isinstance(o, Order) for o in orders):
+            dropped, oversized = _order_problems(state, orders, seat)
+            found["dropped"] += [(state.turn, o, why) for o, why in dropped]
+            found["oversized"] += [(state.turn, o, held) for o, held in oversized]
+        return orders
+    return wrapper
 
 
 def _watch_global_random(fn, *args):
@@ -189,23 +229,8 @@ def check(name: str, games: int, opponent: str) -> int:
     else:
         report.ok("treats the state as read-only")
 
-    # -- issues orders the engine will actually run ------------------------- #
-    dropped = []
-    trial = copy.deepcopy(state)
-    for order in orders:
-        why = _why_illegal(trial, order, SEAT)
-        if why is not None:
-            dropped.append((order, why))
-        else:
-            engine.apply_order(trial, order)     # so later orders see the deduction
-    if dropped:
-        lines = "\n".join(f"  - {o} → {why}" for o, why in dropped[:6])
-        report.fail("issues legal orders",
-                    f"{len(dropped)} of {len(orders)} orders would be silently "
-                    f"discarded by the engine — they never happen, and nothing "
-                    f"reports it:\n{lines}")
-    else:
-        report.ok("issues legal orders")
+    found: dict[str, list] = {"dropped": [], "oversized": []}
+    _checked(lambda s, p: orders, SEAT, found)(state, SEAT)
 
     # -- same seed, same decision ------------------------------------------- #
     # Several boards, and the global `random` deliberately reseeded between the
@@ -253,6 +278,7 @@ def check(name: str, games: int, opponent: str) -> int:
     # -- survives real games ------------------------------------------------ #
     played, wins, timeouts, turns = 0, 0, 0, []
     for seed in range(1, games + 1):
+        ai.STRATEGIES[name] = _checked(decide, SEAT, found)
         try:
             result = sim.play(seed=seed, mode=BOARD["mode"], nodes=BOARD["nodes"],
                               players=2, strategies=[name, opponent])
@@ -265,12 +291,39 @@ def check(name: str, games: int, opponent: str) -> int:
                         f"player already eliminated:\n\n"
                         f"```\n{traceback.format_exc()}```")
             return report.finish(name)
+        finally:
+            ai.STRATEGIES[name] = decide
         played += 1
         wins += 1 if result.winner == SEAT else 0
         timeouts += 1 if result.winner is None else 0
         if result.winner is not None:
             turns.append(result.turns)
     report.ok("survives a whole game", f"{played} games, no crashes")
+
+    # -- issues orders the engine runs as written, every turn ---------------- #
+    where = f"the opening position and {played} games"
+    if found["dropped"]:
+        lines = "\n".join(f"  - turn {t}: {o} → {why}" for t, o, why in found["dropped"][:6])
+        report.fail("issues legal orders",
+                    f"{len(found['dropped'])} orders across {where} would be "
+                    f"silently discarded by the engine — they never happen, and "
+                    f"nothing reports it:\n{lines}")
+    else:
+        report.ok("issues legal orders", where)
+    if found["oversized"]:
+        lines = "\n".join(f"  - turn {t}: {o} → system {o.source_id} has {held} to send"
+                          for t, o, held in found["oversized"][:6])
+        report.fail("asks only for ships it has",
+                    f"{len(found['oversized'])} orders across {where} asked for "
+                    f"more ships than their system had left to send. The engine "
+                    f"quietly sends what is there instead, so the bot fights "
+                    f"with fewer ships than it priced the attack at. A count is "
+                    f"capped by the garrison now (`state.systems[id].ships`) "
+                    f"less the earlier orders from that system this turn; ships "
+                    f"still in flight towards it cannot leave until they "
+                    f"land:\n{lines}")
+    else:
+        report.ok("asks only for ships it has", where)
 
     from tests import botproc
     if botproc.degraded_runs():
