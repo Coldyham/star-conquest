@@ -304,6 +304,8 @@ when to re-run it, is `docs/design/ladder.md`):
 - `thinker` (Claudebot, Thinker): flows ships to the front.
 - `heuristic` (in `ai.py`, the fallback) and `rusherplus` (attacks the weakest
   neighbour): the weak baselines.
+- `chaotic` (unranked): a different non-oracle, memoryless bot each turn, the
+  pick derived from seed, turn and seat (`docs/design/chaotic.md`).
 
 
 - **AI is per-seat and pluggable** (`Player.ai_strategy`, `model.AiParams`).
