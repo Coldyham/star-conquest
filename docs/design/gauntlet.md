@@ -474,6 +474,13 @@ board, and no key moves. Boons cannot do that.
   choice offers a pasted challenge link's score (`linkTarget`) as the stage's
   target. An author plays their own
   gauntlet, pastes the links, and gets targets they have shown can be met.
+  A third choice, Custom, takes typed-in turns (and ships lost), as a lane's
+  gate does, suggesting the link's score and the best bot's beside it; a
+  target stricter than both is warned about ("may be impossible",
+  `meetsTarget`), never refused. A saved body keeps a target's score but never
+  the challenge link it came from, so a stored gauntlet or a `.json` opened on
+  the page rebuilds plain links and opens such a target as Custom, holding its
+  numbers (`draftFromBody`).
   `checkBody` refuses a malformed target (`checkTarget`); `from_dict` drops one
   (the stage then has none) and never raises. The id hashes the body, so adding a target is a
   new row and the old link keeps opening the old gauntlet.

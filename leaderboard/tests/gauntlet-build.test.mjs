@@ -17,7 +17,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import {
   GAUNTLET_ID, LIMITS, addStage, botTarget, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
   draftFromBody, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName, gameLink, joinLane, laneBack,
-  laneFrom, linkTarget, listingOf, moveStage, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem,
+  laneFrom, linkTarget, listingOf, meetsTarget, moveStage, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem,
   slugOf, stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
@@ -229,9 +229,11 @@ test("a draft read back from storage is tolerant of anything", () => {
     { aim: "bot", target: { turns: 9, lost: 1, bot: "marshal", beat: true } },
     { aim: "link", target: { turns: 0 } },
     { aim: "sideways", target: { turns: 9 } },
+    { aim: "turns", target: { turns: 12, lost: 3 } },
   ] })).stages;
   assert.deepEqual(kept.map((s) => [s.aim, s.target]), [
-    ["bot", { turns: 9, lost: 1, bot: "marshal", beat: true }], ["none", null], ["none", { turns: 9 }]]);
+    ["bot", { turns: 9, lost: 1, bot: "marshal", beat: true }], ["none", null], ["none", { turns: 9 }],
+    ["turns", { turns: 12, lost: 3 }]]);
 });
 
 test("a draft names its first problem, link problems first", () => {
@@ -290,6 +292,19 @@ test("the best bot's win is a target to beat; no win or no rows is none", () => 
   assert.deepEqual(botTarget([]), { none: "no-rows" });
 });
 
+test("a score meets a target as the game's Target.met decides", () => {
+  assert.ok(meetsTarget({ turns: 14, lost: 30 }, { turns: 14 }));
+  assert.ok(meetsTarget({ turns: 14, lost: 99 }, { turns: 14 }));
+  assert.ok(!meetsTarget({ turns: 15, lost: 0 }, { turns: 14 }));
+  assert.ok(meetsTarget({ turns: 14, lost: 30 }, { turns: 14, lost: 30 }));
+  assert.ok(meetsTarget({ turns: 13, lost: 99 }, { turns: 14, lost: 30 }));
+  assert.ok(!meetsTarget({ turns: 14, lost: 31 }, { turns: 14, lost: 30 }));
+  assert.ok(!meetsTarget({ turns: 14 }, { turns: 14, lost: 30 }));
+  assert.ok(!meetsTarget({ turns: 31, lost: 12 }, { turns: 31, lost: 12, beat: true }));
+  assert.ok(meetsTarget({ turns: 31, lost: 11 }, { turns: 31, lost: 12, beat: true }));
+  assert.ok(!meetsTarget(null, { turns: 14 }));
+});
+
 test("a draft's target builds into the body and opens again with how it was chosen", async () => {
   const draft = emptyDraft();
   draft.name = "Aimed";
@@ -301,7 +316,9 @@ test("a draft's target builds into the body and opens again with how it was chos
   assert.deepEqual(built.stages.map((s) => s.target), [
     { turns: 31, lost: 12, bot: "thinker", beat: true }, { turns: 9, lost: 0 }, undefined]);
   const back = await draftFromBody(built, async () => "link");
-  assert.deepEqual(back.stages.map((s) => s.aim), ["bot", "link", "none"]);
+  // The body keeps the link's score, never the challenge link: it opens as a custom target holding it.
+  assert.deepEqual(back.stages.map((s) => s.aim), ["bot", "turns", "none"]);
+  assert.deepEqual(back.stages[1].target, { turns: 9, lost: 0 });
   assert.deepEqual(checkBody(buildBody(back)), built);
 });
 

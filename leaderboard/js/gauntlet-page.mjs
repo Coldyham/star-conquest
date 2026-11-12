@@ -27,7 +27,7 @@ import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
   GAUNTLET_ID, LIMITS, addStage, botTarget, buildBody, checkBody, draftFromBody, draftProblem, dropLane, emptyDraft,
-  fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, moveStage, parentsOf, readDraft, removeStage,
+  fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveStage, parentsOf, readDraft, removeStage,
   setStart, setupProblem, stageSetup, targetScore, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
@@ -59,6 +59,9 @@ function freshDraft() {
 const readings = new WeakMap();
 // What a stage's or a lane's target line says, by its object, until the next choice.
 const aimNotes = new WeakMap();
+// The best bot's win on a stage's setup, by stage, as a custom target's
+// suggestion: a promise of `botTarget`'s answer. Dropped when the link changes.
+const botBests = new WeakMap();
 let saved = null;   // {id, body} once saved, until the draft changes again
 let openLane = null;   // the lane whose options show under its near stage's card
 let view = "author";   // the diagram as the author sees it, or as a new player does
@@ -111,6 +114,7 @@ async function linkFor(settings) {
 /** Read a stage's pasted link into its setup, or say why it can't be one. */
 async function readLink(stage) {
   const text = stage.link.trim();
+  botBests.delete(stage);
   if (!text) {
     stage.settings = null;
     readings.set(stage, null);
@@ -161,9 +165,9 @@ async function applyAim(holder, near = holder) {
     return;
   }
   if (holder.aim === "turns") {
-    if (!holder.target || holder.target.beat || holder.target.bot) {
-      holder.target = { turns: linkTarget(reading?.score)?.turns ?? 20 };
-    }
+    const from = holder.target || linkTarget(reading?.score);
+    holder.target = from ? { turns: from.turns, ...(Number.isInteger(from.lost) ? { lost: from.lost } : {}) }
+                         : { turns: 20 };
     aimNotes.set(holder, "");
     return;
   }
@@ -253,11 +257,83 @@ function renderSummary(node, stage, duplicate) {
   });
 }
 
-/** A select for how a stage or lane is aimed, its note, and a redraw of both. */
-function aimControl(holder, near, idFor, choices) {
+/** The best bot's win on `stage`'s setup, asked of the board once per link. */
+function botBest(stage) {
+  if (!stage?.settings || !configured()) return Promise.resolve(null);
+  if (!botBests.has(stage)) {
+    botBests.set(stage, botRows(stage).then((rows) => botTarget(rows).target || null).catch(() => null));
+  }
+  return botBests.get(stage);
+}
+
+/**
+ * A select for how a stage or lane is aimed, its note, the typed-in row a
+ * custom target shows, and a redraw of them. The custom row suggests the
+ * link's score and the best bot's, and warns, without blocking, when the typed
+ * target is stricter than both: no one has shown it can be met.
+ */
+function aimControl(holder, near, idFor, choices, onTyped) {
   const select = el("select", { id: idFor, class: "plain" },
                     choices.map(([value, text]) => el("option", { value, text })));
   const note = el("p", { class: "stage-summary" });
+
+  const turnsId = `${idFor}-turns`;
+  const lostId = `${idFor}-lost`;
+  const turns = el("input", { id: turnsId, type: "number", min: "1", max: "999", "aria-label": "Turns" });
+  const lost = el("input", { id: lostId, type: "number", min: "0", max: "9999", placeholder: "any",
+                             "aria-label": "Ships lost (optional)" });
+  const suggest = el("p", { class: "stage-summary" });
+  const typed = el("div", { class: "aim-custom" }, [
+    el("div", { class: "row lane-turns" }, [
+      el("label", { for: turnsId, text: "Win in" }), turns,
+      el("label", { for: lostId, text: "turns, losing at most" }), lost, el("span", { text: "ships" }),
+    ]),
+    suggest,
+  ]);
+  let bot = null;   // the best bot's target once the board has answered
+
+  const use = (target) => {
+    holder.target = { turns: target.turns, ...(Number.isInteger(target.lost) ? { lost: target.lost } : {}) };
+    turns.value = holder.target.turns;
+    lost.value = holder.target.lost ?? "";
+    showSuggest();
+    onTyped();
+  };
+  const showSuggest = () => {
+    clear(suggest);
+    suggest.classList.remove("bad");
+    const link = linkTarget(readings.get(near)?.score);
+    const known = [
+      link && ["Your link's score", link],
+      bot && [`Best bot (${bot.bot || "bot"})`, bot],
+    ].filter(Boolean);
+    for (const [i, [what, target]] of known.entries()) {
+      const button = el("a", { href: "#", text: "use" });
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        use(target);
+      });
+      suggest.append(i ? " · " : "", `${what}: ${targetScore(target)} (`, button, ")");
+    }
+    if (!holder.target) return;
+    if (!known.length) {
+      suggest.append(el("span", { class: "warn",
+        text: "No score on this setup to check it against: paste a Challenge a friend link, or post a game on it." }));
+    } else if (!known.some(([, target]) => meetsTarget(target, holder.target))) {
+      suggest.append(el("br"), el("span", { class: "warn",
+        text: "Stricter than any score shown above: no one has shown it can be met, so it may be impossible." }));
+    }
+  };
+  const readTyped = () => {
+    const n = Number.parseInt(turns.value, 10);
+    const m = Number.parseInt(lost.value, 10);
+    holder.target = n >= 1 ? { turns: n, ...(m >= 0 ? { lost: m } : {}) } : null;
+    showSuggest();
+    onTyped();
+  };
+  turns.addEventListener("input", readTyped);
+  lost.addEventListener("input", readTyped);
+
   const show = () => {
     const score = readings.get(near)?.score;
     for (const option of select.options) {
@@ -270,9 +346,18 @@ function aimControl(holder, near, idFor, choices) {
     }
     select.value = holder.aim;
     note.textContent = aimNotes.get(holder) ?? (holder.target && holder.aim !== "turns" ? targetText(holder.target) : "");
+    typed.hidden = holder.aim !== "turns";
+    if (typed.hidden) return;
+    turns.value = holder.target?.turns ?? "";
+    lost.value = Number.isInteger(holder.target?.lost) ? holder.target.lost : "";
+    showSuggest();
+    botBest(near).then((found) => {
+      bot = found;
+      if (holder.aim === "turns") showSuggest();
+    });
   };
   show();
-  return { select, note, show };
+  return { select, note, typed, show };
 }
 
 /** The options of the lane `lane`, shown under its near stage's card. */
@@ -280,12 +365,16 @@ function renderLane(lane) {
   const near = stageAt(lane.from);
   const far = stageAt(lane.to);
   const idFor = (name) => `lane-${lane.from}-${lane.to}-${name}`;
-  const { select, note, show } = aimControl(lane, near, idFor("aim"), [
+  const { select, note, typed, show } = aimControl(lane, near, idFor("aim"), [
     ["none", `None: any clear of ${nameOf(near)} opens it`],
-    ["turns", "Win in N turns"],
+    ["turns", "Custom: win in N turns"],
     ["link", `Your score from ${nameOf(near)}'s link`],
     ["bot", `Beat the best bot on ${nameOf(near)}`],
-  ]);
+  ], () => {
+    hidden.disabled = !lane.target;
+    changed();
+    showLabel();
+  });
   const label = el("p", { class: "lane-label" });
   const showLabel = () => {
     const body = buildBody(draft);
@@ -293,30 +382,6 @@ function renderLane(lane) {
     const named = laneLabel(graphOf(body), index(lane.from), index(lane.to));
     label.textContent = named ? `${named}: ${LABEL_WHY[named]}` : "";
   };
-
-  const turns = el("input", { id: idFor("turns"), type: "number", min: "1", max: "999", "aria-label": "Turns" });
-  const lost = el("input", { id: idFor("lost"), type: "number", min: "0", max: "9999", placeholder: "any",
-                             "aria-label": "Ships lost (optional)" });
-  const typed = el("div", { class: "row lane-turns" }, [
-    el("label", { for: idFor("turns"), text: "Win in" }), turns,
-    el("label", { for: idFor("lost"), text: "turns, losing at most" }), lost, el("span", { text: "ships" }),
-  ]);
-  const showTyped = () => {
-    typed.hidden = lane.aim !== "turns";
-    turns.value = lane.target?.turns ?? "";
-    lost.value = Number.isInteger(lane.target?.lost) ? lane.target.lost : "";
-  };
-  showTyped();
-  const readTyped = () => {
-    const n = Number.parseInt(turns.value, 10);
-    const m = Number.parseInt(lost.value, 10);
-    lane.target = n >= 1 ? { turns: n, ...(m >= 0 ? { lost: m } : {}) } : null;
-    hidden.disabled = !lane.target;
-    changed();
-    showLabel();
-  };
-  turns.addEventListener("input", readTyped);
-  lost.addEventListener("input", readTyped);
 
   const twoWay = el("input", { id: idFor("two-way"), type: "checkbox" });
   twoWay.checked = lane.two_way;
@@ -484,11 +549,12 @@ function renderStage(stage, i, dupes) {
     render();
   });
 
-  const { select: aim, note: aimNote, show: showAim } = aimControl(stage, stage, id("aim"), [
+  const { select: aim, note: aimNote, typed: aimTyped, show: showAim } = aimControl(stage, stage, id("aim"), [
     ["none", "None: any win opens the way on"],
+    ["turns", "Custom: win in N turns"],
     ["link", "Your score from this link"],
     ["bot", "Beat the best bot on the board"],
-  ]);
+  ], changed);
   aim.addEventListener("change", async () => {
     stage.aim = aim.value;
     aimNotes.set(stage, stage.aim === "bot" ? "Asking the board…" : "");
@@ -557,7 +623,7 @@ function renderStage(stage, i, dupes) {
     ...paragraphs,
     el("div", { class: "row" }, [more, fewer]),
     el("label", { for: id("hint"), text: "Hint" }), hint, hintCount,
-    el("label", { for: id("aim"), text: "Target (to open the stages beyond)" }), aim, aimNote,
+    el("label", { for: id("aim"), text: "Target (to open the stages beyond)" }), aim, aimTyped, aimNote,
     el("label", { class: "check" }, [opens, "Open from the start"]),
     el("span", { class: "label", text: "Leads to (tap a lit one for its options)" }),
     renderChips(stage),

@@ -134,6 +134,20 @@ export function botTarget(rows) {
   return { target: { turns: best.turns, lost: best.lost, bot: tidy(best.bot).slice(0, LIMITS.bot), beat: true } };
 }
 
+/**
+ * Does a won game's score `{turns, lost}` meet `target`, as the game's
+ * `Target.met` decides: turns first, ships lost breaking a tie when the target
+ * names them, and strictly better when it says `beat`.
+ */
+export function meetsTarget(score, target) {
+  if (!score || !target || !isInt(score.turns)) return false;
+  const named = isInt(target.lost);
+  const mine = named ? [score.turns, isInt(score.lost) ? score.lost : Infinity] : [score.turns];
+  const want = named ? [target.turns, target.lost] : [target.turns];
+  const order = mine[0] - want[0] || (named ? mine[1] - want[1] : 0);
+  return target.beat ? order < 0 : order <= 0;
+}
+
 /** "14 turns", "14 turns / 30 lost": as the game's `Target.score_text`. */
 export function targetScore(target) {
   return `${target.turns} turns${isInt(target.lost) ? ` / ${target.lost} lost` : ""}`;
@@ -416,10 +430,10 @@ function keptTarget(raw) {
   return typeof target === "string" ? null : target;
 }
 
-/** How a draft stage's target was chosen: none, the link's score, the best bot. */
-export const AIMS = Object.freeze(["none", "link", "bot"]);
-/** How a draft lane's target was chosen: a stage's choices, and turns typed in. */
-export const LANE_AIMS = Object.freeze(["none", "turns", "link", "bot"]);
+/** How a draft stage's or lane's target was chosen: none, the link's score, the best bot, typed in. */
+export const AIMS = Object.freeze(["none", "turns", "link", "bot"]);
+/** The same choices for a lane. */
+export const LANE_AIMS = AIMS;
 
 /** A draft with one empty stage, open from the start. */
 export function emptyDraft() {
@@ -434,9 +448,10 @@ function chainOf(stages) {
 /**
  * A stored gauntlet as a draft to edit, its stages in play order with its lanes
  * and starts. Each stage's link is rebuilt from its setup, so it reads like the
- * link it was pasted from. The graph is read as the game reads it
- * (`graphOf`); a lane's target opens as typed-in turns, or the best bot's when
- * it says `beat`.
+ * link it was pasted from, but only its setup: the body keeps a target's score,
+ * never the challenge link it came from. So a target opens as typed-in turns
+ * (a custom one, holding its numbers), or the best bot's when it says `beat`.
+ * The graph is read as the game reads it (`graphOf`).
  *
  * @param linkFor  async (settings) => a game link carrying that setup
  */
@@ -455,7 +470,7 @@ export async function draftFromBody(body, linkFor) {
       title: typeof stage.title === "string" ? stage.title : "",
       briefing: briefing.length ? briefing : [""],
       hint: typeof stage.hint === "string" ? stage.hint : "",
-      aim: target ? (target.beat ? "bot" : "link") : "none",
+      aim: target ? (target.beat ? "bot" : "turns") : "none",
       target,
     });
   }

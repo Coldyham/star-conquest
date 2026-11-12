@@ -1506,6 +1506,7 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 }
 .lane-options legend { padding: 0 0.4rem; color: var(--gold); font-size: 0.8rem; }
 .lane-turns input[type="number"] { width: 6rem; }
+.lane-turns label { margin: 0; }
 .lane-turns[hidden] { display: none; }
 .lane-label { margin: 0; color: var(--cyan); font-size: 0.8rem; }
 .lane-label:empty { display: none; }
