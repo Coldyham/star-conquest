@@ -222,6 +222,8 @@ nor rejected are in [`open.md`](open.md); the file index is
 - campaign.md · Flagging a config first dealt as a "?" so later weeks show it as one: rejected, since it still deals the slow ones and flags the playable ones. *A node you can start on.*
 
 ## gauntlet.md (Gauntlets)
+- gauntlet.md · An in-game gauntlet maker built on the map maker: it would lend placing, dragging, pan and zoom, which a gauntlet's lanes don't use, while the board page already edits everything else a stage needs. *Lanes on the board.*
+- gauntlet.md · A stored position (`at`) per stage: the author would place what `gauntlet.layout` already places, and the game and board would have to agree on one more field. *Lanes on the board.*
 - gauntlet.md · Boons carried between a run's stages (a hand-map edit of the stage): a boon-modified stage scores as a different setup, and the bookkeeping is complicated. Stage targets give a run its pressure instead. *Carry-over.*
 
 ## par.md (Par search)

@@ -72,7 +72,7 @@ them.
 | --- | --- | --- |
 | **gauntlet** | pinned maps played in order, each a **stage** | `gauntlet.py`, `gauntlets` |
 | **stage** | one map of a gauntlet; **cleared** when won (within its **target**, if it has one) | `Stage` |
-| **run** | a gauntlet played in order, with one life | `run.py` |
+| **run** | a gauntlet played from a start to a goal, choosing the way at each fork, with one life | `run.py` |
 | **campaign** | the weekly contest map of **nodes** (each node is a map) | `campaign.py`, `campaign_games` |
 | **node** (campaign only) | one map on the campaign's graph: a **home** you claim, or a **field** node | `graph["nodes"]`, `kind` |
 | **the daily** | one day's pair: the **daily map** ("Daily map", the Map tab, "Monday's map") and the **daily puzzle** (a small duel) | `daily.py` `BOARD`/`PUZZLE` (kind `"board"`/`"puzzle"`, link `#daily`/`#puzzle`); `dailies` |

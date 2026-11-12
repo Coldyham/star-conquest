@@ -1,5 +1,5 @@
 """Generating a gauntlet a slice at a time (`starconquest/gauntletgen.py`,
-`docs/design/gauntlet.md`, "Generated gauntlets")."""
+`docs/design/gauntlet-gen.md`, "Generated gauntlets")."""
 
 from __future__ import annotations
 

@@ -230,6 +230,7 @@ def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     a run."""
     ui.run_at, ui.run_total = gauntlet_run.position(r, g)
     ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
+    ui.run_ways = gauntlet_run.ways_out(r, g, r.playing.stage) if r.playing is not None else ()
     ui.ironman = True
     if ui.stage_label is not None:
         ui.stage_label += " · run"
@@ -243,13 +244,16 @@ def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
     me = ui.human_id
     if log.path is None or (state.winner is None and not state.is_defeated(me)):
         return
+    score = (state.turn, state.players[me].ships_lost)
     outcome = gauntlet_run.judge(state.winner == me, ui.can_post(state), ui.met_target(state))
-    done = gauntlet_run.finish(ui.run_id, log.path.name, outcome, state.turn,
-                      state.players[me].ships_lost, ui.run_total)
+    done = gauntlet_run.finish(ui.run_id, log.path.name, outcome, *score, gauntlet_run.ends(ui.run_ways))
     if done is None:
         ui.run_id = ""
         return
-    ui.run_note, ui.run_ok = gauntlet_run.note(outcome, ui.run_at, ui.run_total, ui.stage_target)
+    ways = len(gauntlet_run.open_ways(ui.run_ways, score)) if done.status == gauntlet_run.ACTIVE else 0
+    ui.has_next_stage = ways == 1
+    ui.run_note, ui.run_ok = gauntlet_run.note(outcome, ui.run_at, ui.run_total, ui.stage_target,
+                                               done.status, ways)
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
@@ -1507,11 +1511,12 @@ Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
 
 
 def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
-             gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None]
-             ) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
+             gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None],
+             pick: int | None = None) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
     """Start a run of the gauntlet picked in the list (``fresh``), or carry on
     the active run: resume its undecided game if it has one, never a fresh copy,
-    else begin its next stage. None, with a word in the list, when there is
+    else begin its next stage, ``pick`` (the stage selected in the list) where
+    it may go more than one way. None, with a word in the list, when there is
     nothing to play. ``enter`` puts the menu on a stage, as picking it does."""
     if fresh:
         g = picked
@@ -1528,7 +1533,7 @@ def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
             return None, MenuNote(said=(g.id, "The gauntlet has changed since the run began, so the run is over",
                                         False))
     assert r is not None
-    sid = gauntlet_run.stage_to_play(r, g)
+    sid = gauntlet_run.stage_to_play(r, g, pick)
     found = enter(g, sid) if sid is not None else None
     if found is None:
         return None, MenuNote()

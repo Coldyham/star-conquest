@@ -85,7 +85,7 @@ class Spec:
     opponents: tuple[str, ...] = tuple(ai.LADDER_ORDER)
     # Off by default: every slider rolled over its whole range deals setups so
     # extreme (one home ship against garrison scale 38) that the probes measure
-    # the knobs rather than the stage (docs/design/gauntlet.md, "The first run").
+    # the knobs rather than the stage (docs/design/gauntlet-gen.md, "The first run").
     roll: bool = False
 
     @classmethod

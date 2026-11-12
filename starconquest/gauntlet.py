@@ -416,6 +416,53 @@ def way_in(g: Gauntlet, sid: int) -> tuple[str, Target] | None:
     return None
 
 
+def layout(g: Gauntlet) -> dict[int, tuple[int, int]]:
+    """Where each stage is drawn, as ``{stage id: (column, row)}``: computed from
+    the graph, never stored, and mirrored by the board's ``gauntlet-graph.mjs``
+    (``leaderboard/tests/fixtures/gauntlet-layout.json`` pins both).
+
+    The column is depth over ungated lanes (``depths``), so the main path reads
+    left to right and a shortcut is a long arrow. A stage reached only through
+    gated lanes lands one column past its shallowest placed source, walking
+    every lane level by level from all the ungated depths at once, so list order
+    never moves it. A stage no start reaches gets a last column of its own. The
+    row is list order within the column, then one pass of crossing reduction:
+    each column after the first is sorted by the mean row of its parents in
+    earlier columns, ties (and a stage with none, by its own row) keeping list
+    order. Hidden stages are laid out like any other, so revealing one moves
+    nothing else.
+    """
+    column = dict(g.depths())
+    level = 0
+    while any(c == level for c in column.values()):
+        for a, b, _lane in g.ways():
+            if column.get(a) == level and b not in column:
+                column[b] = level + 1
+        level += 1
+    last = max(column.values()) + 1
+    for s in g.stages:
+        column.setdefault(s.id, last)
+
+    parents: dict[int, set[int]] = {}
+    for a, b, _lane in g.ways():
+        if column[a] < column[b]:
+            parents.setdefault(b, set()).add(a)
+    row: dict[int, int] = {}
+    for c in sorted(set(column.values())):
+        here = [s.id for s in g.stages if column[s.id] == c]
+
+        def key(i_sid: tuple[int, int]) -> float:
+            i, sid = i_sid
+            above = parents.get(sid)
+            return sum(row[p] for p in above) / len(above) if above else float(i)
+
+        if c > 0:
+            here = [sid for _i, sid in sorted(enumerate(here), key=key)]
+        for r, sid in enumerate(here):
+            row[sid] = r
+    return {s.id: (column[s.id], row[s.id]) for s in g.stages}
+
+
 def stage_settings(stage: Stage) -> Settings:
     """The setup to play. A stage never carries a score to beat, and is never a
     demo: the point is to play it."""
@@ -644,6 +691,13 @@ def link_id(fragment: str) -> str | None:
         return None
     gid = fragment[len(LINK_FRAGMENT):].strip()
     return gid if _ID_RE.match(gid) else None
+
+
+def on_board(g: Gauntlet) -> bool:
+    """Is ``g`` a row the board stored, so its maker can open it as a draft: an
+    id of the board's shape that the generator didn't mint (``gen-<hash>``,
+    `gauntletgen.Job.gid`, which only a gauntlet named "Gen…" could share)."""
+    return bool(_ID_RE.match(g.id)) and not g.id.startswith("gen-")
 
 
 def inline_data(fragment: str) -> dict | None:

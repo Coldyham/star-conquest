@@ -604,6 +604,17 @@ Reasons: `docs/design/gauntlet.md`.
   one before it. **Every stage must be reachable from a start**
   (`gauntlet.problems`): the board's `checkBody` refuses a gauntlet that fails,
   `tools/gauntlet_check.py` will not play one, and the built-ins are held to it.
+- **A stage's place on the graph is computed, never stored** (`gauntlet.layout`,
+  mirrored by the board's `gauntlet-graph.mjs`; both read
+  `leaderboard/tests/fixtures/gauntlet-layout.json`). The board page edits
+  lanes by draft key, never by place, and a draft whose lanes were never
+  touched builds exactly the linear body it always did, so its id holds.
+- **The game's list and the board's diagram share one drawer**
+  (`webapp/js/stagegraph.mjs`, imported by the board from `/play/` so the game
+  never depends on `/board/` offline); it decides nothing. In the list a tap
+  selects (`MenuState.stage_pick`) and a second tap or Play plays; a locked
+  stage selects but never plays; a hidden lane is drawn, and named in the
+  strip, only once met.
 - **A stage is active only while the setup still matches it**
   (`gauntlet.stage_of`, `menu.active_stage`); the banner warns, it never locks.
   A challenge link's setup is never a stage.
@@ -618,9 +629,13 @@ Reasons: `docs/design/gauntlet.md`.
   pinned); Next stage appears only for a win that leaves it cleared, this
   game's or an earlier best meeting the target (`Ui.stage_cleared`,
   `Ui.offers_next_stage`).
-- **A run** (`run.py`) plays a single-path gauntlet with at least one target
-  (`run.offered`, `gauntlet.chain`) in order, each stage within its target,
-  with one life. It is the one piece of gauntlet progress that is stored
+- **A run** (`run.py`) plays a gauntlet from a start to a goal, each stage
+  within its target, with one life. It is offered where it adds something to
+  the list: a target, or a fork (`run.offered`, `run.forks`). It moves from
+  the stage it last won (`run.ways_on`): along any ungated lane to a stage it
+  hasn't won, and along a gated one only when this game's score meets it. At a
+  fork the list marks the ways on and Continue run plays the one selected; a
+  win with no ungated way on completes the run. It is the one piece of gauntlet progress that is stored
   (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
   decided. Only the step's own game moves it, once (`run.finish`), so a Retry
   or fork is free play. That game plays ironman with no Hint, and its Next
