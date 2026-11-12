@@ -231,7 +231,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #veil p { margin: 0 0 4px; font-size: 18px; }
 #veil p.small { font-size: 14px; }
 #veil .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-#veil .share { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+#veil .grid .row-start { grid-column-start: 1; }
+#veil .grid .odd { grid-column: 1 / -1; justify-self: center; width: calc(50% - 6px); }
+#veil .grid .share { margin-top: 8px; }
+@media (max-width: 520px) {
+  #veil .grid { grid-template-columns: 1fr; }
+  #veil .grid .odd { justify-self: stretch; width: auto; }
+  #veil .grid .share:not(.row-start) { margin-top: 0; }
+}
 #veil .btn { min-width: 220px; }
 /* the result lines' roles (`hud.result_lines`) */
 :root { --beat: rgb(130, 200, 150); --tie: rgb(190, 205, 225); --miss: rgb(214, 172, 92);

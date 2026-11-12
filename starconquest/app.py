@@ -217,6 +217,7 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     # its briefing.
     ui.stage_hint = s.hint or (_briefing_again() if s.briefing else None)
     ui.has_next_stage = gauntlet.next_stage(g, s.id) is not None
+    ui.stage_final = s.id in gauntlet.goals(g)
     # Gated ways out (a hidden bonus stage, say), and whether a best already
     # meets each, so the win overlay can say what this win unlocks.
     mine = gauntlet.best(s)

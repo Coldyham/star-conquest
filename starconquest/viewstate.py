@@ -363,12 +363,15 @@ class Ui:
     # overlay: a stage's seed is pinned, so a new map would leave the stage.
     # `stage_target` is the stage's `gauntlet.Target` (a plain value), and
     # `stage_met_before` whether a best filed before this match already meets it.
+    # `stage_final` whether a run ends on this stage (`gauntlet.goals`): what the
+    # win overlay calls the final stage, which a fork, with no Next stage, isn't.
     stage_label: str | None = None
     stage_title: str = ""
     briefing: tuple[str, ...] = ()
     briefing_open: bool = False
     stage_hint: str | None = None
     has_next_stage: bool = False
+    stage_final: bool = False
     stage_target: Target | None = None
     stage_met_before: bool = False
     # The stage's gated ways out, as (label, far stage's title, target, met by

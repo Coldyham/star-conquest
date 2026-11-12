@@ -475,17 +475,26 @@ export class Hud {
         : over.in_stage ? null : button("New map", "N", "green", "restart");
     const first = over.try_again ? button("Try again", "T", "amber", "run_retry")
       : over.retry === false ? null : button("Retry", "T", "amber", "retry");
+    // One two-column grid, so the share pair lines up under the rest: each
+    // group starts a row, and a group's odd last button sits centred.
+    const group = (buttons, cls) => buttons.filter(Boolean).map((b, i, all) => {
+      if (cls) b.classList.add(cls);
+      if (i === 0) b.classList.add("row-start");
+      if (all.length % 2 && i === all.length - 1) b.classList.add("odd");
+      return b;
+    });
+    const buttons = group([first, second, button("Setup menu", "M", "blue", "menu"),
+      button("History & coach", "H", "violet", "toggle_history")]);
+    if (over.share) {
+      buttons.push(...group([button(over.share[0], over.share[1], "teal", "share"),
+        over.board ? button(over.board[0], over.board[1], "gold", "leaderboard") : null], "share"));
+    }
     const kids = [
       h("h1", { style: `color:${this.color(over.headline[1])}` }, over.headline[0]),
       ...over.lines.map(([kind, text, role]) => h("p", { class: kind, style: `color:${this.color(role)}` }, text)),
-      h("div", { class: "grid" }, first, second,
-        button("Setup menu", "M", "blue", "menu"), button("History & coach", "H", "violet", "toggle_history")),
+      h("div", { class: "grid" }, ...buttons),
     ];
-    if (over.share) {
-      kids.push(h("div", { class: "share" }, button(over.share[0], over.share[1], "teal", "share"),
-        over.board ? button(over.board[0], over.board[1], "gold", "leaderboard") : null));
-      if (over.notes) kids.push(h("p", { class: "small dim" }, over.notes));
-    }
+    if (over.share && over.notes) kids.push(h("p", { class: "small dim" }, over.notes));
     veil.replaceChildren(h("div", { class: "stack" }, ...kids));
     veil.hidden = false;
   }

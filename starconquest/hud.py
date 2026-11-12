@@ -660,7 +660,7 @@ def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:
     """The win overlay's stage line: cleared, or which way the target went. A
     win short of it says so, and says too when an earlier best already cleared
     the stage, since Next stage is then still offered."""
-    cleared = "Stage cleared" if ui.has_next_stage else "Final stage cleared"
+    cleared = "Final stage cleared" if ui.stage_final else "Stage cleared"
     if not ui.run_id:
         cleared += "".join(f"  ·  {label} unlocked: {title}" for label, title in ui.unlocked(state))
     target = ui.stage_target

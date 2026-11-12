@@ -149,6 +149,30 @@ def test_a_fork_opens_both_branches_and_has_no_single_next_stage():
     assert gauntlet.open_stages(g) == {0, 1, 2, 3}
 
 
+def test_only_a_stage_a_run_ends_on_is_called_the_final_one():
+    """A fork has no Next stage, but it is not the end of the gauntlet."""
+    from starconquest import app, config, hud, mapgen
+    from starconquest.geometry import WorldView
+    from starconquest.viewstate import Ui
+
+    g = gauntlet.Gauntlet.from_dict({
+        "id": "fork", "start": [0],
+        "stages": [{"id": i, "settings": _setup(100 + i)} for i in range(4)],
+        "lanes": [[0, 1], [0, 2], [1, 3], [2, 3]],
+    })
+    assert g is not None
+    state = build_state(Settings(players=2, nodes=8, seed=1), 1)
+
+    def verdict(sid: int) -> str:
+        ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
+        app.stage_ui(ui, (g, g.stage(sid)))
+        return hud.stage_verdict(state, ui)[1]
+
+    assert verdict(0) == "Stage cleared"
+    assert verdict(1) == "Stage cleared"
+    assert verdict(3) == "Final stage cleared"
+
+
 def test_a_lane_opens_only_its_second_stage_unless_two_way():
     """Clearing a later stage first (a challenge link of the same setup counts)
     opens the way on, never the stage before it."""
