@@ -77,14 +77,16 @@ line gives only the verdict. Ideas that lost are in
 - gauntlet.md · **The file format.** `stages`/`lanes`/`start`, one-way lanes unless `two_way`, a lane's target and `hidden`, reachability (`gauntlet.problems`, `checkBody`), text limits, `to_dict`, user gauntlets.
 - gauntlet.md · **Gauntlets made on the board.** `/api/gauntlet`, its own table never `campaigns`, the `<slug>-<hash>` id, one `checkBody` run twice, `gauntlet.remember`, `#gauntlet=`, remixing, admin listing.
 - gauntlet.md · **Relation to the weekly campaign.** Uncontested, so no server; graph and bordering rule shared in spirit; gauntlet lanes run one way.
-- gauntlet.md · **Generated gauntlets.** A spec (`fix`/`range`/`in`/`not`, opponents, `roll`) dealt by `dealer.deal`, probed and picked by `tools/gauntlet_gen.py`; where it runs; the first run; the last stage may be unwon by every probe.
-- gauntlet.md · *In the game / on the board:* `#gauntlet-spec=`, a slice per menu frame, budgets not lifted; the generate form, `gauntlet-spec.mjs`, under the page's shared name, author and listing box; sharing the file, not spec and seed; saved to the board only when asked to be listed (`gauntlet.ask_listing`).
-- gauntlet.md · *Dealing fewer candidates* (shipped 2026-10-24): round-robin depths; four probes (lean heuristic, thinker, `evolved:0`, marshal); `tools/gauntlet_pool_bench.py`. The web build is untimed.
-- gauntlet.md · **Runs (built 2026-11-04).** A single-path gauntlet with a target, in order, one life (`run.offered`, `gauntlet.chain`); this game's score only; stored, not derived (`WEB_RUNS_KEY`); judges only its own game, so a Retry is free play; ironman, no Hint; Continue resumes the step's log, kept in `webstore` too (`run.keep_log`); one run at a time; an edited gauntlet ends it.
+- gauntlet.md · **Runs (built 2026-11-04).** A start to a goal, one life, offered for a target or a fork (`run.offered`); *Forks (built 2026-11-12)*: moves from the stage last won, gates on the run's own score, the player picks at a fork, no ungated way on completes it; this game's score only; stored, not derived (`WEB_RUNS_KEY`); judges only its own game, so a Retry is free play; ironman, no Hint; Continue resumes the step's log, kept in `webstore` too (`run.keep_log`); one run at a time; an edited gauntlet ends it.
 - gauntlet.md · **The gauntlet: proposed, not built.** A seeded run graph (`tools/campaign.py` `_layout`/`cut_nodes`), stages dealt like `_from_family`/`_mystery`, difficulty by `LADDER_ORDER`.
 - gauntlet.md · **Carry-over.** Boons via `custommap.from_state` and their cost on the board; decided against for stage targets.
 - gauntlet.md · **Stage targets.** A score to win within before later stages open (`gauntlet.Target`, `gauntlet.cleared`, `Ui.stage_cleared`); set from a pasted challenge link or a dealt run's probe wins; none in the tutorial.
-- gauntlet.md · *Beat the best bot:* `standings.bestBot` on the stage's setup, fixed as `{turns, lost, bot, beat}` when picked. *Targets on lanes* (built 2026-11-05): gated and hidden lanes, depth over ungated lanes, `goals` and `lane_label` derived, `shown`/`place`, the shared `gauntlet-lanes.json` fixture, the board page's "would make it linear" warning.
+- gauntlet.md · *Beat the best bot:* `standings.bestBot` on the stage's setup, fixed as `{turns, lost, bot, beat}` when picked. *Targets on lanes* (built 2026-11-05): gated and hidden lanes, depth over ungated lanes, `goals` and `lane_label` derived, `shown`/`place`, the shared `gauntlet-lanes.json` fixture. *Lanes on the board* (built 2026-11-11): the maker is the board page, not the game; lanes by draft key; a linear draft saves today's body; chips, + After / + Branch, lane options; `gauntlet.layout` / `gauntlet-graph.mjs` computed, never stored, `gauntlet-layout.json`; the read-only diagram and its player view. *The graph view* (built 2026-11-11): one drawer (`webapp/js/stagegraph.mjs`) for the game's list and the board, living in the game for offline; CSS grid of buttons, SVG lanes; a hidden lane drawn once met; tap selects, a second tap plays (`stage_pick`, `picked_stage`, `pick_view`); arrows by cell; Edit on the board (`gauntlet.on_board`).
+
+## gauntlet-gen.md
+- gauntlet-gen.md · **Generated gauntlets.** A spec (`fix`/`range`/`in`/`not`, opponents, `roll`) dealt by `dealer.deal`, probed and picked by `tools/gauntlet_gen.py`; where it runs; the first run; the last stage may be unwon by every probe.
+- gauntlet-gen.md · *In the game / on the board:* `#gauntlet-spec=`, a slice per menu frame, budgets not lifted; the generate form, `gauntlet-spec.mjs`, under the page's shared name, author and listing box; sharing the file, not spec and seed; saved to the board only when asked to be listed (`gauntlet.ask_listing`).
+- gauntlet-gen.md · *Dealing fewer candidates* (shipped 2026-10-24): round-robin depths; four probes (lean heuristic, thinker, `evolved:0`, marshal); `tools/gauntlet_pool_bench.py`. The web build is untimed.
 
 ## leaderboard.md
 - leaderboard.md · **Bot replays (`tools/bot_replay.py`).** A scheduled job, not a service. *Through `build_state`*; *what the replayed seat is tuned to* (`replay_aux`); *a loss is a result, not a score*; *a win stores its own replay*.
@@ -208,6 +210,9 @@ line gives only the verdict. Ideas that lost are in
 - council.md · **evolved as one more borrowed candidate** (shipped 2026-10-20). Details in knower.md.
 - council.md · **actuary at Hunt in Field's place (measured, not shipped).** Stronger but far past the browser's search guard, so decided against; without its look-ahead only a lean.
 - council.md · **Stripped frontiers are trades, not mistakes.** `_cover` and `LOSS_PENALTY` both lose or null; the habit is style.
+- council.md · **Playing for the soonest win (`FAST_CLOSE`, 2026-11-11).** Council stockpiles once ahead (puzzles: 70 turns from 3:1 to the win against a person's 13); a win ranks by its turn, a 3:1 lead ranks lines by the rivals' material, the search rolls on past the horizon, and a closer pools whole garrisons; faster on puzzles and every win-turns cell, no wins lost; the bait-and-drain lines people play are not candidates.
+- council.md · **Baiting a covered frontier (built, measured, deleted).** A coverable frontier system thinned to its cover: offered in 3-21% of decides, picked in 0-2%; forcing it costs 1.6-4.9 turns in every cell.
+- council.md · **The bounce (`BOUNCE`, shipped 2026-11-11).** The posted games: bots thin as often as the person, but the person holds 59% of the baits that are bit and bots about 10%; Council already answers strikes it can hold. A candidate thins a frontier system only when the rival's own `decide` strikes it and our ships in reach hold it: 114 played in 800 games, the strike predicted to the ship, those games 2.7 turns shorter; better on puzzles, the win-turns screens and a wide spread, no gate by rival; forcing it loses.
 - council.md · **What it costs.** Browser timing, guards on slow devices, the gentler-jitter test exemption.
 - council.md · **Built, measured, dropped.** Strikes, melee ideas, more openings, hybrids, dice shopping, tuning, crossover, successive halving, retrained judges.
 
@@ -256,6 +261,7 @@ line gives only the verdict. Ideas that lost are in
 - learning.md · **Five more arms, and three combinations (deleted).** Pressed row, strike size, learned guard, joint strikes, `PRIOR_WEIGHT` 1.
 - learning.md · **The counter-strike (deleted).** An option value from a rival's learned empty rate; failed on fresh seeds; the people-profile question open.
 - learning.md · **The posted games against Learning (2026-11-10).** 30 posted games replayed: Learning is more cautious than Field against the person; `LEARN_REACH` 8 clips the curve above ratio 1.5, so the memory can only act where strikes are rare; the person takes what actuary empties; the riposte is a losing seat's mark, not a person's; one pooled multiplier learns the person faster than 31 bins; undo and rewind leave no record. **What to try next.**
+- learning.md · **Arm 4, built and measured (deleted).** A convex income so rich systems count for more: worse at every exponent, rich homes included.
 
 ## convoy.md (built, not shipped)
 - convoy.md · **The plan.** Supply per system and turn; objectives as N ships by turn t; launch at the last moment.
@@ -268,6 +274,11 @@ line gives only the verdict. Ideas that lost are in
 - evolved.md · **The look-ahead.** Six turns at the expected roll; rivals hold or strike all-out; the gain is the veto.
 - evolved.md · **Where it stands.** Third of six; weaker multi-seat; borrowed by Council since 2026-10-20.
 - evolved.md · **Training it** (CMA-ES, the turn-40 share); **measuring it** (the +4 bar); **why multi-seat is short** (no blind remedy).
+
+## chaotic.md
+- chaotic.md · **How it plays.** A fresh pool bot each turn (no oracle, no memory; the weak baselines in on purpose); marshal's pincers become lone feints; the pick derived from seed, turn and seat; the entry at its own stop.
+- chaotic.md · **Why this is not the dispatcher the random seat refused.** The pool holds no oracle, so `is_oracle_seat` is always False and knower runs it exactly.
+- chaotic.md · **Where it stands.** Unranked, in no random pool; between marshal and thinker.
 
 ## field.md: actuary's Style: Field (once fulcrum)
 - field.md · **The middle game the roster plays.** Half of strikes land on empty systems; evacuees step into the striker's source; defensive losses separate winner from loser.

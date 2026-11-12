@@ -368,6 +368,12 @@ def _settings_for(row: dict) -> tuple[Settings, int] | None:
     if not isinstance(seed, int):
         return None
     cfg.seed = seed
+    # The replayed seat is handed to the bot outright (`sim._hand_over`), so
+    # whether the poster let a bot drive it is no part of the map (`autoplay` is
+    # outside `challenge_key` too). Left on, `build_state` builds no human seat
+    # and `play_settings` has none to hand over: a win played after watching a
+    # bot and rewinding to the start was posted with it on, and stopped the run.
+    cfg.autoplay = False
     return cfg, seed
 
 
@@ -571,10 +577,16 @@ def main(argv: list[str] | None = None) -> int:
         # play_settings's own docstring — cheap beside the replay itself, and
         # `_row_for` is what decides whether a loss's is worth keeping.
         log = replay.new_log(job.cfg, job.seed)
-        result = sim.play_settings(job.cfg, job.seed, job.bot, aux=job.aux,
-                                   max_turns=args.max_turns,
-                                   bot_timeout=args.bot_timeout,
-                                   log=log)
+        try:
+            result = sim.play_settings(job.cfg, job.seed, job.bot, aux=job.aux,
+                                       max_turns=args.max_turns,
+                                       bot_timeout=args.bot_timeout,
+                                       log=log)
+        except ValueError as err:
+            # One map that can't be replayed must not stop the batch (the same
+            # rule `_settings_for` keeps); it is reported and retried next run.
+            print(f"  [{index}/{len(jobs)}] {job.game_key[:12]:<12} {job.bot:<14} skipped: {err}")
+            continue
         outcome = f"won in {result.turns}" if result.won else f"lost after {result.turns}"
         tuned = f"@{job.aux:g}" if job.aux != 1.0 else ""
         print(f"  [{index}/{len(jobs)}] {job.game_key[:12]:<12} {job.bot + tuned:<14} "

@@ -32,6 +32,9 @@ nor rejected are in [`open.md`](open.md); the file index is
 - council.md · Retraining the judge on council's own games, search values, a deeper look-ahead or 13 more features: none picks better on the ranking test. *Built, measured, dropped.*
 - council.md · A doomed garrison leaving whole (`_flee`) on Council: null against bots (50.8%, ships lost -0.39), 47.1% (z -1.2) on the posted maps. Shipped on Search only. *A doomed garrison leaves whole* (knower.md).
 - council.md · Offering the picked opening again with the systems its rollout lost held (`_cover`): null against the weak bots, marshal, knower:2 (a z +1.7 lean that did not replicate) and the 153 posted maps. Ranking down lines that lose a system they stripped (`LOSS_PENALTY` 0.03, 0.10): halves the lost empties and loses to the old council 37.6% and 25.2% on the posted maps. Council foresees 48 of 54 such losses; they are trades. *Stripped frontiers are trades, not mistakes.*
+- council.md · `FAST_CLOSE` gated on the judge alone (0.95), not a 3:1 income lead: 1.3 turns slower before 3:1 against the weak bots, 24 puzzles worse against 7. *Playing for the soonest win.*
+- council.md · Baiting a frontier system a neighbour covers sooner than any rival reaches (emptied, a half or a third thinned, one or every one): never picked on the stored puzzles, 0-2% on symmetric core, wheel and hub; forced, 1.6-4.9 turns slower (z +2.4 to +3.7). *Baiting a covered frontier.*
+- council.md · The bounce forced (every verified bait played, not left to the rollout): +1.29 turns (z +4.4) over 418 games. Its strict build (only the sent ships counted, the full round trip, fed systems skipped): right when played but in 27 of 800 games. *The bounce.*
 - council.md · actuary at Hunt in Field's place, as the actuary Council borrows: +6.8 (z +3.86), but three to nine times a decide, far past the browser's search guard. Too slow. *actuary at Hunt in Field's place.*
 - council.md · Hunt without its look-ahead in Field's place, as the actuary Council borrows: +2.6 (z +1.49), two cells negative, at no cost; a lean, not adopted (plain Hunt and Field are near-equal). *actuary at Hunt in Field's place.*
 
@@ -125,6 +128,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - learning.md · Learning's memory of each rival, as against the prior curve alone: never better (9,600 paired games), worse against Planned (z -2.29). The flag is removed and the memory still ships. Dropping it (and with it the oracle claim): decided against; the memory is to be improved against people instead. *Memory off: the prior alone.*
 - learning.md · In Learning's risk: a rival garrison's learned guard kept home (z -2.08 against marshal), a strike all-in or sized at the prior's split (-2.20, and -2.96 against Planned), a rival's garrisons next door striking together (-2.50), `PRIOR_WEIGHT` 1 (null), and pressed with guard, with guard and size, and with guard and joint (all worse). The pressed row alone leans better, but not significantly. *Five more arms, and three combinations.*
 - learning.md · The counter-strike: a reserve next to a rival valued by that rival's learned empty rate. It failed confirmation on fresh seeds and did no better than the prior rate against the roster. Against people it is untested. *The counter-strike.*
+- learning.md · Income made convex in a system's richness (`RICH_EXP` 0.5 / 1 / 2, income scaled by (income / board mean) to that power): worse than stock Learning against marshal at every exponent (-3.0 / -3.3 / -10.9 points), in the rich-home cells too. *Arm 4, built and measured.*
 
 ## convoy.md
 - convoy.md · Keeping the guard against the struck neighbour unless the lane is one turn: 23-37% against waiving it, more timeouts. *What the measurements changed.*
@@ -218,6 +222,8 @@ nor rejected are in [`open.md`](open.md); the file index is
 - campaign.md · Flagging a config first dealt as a "?" so later weeks show it as one: rejected, since it still deals the slow ones and flags the playable ones. *A node you can start on.*
 
 ## gauntlet.md (Gauntlets)
+- gauntlet.md · An in-game gauntlet maker built on the map maker: it would lend placing, dragging, pan and zoom, which a gauntlet's lanes don't use, while the board page already edits everything else a stage needs. *Lanes on the board.*
+- gauntlet.md · A stored position (`at`) per stage: the author would place what `gauntlet.layout` already places, and the game and board would have to agree on one more field. *Lanes on the board.*
 - gauntlet.md · Boons carried between a run's stages (a hand-map edit of the stage): a boon-modified stage scores as a different setup, and the bookkeeping is complicated. Stage targets give a run its pressure instead. *Carry-over.*
 
 ## par.md (Par search)

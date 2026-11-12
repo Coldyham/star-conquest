@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -230,6 +230,7 @@ def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     a run."""
     ui.run_at, ui.run_total = gauntlet_run.position(r, g)
     ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
+    ui.run_ways = gauntlet_run.ways_out(r, g, r.playing.stage) if r.playing is not None else ()
     ui.ironman = True
     if ui.stage_label is not None:
         ui.stage_label += " · run"
@@ -243,13 +244,16 @@ def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
     me = ui.human_id
     if log.path is None or (state.winner is None and not state.is_defeated(me)):
         return
+    score = (state.turn, state.players[me].ships_lost)
     outcome = gauntlet_run.judge(state.winner == me, ui.can_post(state), ui.met_target(state))
-    done = gauntlet_run.finish(ui.run_id, log.path.name, outcome, state.turn,
-                      state.players[me].ships_lost, ui.run_total)
+    done = gauntlet_run.finish(ui.run_id, log.path.name, outcome, *score, gauntlet_run.ends(ui.run_ways))
     if done is None:
         ui.run_id = ""
         return
-    ui.run_note, ui.run_ok = gauntlet_run.note(outcome, ui.run_at, ui.run_total, ui.stage_target)
+    ways = len(gauntlet_run.open_ways(ui.run_ways, score)) if done.status == gauntlet_run.ACTIVE else 0
+    ui.has_next_stage = ways == 1
+    ui.run_note, ui.run_ok = gauntlet_run.note(outcome, ui.run_at, ui.run_total, ui.stage_target,
+                                               done.status, ways)
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
@@ -1239,6 +1243,46 @@ def auto_forward_orders(state: GameState, ui: Ui) -> list[Order]:
     return ui.forward_orders(state)
 
 
+def forget_unplayed_bot(state: GameState, ui: Ui, log: GameLog, settings: Settings | None) -> None:
+    """A match whose first turn was ended by hand is a person's game from the
+    start, so the bot the human seat was set up with is no part of it: put the
+    seat back to the default bot and autoplay off, in the log, the live board and
+    ``settings``, so the match keys to the map it was opened as.
+
+    Without this, a seat-1 bot (only on the AI tab while Autoplay is on) moves
+    ``challenge_key`` though it never decided a turn: watch Council play a
+    campaign node, rewind to the start, win it by hand, and the win posts to a
+    different map. Safe for the record because a claimed seat is never asked to
+    decide, and a predicting opponent models a person's seat without reading its
+    bot (``knower._model_for``); claiming it from the start, as ``autoplay`` off
+    now does on a rebuild, is what this first turn's claim already did. Once the
+    seat's bot has played a turn it stays, as it really did play.
+    """
+    seat = ui.human_id
+    index = seat - 1
+    recorded = Settings.from_dict(log.settings)
+    plain = Settings()
+    if (not recorded.autoplay and recorded.ai_strategy[index] == plain.ai_strategy[index]
+            and recorded.ai[index] == plain.ai[index]):
+        return
+    # A copy, not an edit in place: a fork shares its parent's dict (`GameLog.fork`).
+    data = copy.deepcopy(log.settings)
+    data["autoplay"] = False
+    data["ai_strategy"][index] = plain.ai_strategy[index]
+    data["ai"][index] = asdict(plain.ai[index])
+    log.settings = data
+    if settings is not None:
+        settings.autoplay = False
+        settings.ai_strategy[index] = plain.ai_strategy[index]
+        settings.ai[index] = AiParams()
+    player = state.players.get(seat)
+    if player is not None:
+        player.ai_strategy, player.ai_params = plain.ai_strategy[index], AiParams()
+        if seat in log.strategies:
+            log.strategies[seat] = player.ai_strategy
+    ui.seat_bots = seat_bot_labels(state)
+
+
 def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
                  settings: Settings | None = None,
                  seat_orders: dict[int, list[Order]] | None = None,
@@ -1325,6 +1369,8 @@ def resolve_turn(state: GameState, ui: Ui, log: GameLog | None = None,
         # were in force — recorded before `prune_forward` below drops any that this
         # turn killed, so the log holds the rules the turn was actually played with.
         log.record_turn(record, human_ai=ui.autoplay, rules=ui.auto_forward)
+        if log.turn_count == 1 and not ui.autoplay and seat_orders is None and script is None:
+            forget_unplayed_bot(state, ui, log, settings)
         if state.winner is not None:
             log.mark_finished(state.winner)
         try:
@@ -1465,11 +1511,12 @@ Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
 
 
 def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
-             gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None]
-             ) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
+             gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None],
+             pick: int | None = None) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
     """Start a run of the gauntlet picked in the list (``fresh``), or carry on
     the active run: resume its undecided game if it has one, never a fresh copy,
-    else begin its next stage. None, with a word in the list, when there is
+    else begin its next stage, ``pick`` (the stage selected in the list) where
+    it may go more than one way. None, with a word in the list, when there is
     nothing to play. ``enter`` puts the menu on a stage, as picking it does."""
     if fresh:
         g = picked
@@ -1486,7 +1533,7 @@ def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
             return None, MenuNote(said=(g.id, "The gauntlet has changed since the run began, so the run is over",
                                         False))
     assert r is not None
-    sid = gauntlet_run.stage_to_play(r, g)
+    sid = gauntlet_run.stage_to_play(r, g, pick)
     found = enter(g, sid) if sid is not None else None
     if found is None:
         return None, MenuNote()

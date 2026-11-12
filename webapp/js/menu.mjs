@@ -5,6 +5,7 @@
 // caret, the status line's clock, and when to ask for the lanes to be measured.
 
 import { pickFile } from "./files.mjs";
+import { drawGraph } from "./stagegraph.mjs";
 
 const SURVEY_MS = 250;   // the setup has settled once nothing moved for this long
 
@@ -556,14 +557,26 @@ export class SetupMenu {
     }
   }
 
-  /** The Tutorial list (`setupmenu.tutorial_view`): the gauntlet's stages in
-   * order with their progress, its runs, and Leave, Copy link and Close. */
+  /** The Tutorial list (`setupmenu.tutorial_view`): the gauntlet's stages as
+   * a graph (`stagegraph.mjs`), the selected stage's strip, its runs, and Leave,
+   * Copy link and Close. A tap selects a stage and a second tap plays it, both
+   * decided in Python; what stays here is the graph box's scroll and focus,
+   * kept across the redraw every reply makes. */
   drawTutorial(t) {
     const tone = { warn: "go", hl: "blue", dim: "plain" };
-    const rows = t.stages.map((s) => h("button", {
-      type: "button", class: `trow${s.here ? " here" : ""}`, disabled: !s.open,
-      onclick: s.open ? () => this.press(s.key) : null,
-    }, h("span", { class: "ttitle" }, s.title), h("span", { class: "tstatus", style: `color:${s.color}` }, s.status)));
+    const old = this.modalEl.querySelector(".tgraph");
+    const scroll = old ? [old.scrollLeft, old.scrollTop] : null;
+    const focused = document.activeElement?.closest?.(".tgraph") ? document.activeElement.dataset.key : null;
+    const box = h("div", { class: "tgraph" });
+    const pick = t.pick;
+    const strip = pick ? h("div", { class: "tpick" },
+      h("p", { class: "tptitle" }, pick.title),
+      ...pick.lines.map((l) => h("p", { class: "tpline", style: `color:${l.color}` }, l.text)),
+      h("div", { class: "mbuttons" },
+        h("button", { type: "button", class: "mbtn start", disabled: !pick.play.enabled,
+                      onclick: () => this.press(pick.play.key) }, pick.play.label),
+        pick.edit ? h("button", { type: "button", class: "mbtn blue",
+                                  onclick: () => this.press(pick.edit.key) }, pick.edit.label) : null)) : null;
     const run = t.run ? [h("p", { class: "tnote" }, t.run.text),
       h("div", { class: "mbuttons" }, ...t.run.buttons.map((b) => h("button", {
         type: "button", class: `mbtn ${b.warn ? "go" : "start-edge"}`, onclick: () => this.press(b.key) }, b.label)))] : [];
@@ -572,12 +585,22 @@ export class SetupMenu {
       h("p", { class: "mtitle" }, t.heading),
       t.picker ? h("div", { class: "prow" }, h("span", { class: "plabel" }, t.picker.name),
         this.control({ kind: "stepper", key: "gauntlet_pick", value: t.picker.at })) : null,
-      h("div", { class: "trows" }, ...rows),
+      box,
+      strip,
       ...run,
       t.note ? h("p", { class: "tnote" }, t.note) : null,
       t.said ? h("p", { class: `tnote ${t.said.ok ? "ok" : "err"}` }, t.said.text) : null,
       h("div", { class: "mbuttons tbuttons" }, ...t.buttons.map((b) => h("button", {
         type: "button", class: `mbtn ${tone[b.tone]}`, onclick: () => this.press(b.key) }, b.label)))));
+    const graph = drawGraph(box, t.graph, { onPress: (key) => this.press(key), label: "The gauntlet's stages" });
+    const focus = t.graph.focus;
+    if (scroll) [box.scrollLeft, box.scrollTop] = scroll;
+    if (focus) {
+      // Opening shows the selected stage in the middle; afterwards only enough
+      // to keep it in view, so a scroll by hand isn't undone by the next reply.
+      graph.show(focus, scroll ? { block: "nearest", inline: "nearest" } : { block: "nearest", inline: "center" });
+      if (focused) graph.node(focus)?.focus({ preventScroll: true });
+    }
   }
 
   async resume(accept) {
@@ -593,7 +616,8 @@ export class SetupMenu {
       e.preventDefault();
       return;
     }
-    if (!["Enter", " ", "Escape", "y", "Y", "n", "N"].includes(e.key)) return;
+    const arrow = e.key.startsWith("Arrow") && Boolean(this.last?.menu?.tutorial);   // the gauntlet list's selection
+    if (!arrow && !["Enter", " ", "Escape", "y", "Y", "n", "N"].includes(e.key)) return;
     if ((e.key === " " || e.key === "Enter") && e.target instanceof HTMLButtonElement) return;   // its own press
     e.preventDefault();
     const res = await this.send("menu.key", { name: e.key });

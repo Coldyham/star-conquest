@@ -279,7 +279,7 @@ the five probes was played on each, with budgets lifted and a 400-turn limit
   different maps from the same date. Storing the setup once makes it the
   record, as the campaign stores its week's graph.
 - **actuary is an allowed opponent, and it is time-budgeted.** The game never
-  lifts budgets (`gauntlet.md`, "In the game"), so a probe game against
+  lifts budgets (`gauntlet-gen.md`, "In the game"), so a probe game against
   actuary can come out differently on a phone and a desktop. The worker lifts
   them (`ai.set_budget_scale`), as `tools/gauntlet_gen.py` does.
 - **Cost.** Up to 32 candidates times five probes, some with evolved or actuary in

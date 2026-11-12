@@ -18,7 +18,8 @@
 // one is a new row. 19 + 1 + 12 = 32, gauntlet.py's NAME_MAX, so the id
 // survives the game's own clamp of a gauntlet's `id` intact.
 
-import { bestBot } from "./standings.mjs";
+import { graphOf } from "./gauntlet-graph.mjs";
+import { compareScores } from "./standings.mjs";
 
 export const LIMITS = Object.freeze({
   name: 32,
@@ -90,15 +91,17 @@ export function setupProblem(settings) {
 // -- stage targets ------------------------------------------------------------
 // A score a stage must be won within before the stages beyond it open
 // (docs/design/gauntlet.md, "Stage targets"; the game's `gauntlet.Target`):
-// `{turns, lost?, bot?, beat?}`. An author's own score is met; a bot's, copied
-// off the board's bot column when the gauntlet is saved, is beaten (`beat`).
+// `{turns, lost?, bot?, beat?}`. A target is met; one marked `beat` (a bot's,
+// as the page wrote "Beat the best bot" before targets were typed in) must be
+// beaten, and the page keeps it so until its numbers are edited.
 // Fixed into the file, never looked up live.
 
-const TARGET_KEYS = new Set(["turns", "lost", "bot", "beat"]);
+const TARGET_KEYS = ["turns", "lost", "bot", "beat"];
+const TARGET_KEY_SET = new Set(TARGET_KEYS);
 
 /** A stage's target as stored, or a string saying what is wrong with it. */
 export function checkTarget(raw) {
-  if (!isObject(raw) || Object.keys(raw).some((k) => !TARGET_KEYS.has(k))) {
+  if (!isObject(raw) || Object.keys(raw).some((k) => !TARGET_KEY_SET.has(k))) {
     return "has a target that is not turns, lost, bot and beat";
   }
   if (!isInt(raw.turns) || raw.turns < 1) return "has a target with no turns";
@@ -121,15 +124,57 @@ export function linkTarget(challenge) {
 }
 
 /**
- * The best bot's win on a setup as a target to beat, from that setup's
- * `bot_scores` rows: `{target}`, or `{none}` saying why there is none ("no-rows":
- * the setup has no bot column yet; "no-win": no bot won it, so any win clears).
+ * The bots' wins on a setup, from its `bot_scores` rows, as targets to fill in:
+ * `{fastest, slowest, wins}`, each target `{turns, lost, bot}` with `bot` only
+ * for naming the button. A bot's own best win stands for it, so `slowest` is
+ * the slowest of those, and is null unless two or more bots won. `wins` counts
+ * the bots that did; with none, both are null.
  */
-export function botTarget(rows) {
-  if (!rows?.length) return { none: "no-rows" };
-  const best = bestBot(rows);
-  if (!best) return { none: "no-win" };
-  return { target: { turns: best.turns, lost: best.lost, bot: tidy(best.bot).slice(0, LIMITS.bot), beat: true } };
+export function botWins(rows) {
+  const best = new Map();
+  for (const row of rows || []) {
+    if (!row?.won || !isInt(row.turns)) continue;
+    const name = tidy(row.bot);
+    if (!best.has(name) || compareScores(row, best.get(name)) < 0) best.set(name, row);
+  }
+  const won = [...best.values()].sort(compareScores);
+  const as = (row) => ({ turns: row.turns, ...(isInt(row.lost) ? { lost: row.lost } : {}),
+                         bot: tidy(row.bot).slice(0, LIMITS.bot) });
+  return {
+    fastest: won.length ? as(won[0]) : null,
+    slowest: won.length > 1 ? as(won.at(-1)) : null,
+    wins: won.length,
+  };
+}
+
+/**
+ * Does a won game's score `{turns, lost}` meet `target`, as the game's
+ * `Target.met` decides: turns first, ships lost breaking a tie when the target
+ * names them, and strictly better when it says `beat`.
+ */
+export function meetsTarget(score, target) {
+  if (!score || !target || !isInt(score.turns)) return false;
+  const named = isInt(target.lost);
+  const mine = named ? [score.turns, isInt(score.lost) ? score.lost : Infinity] : [score.turns];
+  const want = named ? [target.turns, target.lost] : [target.turns];
+  const order = mine[0] - want[0] || (named ? mine[1] - want[1] : 0);
+  return target.beat ? order < 0 : order <= 0;
+}
+
+/**
+ * The best posted score on a setup as a target to fill in, from its
+ * `game_summary` rows (one per game key it is filed under): `{turns, lost, by}`,
+ * `by` the holder's name for the button, or null when no posted score counts.
+ * `game_summary`'s best is the counted record, shown even while a map is
+ * embargoed, as the map page shows it.
+ */
+export function postedBest(rows) {
+  const best = (rows || [])
+    .filter((row) => isInt(row?.best_turns))
+    .map((row) => ({ turns: row.best_turns, lost: isInt(row.best_lost) ? row.best_lost : 0,
+                     by: tidy(row.best_user_name || row.best_by_name) }))
+    .sort(compareScores)[0];
+  return best || null;
 }
 
 /** "14 turns", "14 turns / 30 lost": as the game's `Target.score_text`. */
@@ -145,12 +190,17 @@ export function targetText(target) {
 
 /**
  * The gauntlet the page's form describes: `{name, stages: [{title, briefing,
- * hint, settings, target?}]}` in play order. Stages are numbered from 0 in that order,
- * and a linear gauntlet needs no `lanes` or `start` (the game joins stages in
- * list order and opens the first).
+ * hint, settings, target?}], lanes?, start?}`. Stages are numbered from 0 in
+ * list order, and the draft's lanes and starts, which join stages by `key`,
+ * are written by those numbers. `lanes` and `start` are written only when they
+ * differ from what the game assumes without them (each stage joined to the next
+ * in list order, the first open), so a linear gauntlet builds exactly the body
+ * it built before the page drew lanes, and keeps its id. A draft with no
+ * `lanes` at all (one kept before lanes) is that linear gauntlet.
  */
 export function buildBody(draft) {
-  const stages = (draft?.stages || []).map((stage, i) => ({
+  const list = draft?.stages || [];
+  const stages = list.map((stage, i) => ({
     id: i,
     title: tidy(stage.title),
     briefing: (stage.briefing || []).map(tidy).filter(Boolean),
@@ -158,7 +208,41 @@ export function buildBody(draft) {
     settings: stageSetup(stage.settings),
     ...(stage.target ? { target: stage.target } : {}),
   }));
-  return { name: tidy(draft?.name), stages };
+  const body = { name: tidy(draft?.name), stages };
+  if (!Array.isArray(draft?.lanes)) return body;
+  const id = new Map(list.map((stage, i) => [stage.key, i]));
+  const joined = new Set();
+  const lanes = draft.lanes
+    .filter((lane) => id.has(lane.from) && id.has(lane.to) && lane.from !== lane.to)
+    .map((lane) => {
+      const how = laneHow(lane);
+      const pair = [id.get(lane.from), id.get(lane.to)];
+      return Object.keys(how).length ? [...pair, how] : pair;
+    })
+    .sort((x, y) => x[0] - y[0] || x[1] - y[1])
+    .filter(([a, b]) => {
+      if (joined.has(`${a},${b}`) || joined.has(`${b},${a}`)) return false;
+      joined.add(`${a},${b}`);
+      return true;
+    });
+  const opened = Array.isArray(draft.start) ? draft.start : [list[0]?.key];
+  const start = list.map((stage, i) => (opened.includes(stage.key) ? i : -1)).filter((i) => i >= 0);
+  const linear = lanes.length === Math.max(0, stages.length - 1)
+    && lanes.every((pair, i) => pair.length === 2 && pair[0] === i && pair[1] === i + 1);
+  if (!linear) body.lanes = lanes;
+  if (start.length !== 1 || start[0] !== 0) body.start = start;
+  return body;
+}
+
+/** A draft lane's third element: its target, hidden (only with one), two-way. */
+function laneHow(lane) {
+  const how = {};
+  if (isObject(lane.target)) {
+    for (const k of TARGET_KEYS) if (lane.target[k] !== undefined) how[k] = lane.target[k];
+    if (lane.hidden) how.hidden = true;
+  }
+  if (lane.two_way) how.two_way = true;
+  return how;
 }
 
 /**
@@ -244,7 +328,7 @@ function checkLane(how) {
   }
   if (how.two_way !== undefined && typeof how.two_way !== "boolean") return "a lane's two_way is not true or false";
   if (how.hidden !== undefined && typeof how.hidden !== "boolean") return "a lane's hidden is not true or false";
-  const gate = Object.fromEntries(Object.entries(how).filter(([k]) => TARGET_KEYS.has(k)));
+  const gate = Object.fromEntries(Object.entries(how).filter(([k]) => TARGET_KEY_SET.has(k)));
   let out = {};
   if (Object.keys(gate).length) {
     const target = checkTarget(gate);
@@ -257,22 +341,6 @@ function checkLane(how) {
   }
   if (how.two_way) out.two_way = true;
   return out;
-}
-
-/**
- * Does a stored body branch: lanes or a start other than what the game assumes
- * without them (each stage joined to the next in list order, the first open),
- * or a lane with a target or two-way? The page edits order only until it draws
- * lanes, so saving one of these would make it linear.
- */
-export function branches(body) {
-  const stages = Array.isArray(body?.stages) ? body.stages : [];
-  const ids = stages.map((s) => s?.id);
-  if (Array.isArray(body?.start) && (body.start.length !== 1 || body.start[0] !== ids[0])) return true;
-  if (!Array.isArray(body?.lanes)) return false;
-  if (body.lanes.length !== Math.max(0, ids.length - 1)) return true;
-  return body.lanes.some((pair, i) => !Array.isArray(pair) || pair[0] !== ids[i] || pair[1] !== ids[i + 1]
-                                       || (pair.length > 2 && isObject(pair[2]) && Object.values(pair[2]).some((v) => v !== false)));
 }
 
 /**
@@ -368,10 +436,21 @@ export function fileName(body, gauntletId) {
 // typed, each stage carrying the link it was pasted from beside the setup that
 // link decoded to. `buildBody` turns it into a gauntlet; `draftFromBody` turns a
 // stored gauntlet back into one, for "open, edit, save" (which saves a new id).
+//
+// Lanes join stages by a `key` each stage gets when it is made (from the
+// draft's `next_key` counter), never by place, so reordering and removing never
+// rewire a lane: `lanes` is `[{from, to, two_way, target, hidden}]` by key
+// and `start` a list of keys. A stage's or lane's target is whatever numbers
+// were typed or filled in; an older draft's `aim` beside it is ignored.
 
 /** A stage with nothing in it yet. */
-export function emptyStage() {
-  return { link: "", settings: null, title: "", briefing: [""], hint: "", aim: "none", target: null };
+export function emptyStage(key = 0) {
+  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", target: null };
+}
+
+/** A lane with no options: any clear of `from` opens `to`. */
+export function emptyLane(from, to) {
+  return { from, to, two_way: false, target: null, hidden: false };
 }
 
 /** A stored or kept target that checks out, or null. */
@@ -380,48 +459,84 @@ function keptTarget(raw) {
   return typeof target === "string" ? null : target;
 }
 
-/** How a draft stage's target was chosen: none, the link's score, the best bot. */
-export const AIMS = Object.freeze(["none", "link", "bot"]);
 
-/** A draft with one empty stage. */
+/** A draft with one empty stage, open from the start. */
 export function emptyDraft() {
-  return { name: "", by_name: "", wants_listing: false, stages: [emptyStage()] };
+  return { name: "", by_name: "", wants_listing: false, stages: [emptyStage(0)], lanes: [], start: [0], next_key: 1 };
+}
+
+/** Each stage joined to the next in list order: a linear gauntlet's lanes. */
+function chainOf(stages) {
+  return stages.slice(1).map((stage, i) => emptyLane(stages[i].key, stage.key));
 }
 
 /**
- * A stored gauntlet as a draft to edit, its stages in play order. Each stage's
- * link is rebuilt from its setup, so it reads like the link it was pasted from.
+ * A stored gauntlet as a draft to edit, its stages in play order with its lanes
+ * and starts. Each stage's link is rebuilt from its setup, so it reads like the
+ * link it was pasted from, but only its setup: the body keeps a target's
+ * numbers, never the challenge link they came from. The graph is read as the
+ * game reads it (`graphOf`).
  *
  * @param linkFor  async (settings) => a game link carrying that setup
  */
 export async function draftFromBody(body, linkFor) {
   const stages = [];
+  const keyOf = new Map();
   for (const stage of body?.stages || []) {
-    if (!isObject(stage) || !isObject(stage.settings)) continue;
+    if (!isObject(stage) || !isObject(stage.settings) || !isInt(stage.id) || keyOf.has(stage.id)) continue;
     const briefing = (stage.briefing || []).filter((p) => typeof p === "string");
     const target = keptTarget(stage.target);
+    keyOf.set(stage.id, stages.length);
     stages.push({
-      aim: target ? (target.beat ? "bot" : "link") : "none",
-      target,
+      key: stages.length,
       link: await linkFor(stage.settings),
       settings: stage.settings,
       title: typeof stage.title === "string" ? stage.title : "",
       briefing: briefing.length ? briefing : [""],
       hint: typeof stage.hint === "string" ? stage.hint : "",
+      target,
     });
   }
+  if (!stages.length) return emptyDraft();
+  const graph = graphOf({ ...body, stages: [...keyOf.keys()].map((id) => ({ id })) });
+  const lanes = graph.lanes.map(([a, b]) => {
+    const pair = `${a},${b}`;
+    const target = keptTarget(graph.gates.get(pair));
+    return {
+      ...emptyLane(keyOf.get(a), keyOf.get(b)),
+      two_way: graph.twoWay.has(pair),
+      target,
+      hidden: Boolean(target) && graph.hidden.has(pair),
+    };
+  });
   return {
     name: typeof body?.name === "string" ? body.name : "",
     by_name: "",
     wants_listing: false,
-    stages: stages.length ? stages : [emptyStage()],
+    stages,
+    lanes,
+    start: graph.start.map((id) => keyOf.get(id)),
+    next_key: stages.length,
+  };
+}
+
+function readLane(raw, have) {
+  if (!isObject(raw) || !have.has(raw.from) || !have.has(raw.to) || raw.from === raw.to) return null;
+  const target = keptTarget(raw.target);
+  return {
+    from: raw.from,
+    to: raw.to,
+    two_way: raw.two_way === true,
+    target,
+    hidden: Boolean(target) && raw.hidden === true,
   };
 }
 
 /**
  * A draft read back from storage, or null. Tolerant: whatever is missing or of
  * the wrong type comes back empty, so an old or hand-edited draft never breaks
- * the page.
+ * the page. A draft kept before lanes (or with keys that don't hold) comes back
+ * linear: its stages keyed in order, each joined to the next, the first open.
  */
 export function readDraft(text) {
   let data;
@@ -432,31 +547,50 @@ export function readDraft(text) {
   }
   if (!isObject(data) || !Array.isArray(data.stages)) return null;
   const str = (v) => (typeof v === "string" ? v : "");
-  const stages = data.stages.filter(isObject).slice(0, LIMITS.stages).map((s) => {
+  const raw = data.stages.filter(isObject).slice(0, LIMITS.stages);
+  const keys = raw.map((s) => s.key);
+  const keyed = raw.length > 0 && keys.every((k) => isInt(k) && k >= 0) && new Set(keys).size === keys.length;
+  const stages = raw.map((s, i) => {
     const target = keptTarget(s.target);
     return {
+      key: keyed ? s.key : i,
       link: str(s.link),
       settings: isObject(s.settings) ? s.settings : null,
       title: str(s.title),
       briefing: Array.isArray(s.briefing) && s.briefing.length
         ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
       hint: str(s.hint),
-      aim: target && AIMS.includes(s.aim) ? s.aim : "none",
       target,
     };
   });
+  if (!stages.length) stages.push(emptyStage(0));
+  const have = new Set(stages.map((s) => s.key));
+  let lanes = chainOf(stages);
+  let start = [stages[0].key];
+  if (keyed && Array.isArray(data.lanes)) {
+    const joined = new Set();
+    lanes = data.lanes.map((lane) => readLane(lane, have)).filter((lane) => {
+      if (!lane || joined.has(`${lane.from},${lane.to}`) || joined.has(`${lane.to},${lane.from}`)) return false;
+      joined.add(`${lane.from},${lane.to}`);
+      return true;
+    });
+  }
+  if (keyed && Array.isArray(data.start)) start = [...new Set(data.start.filter((k) => have.has(k)))];
   return {
     name: str(data.name),
     by_name: str(data.by_name),
     wants_listing: data.wants_listing === true,
-    stages: stages.length ? stages : [emptyStage()],
+    stages,
+    lanes,
+    start,
+    next_key: Math.max(isInt(data.next_key) ? data.next_key : 0, ...stages.map((s) => s.key + 1)),
   };
 }
 
 /**
  * The first thing stopping a draft from being saved, or "" when it can be:
  * a stage with no link, or one whose link did not decode, is named before the
- * body's own checks run.
+ * body's own checks run, then a draft with no stage open from the start.
  */
 export function draftProblem(draft) {
   for (const [i, stage] of (draft?.stages || []).entries()) {
@@ -465,10 +599,110 @@ export function draftProblem(draft) {
                                : `stage ${i + 1} needs a game link`;
     }
   }
+  if (Array.isArray(draft?.start) && !draft.stages.some((s) => draft.start.includes(s.key))) {
+    return "tick at least one stage as open from the start";
+  }
   const body = checkBody(buildBody(draft));
   if (typeof body === "string") return body;
   if (checkByName(draft.by_name) === null) return `your name is over ${LIMITS.byName} characters`;
   return "";
+}
+
+// -- editing the graph ---------------------------------------------------------
+// The page's presses on a draft's lanes and stages. Each changes `draft` in
+// place, as the page's other edits do.
+
+function takeKey(draft) {
+  const used = draft.stages.map((s) => s.key + 1);
+  const key = Math.max(isInt(draft.next_key) ? draft.next_key : 0, ...used);
+  draft.next_key = key + 1;
+  return key;
+}
+
+/**
+ * Add a stage and return it. With `after` (a key) it goes directly below that
+ * stage with a lane from it (+ After); with `beside` it goes below that stage
+ * with a lane from each of its parents, and is open from the start if that
+ * stage is (+ Branch), so it lands in the same column. With neither it goes at
+ * the bottom, joined from the stage that was last (+ Stage): an author who never
+ * touches a lane gets a linear gauntlet.
+ */
+export function addStage(draft, { after = null, beside = null } = {}) {
+  if (!Array.isArray(draft.lanes)) draft.lanes = chainOf(draft.stages);
+  if (!Array.isArray(draft.start)) draft.start = draft.stages.length ? [draft.stages[0].key] : [];
+  const stage = emptyStage(takeKey(draft));
+  const near = after ?? beside;
+  const at = draft.stages.findIndex((s) => s.key === near);
+  if (at >= 0) {
+    draft.stages.splice(at + 1, 0, stage);
+    if (after !== null) {
+      draft.lanes.push(emptyLane(after, stage.key));
+    } else {
+      for (const from of parentsOf(draft, beside)) draft.lanes.push(emptyLane(from, stage.key));
+      if (draft.start.includes(beside)) draft.start.push(stage.key);
+    }
+  } else {
+    const last = draft.stages.at(-1);
+    draft.stages.push(stage);
+    if (last) draft.lanes.push(emptyLane(last.key, stage.key));
+    else draft.start.push(stage.key);
+  }
+  return stage;
+}
+
+/** The stages a lane leads into `key` from, the way each lane runs. */
+export function parentsOf(draft, key) {
+  return (draft.lanes || []).flatMap((lane) => (lane.to === key ? [lane.from]
+                                              : lane.two_way && lane.from === key ? [lane.to] : []));
+}
+
+/** Remove a stage with its lanes and its start mark; nothing is rewired. */
+export function removeStage(draft, key) {
+  draft.stages = draft.stages.filter((s) => s.key !== key);
+  if (Array.isArray(draft.lanes)) draft.lanes = draft.lanes.filter((l) => l.from !== key && l.to !== key);
+  if (Array.isArray(draft.start)) draft.start = draft.start.filter((k) => k !== key);
+}
+
+/** The lane that runs from `a` to `b` (one-way that way, or two-way), or null. */
+export function laneFrom(draft, a, b) {
+  return (draft.lanes || []).find((l) => (l.from === a && l.to === b) || (l.two_way && l.from === b && l.to === a))
+    ?? null;
+}
+
+/** A one-way lane from `b` back to `a`, which `a`'s chip offers to make two-way. */
+export function laneBack(draft, a, b) {
+  return (draft.lanes || []).find((l) => l.from === b && l.to === a && !l.two_way) ?? null;
+}
+
+/**
+ * Join `a` to `b` and return the lane. A pair already joined the other way is
+ * made two-way rather than given a second lane, since the game keeps a pair's
+ * first lane and drops the second.
+ */
+export function joinLane(draft, a, b) {
+  const there = laneFrom(draft, a, b);
+  if (there) return there;
+  const back = laneBack(draft, a, b);
+  if (back) {
+    back.two_way = true;
+    return back;
+  }
+  const lane = emptyLane(a, b);
+  draft.lanes.push(lane);
+  return lane;
+}
+
+/** Remove a lane. */
+export function dropLane(draft, lane) {
+  draft.lanes = draft.lanes.filter((l) => l !== lane);
+}
+
+/** Tick or untick a stage as open from the start, keeping list order. */
+export function setStart(draft, key, on) {
+  const opened = new Set(draft.start || []);
+  if (on) opened.add(key);
+  else opened.delete(key);
+  draft.start = draft.stages.map((s) => s.key).filter((k) => opened.has(k));
 }
 
 /** Move the stage at `from` by `step` places; out of range is a no-op. */

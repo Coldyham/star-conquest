@@ -18,9 +18,9 @@ ships or is dropped, delete its line here (and add it to
 - html-frontend.md · Startup on a real phone over a real network, which the spike and the cutover could not measure; retiring `tools/parity_next.py`/`parity_sheet.py` once the pygame baseline is no longer needed; aborting a long bot turn (terminate the worker, rebuild from the log); actuary's wall-clock look budget making its strength depend on the device. *The cutover (phase 8)*, *The Pyodide spike (phase 0)*.
 - leaderboard.md · Watch links on an owner's own scores while their map is embargoed: `replay.mjs` asking Auth who calls, as `pbp.mjs` does, and serving that owner's logs past `public_replays`. *Claimed names.*
 - training.md · Drill stages and a tutorial stage each for rusherplus, evolved and knower; choosing the hint's advisor. *Proposed, not built.*
-- gauntlet.md · The roguelite run beyond the linear run built in *Runs*: branching, lane gates, lives and boons (`graphical-gauntlet-maker.md`), and a seeded run graph with stages dealt like the campaign's. *The gauntlet: proposed, not built.*
+- gauntlet.md · The roguelite run beyond the run built in *Runs* (forks and lane gates built 2026-11-12): lives and boons (`graphical-gauntlet-maker.md`), and a seeded run graph with stages dealt like the campaign's. *The gauntlet: proposed, not built.*
 - shell.md · The phone's setup menu at device resolution, if the panel's height can be had without a pixel scan; the idle side panel's how-to cut off on a landscape phone; the same send-finishes-its-source rule on desktop. *Phones: the compact layout.*
-- gauntlet.md · Lanes are built (*Targets on lanes*) but authored by hand only: the board page edits order and warns on a branching gauntlet, and the menu lists stages rather than drawing the graph (Phases 2-3 of `graphical-gauntlet-maker.md`); the generated-gauntlet web build is untimed on a phone. *Targets on lanes*, *In the game.*
+- gauntlet-gen.md · The generated-gauntlet web build is untimed on a phone. *In the game.*
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
 - daily.md · Stars on a puzzle once its day ends: tiers from par frozen in `puzzle_stars`, the par public after the day, a star column on the past day's standings; daily boards wait for the bot-tier check on daily maps alone. *Stars after the day.*
@@ -39,6 +39,7 @@ ships or is dropped, delete its line here (and add it to
 
 ## Bot research
 - ladder.md · The slow cell (24 nodes, 3 ly/turn) predates actuary; `tests.sim` has no ship-speed flag to re-run it. *Re-running it.*
+- council.md · The bounce: a bait lost when a later turn sends its cover elsewhere (10 of 114); checking the bite more than one turn ahead; a version for Search. *The bounce*, *What is left.*
 - knower.md · Bait openings at Search (a wall between two rivals emptied): a lean on screening seeds; confirm on fresh seeds and read at Council. *Baiting in a free-for-all.*
 - knower.md · Not built: the remnant strike, and a person's launch folded in as uncertain. *Pile-ups under the garrison-fights-last rule.*
 - council.md · Closing the middle-game gap to people on the posted maps. *Against the posted maps and the people who posted them.*

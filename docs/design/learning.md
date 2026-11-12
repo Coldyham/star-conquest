@@ -711,6 +711,29 @@ nothing in a game. The person's multiplier at the end of a game ranges from
 0.91 to 1.49 (quartiles, median 1.15): the same person is a different striker
 from game to game, which is a case for in-game learning over a stored profile.
 
+**The author's account, and the shares.** Playing them, actuary is slippery
+and marshal relentless: retreat from marshal and it beats you all the way back
+without leaving an opening; against actuary you can feel you are winning and
+it still has more ships, and cannot be pinned down or drawn into an uneven
+fight. The replays bear that out. Median share of players' income and of
+players' ships, the actuary seat against the person, at the half of the game:
+
+                      income              ships
+    Field (41)        0.32 vs 0.50        0.42 vs 0.43
+    Learning (30)     0.28 vs 0.48        0.29 vs 0.44
+
+The Field seats (mostly two-seat games on small maps) are far behind on income
+and level on ships at the half; in 10 of 41 games they trail on income and not
+on ships. Learning's three-seat games are behind on both, but its ship share
+never drops below its income share, where the person's does. That is the
+ledger doing what it was built for: it does not lose ships in fights it would
+lose, so it evacuates and gives up the system (the empties the person takes,
+above). The person wins the territory and its income, and the ships follow
+later. So actuary's weakness against the person is not the risk term, which
+already refuses uneven fights; it is the price of the systems it gives up
+(arm 4 below). marshal's feel is its guard and its counter-punch the turn
+after a garrison leaves ([`marshal.md`](marshal.md)).
+
 **Caveats.**
 - Every posted game is a win for the person, and all but a handful are the
   author's ([`learner.md`](learner.md), "Predicting people").
@@ -760,3 +783,41 @@ with `tools/learning_humans.py`, which costs nothing.
    stand-in person for self-play is worth building only if it first beats
    "the person holds" on `learner_check.py --logs public`'s Brier, as a
    `GUESSES` entry; knower's blind plan, marshal and actuary all failed that.
+
+### Arm 4, built and measured: a convex income (2026-11-10, deleted)
+
+The author's reading of arm 4: a few high-production systems, such as homes set
+to 1 or 2 turns a ship, can pay off over the long run more than a small front
+line or a contiguous territory. So a rich system should be worth more than its
+share of the board's income. The arm scaled each system's income by
+(income / the board's mean income) to the power `RICH_EXP`, in the one place the
+ledger reads income, so the worth of a held system, the risk stake, the field's
+stake and the price of a capture all moved together. 0.5, 1 and 2 were tried.
+
+Paired against stock Learning on the same (cell, seed, seating), each arm
+duelled against stock marshal, seeds 20000-20199 (200 seeds, both seatings, 1,000
+games an arm in each of five cells; 8,000 in all): 18 and 24 systems at 6
+ly/turn, 18 at 6 ly/turn with `home_production` 1 and with 2, and 24 at 12
+ly/turn with `home_production` 1. Win rate against marshal, pooled, and the
+paired z against stock:
+
+    arm            win rate     paired vs stock
+    stock          68.8%
+    RICH_EXP 0.5   65.8%        -3.0 pt   z -2.83
+    RICH_EXP 1.0   65.6%        -3.3 pt   z -2.72
+    RICH_EXP 2.0   57.9%        -10.9 pt  z -8.09
+
+**It is worse, and the harder it bites the worse.** Both rich-home cells read
+the same as the rest: at `home_production` 1 the arm is level at 1.0 (z +0.40)
+and worse at 2.0 (z -2.48), at 2 it is worse at 0.5 and 1.0 (z -3.27, -2.80).
+Where homes are rich, stock Learning already beats marshal by as much as
+anywhere (+12 to +24 points on seed pairs), so it is not undervaluing them
+through the income term. The flag is removed.
+
+**Not measured, so not ruled out:** only convexity in the value was tried, and
+against marshal alone (it fell monotonically, so the other opponents were not
+run). Two other ways to hold what is rich were not built: a garrison floor or
+risk multiplier on a system whose income is far above the board's mean, and a
+pull that sends ships to a rich system rather than to a contested one. Maps
+here are generated, so the cells vary only the home systems; a hand-drawn map
+with a rich interior is not covered.

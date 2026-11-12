@@ -133,8 +133,8 @@ def test_the_opening_and_local_stages_run_once_and_resume(tmp_path):
     setup = _setup_file(tmp_path)
     argv = ["--daily", str(setup), "--width", "6", "--beam-budget", "1", "--start-k", "2", "--max-k", "2",
             "--levels", "coarse", "--proof-budget", "0", "--k-budget", "60", "--max-turns", "40",
-            "--open-depth", "2", "--open-budget", "1", "--open-width", "6", "--refine", "2", "--refine-width", "6",
-            "--refine-budget", "1", "--workers", "1", "--local-seconds", "2", "--results-dir", str(tmp_path / "out")]
+            "--open-depth", "1", "--open-budget", "0.2", "--open-width", "6", "--refine", "2", "--refine-width", "6",
+            "--refine-budget", "0.2", "--workers", "1", "--local-seconds", "1", "--results-dir", str(tmp_path / "out")]
     par_best.main(argv)
     ledger = tmp_path / "out" / "t_k.jsonl"
     first = ledger.read_text()

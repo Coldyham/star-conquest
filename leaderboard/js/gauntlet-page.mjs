@@ -1,5 +1,13 @@
 // The gauntlet builder (gauntlet.html): paste a game link per stage, write its
-// briefing and hint, save, and share the short link that opens it in the game.
+// briefing and hint, join stages by lanes, save, and share the short link that
+// opens it in the game.
+//
+// Each stage card has a row of "Leads to" chips, one per other stage: lit means
+// a lane from this stage to that one, and tapping a lit chip opens the lane's
+// options under the card (two-way, a gate, hidden). A diagram above the cards
+// is drawn from gauntlet-graph.mjs's `layout`, the same function the game's
+// `gauntlet.layout` is, so it is the picture the game will show; it never
+// edits (docs/design/gauntlet.md, "Lanes on the board").
 //
 // The draft lives in localStorage under DRAFT_KEY as the form was typed, so a
 // reload loses nothing; once saved, the stored row is the record and the draft
@@ -8,20 +16,23 @@
 // new id. Everything that decides anything is in gauntlet-build.mjs, which
 // /api/gauntlet runs too; this file is the DOM around it.
 //
-// A stage's target (docs/design/gauntlet.md, "Stage targets") is the pasted
-// challenge link's own score, or the best bot's win on the setup read off
-// `bot_scores`. The bot's is read when picked and again on Save, then fixed into
-// the file: the game never looks it up.
+// A stage's or lane's target (docs/design/gauntlet.md, "Stage targets") is
+// the turns and ships typed in, blank for none. Buttons fill it from the pasted
+// challenge link's score or a bot's win on the setup read off `bot_scores`;
+// either way the numbers are fixed into the file: the game never looks them up.
 
 import { configured, inList, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
-  GAUNTLET_ID, LIMITS, botTarget, branches, buildBody, checkBody, draftFromBody, draftProblem, emptyDraft, emptyStage,
-  fileName, gameLink, linkTarget, moveStage, readDraft, setupProblem, stageSetup, targetScore, targetText,
-  textLength, tidy,
+  GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, checkBody, draftFromBody, draftProblem, dropLane, emptyDraft,
+  fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveStage, parentsOf, readDraft, removeStage,
+  postedBest, setStart, setupProblem, stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
+import { depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
+// The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
+import { drawGraph } from "/play/js/stagegraph.mjs";
 import { inflate } from "./inflate-browser.mjs";
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
@@ -46,9 +57,14 @@ function freshDraft() {
 // it could not be a stage, and the link's score and game key for a target.
 // Rebuilt from the link on load, never stored.
 const readings = new WeakMap();
-// What the stage's target line says, by stage object, until the next choice.
-const aimNotes = new WeakMap();
+// What the board knows of a stage's setup, by stage, for the target's quick
+// fills: a promise of `boardScores`' answer. Dropped when the link changes.
+const botBests = new WeakMap();
 let saved = null;   // {id, body} once saved, until the draft changes again
+let openLane = null;   // the lane whose options show under its near stage's card
+let view = "author";   // the diagram as the author sees it, or as a new player does
+// Past this many stages a card shows only its lit chips, the rest in a select.
+const ALL_CHIPS = 16;
 
 const $ = (id) => document.getElementById(id);
 
@@ -62,6 +78,7 @@ function keep() {
 
 function changed() {
   keep();
+  drawDiagram();
   if (saved) {
     saved = null;
     $("result").hidden = true;
@@ -95,6 +112,7 @@ async function linkFor(settings) {
 /** Read a stage's pasted link into its setup, or say why it can't be one. */
 async function readLink(stage) {
   const text = stage.link.trim();
+  botBests.delete(stage);
   if (!text) {
     stage.settings = null;
     readings.set(stage, null);
@@ -116,54 +134,37 @@ async function readLink(stage) {
 }
 
 /**
- * The setup's `bot_scores` rows. A challenge link carries the game's own key;
- * a Get Link carries none, so the setup is also matched to its `games` row by
- * jsonb equality (contains and is contained by), as `campaign_games` matches.
+ * The setup's `bot_scores` rows and its `game_summary` rows (for the best
+ * posted score). A challenge link carries the game's own key; a Get Link
+ * carries none, so the setup is also matched to its `games` row by jsonb
+ * equality (contains and is contained by), as `campaign_games` matches.
  */
-async function botRows(stage) {
+async function boardRows(stage) {
   const keys = new Set([readings.get(stage)?.gameKey].filter(Boolean));
   const json = encodeURIComponent(JSON.stringify(stage.settings));
   const games = await select(`games?select=game_key&settings_json=cs.${json}&settings_json=cd.${json}`)
     .catch(() => []);
   for (const game of games) keys.add(game.game_key);
-  if (!keys.size) return [];
-  return select(`bot_scores?select=bot,won,turns,lost&game_key=${inList(keys)}`);
+  if (!keys.size) return { bots: [], posted: [] };
+  const [bots, posted] = await Promise.all([
+    select(`bot_scores?select=bot,won,turns,lost&game_key=${inList(keys)}`),
+    select(`game_summary?select=best_turns,best_lost,best_by_name,best_user_name&game_key=${inList(keys)}`)
+      .catch(() => []),
+  ]);
+  return { bots, posted };
 }
 
-/**
- * Set `stage.target` from how it is aimed, and say what that came to. For the
- * best bot this asks the board; an answer that arrives after the stage was
- * aimed elsewhere is dropped.
- */
-async function applyAim(stage) {
-  const reading = readings.get(stage);
-  if (stage.aim === "link") {
-    stage.target = linkTarget(reading?.score);
-    aimNotes.set(stage, stage.target ? `${targetText(stage.target)}: a win at or under your score clears it.`
-                                     : "This link carries no score: paste a Challenge a friend link.");
-    return;
-  }
-  if (stage.aim !== "bot" || !stage.settings) {
-    stage.target = null;
-    aimNotes.set(stage, "");
-    return;
-  }
-  let rows;
-  try {
-    rows = await botRows(stage);
-  } catch {
-    aimNotes.set(stage, stage.target ? `Couldn't ask the board; keeping ${targetText(stage.target)}.`
-                                     : "Couldn't ask the board for its bot scores. Try again.");
-    return;
-  }
-  if (stage.aim !== "bot") return;
-  const found = botTarget(rows);
-  stage.target = found.target || null;
-  aimNotes.set(stage, found.target
-    ? `${targetText(found.target)}. Strictly better clears it. Read again when you save.`
-    : found.none === "no-win"
-      ? "No bot won this setup, so any win clears it."
-      : "No bot scores for this setup yet: post a game on it and they arrive within the hour.");
+const stageAt = (key) => draft.stages.find((s) => s.key === key);
+
+/** A stage's name on a chip or in the diagram: its title, else "Stage N". */
+function nameOf(stage) {
+  return tidy(stage?.title) || `Stage ${draft.stages.indexOf(stage) + 1}`;
+}
+
+/** "≤12", "≤12/30", "beat 31/12": a gate in a tight spot. */
+function shortTarget(target) {
+  const score = Number.isInteger(target.lost) ? `${target.turns}/${target.lost}` : String(target.turns);
+  return target.beat ? `beat ${score}` : `≤${score}`;
 }
 
 /** Stages that are the same setup as an earlier one: they would clear together. */
@@ -216,71 +217,318 @@ function renderSummary(node, stage, duplicate) {
   });
 }
 
+/**
+ * What the board knows of `stage`'s setup, asked once per link: `botWins`'
+ * answer plus `posted`, the best posted score (`postedBest`), or null when the
+ * board couldn't say.
+ */
+function boardScores(stage) {
+  if (!stage?.settings || !configured()) return Promise.resolve(null);
+  if (!botBests.has(stage)) {
+    botBests.set(stage, boardRows(stage)
+      .then(({ bots, posted }) => ({ ...botWins(bots), posted: postedBest(posted) }))
+      .catch(() => null));
+  }
+  return botBests.get(stage);
+}
+
+/** "25/2": a score on a quick-fill button. */
+const scoreText = (t) => (Number.isInteger(t.lost) ? `${t.turns}/${t.lost}` : `${t.turns}`);
+
+/**
+ * A stage's or lane's target: "Win in [turns] turns, losing at most [ships]
+ * ships", always shown, blank turns meaning no target. Buttons under it fill it
+ * from the link's score, the best posted score and the bots' wins on `near`'s
+ * setup (greyed when there is none; best posted and slowest bot only shown when
+ * there is one), and a note says what it comes to, warning, never blocking, when it
+ * is stricter than every score known: no one has shown it can be met.
+ * `onChange` runs after each edit; `show` redraws it from `holder.target`.
+ */
+function targetControl(holder, near, idFor, noneText, onChange) {
+  const turnsId = `${idFor}-turns`;
+  const lostId = `${idFor}-lost`;
+  const turns = el("input", { id: turnsId, type: "number", min: "1", max: "999", placeholder: "any",
+                              "aria-label": "Turns" });
+  const lost = el("input", { id: lostId, type: "number", min: "0", max: "9999", placeholder: "any",
+                             "aria-label": "Ships lost" });
+  const fromLink = el("button", { class: "drop", type: "button" });
+  const posted = el("button", { class: "drop", type: "button" });
+  const fastest = el("button", { class: "drop", type: "button" });
+  const slowest = el("button", { class: "drop", type: "button" });
+  const note = el("p", { class: "stage-summary" });
+  const row = el("div", { class: "target" }, [
+    el("div", { class: "row lane-turns" }, [
+      el("label", { for: turnsId, text: "Win in" }), turns,
+      el("label", { for: lostId, text: "turns, losing at most" }), lost, el("span", { text: "ships" }),
+    ]),
+    el("div", { class: "row target-fills" }, [fromLink, posted, fastest, slowest]),
+    note,
+  ]);
+  let bots;   // boardScores' answer, null when the board couldn't say, undefined while asking
+
+  const known = () => [linkTarget(readings.get(near)?.score), bots?.posted, bots?.fastest, bots?.slowest]
+    .filter(Boolean);
+  const showNote = () => {
+    clear(note);
+    if (!holder.target) {
+      note.append(Number.parseInt(lost.value, 10) >= 0 ? "Give it turns too: blank turns is no target." : noneText);
+      return;
+    }
+    note.append(holder.target.beat
+      ? `${targetText(holder.target)}: strictly better clears it. Editing the numbers makes it an ordinary target.`
+      : targetText(holder.target));
+    const scores = known();
+    if (!scores.length) {
+      note.append(el("span", { class: "warn", text: " · No score on this setup to check it against." }));
+    } else if (!scores.some((score) => meetsTarget(score, holder.target))) {
+      note.append(el("span", { class: "warn",
+        text: " · Stricter than every score above: no one has shown it can be met, so it may be impossible." }));
+    }
+  };
+  const showFills = () => {
+    const link = linkTarget(readings.get(near)?.score);
+    fromLink.textContent = link ? `From link: ${scoreText(link)}` : "From link";
+    fromLink.disabled = !link;
+    fromLink.title = link ? "" : "Paste a Challenge a friend link to use its score";
+    const asking = bots === undefined && near?.settings && configured();
+    fastest.textContent = bots?.fastest ? `Fastest bot: ${scoreText(bots.fastest)} (${bots.fastest.bot})`
+                                        : asking ? "Fastest bot: asking…" : "Fastest bot";
+    fastest.disabled = !bots?.fastest;
+    fastest.title = bots?.fastest || asking ? "" : bots === null ? "Couldn't ask the board for its bot scores"
+      : bots ? "No bot has won this setup" : "No bot scores without a map link and the board";
+    posted.hidden = !bots?.posted;
+    if (bots?.posted) {
+      posted.textContent = `Best posted: ${scoreText(bots.posted)}${bots.posted.by ? ` (${bots.posted.by})` : ""}`;
+    }
+    slowest.hidden = !bots?.slowest;
+    if (bots?.slowest) slowest.textContent = `Slowest bot: ${scoreText(bots.slowest)} (${bots.slowest.bot})`;
+  };
+  const fill = (target) => {
+    holder.target = { turns: target.turns, ...(Number.isInteger(target.lost) ? { lost: target.lost } : {}) };
+    show();
+    onChange();
+  };
+  fromLink.addEventListener("click", () => fill(linkTarget(readings.get(near)?.score)));
+  posted.addEventListener("click", () => bots?.posted && fill(bots.posted));
+  fastest.addEventListener("click", () => bots?.fastest && fill(bots.fastest));
+  slowest.addEventListener("click", () => bots?.slowest && fill(bots.slowest));
+  const readTyped = () => {
+    const n = Number.parseInt(turns.value, 10);
+    const m = Number.parseInt(lost.value, 10);
+    holder.target = n >= 1 ? { turns: n, ...(m >= 0 ? { lost: m } : {}) } : null;
+    showNote();
+    onChange();
+  };
+  turns.addEventListener("input", readTyped);
+  lost.addEventListener("input", readTyped);
+
+  const show = () => {
+    turns.value = holder.target?.turns ?? "";
+    lost.value = Number.isInteger(holder.target?.lost) ? holder.target.lost : "";
+    bots = undefined;
+    showFills();
+    showNote();
+    boardScores(near).then((found) => {
+      bots = found;
+      showFills();
+      showNote();
+    });
+  };
+  show();
+  return { row, show };
+}
+
+/** The options of the lane `lane`, shown under its near stage's card. */
+function renderLane(lane) {
+  const near = stageAt(lane.from);
+  const far = stageAt(lane.to);
+  const idFor = (name) => `lane-${lane.from}-${lane.to}-${name}`;
+  const { row: gate } = targetControl(lane, near, idFor("aim"), `No gate: any clear of ${nameOf(near)} opens it.`,
+    () => {
+      if (!lane.target) lane.hidden = hidden.checked = false;
+      hidden.disabled = !lane.target;
+      changed();
+      showLabel();
+    });
+  const label = el("p", { class: "lane-label" });
+  const showLabel = () => {
+    const body = buildBody(draft);
+    const index = (key) => draft.stages.findIndex((s) => s.key === key);
+    const named = laneLabel(graphOf(body), index(lane.from), index(lane.to));
+    label.textContent = named ? `${named}: ${LABEL_WHY[named]}` : "";
+  };
+
+  const twoWay = el("input", { id: idFor("two-way"), type: "checkbox" });
+  twoWay.checked = lane.two_way;
+  twoWay.addEventListener("change", () => {
+    lane.two_way = twoWay.checked;
+    changed();
+    render(idFor("two-way"));
+  });
+  const hidden = el("input", { id: idFor("hidden"), type: "checkbox" });
+  hidden.checked = lane.hidden;
+  hidden.disabled = !lane.target;
+  hidden.addEventListener("change", () => {
+    lane.hidden = hidden.checked;
+    changed();
+    render(idFor("hidden"));
+  });
+
+  const remove = el("button", { class: "drop", type: "button", text: "Remove lane" });
+  remove.addEventListener("click", () => {
+    dropLane(draft, lane);
+    openLane = null;
+    changed();
+    render(`s${lane.from}-to-${lane.to}`);
+  });
+  const close = el("button", { class: "drop", type: "button", text: "Done" });
+  close.addEventListener("click", () => {
+    openLane = null;
+    render(`s${lane.from}-to-${lane.to}`);
+  });
+  showLabel();
+
+  return el("fieldset", { class: "lane-options" }, [
+    el("legend", { text: `Lane: ${nameOf(near)} ${lane.two_way ? "↔" : "→"} ${nameOf(far)}` }),
+    el("label", { class: "check" }, [twoWay, "Two-way (either end opens the other)"]),
+    el("span", { class: "label", text: "Gate (what opens it)" }), gate,
+    el("label", { class: "check" }, [hidden, "Hidden until met (needs a gate)"]),
+    label,
+    el("div", { class: "row" }, [close, remove]),
+  ]);
+}
+
+// What each derived label means, beside a lane's options.
+const LABEL_WHY = {
+  Bonus: "the stage it opens leads to no stage that ends the gauntlet.",
+  Shortcut: "it skips past stages on the way to the end.",
+  Gated: "it opens on a target, not a plain win.",
+};
+
+/** The "Leads to" chips of `stage`: one per other stage, lit where a lane runs. */
+function renderChips(stage) {
+  const many = draft.stages.length > ALL_CHIPS;
+  const chips = [];
+  const unlit = [];
+  for (const other of draft.stages) {
+    if (other === stage) continue;
+    const lane = laneFrom(draft, stage.key, other.key);
+    const back = !lane && laneBack(draft, stage.key, other.key);
+    if (many && !lane) {
+      unlit.push([other, back]);
+      continue;
+    }
+    const text = lane
+      ? `${nameOf(other)}${lane.two_way ? " ↔" : ""}${lane.target ? ` · ${shortTarget(lane.target)}` : ""}${lane.hidden && lane.target ? " · hidden" : ""}`
+      : back ? `${nameOf(other)}: ↔ make two-way` : nameOf(other);
+    const chip = el("button", {
+      id: `s${stage.key}-to-${other.key}`, type: "button", text,
+      class: `chip${lane ? " lit" : ""}${lane && lane === openLane ? " open" : ""}`,
+      "aria-pressed": String(Boolean(lane)),
+    });
+    chip.addEventListener("click", () => {
+      if (lane) {
+        openLane = openLane === lane ? null : lane;
+      } else {
+        const made = joinLane(draft, stage.key, other.key);
+        openLane = back ? made : openLane;
+        changed();
+      }
+      render(chip.id);
+    });
+    const glow = (on) => () => lightLane(on ? [stage.key, other.key] : null);
+    chip.addEventListener("mouseenter", glow(true));
+    chip.addEventListener("focus", glow(true));
+    chip.addEventListener("mouseleave", glow(false));
+    chip.addEventListener("blur", glow(false));
+    chips.push(chip);
+  }
+  const row = el("div", { class: "chips" }, chips);
+  if (unlit.length) {
+    const pick = el("select", { id: `s${stage.key}-lane-to`, class: "plain", "aria-label": "Add a lane to" }, [
+      el("option", { value: "", text: "+ Lane to…" }),
+      ...unlit.map(([other, back]) => el("option", {
+        value: String(other.key), text: back ? `${nameOf(other)}: ↔ make two-way` : nameOf(other),
+      })),
+    ]);
+    pick.addEventListener("change", () => {
+      const key = Number(pick.value);
+      if (!pick.value) return;
+      joinLane(draft, stage.key, key);
+      changed();
+      render(`s${stage.key}-to-${key}`);
+    });
+    row.append(pick);
+  }
+  if (!chips.length && !unlit.length) row.append(el("span", { class: "hint", text: "Add a stage to join it to." }));
+  return row;
+}
+
+/** "From Stage 1 · from Stage 3 (two-way)": the lanes into a stage, so either end explains one. */
+function fromNote(stage) {
+  const parts = parentsOf(draft, stage.key).map((key) => {
+    const lane = laneFrom(draft, key, stage.key);
+    return `from ${nameOf(stageAt(key))}${lane?.target ? ` (${shortTarget(lane.target)})` : ""}`;
+  });
+  return el("p", { class: "stage-from", text: parts.length ? `Reached ${parts.join(" · ")}` : "" });
+}
+
 function renderStage(stage, i, dupes) {
   const n = draft.stages.length;
-  const id = (name) => `s${i}-${name}`;
+  const id = (name) => `s${stage.key}-${name}`;
   const summary = el("p");
   renderSummary(summary, stage, dupes.has(i));
 
-  const move = (step) => {
+  const move = (step, focus) => {
     draft.stages = moveStage(draft.stages, i, step);
     changed();
-    render();
+    render(focus);
   };
   const tools = el("div", { class: "row stage-tools" }, [
-    el("button", { class: "drop", type: "button", "aria-label": "Move up", text: "↑" }),
-    el("button", { class: "drop", type: "button", "aria-label": "Move down", text: "↓" }),
+    el("button", { id: id("after"), class: "drop", type: "button", text: "+ After",
+                   title: "A new stage below this one, with a lane from this one" }),
+    el("button", { id: id("branch"), class: "drop", type: "button", text: "+ Branch",
+                   title: "A new stage beside this one: the same lanes in, so a fork" }),
+    el("button", { id: id("up"), class: "drop", type: "button", "aria-label": "Move up", text: "↑" }),
+    el("button", { id: id("down"), class: "drop", type: "button", "aria-label": "Move down", text: "↓" }),
     el("button", { class: "drop", type: "button", text: "Remove" }),
   ]);
-  const [up, down, remove] = tools.children;
+  const [after, branch, up, down, remove] = tools.children;
+  after.disabled = branch.disabled = n >= LIMITS.stages;
   up.disabled = i === 0;
   down.disabled = i === n - 1;
   remove.disabled = n === 1;
-  up.addEventListener("click", () => move(-1));
-  down.addEventListener("click", () => move(1));
+  const grow = (how) => () => {
+    const made = addStage(draft, how);
+    changed();
+    render(`s${made.key}-link`);
+  };
+  after.addEventListener("click", grow({ after: stage.key }));
+  branch.addEventListener("click", grow({ beside: stage.key }));
+  up.addEventListener("click", () => move(-1, id("up")));
+  down.addEventListener("click", () => move(1, id("down")));
   remove.addEventListener("click", () => {
-    draft.stages = draft.stages.filter((s) => s !== stage);
+    removeStage(draft, stage.key);
+    if (openLane && !draft.lanes.includes(openLane)) openLane = null;
     changed();
     render();
   });
 
-  const aim = el("select", { id: id("aim"), class: "plain" }, [
-    el("option", { value: "none", text: "None: any win opens the way on" }),
-    el("option", { value: "link", text: "Your score from this link" }),
-    el("option", { value: "bot", text: "Beat the best bot on the board" }),
-  ]);
-  const aimNote = el("p", { class: "stage-summary" });
-  const showAim = () => {
-    const score = readings.get(stage)?.score;
-    aim.options[1].text = score ? `Your score from this link: ${targetScore(linkTarget(score))}`
-                                : "Your score from this link (paste a Challenge a friend link)";
-    aim.options[1].disabled = !score && stage.aim !== "link";
-    aim.options[2].disabled = !configured() && stage.aim !== "bot";
-    aim.value = stage.aim;
-    aimNote.textContent = aimNotes.get(stage) ?? (stage.target ? targetText(stage.target) : "");
-  };
-  showAim();
-  aim.addEventListener("change", async () => {
-    stage.aim = aim.value;
-    aimNotes.set(stage, stage.aim === "bot" ? "Asking the board…" : "");
-    showAim();
-    changed();
-    await applyAim(stage);
-    showAim();
-    changed();
-  });
-
+  const { row: aim, show: showAim } = targetControl(stage, stage, id("aim"),
+                                                    "No target: any win opens the way on.", changed);
   const [link] = textField(id("link"), stage.link, "https://…/play/#eNo…", 0, (v) => { stage.link = v; }, true);
   link.addEventListener("input", async () => {
     await readLink(stage);
     renderSummary(summary, stage, duplicates().has(draft.stages.indexOf(stage)));
-    if (stage.aim !== "none") await applyAim(stage);
     showAim();
     showProblem();
     keep();
+    drawDiagram();
   });
   const [title, titleCount] = textField(id("title"), stage.title, `Stage ${i + 1}`, LIMITS.title,
                                         (v) => { stage.title = v; });
+  // The chips and notes on other cards name this stage: redraw them once it is typed.
+  title.addEventListener("change", () => render());
   const [hint, hintCount] = textField(id("hint"), stage.hint, "One line, shown beside the board",
                                       LIMITS.hint, (v) => { stage.hint = v; });
 
@@ -294,8 +542,7 @@ function renderStage(stage, i, dupes) {
   more.addEventListener("click", () => {
     stage.briefing.push("");
     changed();
-    render();
-    document.getElementById(id(`brief-${stage.briefing.length - 1}`))?.focus();
+    render(id(`brief-${stage.briefing.length - 1}`));
   });
   const fewer = el("button", { class: "drop", type: "button", text: "− Paragraph" });
   fewer.disabled = stage.briefing.length <= 1;
@@ -305,8 +552,17 @@ function renderStage(stage, i, dupes) {
     render();
   });
 
-  return el("fieldset", { class: "stage" }, [
-    el("legend", { text: `Stage ${i + 1}` }),
+  const opens = el("input", { id: id("start"), type: "checkbox" });
+  opens.checked = (draft.start || []).includes(stage.key);
+  opens.addEventListener("change", () => {
+    setStart(draft, stage.key, opens.checked);
+    changed();
+    render(id("start"));
+  });
+  const lane = openLane && openLane.from === stage.key && draft.lanes.includes(openLane) ? openLane : null;
+
+  return el("fieldset", { class: "stage", id: `card-${stage.key}` }, [
+    el("legend", { text: `Stage ${i + 1}${tidy(stage.title) ? `: ${tidy(stage.title)}` : ""}` }),
     tools,
     el("label", { for: id("link"), text: "Map link" }), link, summary,
     el("label", { for: id("title"), text: "Title" }), title, titleCount,
@@ -314,11 +570,99 @@ function renderStage(stage, i, dupes) {
     ...paragraphs,
     el("div", { class: "row" }, [more, fewer]),
     el("label", { for: id("hint"), text: "Hint" }), hint, hintCount,
-    el("label", { for: id("aim"), text: "Target (to open the stages beyond)" }), aim, aimNote,
+    el("span", { class: "label", text: "Target (to open the stages beyond)" }), aim,
+    el("label", { class: "check" }, [opens, "Open from the start"]),
+    el("span", { class: "label", text: "Leads to (tap a lit one for its options)" }),
+    renderChips(stage),
+    lane ? renderLane(lane) : null,
+    fromNote(stage),
   ]);
 }
 
-function render() {
+// -- the diagram ---------------------------------------------------------------
+// Drawn from the body the draft builds, so a stage is placed where the game's
+// `gauntlet.layout` will place it, by the game's own drawer (stagegraph.mjs,
+// the one its gauntlet list uses). Read-only: a click on a stage scrolls to its
+// card, and hovering a chip lights its lane.
+
+let diagram = null;   // what drawGraph answered, to light a lane with
+
+/** The draft as the drawer takes it: stages at their cells, the lanes between. */
+function diagramView() {
+  const graph = graphOf(buildBody(draft));
+  const cells = layout(graph);
+  const player = view === "player";
+  const hiddenOnly = hiddenStages(graph);
+  const unseen = player ? hiddenOnly : new Set();
+  const reached = reachable(graph);
+  const plain = depths(graph);
+  const ends = goals(graph);
+  const keyOf = (sid) => `card-${draft.stages[sid].key}`;
+  const words = { start: "open from the start", goal: "ends the gauntlet", stranded: "no start reaches it",
+                  "off-path": "reached only through a gate", hidden: "hidden until met" };
+  const nodes = graph.ids.filter((sid) => !unseen.has(sid)).map((sid) => {
+    const marks = [];
+    if (graph.start.includes(sid)) marks.push("start");
+    if (ends.has(sid)) marks.push("goal");
+    if (!reached.has(sid)) marks.push("stranded");
+    else if (!plain.has(sid)) marks.push("off-path");
+    if (hiddenOnly.has(sid)) marks.push("hidden");
+    const [col, row] = cells.get(sid);
+    return { key: keyOf(sid), col, row, place: String(sid + 1), title: nameOf(draft.stages[sid]), open: true,
+             marks, tip: [`Stage ${sid + 1}: ${nameOf(draft.stages[sid])}`, ...marks.map((m) => words[m])].join(" · ") };
+  });
+  const lanes = [];
+  for (const [a, b] of graph.lanes) {
+    const pair = `${a},${b}`;
+    if (player && (graph.hidden.has(pair) || unseen.has(a) || unseen.has(b))) continue;
+    const gate = graph.gates.get(pair);
+    // A gated lane that is its far stage's only way in: players reach that stage
+    // only by meeting the target (amber, a warning, not a block).
+    const only = Boolean(gate) && ways(graph).every((w) => w.to !== b || graph.gates.has(w.lane));
+    lanes.push({ from: keyOf(a), to: keyOf(b), gated: Boolean(gate), short: gate ? shortTarget(gate) : "",
+                 hidden: graph.hidden.has(pair), two_way: graph.twoWay.has(pair), warn: only });
+  }
+  const stranded = graph.ids.filter((sid) => !reached.has(sid)).map((sid) => nameOf(draft.stages[sid]));
+  return { nodes, lanes, stranded, columns: Math.max(1, ...[...cells.values()].map(([c]) => c + 1)) };
+}
+
+function drawDiagram() {
+  const box = $("diagram");
+  if (!box) return;
+  const shape = diagramView();
+  diagram = drawGraph(box, shape, {
+    label: `The gauntlet's shape: ${shape.nodes.length} stages in ${shape.columns} columns`,
+    onPress: (key) => {
+      const card = document.getElementById(key);
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      card.classList.remove("flash");
+      void card.offsetWidth;   // restart the animation
+      card.classList.add("flash");
+    },
+  });
+  $("diagram-note").textContent = shape.stranded.length
+    ? `No start reaches ${shape.stranded.join(", ")}: join it from a stage, or tick it as open from the start.`
+    : "";
+}
+
+/** Light the lane between two stage keys (either way), or none. */
+function lightLane(pair) {
+  diagram?.light(pair ? `card-${pair[0]}` : null, pair ? `card-${pair[1]}` : null);
+}
+
+function showView(which) {
+  view = which;
+  for (const w of ["author", "player"]) {
+    const tab = $(`view-${w}`);
+    tab.classList.toggle("lit", w === view);
+    tab.setAttribute("aria-pressed", String(w === view));
+  }
+  drawDiagram();
+}
+
+/** Redraw the form (and the diagram), then put the focus back on `focusId`. */
+function render(focusId = null) {
   const dupes = duplicates();
   clear($("stages")).append(...draft.stages.map((stage, i) => renderStage(stage, i, dupes)));
   $("add-stage").disabled = draft.stages.length >= LIMITS.stages;
@@ -326,7 +670,9 @@ function render() {
   counter($("g-name-count"), draft.name, LIMITS.name);
   $("g-by").value = draft.by_name;
   $("g-listing").checked = draft.wants_listing;
+  drawDiagram();
   showProblem();
+  if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
 }
 
 async function save(event) {
@@ -334,15 +680,6 @@ async function save(event) {
   if (draftProblem(draft)) return;
   $("save").disabled = true;
   say("Saving…");
-  // The best bot is read again now: the column moves, and the file fixes what
-  // it says at the moment of saving.
-  const aimed = draft.stages.filter((stage) => stage.aim === "bot");
-  await Promise.all(aimed.map(applyAim));
-  if (aimed.length) {
-    keep();
-    render();
-    $("save").disabled = true;
-  }
   const gauntlet = buildBody(draft);
   try {
     const response = await fetch(ENDPOINT, {
@@ -429,13 +766,10 @@ async function load() {
       const answer = await response.json();
       if (!response.ok) throw new Error(answer.error || String(response.status));
       draft = await draftFromBody(answer.gauntlet, linkFor);
+      openLane = null;
       history.replaceState(null, "", location.pathname);
       keep();
-      if (branches(answer.gauntlet)) {
-        say(`Opened ${tidy(answer.gauntlet.name)}. This gauntlet branches; saving here would make it linear.`, "error");
-      } else {
-        say(`Opened ${tidy(answer.gauntlet.name)}. Saving your edits makes a new link.`);
-      }
+      say(`Opened ${tidy(answer.gauntlet.name)}. Saving your edits makes a new link.`);
     } catch (err) {
       say(`Couldn't open that gauntlet (${err.message}).`, "error");
     }
@@ -452,6 +786,36 @@ async function load() {
   render();
 }
 
+/**
+ * Open a `.json` gauntlet file as a draft (a desktop file, or a generated
+ * gauntlet the board never saw), read as a stored one is. The author's name
+ * and listing choice stay as they are.
+ */
+async function openFile() {
+  const file = $("open-file").files?.[0];
+  $("open-file").value = "";
+  if (!file) return;
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    say(`${file.name} isn't a gauntlet file (it doesn't read as JSON).`, "error");
+    return;
+  }
+  const opened = await draftFromBody(data, linkFor);
+  if (!opened.stages.some((stage) => stage.settings)) {
+    say(`${file.name} has no stages with a setup.`, "error");
+    return;
+  }
+  if (!confirm("Replace this draft with the file?")) return;
+  draft = { ...opened, by_name: draft.by_name, wants_listing: draft.wants_listing };
+  openLane = null;
+  changed();
+  await Promise.all(draft.stages.map(readLink));
+  render();
+  say(`Opened ${file.name}. Saving it here gives it a link.`);
+}
+
 function main() {
   mountNav();
   for (const w of WAYS) $(`way-${w}-tab`).addEventListener("click", () => showWay(w));
@@ -464,17 +828,19 @@ function main() {
   $("g-by").addEventListener("input", () => { draft.by_name = $("g-by").value; changed(); });
   $("g-listing").addEventListener("change", () => { draft.wants_listing = $("g-listing").checked; changed(); });
   $("add-stage").addEventListener("click", () => {
-    draft.stages.push(emptyStage());
+    const stage = addStage(draft);
     changed();
-    render();
-    document.getElementById(`s${draft.stages.length - 1}-link`)?.focus();
+    render(`s${stage.key}-link`);
   });
+  for (const w of ["author", "player"]) $(`view-${w}`).addEventListener("click", () => showView(w));
+  $("open-file").addEventListener("change", openFile);
   $("form").addEventListener("submit", save);
   $("copy").addEventListener("click", copyLink);
   $("download").addEventListener("click", download);
   $("reset").addEventListener("click", () => {
     if (!confirm("Clear this draft and start over?")) return;
     draft = freshDraft();
+    openLane = null;
     changed();
     render();
   });

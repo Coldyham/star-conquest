@@ -149,17 +149,42 @@
     <p class="lede">
       Get a link per stage from the setup menu's <strong>Get Link</strong> (with
       a fixed seed) or <strong>Challenge a friend</strong> after a game. Paste
-      them here and say what each stage teaches. A stage's target is your score
-      from a <strong>Challenge a friend</strong> link, or the best bot's.
+      them here and say what each stage teaches. A stage's target is the turns
+      (and ships lost) to win within: type it, or fill it from your
+      <strong>Challenge a friend</strong> link's score or a bot's.
     </p>
     <p class="lede">
-      Saving gives you a link that opens the gauntlet in the game's
-      <strong>Gauntlets</strong> list.
+      Each stage leads to the next unless you say otherwise: a stage's
+      <strong>Leads to</strong> chips join it to any other, and a lane can ask
+      for a target, run both ways, or stay hidden until met, for shortcuts and
+      bonus stages. Saving gives you a link that opens the gauntlet in the
+      game's <strong>Gauntlets</strong> list.
     </p>
 
     <form id="form" class="form gauntlet-form" autocomplete="off">
+      <!-- The diagram is drawn by the same layout as the game's graph
+           (gauntlet-graph.mjs, the game's gauntlet.layout). It never edits. -->
+      <section class="diagram-box" aria-label="The gauntlet's shape">
+        <div class="row">
+          <span class="label">Shape</span>
+          <button id="view-author" class="chip lit" type="button" aria-pressed="true">As you see it</button>
+          <button id="view-player" class="chip" type="button" aria-pressed="false">As a new player sees it</button>
+        </div>
+        <div id="diagram" class="diagram"></div>
+        <p class="diagram-key">
+          Starts have a bar on the left; ★ ends the gauntlet. Dashed lanes need
+          a target, dotted ones are hidden until met, and amber is a stage's only
+          way in. Tap a stage to go to its card.
+        </p>
+        <p class="status error" id="diagram-note" role="status" aria-live="polite"></p>
+      </section>
+
       <div id="stages" class="stages"></div>
-      <button id="add-stage" class="mini" type="button">+ Add a stage</button>
+      <div class="row">
+        <button id="add-stage" class="mini" type="button">+ Add a stage</button>
+        <label class="file-open mini" for="open-file">Open a .json file</label>
+        <input id="open-file" type="file" accept=".json,application/json" hidden>
+      </div>
 
       <p class="status error" id="problem" role="status" aria-live="polite"></p>
       <button id="save" type="submit">Save gauntlet</button>

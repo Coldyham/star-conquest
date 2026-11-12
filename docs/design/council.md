@@ -281,6 +281,196 @@ mostly gone. That matches plain Hunt against Field head to head, 50.8%
 of Hunt's lead, and two near-equal candidates mostly trade which of two similar
 lines wins. A lean, not adopted.
 
+## Playing for the soonest win (`FAST_CLOSE`, 2026-11-11)
+
+**What prompted it.** On the daily puzzle Council misses par by a median of 3
+turns over the first 15 days (1.56 times par), and the blind bots by 8-18.
+Against the best human line on each of 14 days both won, split at the 3:1 and
+9:1 income leads ([`win-turns.md`](win-turns.md)), Council took 124 turns to 3:1
+against the person's 113, but 70 from 3:1 to the win against 13. Once ahead it
+stockpiles: on 2026-11-01 its ships climbed from 10 to 48 over 25 turns, where
+the person won in 10 holding about 12. People spend ships to the end. Two causes
+in the search:
+
+- A line that wins scores 1.0 whatever ply it wins on, so a win on ply 2 and one
+  on ply 8 tie, and the tie keeps the default.
+- Once the judge rates every line near 1, the pick is decided by noise, which
+  favours the line holding the most.
+
+Tracing 2026-10-30, 11-01 and 11-03 showed a third: the judge read 0.99 for 18
+turns while the rival kept one system, and no candidate won inside the horizon
+(longest lane + 5, 8 plies there), because none pools ships for one strike on a
+system three turns off; each turn's pick was a different bot's line, so the plays
+added up to no plan.
+
+**What it does** (`models/knower.py`, Council only):
+
+- A won line ranks by the turn it wins on, soonest first.
+- Once the real board shows a 3:1 income lead (`CLOSE_SHARE` 0.75), a line the
+  judge rates at least `CLOSE_AT` (0.95) ranks by the rivals' remaining material,
+  weighed as `_evaluate` weighs it, and never by our own ships.
+- In that state, if no line won inside the horizon, every line rolls on a ply at a
+  time until one wins or `CLOSE_DEEPER` (3) times the horizon is spent, under the
+  same deadline as the rest of the search.
+- In that state too, while `_evaluate` says we are ahead, a closer is offered: it
+  picks the rival system it can take soonest on every roll (`combat.sure_count`
+  against the garrison at landing), routes through our own systems only, and sends
+  whole garrisons a hop whenever their distance equals the strike's; the rest wait.
+  It plays its own line on in the rollouts.
+
+**Measurements** (`tools/puzzle_bench.py` on the 15 stored puzzles and 100 dealt;
+`tools/win_turns.py --quick`; the base is main at 1c6fd7e, run from a worktree):
+
+| | Base | Judge-gated (first build) | 3:1-gated (shipped) |
+| --- | --- | --- | --- |
+| Puzzles: better / worse / same | | 59 / 24 / 32 | **59 / 7 / 49** |
+| Puzzles: mean turns, z | 19.9 | -1.20, -3.2 | **-1.48, -6.5** |
+| Weak bots: beats base, z | | 67.8%, +8.7 | **73.2%, +14.2** |
+| Weak bots: turns | | -6.2% | -4.4% |
+| Weak bots: before 3:1 / after | | +1.3 / -4.6 | **0.0** / -2.2 |
+| marshal, actuary: beats base, z | | | **73.9%, +11.1** |
+| marshal, actuary: wins, turns | | | +0.3 pt, -6.5% |
+
+No puzzle or game won by the base was lost. The judge-gated build, which closed
+whenever the judge read 0.95, played worse before 3:1 because on small boards the
+judge reads that early (2026-10-30: from turn 1). Against marshal and actuary
+ships lost fell in every cell. A game costs about the same (it is shorter); a turn
+costs up to about 1.5 times as much on small boards with the guards lifted.
+
+**What is left.** On puzzles the gap to par is still most of it (about 18.5 turns
+against par near 8-10). The person's 10-turn line on 2026-10-30 took a rival
+system on turn 4, held it while the rival threw fleets at it against the
+defender's advantage, and took the drained home with 4 ships. Lines like that
+(baiting a predictable rival, softening strikes, relays; [`par.md`](par.md),
+"Beyond K launches") are not among Council's candidates.
+
+## Baiting a covered frontier (2026-11-11, built, measured, deleted)
+
+**The idea** (the author's): against most bots a person wins by baiting. Two
+systems closer to each other than to any rival can bounce ships between them and
+break the strikes a rival throws, and on a `core` map the centre reaches the ring
+sooner than anything else, so everything can sit there and reinforce outward.
+heuristic does it by accident, marshal and actuary lower their defend margins
+when relief is in range, and marshal's wedge retreat was worse without an
+oracle. Council's rollouts run each rival's own code, and knower's Phase 1 answers
+a fleet in flight from any neighbour that lands in time, so only the first move
+was missing.
+
+**The arm.** A Council candidate: a system of ours next to a rival, with no
+hostile fleet inbound and nothing the default plan sends it, is coverable if a
+system of ours has a lane to it shorter than any rival's reach. The candidate is
+the default plan with the coverable system's spare garrison moved to its cover:
+the most tempting one emptied (`one`), every one (`all`), or half or a third of
+the most tempting one's (`half`, `third`). Bait lines play on by the default plan.
+
+**What it read** (Council with the fast close, both arms):
+
+- *Offered and picked.* The 15 stored puzzles: a cover in 34 of 196 decides,
+  offered in 21, never picked, in any mode. Six games each of symmetric core,
+  wheel and hub and random 18 at 6 ly/turn against thinker, heuristic and
+  rusherplus: offered in 3-21% of decides, picked in 0-2%.
+- *Offering it.* 115 puzzles: 112 identical, 3 faster (-0.21 turns, z -1.4). 30
+  seeds each of core 13 against thinker and heuristic, wheel 13 against thinker
+  and random 11 against rusherplus: -0.17 to +0.23 turns, nothing significant.
+- *Forcing it* (`half` played whenever offered and its judged value is within
+  0.05 of the best line's): slower in every cell, +4.5 (z +3.7), +1.8 (z +2.4),
+  +4.9 (z +3.2) and +1.6 (z +3.0) turns, no wins changed.
+
+The rollouts were right to turn it down: an empty system draws only the strike
+an empty system needs, and a thinned one loses tempo Council spends better
+pressing. A person's bait pays against bots because it outlasts them over many
+turns; Council already wins those games faster than the bait would. Deleted;
+`tools/puzzle_bench.py --set` and `win_turns.py`'s layout cells
+(`symmetric/core:13:6:2`) stay. The second attempt, "The bounce" below, is what
+shipped.
+
+## The bounce (`BOUNCE`, 2026-11-11, shipped)
+
+**What the posted games show** (`tools/bait_census.py`, 435 public replays on
+the current rules, nearly all the author's). A *thin* is at least half of a
+garrison next to a rival sent to another system of the seat's own; it is *bit* if
+a rival strike launched after it lands there within 8 turns.
+
+| Seat | Thins per 100 turns | Bit | Held | ...with a bounce back |
+| --- | --- | --- | --- | --- |
+| The person | 10.7 | 580 | **343 (59%)** | **207** |
+| actuary | 14.3 | 250 | 26 (10%) | 22 |
+| knower | 13.2 | 145 | 13 (9%) | 10 |
+| heuristic | 3.2 | 171 | 21 | 8 |
+| marshal | 6.9 | 17 | 0 | 0 |
+
+Bots thin as often as the person; what differs is what follows. Per 100 turns the
+person thins 10.7 times, is bit 2.6, holds 1.5 and holds by a bounce 0.9. The
+rival launches a median of one turn after the thin, the strike is 5 ships
+(median), and in 306 of the 343 held baits the person's answer was launched after
+the rival's launch. A bot's thin is ships flowing forward: they are spent by the
+time the strike comes. The person's baits hold 74-81% of the time against thinker,
+rusherplus and heuristic and 50-56% against marshal, actuary and knower.
+
+**Council already answers.** Of the strikes on Council's systems in 192 games
+against six bots, 107 could be held only with ships in reach; it held 97 and sent
+help in 96. The reaction exists; the setup does not.
+
+**What it does.** A Council candidate (`_bounce_plan`). For the three most
+tempting of our systems next to a rival, with no hostile fleet inbound or
+predicted and none the rival strikes anyway with the default plan played:
+
+- the default plan, less whatever it sends that system, plus a share of its spare
+  garrison (all, two thirds, a half, a third) sent to its nearest neighbour of
+  ours;
+- that turn is played forward and every rival's own `decide` is asked what it
+  launches (`_strikes_on`). The bait stands if the strike is 3 ships or more and
+  the garrison at landing, our fleets landing on it, and every ship of ours that
+  can reach it once the strike is launched (the sent ships too, if they can get
+  back) make `combat.hold_count`;
+- of those, the one drawing the largest strike is offered. Its line keeps the bait
+  home and sends in what holds the strike with half as much again to spare
+  (`BOUNCE_PAD`), the farthest first, until it lands (`_bounce_on`).
+
+Council plays it only where its rollout scores best.
+
+**The strict build first.** Only the sent ships counted, they had to make the
+round trip (twice the lane less one, against the strike's flight), and a system
+the default plan fed was skipped. Against thinker, of 1,252 decides: 719 had a
+frontier system, 195 the round-trip geometry, 70 were neither struck nor fed, 53
+had spare ships, the rival bit 18, and 9 held. Over 800 games (five cells, thinker,
+heuristic, rusherplus and evolved, 40 seeds) it was played in 27; those games ran
+2.2 turns shorter (z -2.0). Forced, every verified bounce played (100): the rival
+struck 99, 96 held, 519 strike ships predicted and 514 real, and the games ran
+level (-0.4 turns, z -0.7).
+
+**The shipped build**, same 800 games:
+
+| | Council chooses | Forced |
+| --- | --- | --- |
+| Games with a bounce | 105 | 418 |
+| Bounces played; struck; held | 114; 114; 104 | 667; 662; 565 |
+| Strike ships predicted, real | 831, 831 | 3,914, 3,895 |
+| Turns, those games | **-2.68 (z -4.5)**, 70 faster, 25 slower | +1.29 (z +4.4) |
+| Ships lost, those games | -3.2 | 0.0 |
+
+Every game without a bounce is the base's own. By rival: thinker -3.0 turns,
+evolved -4.2, heuristic -1.4, rusherplus -1.6; symmetric core -2.3. The rollout
+choosing among verified baits is what pays; forcing them loses.
+
+**Against Council with the fast close** (`win_turns.py`, `puzzle_bench.py`):
+
+| Bench | Beats, z | Turns, z | Wins |
+| --- | --- | --- | --- |
+| 115 puzzles | 9 better, 2 worse, 104 same | -0.43 a puzzle, -1.75 | none lost |
+| heuristic, rusherplus, thinker (525 pairs) | 53.7%, +4.1 | -1.6%, -4.2 | none lost |
+| marshal, actuary (350 pairs) | 52.8%, +2.4 | -2.1%, -3.4 | -0.2 pt (one), z -1.0 |
+| Four symmetric layouts at 13, 13:3, 18:18, 24:12, four seats at 18:6, against thinker, rusherplus, evolved and marshal (1,080 pairs) | 53.0%, +4.8 | -0.9%, -4.0 | none lost |
+
+No cell is significantly worse (the worst +1.2%, z +1.0), so it is not gated to
+the weaker rivals. A turn costs the same (0.96 to 1.23 times, within noise).
+
+**What is left.** Council plays a bounce 0.36 times per 100 turns against the
+person's 1.5 held. Ten of the 114 were lost: the hold counts ships that could
+reach, and a later turn's pick sometimes sends them elsewhere. The bite is checked
+one turn ahead; 123 of the person's 343 held baits were bit later than that. It
+needs the rival's `decide`, so it is Council's alone.
+
 ## What it costs
 
 In the browser (CPython on WebAssembly, about 2× native), median per decide:

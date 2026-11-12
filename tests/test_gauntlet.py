@@ -307,6 +307,44 @@ def test_the_board_stores_lanes_the_game_reads():
     assert gauntlet.to_dict(_branching())["lanes"] == fx["stored_lanes"]
 
 
+_LAYOUT = _LANES.with_name("gauntlet-layout.json")
+
+
+@pytest.mark.parametrize("case", json.loads(_LAYOUT.read_text(encoding="utf-8"))["cases"],
+                         ids=lambda c: c["name"])
+def test_layout_is_the_one_the_board_draws(case):
+    """leaderboard/tests/fixtures/gauntlet-layout.json, read by the board's
+    gauntlet-graph.mjs too: where each stage is drawn, and what is derived."""
+    body = {**case["body"], "stages": [{**s, "settings": {}} for s in case["body"]["stages"]]}
+    g = gauntlet.Gauntlet.from_dict(body)
+    assert g is not None
+    assert gauntlet.layout(g) == {int(k): tuple(v) for k, v in case["layout"].items()}
+    assert gauntlet.goals(g) == set(case["goals"])
+    assert g.hidden_stages() == set(case["hidden_stages"])
+    assert {s.id for s in g.stages} - g.reachable() == set(case["unreachable"])
+    assert [[a, b, gauntlet.lane_label(g, a, b)] for a, b, _ in g.ways()] == case["labels"]
+
+
+def test_layout_ignores_list_order_for_gated_only_stages():
+    """A chain of stages reached only by gated lanes lands in the same columns
+    whichever order they are listed in."""
+    def columns(order):
+        g = gauntlet.Gauntlet.from_dict({
+            "stages": [{"id": s, "settings": {}} for s in order],
+            "lanes": [[0, 1], [1, 2, {"turns": 9}], [2, 3, {"turns": 9}]]})
+        return {sid: cell[0] for sid, cell in gauntlet.layout(g).items()}
+    assert columns([0, 1, 2, 3]) == columns([0, 1, 3, 2]) == {0: 0, 1: 1, 2: 2, 3: 3}
+
+
+def test_the_tutorial_lays_out_in_one_row_with_its_bonus_beneath():
+    g = gauntlet.find(gauntlet.builtin(), gauntlet.TUTORIAL_ID)
+    assert g is not None
+    cells = gauntlet.layout(g)
+    assert len(set(cells.values())) == len(g.stages)
+    hidden = g.hidden_stages()
+    assert all(cells[s.id][1] == 0 for s in g.stages if s.id not in hidden)
+
+
 def test_the_canonical_file_reads_back_to_the_same_gauntlet():
     for g in [_branching(), _tutorial(), _targeted({"turns": 9, "lost": 2})]:
         again = gauntlet.Gauntlet.from_dict(json.loads(json.dumps(gauntlet.to_dict(g))))

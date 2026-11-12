@@ -709,6 +709,61 @@ def test_rewinding_past_every_hand_played_turn_un_claims_the_seat():
     assert replay.reconstruct(dropped)[0].human() is None
 
 
+def _watched_council_then_rewound(monkeypatch, tmp_path):
+    """Council in seat 1 plays a few turns as a demo, then history rewinds the
+    match to its opening position (`app.apply_rewind`), as a player does to try
+    a map themselves after watching a bot take it."""
+    from starconquest import app
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    opened = Settings(players=3, nodes=14, seed=5)
+    settings = Settings.from_dict(opened.to_dict())
+    settings.autoplay = True
+    settings.ai_strategy[0] = "knower"
+    settings.ai[0].aux = 3.0
+    state, ui, log = app.start_game(settings, 5, True)
+    for _ in range(3):
+        app.resolve_turn(state, ui, log, settings)
+    state, ui = app.apply_rewind(log, settings, 0)
+    return opened, settings, state, ui, log
+
+
+def test_a_bot_that_never_played_a_turn_is_no_part_of_the_map(monkeypatch, tmp_path):
+    """Watch Council play a campaign node, rewind to the start and win it by hand,
+    and the win must post to the node: the seat's bot never decided a turn of the
+    game that was played, so it is dropped from the setup the moment the first
+    turn is ended by hand (`app.forget_unplayed_bot`), in the log, the live board
+    and the settings the score is posted from."""
+    from starconquest import app
+    opened, settings, state, ui, log = _watched_council_then_rewound(monkeypatch, tmp_path)
+    assert settings.challenge_key() != opened.challenge_key()     # the trap
+    app.resolve_turn(state, ui, log, settings)                     # ended by hand
+    assert settings.challenge_key() == opened.challenge_key()
+    assert log.setup_key() == opened.challenge_key()
+    assert Settings.from_dict(log.settings).challenge_key() == opened.challenge_key()
+    assert state.players[1].ai_strategy == "heuristic" and log.strategies[1] == "heuristic"
+    # The record still rebuilds the board the live game reached.
+    for _ in range(4):
+        app.resolve_turn(state, ui, log, settings)
+    rebuilt, _ = replay.reconstruct(log)
+    assert rebuilt.human() is not None and rebuilt.turn == state.turn
+    assert all(rebuilt.systems[i].owner_id == state.systems[i].owner_id
+               and rebuilt.systems[i].ships == state.systems[i].ships
+               for i in state.systems)
+
+
+def test_a_bot_that_played_a_turn_stays_in_the_setup(monkeypatch, tmp_path):
+    """Taken over after the seat's bot has played: it really played part of the
+    game, so the setup keeps it."""
+    from starconquest import app
+    opened, settings, state, ui, log = _watched_council_then_rewound(monkeypatch, tmp_path)
+    ui.autoplay = True
+    app.resolve_turn(state, ui, log, settings)                     # Council's turn
+    ui.autoplay = False
+    app.resolve_turn(state, ui, log, settings)                     # ...then by hand
+    assert settings.ai_strategy[0] == "knower"
+    assert log.setup_key() == settings.challenge_key() != opened.challenge_key()
+
+
 # --------------------------------------------------------------------------- #
 # Seat strategies: a random seat keeps the bot it was dealt
 # --------------------------------------------------------------------------- #

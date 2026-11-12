@@ -45,7 +45,7 @@ Decisions taken with the user (2026-11-03):
   Save and listing. HTML forms also edit text far better on a phone than a
   pygame sidebar with `softkeyboard`;
 - **a stage's place on the graph is computed, never stored.** There is no `at`
-  field. `layout` places stages by depth and order ("Layout", Phase 2), and the
+  field. `gauntlet.layout` places stages by depth and order (*Lanes on the board* in `gauntlet.md`), and the
   author's only say in the picture is the stages' order within a column;
 - a run is a stored local record alongside bests, so any gauntlet can be played
   freely or as a run;
@@ -199,106 +199,207 @@ Two things Phase 1 did that this plan had left to Phase 2:
 - **`gauntlet.chain` walks ungated lanes only**, so a linear gauntlet with a
   bonus stage can still be run and the bonus is never a run step.
 
-## Phase 2: the graph view replaces the stage list (`menu.py`)
+## Phase 2: the graph view replaces the stage list (re-planned 2026-11-11 for the HTML game)
 
-`_draw_tutorial` / `_handle_tutorial` (menu.py:764-913) become a graph panel in
-the same modal. The heading, gauntlet picker, notes, Leave, Copy link and Close
-all stay.
+**Built 2026-11-11.** The reasons as built are in `docs/design/gauntlet.md`,
+*The graph view*. Where the build differs from what follows:
+- **The strip names a gated way only once it is shown**: a hidden lane says
+  nothing in the strip until met, as on the graph.
+- **`gauntlet.on_board`** decides Edit on the board: the board's id shape and
+  not a generated `gen-<hash>` (which has the same shape). The maker's path is
+  `paths.LEADERBOARD_MAKER_PATH`; `LEADERBOARD_GAUNTLET_PATH` was already the
+  API's.
+- **The columns are `minmax(6rem, max-content)`**, so a column is as wide as its
+  widest title.
+- **`gauntlet.md` was split** first: *Generated gauntlets* is now
+  `gauntlet-gen.md`.
+- Not done: a new parity screen for a branching gauntlet (the tutorial's
+  existing screen covers the drawer), and fading edges on the scrolling box.
 
-### Layout (core `gauntlet.layout`, mirrored by the board)
+The first plan for this phase drew the graph into the pygame `menu.py` with a
+new shell module, `stagegraph.py`, and had to rebuild in pygame what a browser
+gives for free: clipping, a scroll offset in `MenuState`, drag-versus-tap
+thresholds, hit rects for nodes scrolled out of view, scaling down to fit. The
+pygame shell is gone. The list is now `setupmenu.tutorial_view` (the words and
+the presses) drawn by `webapp/js/menu.mjs` `drawTutorial`, and the board's
+diagram (Phase 3) is already an HTML drawing of the same layout. So most of the
+old phase goes away:
 
-Positions are computed from the graph, never stored, so the game and the board
-must agree on them. `gauntlet.layout(g, shown=None)` returns a
-`{stage id: (column, row)}` grid, pure and deterministic:
+- **Scrolling is the browser's.** The graph sits in an `overflow: auto` box. The
+  wheel, touch drag and the scroll bars all come free, and a tap is never
+  mistaken for a scroll. Opening scrolls the chosen node into view
+  (`scrollIntoView`). No offset in `MenuState`, no clipping, no hit rects.
+- **Nodes are real buttons**, so focus, Tab, screen readers and the disabled
+  state of a locked stage come free.
+- **No new drawing code on either side.** One drawer serves the game and the
+  board.
 
-- **Column is depth over ungated lanes** (`depths()`), so the main path reads
-  left to right and a shortcut is a long arrow, not a stage moved forward.
-- **A stage reached only by gated lanes** has no ungated depth. Its column comes
-  from one breadth-first walk over *every* lane, seeded with all the ungated
-  depths at once, each lane adding one column. The stage therefore lands one
-  column past its shallowest placed source, and a chain of them (A gated→X
-  gated→Y) is placed the same way whatever the list order. The mockup's
-  repeated passes in list order are the thing to avoid: they can place such a
-  chain differently depending on which stage comes first in the list.
-- **A stage no start reaches** (a `problems()` blocker) goes in a last column of
-  its own, so the board can draw it red rather than drop it.
-- **Row is the stages' list order within the column**, then one pass of
-  crossing reduction: each column after the first is sorted by the average row
-  of its parents (ties keep list order). One pass, not iterated, so the author's
-  order still decides most of the picture and a small edit never reshuffles it.
-- **Hidden stages are laid out, then left undrawn.** The grid is computed over
-  the whole graph, so revealing a bonus stage moves nothing else. The cost is a
-  gap where it will appear; the board's diagram nudges the author to put such a
-  stage last in its column, so the gap is at the edge.
-- **Two-way lanes count in both directions for depth**, as `Gauntlet.onward()`
-  and `depths()` already walk them (and as the mockup does). They are drawn as a
-  double-headed arrow.
+The layout already exists (`gauntlet.layout` and `gauntlet-graph.mjs`, pinned
+by `leaderboard/tests/fixtures/gauntlet-layout.json`). It landed with Phase 3.
+It takes no `shown` argument: hidden stages are laid out like any other and
+left undrawn, so revealing one moves nothing.
 
-`leaderboard/js/gauntlet-graph.mjs` implements the same function for the board.
-A shared fixture, `tests/fixtures/gauntlet-layout.json` (graphs and their
-expected grids and derived goals and labels: linear, a fork that rejoins, a
-shortcut, a gated bonus, a hidden bonus, a chain of gated-only stages listed
-out of order, an unreachable stage, a two-way lane reached only backwards), is
-read by
-`tests/test_gauntlet.py` and `leaderboard/tests/gauntlet-graph.test.mjs`, so the
-two cannot drift.
+### One drawer, `webapp/js/stagegraph.mjs`
 
-### The view
+- **It lives in the game, and the board imports it** as `/play/js/stagegraph.mjs`
+  (one site). The other way round would break offline play. The service worker
+  serves `/board/` network-first, so a game that imported from the board would
+  lose the module offline, and a kept gauntlet must open offline
+  (`gauntlet.md`, "The game fetches once, then keeps the file").
+- **It decides nothing.** `drawGraph(box, view, {onPress, onHover})` takes a
+  plain view and builds the DOM:
+  - `view.nodes`: `[{key, col, row, title, status, tone, open, here, marks}]`,
+    where `marks` holds any of `start`, `goal`, `run`, `stranded`, `off_path`,
+    `hidden`;
+  - `view.lanes`: `[{from, to, gated, short, hidden, two_way, warn}]`, the ends
+    being node keys.
+  
+  The game builds the view in Python (`setupmenu`); the board builds it in JS
+  from `gauntlet-graph.mjs`, moving the logic out of `gauntlet-page.mjs`
+  `drawDiagram`.
+- **Layout is CSS, as `html-frontend.md` asks**: nothing that holds text gets
+  a fixed pixel size.
+  - The nodes are buttons in a CSS grid (`grid-column: col + 1; grid-row:
+    row + 1`). Columns are `minmax(min-content, 10rem)`, so a long title wraps
+    rather than overflowing.
+  - The lanes are an SVG overlay sized to the grid. Its paths are computed from
+    the buttons' `getBoundingClientRect()` after layout, and redrawn by a
+    `ResizeObserver`.
+  - The path shapes are the board's as built: an S-curve to the next column, an
+    arc over the stages a long lane skips, a dip below for a lane back or within
+    a column, an arrowhead per direction, dashed when gated, dotted when hidden.
+  - The board's fixed-size SVG nodes go. The game and board each style the
+    shared class names in their own theme (`webapp/css/menu.css`,
+    `leaderboard/css/style.css`).
+- **Touch:** buttons are at least `config.TOUCH_MIN_TARGET` tall
+  (`COMPACT_TOUCH_MIN_TARGET` on a phone), as the rows they replace are.
 
-- **Nodes.** Stages are drawn at their `layout` cell. The grid scales to fit
-  the panel, but never below a minimum node size that still holds a short
-  label and is at least `config.TOUCH_MIN_TARGET`.
-- **Sideways scroll.** A gauntlet with more columns than fit at that size
-  scrolls sideways; a long linear one is the usual case, since every stage of
-  a chain is its own column. This is the one view for every gauntlet, linear
-  or branching, so it must read well at 64 columns, not only fit them.
-  - The offset is transient `MenuState`, reset when the picker changes
-    gauntlet. On opening, the view scrolls to the first open stage.
-  - The wheel (and shift-wheel), a drag, and the arrow keys scroll it. Moving
-    the selection off the edge scrolls to keep it in view.
-  - On touch, a drag past a small threshold scrolls and is not a tap.
-  - Faded edges, or a small arrow at each edge, show there is more.
-  - `stagegraph` takes the offset, clips to its rect, and returns rects only
-    for nodes it drew, so a node scrolled out of view can't be clicked.
-  - Rows still scale to fit; a graph too tall at the minimum size scrolls down
-    as well, by the same rules.
-- **Node states:** cleared ✓, won short of target, open (pulsing), locked
-  (dim). Starts and goals get a small mark.
-- **Lanes** are arrows.
-  - Move `render._draw_arrowhead` (render.py:355) into `widgets` so menu can use
-    it, and leave a re-export in render.
-  - A gated lane is drawn dashed, with its `Target.short()` label ("≤12").
-  - A hidden lane, and any stage only it reaches, is not drawn until met.
-- **The drawer is its own shell module**, `stagegraph.py`, so the run view
-  (Phase 5) draws with it too. It knows nothing of the menu. It takes the
-  surface, a rect, and a list of stage nodes (cell, label, state) and lanes
-  (ends, gated, label, hidden), draws them and returns a rect per node for
-  hit-testing. It imports neither `engine` nor `ai`, and never mutates what it
-  is given. Add it to CLAUDE.md's shell module list.
-- **The detail strip.** Tapping a node selects it, and a strip under the graph
-  shows its title, best, target and each way on with what it needs ("Shortcut:
-  win in 12"). It has **Play** (the existing `_load_stage` + `_start`) and, in a
-  run, the run controls (Phase 5). A gauntlet stored on the board (`#g=`) also
-  gets **Edit on the board**, which opens `gauntlet.html#<id>` as a draft.
-- **Keyboard.** Arrow keys move between nodes and Enter plays, so it stays
-  usable without a mouse.
-- **Compact.** It keeps working through `_fit_modal`, and the touch targets are
-  floored at `config.TOUCH_MIN_TARGET`.
-- **Win overlay.** Next stage (N) is unchanged: it uses `gauntlet.next_stage`,
-  and a fork sends the player to the graph.
+### In the game
 
-Tests:
-- `tests/test_gauntlet.py`: the layout fixture.
-- `tests/test_menu*.py`: at 1, 25 and 64 stages (linear and branching) and at
-  scale 1, 1.5 and 2, every drawn node is inside the panel and at least the
-  minimum size. A 64-stage linear gauntlet scrolls, and the first open stage
-  is in view on opening. Moving the selection past the edge scrolls it into
-  view. A node scrolled out of view, a hidden stage, and a locked node are not
-  clickable.
-- `tests/test_stagegraph.py` (headless): every state draws, the returned rects
-  match the cells, and a hidden lane draws nothing.
+- **`setupmenu.tutorial_view` gains `graph`** in place of `stages`. It is built
+  from `stage_rows`, which keeps every rule it has now: open, cleared, won short
+  of the target, locked with what its way in needs, the run marker, and hidden
+  stages left out until opened (`gauntlet.shown`). It adds:
+  - each shown stage's cell from `gauntlet.layout`, and its `start`/`goal`
+    marks (`gauntlet.goals`);
+  - the lanes between shown stages, with `Target.short()` on a gated one;
+  - a hidden lane only once it is met, meaning its near stage's best meets its
+    gate. Until then neither it nor a stage only it reaches is drawn.
+  
+  `stage_rows` keeps returning rows. The view just gives each one its cell.
+- **Tap selects, Play plays.** At a fork a tap must say what each way needs
+  before it commits, and a node is too small to say it. So:
+  - **`MenuState.stage_pick`** (a stage id; transient, like `gauntlet_pick`) is
+    reset when the list opens and when the picker changes gauntlet. It starts on
+    the stage being played, else the run's stage, else the first open, uncleared
+    stage, else the first start.
+  - **The press `stage_<id>`** selects a stage. Pressing the selected one again
+    plays it (today's `load_stage` + `begin("start")`), so a double tap still
+    plays in one gesture.
+  - **The detail strip** under the graph is in the view as `pick`: the selected
+    stage's title, its best, its target, and each way on with what it needs.
+    The ways on come from `gauntlet.gates_out` and the ungated lanes ("Shortcut
+    to The siege: win in 12"). Its buttons are **Play** (`stage_play`, disabled
+    while the stage is locked) and, for a gauntlet stored on the board,
+    **Edit on the board**.
+  - **Edit on the board** (`stage_edit`) opens `/board/gauntlet.html#<id>`
+    through `webstore.open_url`. It is offered only when the id has the board's
+    shape (`<slug>-<12 hex>`) and `LEADERBOARD_ORIGIN` is set.
+- **Keyboard.** `session.op_menu_key` takes the arrow keys while the list is
+  open: `setupmenu.step_pick(ms, g, dx, dy)` moves to the nearest shown node
+  that way, by cell. Enter plays the selected stage and Esc closes the list, as
+  now. `menu.mjs` `key()` forwards arrows only while the list is open. The page
+  keeps the selected button focused and scrolled into view after each reply.
+- **Linear gauntlets too.** The plan has always been one view for every
+  gauntlet, so the tutorial becomes a row of ten with its hidden bonus beneath
+  The hunt. A chain is one row that scrolls sideways, opened on the stage to
+  play next. A node shows "3 · Title" and a short status ("✓ 14/3", "next",
+  "locked"); the full status is in the strip.
+- **The modal.** `.mmodal.tutorial` drops its `min-width: 460px` for
+  `min(90vw, 60rem)`, so a branching gauntlet gets room on desktop. On a phone
+  (`compact`) the modal already fills the screen; the graph box takes the space
+  the rows took, and the strip sits under it.
+- **Win overlay.** Next stage (N) is unchanged: at a fork `gauntlet.next_stage`
+  is None, so the player goes back to the list, with the fork's stage selected.
+
+### On the board
+
+`gauntlet-page.mjs` `drawDiagram` keeps building what to show (the author's
+view and the new player's, stranded and amber marks) and hands it to
+`drawGraph`:
+- a click on a node scrolls to its card, as now;
+- a chip hover lights its lane, through the drawer's `light(pair)`.
+
+The board's own drawing code goes, about 150 lines.
+
+### Tests
+
+- **`tests/test_setupmenu.py`:**
+  - the graph view carries every shown stage once, with its `layout` cell;
+  - a hidden stage and its lane are absent until the lane is met, then present;
+  - a gated lane carries its short target;
+  - `stage_pick` defaults (here, the run, the first open, a start);
+  - a tap selects, a second tap plays, and a locked stage selects but doesn't
+    play;
+  - `step_pick` moves by cell and stops at an edge;
+  - Edit on the board only for a board-shaped id.
+- **`webapp/tests/stagegraph.test.mjs`:** the drawer's pure half, exported for
+  tests: the lane path for each shape (a next column, a skip, a lane back, two
+  ways) given node rects, and the classes per mark. The DOM half is checked by
+  the parity screens.
+- **`tests/fixtures/parity_screens.json`:** the existing tutorial screen
+  (desktop, phone and phone landscape) is re-shot, plus a branching gauntlet
+  screen with a fork, a shortcut and a met hidden lane. `tools/parity_next.py`
+  shoots them. Check every node is inside the modal or reachable by scrolling,
+  and that the page has no sideways scroll.
+- **The board:** `node --test leaderboard/tests/*.test.mjs` is unchanged (its
+  diagram is DOM). Re-shoot the page as in Phase 3.
+
+Run the full suite: this touches `setupmenu` and `session`.
+
+### Size
+
+About 450 lines of code:
+- `stagegraph.mjs` ~200;
+- `setupmenu` view, pick and step ~120;
+- `session` keys and `menu.mjs` ~40;
+- CSS ~60;
+- the board moved onto the drawer, net about −100.
+
+About 250 lines of tests. That is less than the first plan's ~580 plus ~280,
+and the second picture (the board's) goes away rather than being kept in step
+by hand.
+
+### Defaults taken without asking (confirm before building)
+
+- **Tap selects, a second tap or Play plays.** Today one tap plays. The
+  alternative is one tap plays with the strip shown on hover/focus only, which
+  leaves touch players nothing to read at a fork.
+- **The graph for every gauntlet, linear ones included.** The alternative is
+  to keep today's list for a chain with nothing gated (`gauntlet.chain` and no
+  gated lanes) and draw the graph only when there is a shape to see. The
+  tutorial has its hidden bonus, so it would get the graph either way once the
+  bonus is met.
+- **The drawer is in the game and the board imports it**, for offline play.
 
 ## Phase 3: lanes on the board's gauntlet page (`gauntlet.html`, `gauntlet-page.mjs`, `gauntlet-build.mjs`, new `gauntlet-graph.mjs`)
+
+**Built 2026-11-11.** The reasons as built are in `docs/design/gauntlet.md`,
+*Lanes on the board*. Where the build differs from what follows:
+- **Lane gates have a fourth choice, "Win in N turns"** (typed in, with an
+  optional ships-lost cap), beside the stage target's three. A stored lane
+  target opens as typed turns, or as the best bot's when it says `beat`.
+- **`buildBody` sorts lanes by (from, to)**, so the stored body (and its id)
+  doesn't depend on the order the author clicked chips in.
+- **A draft with no stage open from the start is refused** before Save
+  ("tick at least one stage…"), rather than left to `from_dict`'s default.
+- **The diagram's marks**: starts get a bar on the left, goals a ★ and a gold
+  border, stages reached only through a gate a dashed border, hidden ones a
+  dotted border. A lane that skips columns arcs over the stages it skips; a
+  lane back or within a column dips below.
+- **`branches()` is gone** with its warning.
+- Not done: a click on stage A then B in the diagram to toggle a lane (the
+  plan's "later step"), and the end-to-end check on a deploy preview.
 
 The page keeps its stage cards: one pasted link per stage, title, briefing,
 hint, target, ↑/↓, Remove. Phase 3 adds the graph to them. Nothing in the game
@@ -456,6 +557,11 @@ Then run the full suite, since this touches `replay` and `main`.
 
 ## Phase 5: runs (core `run.py`, menu graph overlay, main)
 
+**Movement over the graph is built (2026-11-12)**, without lives or boons:
+`docs/design/gauntlet.md`, *Runs*, *Forks*. A run moves from the stage it last
+won, gated lanes open on its own score, and the list chooses at a fork; a win
+with no ungated way on completes it. What follows for movement stands as built.
+
 **This grows Phase 0's run rather than starting one.** The record, its storage,
 Continue run through `active_log`, the boot prompt, no Retry or rewind, no Hint,
 and one active run all stay as Phase 0 built them. What Phase 5 adds:
@@ -562,7 +668,7 @@ Main wiring tests:
   - the Gauntlets paragraph: lane targets, the maker, runs, and "a boon game is
     unpostable; boons live in `GameLog.boons`, never `Settings`";
   - the core module list: `boons`, `run`;
-  - the shell list: `stagegraph`;
+  - the page's shared drawer: `webapp/js/stagegraph.mjs`, imported by the board;
   - the Gauntlets paragraph also gets "a stage's place is computed
     (`gauntlet.layout`, mirrored by `gauntlet-graph.mjs`), never stored";
   - the derived-stream list: run offers.
@@ -573,8 +679,8 @@ There are six PRs, each usable on its own:
 0. a linear run, first: no format, board or replay change, and immediately
    playable on generated gauntlets with targets;
 1. the format;
-2. the graph view, `stagegraph` and the shared layout, which are useful at once
-   for existing gauntlets;
+2. the graph view in the game's list, on one drawer shared with the board (the
+   shared layout landed with Phase 3);
 3. lanes on the board's gauntlet page;
 4. boons in the log;
 5. runs.
@@ -602,7 +708,7 @@ design.
 |---|---|---|---|---|
 | 0. Linear run | ~450 (`run.py` ~150, menu ~120, main ~120, the rest ~60) | ~350 | Small-medium; touches `main` (run the full suite) | the stage list, `Target`, Next stage, `stage_ui`, `replay.load`, `webstore` |
 | 1. Format | ~230 (`gauntlet.py` ~170, `checkBody` ~60) | ~250 | Small | `Target`, `_target`, the existing `from_dict` and `checkBody` |
-| 2. Graph view, `stagegraph`, `layout` | ~580 (replaces ~150 in menu; `layout` ~70; scroll ~60) | ~280 | Medium | `_fit_modal`, `widgets`, the arrowhead helper, `open_stages`/`cleared` unchanged |
+| 2. Graph view on a shared drawer (re-planned; `layout` built with 3) | ~450 (`stagegraph.mjs` ~200, `setupmenu` ~120, the board net −100) | ~250 | Small-medium; touches `setupmenu`/`session` (run the full suite) | `stage_rows`, `gauntlet.layout`, the board's lane shapes, browser scrolling |
 | 3. Lanes on the board | ~550 (`gauntlet-graph.mjs` ~150, page ~300, build ~50, CSS ~50) | ~250 | Medium | the stage cards, `applyAim`, `linkTarget`/`botTarget`, `checkBody`, `readDraft` |
 | 4. Boons in the log | ~250 | ~200 | Small, but it touches replay (run the full suite) | the Hint's unpostable path, the `strategies` stamp in `reconstruct` |
 | 5. Runs, grown | ~700 (`run.py` +150, run view and boon pick ~400, wiring ~150) | ~350 | Medium | Phase 0's record and wiring, the Phase 2 graph view |
@@ -747,7 +853,7 @@ needs its notes and its async bot lookup) and the main wiring for runs.
 - Production: `Node.production` is turns per ship (`model.py:209`), and the
   menu's range is 1-8 (`settings.py:113`).
 
-### The gauntlet list in the menu (Phase 2 replaces it)
+### The gauntlet list in the menu (Phase 2 replaces it; pygame line numbers, gone since the cutover; see Phase 2 for where it lives now)
 - **State:** `MenuState` gauntlet fields are at `menu.py:336-359`: `stage_at`,
   `stash`, `tutorial_open`, `gauntlets`, `gauntlet_pick`, `stage_bests`,
   `kept_ids` and `gauntlet_note`.
