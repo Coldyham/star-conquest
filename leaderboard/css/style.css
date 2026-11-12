@@ -1462,11 +1462,15 @@ a.cal-day:hover { outline: 1px solid var(--cyan); }
   text-transform: uppercase;
 }
 .gauntlet-form label.file-open {
+  margin: 0;
   padding: 0.7rem 1rem;
-  border: 1px solid var(--dim);
+  border: 2px solid var(--dim);
+  border-radius: 3px;
   color: var(--dim);
   font-size: 0.8rem;
+  line-height: 1.5;
   cursor: pointer;
+  box-shadow: 0 3px 0 #1b2036;
 }
 .gauntlet-form label.file-open:hover { color: var(--ink); }
 
