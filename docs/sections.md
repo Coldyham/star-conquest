@@ -85,6 +85,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## gauntlet-gen.md
 - gauntlet-gen.md · **Generated gauntlets.** A spec (`fix`/`range`/`in`/`not`, opponents, `roll`) dealt by `dealer.deal`, probed and picked by `tools/gauntlet_gen.py`; where it runs; the first run; the last stage may be unwon by every probe.
+- gauntlet-gen.md · *Shapes (built 2026-11-12):* `line`, `concertina`, `cross-stitch` (`widths`; `stages` counts columns); a pair about as hard but unlike on size, lane length or layout (`dealer.AXES`, `free_axes`); the second deal steered, not filtered after probing (`PAIR_TRIES`); `pick_shape`, alike pairs; titles by axis; `gid` unchanged for a line; the form's Shape, `--shape`; cost; `lives`.
 - gauntlet-gen.md · *In the game / on the board:* `#gauntlet-spec=`, a slice per menu frame, budgets not lifted; the generate form, `gauntlet-spec.mjs`, under the page's shared name, author and listing box; sharing the file, not spec and seed; saved to the board only when asked to be listed (`gauntlet.ask_listing`).
 - gauntlet-gen.md · *Dealing fewer candidates* (shipped 2026-10-24): round-robin depths; four probes (lean heuristic, thinker, `evolved:0`, marshal); `tools/gauntlet_pool_bench.py`. The web build is untimed.
 

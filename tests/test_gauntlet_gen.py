@@ -102,3 +102,29 @@ def test_a_run_writes_a_gauntlet_the_game_reads_and_resumes(tmp_path, monkeypatc
     monkeypatch.setattr(sys, "argv", argv[:5] + ["--seed", "4"])
     with pytest.raises(SystemExit):
         gen.main()
+
+
+def test_a_shaped_run_keeps_its_shape_in_the_ledger_and_its_pick_beside_the_games(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(gen, "RESULTS", tmp_path)
+    spec = {**SMALL, "rules": {**SMALL["rules"], "systems": {"range": [8, 20]}}}
+    argv = ["gauntlet_gen.py", "--run", "s", "--seed", "3", "--rounds", "1", "--workers", "1",
+            "--probes", "heuristic", "marshal", "--shape", "cross-stitch", "--lives", "2",
+            "--spec-json", json.dumps(spec)]
+    monkeypatch.setattr(sys, "argv", argv)
+    gen.main()
+    lines = [json.loads(line) for line in (tmp_path / "s.jsonl").read_text().splitlines()]
+    assert lines[0]["shape"] == "cross-stitch"
+    picks = [row for row in lines if row.get("pick")]
+    assert len(picks) == 1 and picks[0]["shape"] == "cross-stitch" and "alike" in picks[0]
+    data = json.loads((tmp_path / "s.json").read_text())
+    g = gauntlet.Gauntlet.from_dict(data)
+    assert g is not None and gauntlet.problems(g) == [] and g.lives == 2
+    # A rerun reads past the pick line, plays nothing, and refuses another shape.
+    games = sum(1 for row in lines if "bot" in row)
+    monkeypatch.setattr(sys, "argv", argv[:5] + ["--workers", "1", "--probes", "heuristic", "marshal"])
+    gen.main()
+    after = [json.loads(line) for line in (tmp_path / "s.jsonl").read_text().splitlines()]
+    assert sum(1 for row in after if "bot" in row) == games
+    monkeypatch.setattr(sys, "argv", argv[:5] + ["--shape", "concertina"])
+    with pytest.raises(SystemExit):
+        gen.main()

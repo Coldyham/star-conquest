@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
-from starconquest import ai, dealer, gauntlet
+from starconquest import ai, dealer, gauntlet, run
 from starconquest import gauntletgen as gg
 
 SMALL = {"stages": 2, "seed": 9, "rules": {"players": {"fix": 2}, "systems": {"range": [8, 10]}},
@@ -213,3 +215,136 @@ def test_lives_ride_in_the_link_and_the_file_but_not_the_id():
     picked = [{"stage": {"players": 2, "nodes": 8, "seed": 1}, "wins": [], "played": 2}]
     assert "lives" not in gg.build("gen-x", "X", picked, None, 0)
     assert gg.build("gen-x", "X", picked, None, 0, lives=3)["lives"] == 3
+
+
+# --------------------------------------------------------------------------- #
+# Branching shapes
+# --------------------------------------------------------------------------- #
+WIDE = {"stages": 3, "seed": 4, "rules": {"players": {"fix": 2}, "systems": {"range": [8, 20]},
+                                         "mode": {"in": ["random", "symmetric"]}},
+        "opponents": ["rusherplus", "heuristic"]}
+
+
+@pytest.mark.parametrize("shape, n, cols", [
+    ("line", 4, [1, 1, 1, 1]),
+    ("concertina", 7, [1, 2, 1, 2, 1, 2, 1]),
+    ("concertina", 6, [1, 2, 1, 2, 1, 1]),
+    ("concertina", 2, [1, 1]),
+    ("cross-stitch", 6, [2, 2, 2, 2, 2, 1]),
+    ("cross-stitch", 2, [2, 1]),
+])
+def test_each_shape_has_its_widths_and_ends_on_one_stage(shape, n, cols):
+    assert gg.widths(shape, n) == cols and len(cols) == n
+
+
+def test_a_line_jobs_id_is_what_it_always_was():
+    assert gg.job_from_link(SMALL, seed=0).gid == "gen-aa0b009f0167"
+    assert gg.job_from_link({**SMALL, "shape": "nope"}, seed=0).shape == "line"
+    assert gg.job_from_link({**SMALL, "shape": "concertina"}, seed=0).gid != "gen-aa0b009f0167"
+
+
+def test_a_line_deals_as_it_always_did():
+    spec = dealer.Spec.from_dict(SMALL)
+    assert gg.candidates(spec, 9, 2) == gg.candidates(spec, 9, 2, "line")
+    assert all("axes" not in c for c in gg.candidates(spec, 9, 2))
+
+
+def test_a_pairs_second_deal_differs_when_the_spec_leaves_an_axis_free():
+    spec = dealer.Spec.from_dict(WIDE)
+    assert dealer.free_axes(spec) == ["size", "lane length", "layout"]
+    cands = gg.candidates(spec, 4, 2, "cross-stitch")
+    assert cands == gg.candidates(spec, 4, 2, "cross-stitch")
+    by = {}
+    for c in cands:
+        by.setdefault((c["round"], c["depth"]), []).append(c)
+    pairs = [v for (_r, d), v in by.items() if d < 1.0]
+    assert pairs and all(len(v) == 2 and gg.differ(v[0]["axes"], v[1]["axes"]) for v in pairs)
+
+
+def test_free_axes_names_what_a_spec_leaves_to_differ():
+    pinned = dealer.Spec.from_dict({**WIDE, "rules": {"players": {"fix": 2}, "systems": {"range": [12, 14]},
+                                                       "mode": {"fix": "random"},
+                                                       "lane_turns": {"range": [3, 4]}}})
+    assert dealer.free_axes(pinned) == []
+    assert dealer.free_axes(dealer.Spec.from_dict({"rules": {}})) == ["lane length"]
+
+
+def test_differ_reads_the_axes_in_order():
+    a = {"systems": 12, "lane": 4, "mode": "random"}
+    assert gg.differ(a, {**a, "systems": 15}) == "size"
+    assert gg.differ(a, {**a, "systems": 14, "lane": 6}) == "lane length"
+    assert gg.differ(a, {**a, "lane": 5, "mode": "symmetric"}) == "layout"
+    assert gg.differ(a, {**a, "systems": 14, "lane": 5}) is None
+
+
+def _w(key, lost, systems=12, lane=4, mode="random", turns=50, depth=0.5):
+    m = _m(key, lost, 4, depth)
+    for w in m["wins"]:
+        w["turns"] = turns
+    return {**m, "win_turns": turns if m["wins"] else None, "axes": {"systems": systems, "lane": lane, "mode": mode}}
+
+
+def test_a_wide_column_takes_a_pair_that_differs_over_a_nearer_alike_one():
+    measured = [_w("easy", 0), _w("mid", 2), _w("twin", 2, turns=51), _w("other", 2, systems=20, turns=60),
+                _w("hard", 3), _w("unwon", 4, depth=1.0)]
+    columns, alike = gg.pick_shape(measured, [1, 2, 1, 1])
+    assert [[m["key"] for m in c] for c in columns] == [["easy"], ["twin", "other"], ["hard"], ["unwon"]]
+    assert alike == []
+    # With nothing unlike left, the nearest stands in, and the pair is marked alike.
+    columns, alike = gg.pick_shape([m for m in measured if m["key"] != "other"], [1, 2, 1, 1])
+    assert [m["key"] for m in columns[1]] == ["twin", "mid"] and alike == [1]
+
+
+def test_a_shape_settles_only_once_every_column_is_full_and_its_pairs_differ():
+    measured = [_w("easy", 0), _w("mid", 2), _w("twin", 2, turns=51), _w("hard", 3), _w("unwon", 4, depth=1.0)]
+    cols = [1, 2, 1, 1]
+    stop, shown = gg.settled(measured, 4, True, 4, None, cols, free=True)
+    assert not stop                                   # alike, and the spec leaves an axis free
+    assert gg.settled(measured, 4, True, 4, None, cols, free=False)[0]
+    fixed = measured + [_w("other", 2, systems=20, turns=60)]
+    assert gg.settled(fixed, 4, True, 4, shown, cols, free=True)[0]
+    assert gg.settled(measured[:2], 4, True, 4, None, cols) == (False, None)
+
+
+def test_a_pairs_titles_name_how_they_differ():
+    big, small = _w("a", 1, systems=20), _w("b", 1, systems=12)
+    assert gg.titles([[big], [big, small], [small]]) == [
+        "Stage 1", "Stage 2: more systems", "Stage 2: fewer systems", "Stage 3"]
+    assert gg.titles([[_w("a", 1, lane=3), _w("b", 1, lane=6)]]) == [
+        "Stage 1: shorter lanes", "Stage 1: longer lanes"]
+    assert gg.titles([[_w("a", 1, mode="random"), _w("b", 1, mode="symmetric")]]) == [
+        "Stage 1: scattered", "Stage 1: symmetric"]
+    assert gg.titles([[_w("a", 1), _w("b", 1)]]) == ["Stage 1a", "Stage 1b"]
+    assert all(len(t) <= gauntlet.TITLE_MAX for t in gg.titles([[big, small]] * 16))
+
+
+@pytest.mark.parametrize("cols, start", [([1, 2, 1, 2, 1], [0]), ([2, 2, 1], [0, 1])])
+def test_a_shaped_file_joins_each_column_to_the_next_and_lays_out_by_column(cols, start):
+    columns, i = [], 0
+    for w in cols:
+        columns.append([_w(f"s{i + j}", 1, systems=12 + 10 * j) for j in range(w)])
+        i += w
+    for c in columns:
+        for m in c:
+            m["stage"] = {"players": 2, "nodes": 8, "seed": 1}
+    data = gg.build_shape("gen-x", "X", columns, None, 0)
+    assert data["start"] == start
+    g = gauntlet.Gauntlet.from_dict(data)
+    assert g is not None and gauntlet.problems(g) == [] and gauntlet.goals(g) == {len(data["stages"]) - 1}
+    cells = gauntlet.layout(g)
+    at = 0
+    for n, w in enumerate(cols):
+        assert [cells[at + j] for j in range(w)] == [(n, j) for j in range(w)]   # "a" above "b"
+        at += w
+    assert len(g.lanes) == sum(a * b for a, b in itertools.pairwise(cols))
+    assert run.offered(g) == (any(w > 1 for w in cols))
+
+
+def test_a_shaped_job_makes_a_gauntlet_the_game_reads():
+    job = gg.job_from_link({**WIDE, "stages": 2, "candidates": 1, "shape": "cross-stitch"}, seed=0)
+    assert job.cols == [2, 1] and job.free
+    _finish(job)
+    data = job.result()
+    assert data is not None
+    g = gauntlet.Gauntlet.from_dict(data)
+    assert g is not None and gauntlet.problems(g) == []

@@ -19,12 +19,18 @@ probe game finished), unless ``--no-unwon-last``.
 
 With ``--targets`` (or ``--targets fastest``) each stage some probe won gets a
 target: the slowest (or the fastest) probe win plus ``--target-slack`` turns.
-``--lives`` sets the lives a run of it starts with. Design:
-docs/design/gauntlet-gen.md, "Generated gauntlets".
+``--lives`` sets the lives a run of it starts with. ``--shape concertina`` or
+``--shape cross-stitch`` joins the stages in a branching shape instead of a
+line: ``--stages`` stays the run's length, the number of columns, and each wide
+column holds a pair about as hard as each other but different in size, lane
+length or layout (``gauntletgen.widths``, ``pick_shape``). Design:
+docs/design/gauntlet-gen.md, "Generated gauntlets", *Shapes*.
 
 Every game is a line in ``results/gauntlet_gen/<run>.jsonl`` the moment it
 finishes; the run's spec, seed and rounds head the file, and a rerun plays only
-the games not there. The gauntlet is written to
+the games not there; the shape is in the header too, since it changes what is
+dealt. The pick is appended as its own line, its alike pairs named. The
+gauntlet is written to
 ``results/gauntlet_gen/<run>.json`` (and ``--out``), the file a desktop player
 drops in the game's gauntlets folder.
 """
@@ -84,12 +90,12 @@ def load(path: Path) -> tuple[dict | None, list[dict]]:
             continue
         if row.get("header"):
             head = row
-        else:
+        elif not row.get("pick"):
             rows.append(row)
     return head, rows
 
 
-def report(measured: list[dict], picked: list[dict], probes: list[str]) -> None:
+def report(measured: list[dict], picked: list[dict], probes: list[str], alike: list[int] = ()) -> None:
     chosen = {m["key"] for m in picked}
     print(f"\n{len(measured)} candidates, {len(probes)} probes ({', '.join(probes)})")
     for m in sorted(measured, key=lambda m: (m["depth"], m["key"])):
@@ -110,6 +116,8 @@ def report(measured: list[dict], picked: list[dict], probes: list[str]) -> None:
         print("  note: every probe won the last stage")
     if picked and not picked[-1]["wins"]:
         print("  note: no probe won the last stage, so it has no target")
+    for c in alike:
+        print(f"  note: the pair in column {c + 1} is alike: no unused candidate near it differs")
 
 
 def read_spec(a) -> dict:
@@ -136,6 +144,8 @@ def main() -> None:
     ap.add_argument("--no-unwon-last", action="store_true",
                     help="never make the last stage a map no probe won")
     ap.add_argument("--target-slack", type=int, default=0, help="turns added to each target")
+    ap.add_argument("--shape", choices=gg.SHAPES, default="line",
+                    help="how the stages are joined (default line); --stages counts columns")
     ap.add_argument("--lives", type=int, default=1,
                     help=f"lives a run of it starts with, 1 to {gauntlet.LIVES_MAX} (default 1)")
     ap.add_argument("--out", help="also write the gauntlet file here")
@@ -151,8 +161,10 @@ def main() -> None:
         if "rounds" not in head:
             sys.exit(f"{_shown(path)} was dealt per stage, before rounds: use a new --run")
         raw, seed, rounds = head["spec"], head["seed"], head["rounds"]
+        shape = head.get("shape", "line")
         changed = (a.spec, a.spec_json, a.stages is not None, a.seed not in (None, seed),
-                   a.rounds not in (ap.get_default("rounds"), rounds))
+                   a.rounds not in (ap.get_default("rounds"), rounds),
+                   a.shape not in (ap.get_default("shape"), shape))
         if any(changed):
             sys.exit(f"{_shown(path)} already holds a run: drop the spec flags or use a new --run")
     else:
@@ -163,18 +175,25 @@ def main() -> None:
         if not isinstance(seed, int):
             seed = random_seed()
         rounds = max(1, a.rounds)
+        shape = a.shape
     spec = dealer.Spec.from_dict(raw)
     if stuck := dealer.problems(spec):
         sys.exit("\n".join(stuck))
     if slow := [b for b in SLOW if any(o.partition(":")[0] == b for o in spec.opponents)]:
         print(f"note: {', '.join(slow)} may sit in these games and are slow: expect minutes a game")
 
-    cands = candidates(spec, seed, rounds)
+    cols, free = gg.widths(shape, spec.stages), bool(dealer.free_axes(spec))
+    if shape != "line" and not free:
+        print("note: the two tracks may look alike: this spec fixes size, layout and lane length")
+    cands = candidates(spec, seed, rounds, shape)
     if head is None:
+        top = {"header": True, "spec": spec.to_dict(), "seed": seed, "rounds": rounds}
+        if shape != "line":
+            top["shape"] = shape
         with open(path, "a") as out:
-            out.write(json.dumps({"header": True, "spec": spec.to_dict(), "seed": seed, "rounds": rounds}) + "\n")
+            out.write(json.dumps(top) + "\n")
     done = {(r["key"], r["bot"]) for r in rows}
-    print(f"seed {seed}: at most {rounds} rounds of {spec.stages} candidates, "
+    print(f"seed {seed}: at most {rounds} rounds of {sum(cols)} candidates, "
           f"{len(done)} games already in {_shown(path)}", flush=True)
     t0, shown = time.time(), None
     with ProcessPoolExecutor(a.workers) as pool:
@@ -193,19 +212,29 @@ def main() -> None:
                         print(f"  {i}/{len(jobs)} {row['bot']}: {'won' if row['won'] else 'lost'} "
                               f"in {row['turns']}t ({time.time() - t0:.0f}s)", flush=True)
             stop, shown = settled(measure(dealt, rows, a.probes), spec.stages, not a.no_unwon_last,
-                                  len(a.probes), shown)
+                                  len(a.probes), shown, cols, free)
             if stop:
                 print(f"settled after round {r + 1}", flush=True)
                 cands = dealt
                 break
 
     measured = measure(cands, rows, a.probes)
-    picked = pick(measured, spec.stages, not a.no_unwon_last)
-    report(measured, picked, a.probes)
-    if len(picked) < spec.stages:
+    name = a.name or f"Generated {seed}"
+    if shape == "line":
+        picked, alike = pick(measured, spec.stages, not a.no_unwon_last), []
+        data = gg.build(f"gen-{a.run}", name, picked, a.targets, a.target_slack, a.lives)
+    else:
+        columns, alike = gg.pick_shape(measured, cols, not a.no_unwon_last)
+        picked = [m for c in columns for m in c]
+        data = gg.build_shape(f"gen-{a.run}", name, columns, a.targets, a.target_slack, a.lives)
+        with open(path, "a") as out:
+            out.write(json.dumps({"pick": True, "shape": shape,
+                                  "columns": [[m["key"] for m in c] for c in columns],
+                                  "alike": alike}) + "\n")
+    report(measured, picked, a.probes, alike)
+    if len(picked) < sum(cols):
         print(f"  note: only {len(picked)} candidates could be picked; "
               f"deal more with a new --run and a larger --rounds")
-    data = gg.build(f"gen-{a.run}", a.name or f"Generated {seed}", picked, a.targets, a.target_slack, a.lives)
     g = gauntlet.Gauntlet.from_dict(data)
     if g is None or gauntlet.problems(g):
         sys.exit("the picked gauntlet does not read back: nothing written")

@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import {
-  KNOB_TABS, KNOBS, OPPONENTS, SPEC_FRAGMENT, buildSpec, emptyForm, gameCount, isSet, knobText, specLink,
+  KNOB_TABS, KNOBS, OPPONENTS, SPEC_FRAGMENT, buildSpec, emptyForm, freeAxes, gameCount, isSet, knobText, specLink,
+  stageCount, widths,
 } from "../js/gauntlet-spec.mjs";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/gauntlet-spec.json", import.meta.url));
@@ -133,4 +134,24 @@ test("lives ride beside the spec only when more than one", () => {
   assert.equal("lives" in buildSpec(emptyForm(), seven), false);
   assert.equal(buildSpec({ ...emptyForm(), lives: "3" }, seven).lives, 3);
   assert.match(buildSpec({ ...emptyForm(), lives: 12 }, seven), /lives must be 1 to 9/);
+});
+
+test("a shape rides beside the spec, its widths the game's", () => {
+  assert.equal("shape" in buildSpec(emptyForm(), seven), false);
+  const spec = buildSpec({ ...emptyForm(), stages: 7, shape: "concertina" }, seven);
+  assert.equal(spec.shape, "concertina");
+  assert.equal(stageCount(spec), 10);
+  assert.equal(gameCount(spec), 10 * 3 * 5);
+  assert.equal(stageCount({ stages: 6, shape: "cross-stitch" }), 11);
+  assert.deepEqual(widths("concertina", 6), [1, 2, 1, 2, 1, 1]);
+  assert.deepEqual(widths("cross-stitch", 2), [2, 1]);
+  assert.deepEqual(widths("line", 3), [1, 1, 1]);
+  assert.match(buildSpec({ ...emptyForm(), shape: "spiral" }, seven), /pick a shape/);
+});
+
+test("free axes are the dealer's", () => {
+  assert.deepEqual(freeAxes(buildSpec(emptyForm(), seven)), ["size", "lane length", "layout"]);
+  const pinned = buildSpec({ ...emptyForm(), mode: "random", systemsMin: 13, systemsMax: 14 }, seven);
+  assert.deepEqual(freeAxes(pinned), ["lane length"]);
+  assert.deepEqual(freeAxes({ rules: { systems: { fix: 12 }, mode: { fix: "random" }, lane_turns: { range: [3, 4] } } }), []);
 });

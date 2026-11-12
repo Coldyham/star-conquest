@@ -67,8 +67,16 @@
         take longer. Left without a name, a gauntlet is named after its seed.
       </p>
 
-      <label for="gen-stages">Stages</label>
+      <label for="gen-stages">Stages a run plays</label>
       <input id="gen-stages" type="number" min="2" max="16" value="6">
+
+      <label for="gen-shape">Shape</label>
+      <select id="gen-shape">
+        <option value="line">One path</option>
+        <option value="concertina">Concertina: splits and rejoins</option>
+        <option value="cross-stitch">Cross-stitch: two tracks, switch at any stage</option>
+      </select>
+      <p class="hint" id="gen-shape-note"></p>
 
       <label for="gen-mode">Map type</label>
       <select id="gen-mode">

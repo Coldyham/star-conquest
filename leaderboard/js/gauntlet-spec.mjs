@@ -12,7 +12,7 @@
 // switch Off, On or Either (`form.switches`). What the form leaves alone (both
 // pins on the game's default, a switch Off) is left out, so the game keeps that
 // field at its default (`roll` false) or rolls it (`roll` true). The run's own options
-// (`candidates`, `targets`, `slack`, `name`, `unwon_last`, `lives`) ride beside it, read by
+// (`candidates`, `targets`, `slack`, `name`, `unwon_last`, `lives`, `shape`) ride beside it, read by
 // `gauntletgen.job_from_link`. So do `wants_listing` and `by_name`, and only when
 // "Ask for it to be listed publicly" is ticked: that box is the consent for the
 // game to send what it makes to the board (`gauntlet.ask_listing`). `candidates` is the most rounds the game deals, one
@@ -37,6 +37,48 @@ export const LIMITS = Object.freeze({
   byName: 32,
   lives: [1, 9],
 });
+// How the stages are joined (`gauntletgen.SHAPES`): `stages` stays the run's
+// length, the number of columns; a wide column holds two stages.
+export const SHAPES = Object.freeze(["line", "concertina", "cross-stitch"]);
+
+/** The stages in each column of `shape`, `columns` long (`gauntletgen.widths`). */
+export function widths(shape, columns) {
+  if (!(columns >= 1)) return [];
+  if (shape === "concertina") {
+    const odd = columns % 2 ? columns : columns - 1;
+    return [...Array.from({ length: odd }, (_, i) => 1 + (i % 2)), ...(odd < columns ? [1] : [])];
+  }
+  if (shape === "cross-stitch") return [...Array(columns - 1).fill(2), 1];
+  return Array(columns).fill(1);
+}
+
+/** How many stages a spec's gauntlet has: its columns' widths summed. */
+export function stageCount(spec) {
+  return widths(spec.shape || "line", spec.stages).reduce((a, b) => a + b, 0);
+}
+
+/**
+ * The ways two stages of a pair may differ that `spec` leaves free
+ * (`dealer.free_axes`): size when its systems may differ by a quarter, lane
+ * length unless a `lane_turns` rule pins it within a turn, layout when either
+ * mode may be dealt.
+ */
+export function freeAxes(spec) {
+  const out = [];
+  const systems = spec.rules?.systems;
+  if (systems || spec.roll) {
+    const [lo, hi] = systems?.range || (systems?.fix !== undefined ? [systems.fix, systems.fix]
+      : systems?.in ? [Math.min(...systems.in), Math.max(...systems.in)] : [5, 40]);
+    if (hi >= lo * 1.25) out.push("size");
+  }
+  const lane = spec.rules?.lane_turns;
+  const [llo, lhi] = lane?.range || (lane?.fix !== undefined ? [lane.fix, lane.fix] : [1, 20]);
+  if (lhi - llo >= 2) out.push("lane length");
+  const mode = spec.rules?.mode;
+  if ((mode || spec.roll) && (mode?.in?.length > 1 || (!mode && spec.roll))) out.push("layout");
+  return out;
+}
+
 /** Opponents a form offers, weakest first (the ladder is strongest first). */
 export const OPPONENTS = Object.freeze([...LADDER_ORDER].reverse());
 
@@ -130,6 +172,7 @@ export function emptyForm() {
     wantsListing: false,
     lives: 1,
     stages: 6,
+    shape: "line",
     mode: "any",              // any | random | symmetric
     playersMin: 2,
     playersMax: 4,
@@ -217,6 +260,10 @@ export function buildSpec(form, rollSeed = () => Math.floor(Math.random() * LIMI
   const lives = wholeIn(form.lives ?? 1, LIMITS.lives);
   if (lives === null) return `lives must be ${LIMITS.lives[0]} to ${LIMITS.lives[1]}`;
   if (lives > 1) spec.lives = lives;
+  if (form.shape && form.shape !== "line") {
+    if (!SHAPES.includes(form.shape)) return "pick a shape";
+    spec.shape = form.shape;
+  }
   const name = String(form.name ?? "").split(/\s+/).filter(Boolean).join(" ");
   if ([...name].length > LIMITS.name) return `the name is over ${LIMITS.name} characters`;
   if (name) spec.name = name;
@@ -232,7 +279,7 @@ export function buildSpec(form, rollSeed = () => Math.floor(Math.random() * LIMI
 /** The most probe games the game will play for a spec (it often stops sooner):
  * what a phone waits on. */
 export function gameCount(spec) {
-  return spec.stages * spec.candidates * PROBES;
+  return stageCount(spec) * spec.candidates * PROBES;
 }
 
 /** The game link that generates ``spec``: `<game>#gauntlet-spec=<token>`. */
