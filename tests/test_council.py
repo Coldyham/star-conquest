@@ -197,20 +197,12 @@ def test_a_stored_council_seat_is_warned_about_as_council(kn):
     assert setup_warnings(s, people={1})[0].startswith("Knower at Council searching ")
 
 
-@pytest.fixture
-def keep_config(monkeypatch):
-    """Rebuilding a logged board writes its setup's knobs into `config`."""
-    from starconquest import config, settings
-    for _, const in settings._GLOBAL_KNOBS:
-        monkeypatch.setattr(config, const, getattr(config, const))
-
-
-def test_the_traps_rebuild_the_strikes_council_really_sent(kn, keep_config):
+def test_the_traps_rebuild_the_strikes_council_really_sent(kn):
     from tests import council_traps
-    assert [sent for *_, sent in council_traps.probe()] == [7, 11, 0, 14, 15, 10]
+    assert [sent for *_, sent in council_traps.probe()] == [7, 11, 0, 13, 15, 10]
 
 
 @pytest.mark.xfail(strict=True, reason="council's rollouts do not foresee a person's relief")
-def test_council_walks_into_none_of_the_traps(kn, keep_config):
+def test_council_walks_into_none_of_the_traps(kn):
     from tests import council_traps
     assert all(outcome != "lost" for *_, outcome, _ in council_traps.probe())

@@ -19,6 +19,7 @@ dev = [
     # Only as an image library, for two offline tools: the home-screen icons
     # (tools/pwa/make_icons.py) and the parity contact sheets (tools/parity_sheet.py).
     "pygame-ce>=2.5",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.ruff.lint]

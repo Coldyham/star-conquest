@@ -37,7 +37,8 @@ uv run python main.py                          # serves the game at 127.0.0.1:80
                                                # symmetric --seed 42 --nodes 24; --no-open)
 uv run python main.py --no-menu --autoplay     # AI plays every seat (demo)
 
-uv run pytest                                  # full suite (or a file / file::test)
+uv run pytest -n auto                          # full suite in parallel, ~25 s (pytest-xdist)
+uv run pytest tests/test_x.py                  # a file / file::test (serial is faster for a few)
 
 uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
 uv run python -m tests.sim --trials 200          # batch stats; add --film to check playback
