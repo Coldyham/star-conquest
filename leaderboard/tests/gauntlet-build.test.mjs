@@ -15,9 +15,9 @@ import { fileURLToPath } from "node:url";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import {
-  GAUNTLET_ID, LIMITS, addStage, botTarget, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
+  GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
   draftFromBody, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName, gameLink, joinLane, laneBack,
-  laneFrom, linkTarget, listingOf, meetsTarget, moveStage, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem,
+  laneFrom, linkTarget, listingOf, meetsTarget, moveStage, postedBest, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem,
   slugOf, stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
@@ -216,24 +216,24 @@ test("a draft read back from storage is tolerant of anything", () => {
   assert.deepEqual(out, {
     name: "", by_name: "", wants_listing: false,
     stages: [
-      { key: 0, link: "", settings: null, title: "", briefing: [""], hint: "", aim: "none", target: null },
-      { key: 1, link: "", settings: null, title: "t", briefing: ["a", ""], hint: "", aim: "none", target: null },
+      { key: 0, link: "", settings: null, title: "", briefing: [""], hint: "", target: null },
+      { key: 1, link: "", settings: null, title: "t", briefing: ["a", ""], hint: "", target: null },
     ],
     lanes: [emptyLane(0, 1)],
     start: [0],
     next_key: 2,
   });
   assert.deepEqual(readDraft('{"stages": []}').stages, [emptyStage()]);
-  // A kept target comes back with how it was chosen; a bad one, or a bad aim, as none.
+  // A kept target comes back as it was, a bad one as none; an older draft's aim is ignored.
   const kept = readDraft(JSON.stringify({ stages: [
     { aim: "bot", target: { turns: 9, lost: 1, bot: "marshal", beat: true } },
     { aim: "link", target: { turns: 0 } },
     { aim: "sideways", target: { turns: 9 } },
-    { aim: "turns", target: { turns: 12, lost: 3 } },
+    { target: { turns: 12, lost: 3 } },
   ] })).stages;
-  assert.deepEqual(kept.map((s) => [s.aim, s.target]), [
-    ["bot", { turns: 9, lost: 1, bot: "marshal", beat: true }], ["none", null], ["none", { turns: 9 }],
-    ["turns", { turns: 12, lost: 3 }]]);
+  assert.deepEqual(kept.map((s) => s.target), [
+    { turns: 9, lost: 1, bot: "marshal", beat: true }, null, { turns: 9 }, { turns: 12, lost: 3 }]);
+  assert.equal(kept.some((s) => "aim" in s), false);
 });
 
 test("a draft names its first problem, link problems first", () => {
@@ -278,18 +278,35 @@ test("a pasted challenge's score is a target to meet", () => {
   assert.equal(targetText({ turns: 14 }), "Win in 14 turns or fewer");
 });
 
-test("the best bot's win is a target to beat; no win or no rows is none", () => {
+test("the bots' wins fill a target: the fastest, and the slowest once two bots won", () => {
   const rows = [
     { bot: "heuristic", won: true, turns: 40, lost: 9 },
+    { bot: "heuristic", won: true, turns: 35, lost: 9 },   // its own best stands for it
     { bot: "thinker", won: true, turns: 31, lost: 12 },
     { bot: "marshal", won: true, turns: 31, lost: 14 },
     { bot: "knower", won: false, turns: 80, lost: 0 },
   ];
-  const { target } = botTarget(rows);
-  assert.deepEqual(target, { turns: 31, lost: 12, bot: "thinker", beat: true });
-  assert.equal(targetText(target), "Beat thinker: 31 turns / 12 lost");
-  assert.deepEqual(botTarget([{ bot: "knower", won: false, turns: 80, lost: 0 }]), { none: "no-win" });
-  assert.deepEqual(botTarget([]), { none: "no-rows" });
+  assert.deepEqual(botWins(rows), {
+    fastest: { turns: 31, lost: 12, bot: "thinker" },
+    slowest: { turns: 35, lost: 9, bot: "heuristic" },
+    wins: 3,
+  });
+  assert.equal(targetText({ turns: 31, lost: 12, bot: "thinker", beat: true }), "Beat thinker: 31 turns / 12 lost");
+  assert.deepEqual(botWins([{ bot: "marshal", won: true, turns: 20, lost: 1 }, { bot: "knower", won: false, turns: 80 }]),
+                   { fastest: { turns: 20, lost: 1, bot: "marshal" }, slowest: null, wins: 1 });
+  assert.deepEqual(botWins([]), { fastest: null, slowest: null, wins: 0 });
+  assert.deepEqual(botWins(null), { fastest: null, slowest: null, wins: 0 });
+});
+
+test("the best posted score fills a target, the best of every key the setup is filed under", () => {
+  assert.deepEqual(postedBest([
+    { best_turns: 18, best_lost: 4, best_by_name: "Old", best_user_name: "Ada" },
+    { best_turns: null, best_lost: null, best_by_name: null, best_user_name: null },
+    { best_turns: 18, best_lost: 2, best_by_name: " Bo ", best_user_name: null },
+  ]), { turns: 18, lost: 2, by: "Bo" });
+  assert.equal(postedBest([{ best_turns: null }]), null);
+  assert.equal(postedBest([]), null);
+  assert.equal(postedBest(undefined), null);
 });
 
 test("a score meets a target as the game's Target.met decides", () => {
@@ -305,20 +322,18 @@ test("a score meets a target as the game's Target.met decides", () => {
   assert.ok(!meetsTarget(null, { turns: 14 }));
 });
 
-test("a draft's target builds into the body and opens again with how it was chosen", async () => {
+test("a draft's target builds into the body and opens again as it was", async () => {
   const draft = emptyDraft();
   draft.name = "Aimed";
-  draft.stages = [{ ...emptyStage(), settings: { ...SETUP }, aim: "bot",
-                    target: { turns: 31, lost: 12, bot: "thinker", beat: true } },
-                  { ...emptyStage(), settings: { ...SETUP, seed: 7 }, aim: "link", target: { turns: 9, lost: 0 } },
+  draft.stages = [{ ...emptyStage(), settings: { ...SETUP }, target: { turns: 31, lost: 12, bot: "thinker", beat: true } },
+                  { ...emptyStage(), settings: { ...SETUP, seed: 7 }, target: { turns: 9, lost: 0 } },
                   { ...emptyStage(), settings: { ...SETUP, seed: 8 } }];
   const built = checkBody(buildBody(draft));
   assert.deepEqual(built.stages.map((s) => s.target), [
     { turns: 31, lost: 12, bot: "thinker", beat: true }, { turns: 9, lost: 0 }, undefined]);
   const back = await draftFromBody(built, async () => "link");
-  // The body keeps the link's score, never the challenge link: it opens as a custom target holding it.
-  assert.deepEqual(back.stages.map((s) => s.aim), ["bot", "turns", "none"]);
-  assert.deepEqual(back.stages[1].target, { turns: 9, lost: 0 });
+  assert.deepEqual(back.stages.map((s) => s.target), [
+    { turns: 31, lost: 12, bot: "thinker", beat: true }, { turns: 9, lost: 0 }, null]);
   assert.deepEqual(checkBody(buildBody(back)), built);
 });
 
@@ -438,8 +453,8 @@ test("the reverse pair makes a lane two-way and never adds a second", () => {
 test("a lane's gate, hidden and two-way build as the game reads them", () => {
   const draft = linear(3);
   const [a, b, c] = draft.stages.map((s) => s.key);
-  Object.assign(joinLane(draft, a, c), { aim: "turns", target: { turns: 12 }, hidden: true });
-  Object.assign(laneFrom(draft, a, b), { aim: "bot", target: { turns: 31, lost: 12, bot: "thinker", beat: true } });
+  Object.assign(joinLane(draft, a, c), { target: { turns: 12 }, hidden: true });
+  Object.assign(laneFrom(draft, a, b), { target: { turns: 31, lost: 12, bot: "thinker", beat: true } });
   // Hidden with no target is dropped, as the game would drop it.
   Object.assign(laneFrom(draft, b, c), { hidden: true });
   const built = checkBody(buildBody(draft));
@@ -454,8 +469,8 @@ test("a branching body opens as a draft and builds back to the same body", async
   assert.equal(draft.lanes.length, LANES.stored_lanes.length);
   assert.deepEqual(draft.start, [0]);
   const gated = draft.lanes.find((l) => l.from === 0 && l.to === 5);
-  assert.equal(gated.aim, "bot");
-  assert.equal(draft.lanes.find((l) => l.from === 1 && l.to === 3).aim, "turns");
+  assert.equal(gated.target.beat, true);
+  assert.equal(draft.lanes.find((l) => l.from === 1 && l.to === 3).target.beat, undefined);
   assert.equal(draft.lanes.find((l) => l.from === 2 && l.to === 4).hidden, true);
   const rebuilt = checkBody(buildBody(draft));
   assert.deepEqual(rebuilt.lanes, [...stored.lanes].sort((x, y) => x[0] - y[0] || x[1] - y[1]));
@@ -476,9 +491,9 @@ test("a kept draft's lanes are read tolerantly", () => {
   assert.equal(out.next_key, 10);
   assert.deepEqual(out.start, [9]);
   assert.deepEqual(out.lanes, [
-    { from: 4, to: 9, two_way: false, aim: "turns", target: { turns: 5 }, hidden: true },
-    { from: 9, to: 2, two_way: false, aim: "none", target: null, hidden: false },
-    { from: 4, to: 2, two_way: false, aim: "link", target: null, hidden: false },
+    { from: 4, to: 9, two_way: false, target: { turns: 5 }, hidden: true },
+    { from: 9, to: 2, two_way: false, target: { turns: 5 }, hidden: true },
+    { from: 4, to: 2, two_way: false, target: null, hidden: false },
   ]);
   // Keys that don't hold make the draft linear again.
   const relinked = readDraft(JSON.stringify({ stages: [{ key: 1 }, { key: 1 }], lanes: [], start: [] }));

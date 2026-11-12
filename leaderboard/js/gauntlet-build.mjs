@@ -19,7 +19,7 @@
 // survives the game's own clamp of a gauntlet's `id` intact.
 
 import { graphOf } from "./gauntlet-graph.mjs";
-import { bestBot } from "./standings.mjs";
+import { compareScores } from "./standings.mjs";
 
 export const LIMITS = Object.freeze({
   name: 32,
@@ -91,8 +91,9 @@ export function setupProblem(settings) {
 // -- stage targets ------------------------------------------------------------
 // A score a stage must be won within before the stages beyond it open
 // (docs/design/gauntlet.md, "Stage targets"; the game's `gauntlet.Target`):
-// `{turns, lost?, bot?, beat?}`. An author's own score is met; a bot's, copied
-// off the board's bot column when the gauntlet is saved, is beaten (`beat`).
+// `{turns, lost?, bot?, beat?}`. A target is met; one marked `beat` (a bot's,
+// as the page wrote "Beat the best bot" before targets were typed in) must be
+// beaten, and the page keeps it so until its numbers are edited.
 // Fixed into the file, never looked up live.
 
 const TARGET_KEYS = ["turns", "lost", "bot", "beat"];
@@ -123,15 +124,27 @@ export function linkTarget(challenge) {
 }
 
 /**
- * The best bot's win on a setup as a target to beat, from that setup's
- * `bot_scores` rows: `{target}`, or `{none}` saying why there is none ("no-rows":
- * the setup has no bot column yet; "no-win": no bot won it, so any win clears).
+ * The bots' wins on a setup, from its `bot_scores` rows, as targets to fill in:
+ * `{fastest, slowest, wins}`, each target `{turns, lost, bot}` with `bot` only
+ * for naming the button. A bot's own best win stands for it, so `slowest` is
+ * the slowest of those, and is null unless two or more bots won. `wins` counts
+ * the bots that did; with none, both are null.
  */
-export function botTarget(rows) {
-  if (!rows?.length) return { none: "no-rows" };
-  const best = bestBot(rows);
-  if (!best) return { none: "no-win" };
-  return { target: { turns: best.turns, lost: best.lost, bot: tidy(best.bot).slice(0, LIMITS.bot), beat: true } };
+export function botWins(rows) {
+  const best = new Map();
+  for (const row of rows || []) {
+    if (!row?.won || !isInt(row.turns)) continue;
+    const name = tidy(row.bot);
+    if (!best.has(name) || compareScores(row, best.get(name)) < 0) best.set(name, row);
+  }
+  const won = [...best.values()].sort(compareScores);
+  const as = (row) => ({ turns: row.turns, ...(isInt(row.lost) ? { lost: row.lost } : {}),
+                         bot: tidy(row.bot).slice(0, LIMITS.bot) });
+  return {
+    fastest: won.length ? as(won[0]) : null,
+    slowest: won.length > 1 ? as(won.at(-1)) : null,
+    wins: won.length,
+  };
 }
 
 /**
@@ -146,6 +159,22 @@ export function meetsTarget(score, target) {
   const want = named ? [target.turns, target.lost] : [target.turns];
   const order = mine[0] - want[0] || (named ? mine[1] - want[1] : 0);
   return target.beat ? order < 0 : order <= 0;
+}
+
+/**
+ * The best posted score on a setup as a target to fill in, from its
+ * `game_summary` rows (one per game key it is filed under): `{turns, lost, by}`,
+ * `by` the holder's name for the button, or null when no posted score counts.
+ * `game_summary`'s best is the counted record, shown even while a map is
+ * embargoed, as the map page shows it.
+ */
+export function postedBest(rows) {
+  const best = (rows || [])
+    .filter((row) => isInt(row?.best_turns))
+    .map((row) => ({ turns: row.best_turns, lost: isInt(row.best_lost) ? row.best_lost : 0,
+                     by: tidy(row.best_user_name || row.best_by_name) }))
+    .sort(compareScores)[0];
+  return best || null;
 }
 
 /** "14 turns", "14 turns / 30 lost": as the game's `Target.score_text`. */
@@ -410,18 +439,18 @@ export function fileName(body, gauntletId) {
 //
 // Lanes join stages by a `key` each stage gets when it is made (from the
 // draft's `next_key` counter), never by place, so reordering and removing never
-// rewire a lane: `lanes` is `[{from, to, two_way, aim, target, hidden}]` by key
-// and `start` a list of keys. A lane's `aim` says how its target was chosen, as
-// a stage's does, plus "turns", typed in.
+// rewire a lane: `lanes` is `[{from, to, two_way, target, hidden}]` by key
+// and `start` a list of keys. A stage's or lane's target is whatever numbers
+// were typed or filled in; an older draft's `aim` beside it is ignored.
 
 /** A stage with nothing in it yet. */
 export function emptyStage(key = 0) {
-  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", aim: "none", target: null };
+  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", target: null };
 }
 
 /** A lane with no options: any clear of `from` opens `to`. */
 export function emptyLane(from, to) {
-  return { from, to, two_way: false, aim: "none", target: null, hidden: false };
+  return { from, to, two_way: false, target: null, hidden: false };
 }
 
 /** A stored or kept target that checks out, or null. */
@@ -430,10 +459,6 @@ function keptTarget(raw) {
   return typeof target === "string" ? null : target;
 }
 
-/** How a draft stage's or lane's target was chosen: none, the link's score, the best bot, typed in. */
-export const AIMS = Object.freeze(["none", "turns", "link", "bot"]);
-/** The same choices for a lane. */
-export const LANE_AIMS = AIMS;
 
 /** A draft with one empty stage, open from the start. */
 export function emptyDraft() {
@@ -448,10 +473,9 @@ function chainOf(stages) {
 /**
  * A stored gauntlet as a draft to edit, its stages in play order with its lanes
  * and starts. Each stage's link is rebuilt from its setup, so it reads like the
- * link it was pasted from, but only its setup: the body keeps a target's score,
- * never the challenge link it came from. So a target opens as typed-in turns
- * (a custom one, holding its numbers), or the best bot's when it says `beat`.
- * The graph is read as the game reads it (`graphOf`).
+ * link it was pasted from, but only its setup: the body keeps a target's
+ * numbers, never the challenge link they came from. The graph is read as the
+ * game reads it (`graphOf`).
  *
  * @param linkFor  async (settings) => a game link carrying that setup
  */
@@ -470,7 +494,6 @@ export async function draftFromBody(body, linkFor) {
       title: typeof stage.title === "string" ? stage.title : "",
       briefing: briefing.length ? briefing : [""],
       hint: typeof stage.hint === "string" ? stage.hint : "",
-      aim: target ? (target.beat ? "bot" : "turns") : "none",
       target,
     });
   }
@@ -482,7 +505,6 @@ export async function draftFromBody(body, linkFor) {
     return {
       ...emptyLane(keyOf.get(a), keyOf.get(b)),
       two_way: graph.twoWay.has(pair),
-      aim: target ? (target.beat ? "bot" : "turns") : "none",
       target,
       hidden: Boolean(target) && graph.hidden.has(pair),
     };
@@ -500,13 +522,11 @@ export async function draftFromBody(body, linkFor) {
 
 function readLane(raw, have) {
   if (!isObject(raw) || !have.has(raw.from) || !have.has(raw.to) || raw.from === raw.to) return null;
-  const aim = LANE_AIMS.includes(raw.aim) ? raw.aim : "none";
-  const target = aim === "none" ? null : keptTarget(raw.target);
+  const target = keptTarget(raw.target);
   return {
     from: raw.from,
     to: raw.to,
     two_way: raw.two_way === true,
-    aim,
     target,
     hidden: Boolean(target) && raw.hidden === true,
   };
@@ -540,7 +560,6 @@ export function readDraft(text) {
       briefing: Array.isArray(s.briefing) && s.briefing.length
         ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
       hint: str(s.hint),
-      aim: target && AIMS.includes(s.aim) ? s.aim : "none",
       target,
     };
   });

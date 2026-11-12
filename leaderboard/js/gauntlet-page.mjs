@@ -16,19 +16,19 @@
 // new id. Everything that decides anything is in gauntlet-build.mjs, which
 // /api/gauntlet runs too; this file is the DOM around it.
 //
-// A stage's target (docs/design/gauntlet.md, "Stage targets") is the pasted
-// challenge link's own score, or the best bot's win on the setup read off
-// `bot_scores`. The bot's is read when picked and again on Save, then fixed into
-// the file: the game never looks it up.
+// A stage's or lane's target (docs/design/gauntlet.md, "Stage targets") is
+// the turns and ships typed in, blank for none. Buttons fill it from the pasted
+// challenge link's score or a bot's win on the setup read off `bot_scores`;
+// either way the numbers are fixed into the file: the game never looks them up.
 
 import { configured, inList, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
-  GAUNTLET_ID, LIMITS, addStage, botTarget, buildBody, checkBody, draftFromBody, draftProblem, dropLane, emptyDraft,
+  GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, checkBody, draftFromBody, draftProblem, dropLane, emptyDraft,
   fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveStage, parentsOf, readDraft, removeStage,
-  setStart, setupProblem, stageSetup, targetScore, targetText, textLength, tidy,
+  postedBest, setStart, setupProblem, stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
 // The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
@@ -57,10 +57,8 @@ function freshDraft() {
 // it could not be a stage, and the link's score and game key for a target.
 // Rebuilt from the link on load, never stored.
 const readings = new WeakMap();
-// What a stage's or a lane's target line says, by its object, until the next choice.
-const aimNotes = new WeakMap();
-// The best bot's win on a stage's setup, by stage, as a custom target's
-// suggestion: a promise of `botTarget`'s answer. Dropped when the link changes.
+// What the board knows of a stage's setup, by stage, for the target's quick
+// fills: a promise of `boardScores`' answer. Dropped when the link changes.
 const botBests = new WeakMap();
 let saved = null;   // {id, body} once saved, until the draft changes again
 let openLane = null;   // the lane whose options show under its near stage's card
@@ -136,62 +134,24 @@ async function readLink(stage) {
 }
 
 /**
- * The setup's `bot_scores` rows. A challenge link carries the game's own key;
- * a Get Link carries none, so the setup is also matched to its `games` row by
- * jsonb equality (contains and is contained by), as `campaign_games` matches.
+ * The setup's `bot_scores` rows and its `game_summary` rows (for the best
+ * posted score). A challenge link carries the game's own key; a Get Link
+ * carries none, so the setup is also matched to its `games` row by jsonb
+ * equality (contains and is contained by), as `campaign_games` matches.
  */
-async function botRows(stage) {
+async function boardRows(stage) {
   const keys = new Set([readings.get(stage)?.gameKey].filter(Boolean));
   const json = encodeURIComponent(JSON.stringify(stage.settings));
   const games = await select(`games?select=game_key&settings_json=cs.${json}&settings_json=cd.${json}`)
     .catch(() => []);
   for (const game of games) keys.add(game.game_key);
-  if (!keys.size) return [];
-  return select(`bot_scores?select=bot,won,turns,lost&game_key=${inList(keys)}`);
-}
-
-/**
- * Set `holder.target` from how it is aimed, and say what that came to. The
- * holder is a stage or a lane; `near` is the stage whose link and setup the
- * aim reads (the stage itself, or the lane's near end). For the best bot this
- * asks the board; an answer that arrives after it was aimed elsewhere is dropped.
- */
-async function applyAim(holder, near = holder) {
-  const reading = readings.get(near);
-  if (holder.aim === "link") {
-    holder.target = linkTarget(reading?.score);
-    aimNotes.set(holder, holder.target ? `${targetText(holder.target)}: a win at or under your score clears it.`
-                                       : "This link carries no score: paste a Challenge a friend link.");
-    return;
-  }
-  if (holder.aim === "turns") {
-    const from = holder.target || linkTarget(reading?.score);
-    holder.target = from ? { turns: from.turns, ...(Number.isInteger(from.lost) ? { lost: from.lost } : {}) }
-                         : { turns: 20 };
-    aimNotes.set(holder, "");
-    return;
-  }
-  if (holder.aim !== "bot" || !near?.settings) {
-    holder.target = null;
-    aimNotes.set(holder, "");
-    return;
-  }
-  let rows;
-  try {
-    rows = await botRows(near);
-  } catch {
-    aimNotes.set(holder, holder.target ? `Couldn't ask the board; keeping ${targetText(holder.target)}.`
-                                       : "Couldn't ask the board for its bot scores. Try again.");
-    return;
-  }
-  if (holder.aim !== "bot") return;
-  const found = botTarget(rows);
-  holder.target = found.target || null;
-  aimNotes.set(holder, found.target
-    ? `${targetText(found.target)}. Strictly better clears it. Read again when you save.`
-    : found.none === "no-win"
-      ? "No bot won this setup, so any win clears it."
-      : "No bot scores for this setup yet: post a game on it and they arrive within the hour.");
+  if (!keys.size) return { bots: [], posted: [] };
+  const [bots, posted] = await Promise.all([
+    select(`bot_scores?select=bot,won,turns,lost&game_key=${inList(keys)}`),
+    select(`game_summary?select=best_turns,best_lost,best_by_name,best_user_name&game_key=${inList(keys)}`)
+      .catch(() => []),
+  ]);
+  return { bots, posted };
 }
 
 const stageAt = (key) => draft.stages.find((s) => s.key === key);
@@ -257,107 +217,125 @@ function renderSummary(node, stage, duplicate) {
   });
 }
 
-/** The best bot's win on `stage`'s setup, asked of the board once per link. */
-function botBest(stage) {
+/**
+ * What the board knows of `stage`'s setup, asked once per link: `botWins`'
+ * answer plus `posted`, the best posted score (`postedBest`), or null when the
+ * board couldn't say.
+ */
+function boardScores(stage) {
   if (!stage?.settings || !configured()) return Promise.resolve(null);
   if (!botBests.has(stage)) {
-    botBests.set(stage, botRows(stage).then((rows) => botTarget(rows).target || null).catch(() => null));
+    botBests.set(stage, boardRows(stage)
+      .then(({ bots, posted }) => ({ ...botWins(bots), posted: postedBest(posted) }))
+      .catch(() => null));
   }
   return botBests.get(stage);
 }
 
-/**
- * A select for how a stage or lane is aimed, its note, the typed-in row a
- * custom target shows, and a redraw of them. The custom row suggests the
- * link's score and the best bot's, and warns, without blocking, when the typed
- * target is stricter than both: no one has shown it can be met.
- */
-function aimControl(holder, near, idFor, choices, onTyped) {
-  const select = el("select", { id: idFor, class: "plain" },
-                    choices.map(([value, text]) => el("option", { value, text })));
-  const note = el("p", { class: "stage-summary" });
+/** "25/2": a score on a quick-fill button. */
+const scoreText = (t) => (Number.isInteger(t.lost) ? `${t.turns}/${t.lost}` : `${t.turns}`);
 
+/**
+ * A stage's or lane's target: "Win in [turns] turns, losing at most [ships]
+ * ships", always shown, blank turns meaning no target. Buttons under it fill it
+ * from the link's score, the best posted score and the bots' wins on `near`'s
+ * setup (greyed when there is none; best posted and slowest bot only shown when
+ * there is one), and a note says what it comes to, warning, never blocking, when it
+ * is stricter than every score known: no one has shown it can be met.
+ * `onChange` runs after each edit; `show` redraws it from `holder.target`.
+ */
+function targetControl(holder, near, idFor, noneText, onChange) {
   const turnsId = `${idFor}-turns`;
   const lostId = `${idFor}-lost`;
-  const turns = el("input", { id: turnsId, type: "number", min: "1", max: "999", "aria-label": "Turns" });
+  const turns = el("input", { id: turnsId, type: "number", min: "1", max: "999", placeholder: "any",
+                              "aria-label": "Turns" });
   const lost = el("input", { id: lostId, type: "number", min: "0", max: "9999", placeholder: "any",
-                             "aria-label": "Ships lost (optional)" });
-  const suggest = el("p", { class: "stage-summary" });
-  const typed = el("div", { class: "aim-custom" }, [
+                             "aria-label": "Ships lost" });
+  const fromLink = el("button", { class: "drop", type: "button" });
+  const posted = el("button", { class: "drop", type: "button" });
+  const fastest = el("button", { class: "drop", type: "button" });
+  const slowest = el("button", { class: "drop", type: "button" });
+  const note = el("p", { class: "stage-summary" });
+  const row = el("div", { class: "target" }, [
     el("div", { class: "row lane-turns" }, [
       el("label", { for: turnsId, text: "Win in" }), turns,
       el("label", { for: lostId, text: "turns, losing at most" }), lost, el("span", { text: "ships" }),
     ]),
-    suggest,
+    el("div", { class: "row target-fills" }, [fromLink, posted, fastest, slowest]),
+    note,
   ]);
-  let bot = null;   // the best bot's target once the board has answered
+  let bots;   // boardScores' answer, null when the board couldn't say, undefined while asking
 
-  const use = (target) => {
-    holder.target = { turns: target.turns, ...(Number.isInteger(target.lost) ? { lost: target.lost } : {}) };
-    turns.value = holder.target.turns;
-    lost.value = holder.target.lost ?? "";
-    showSuggest();
-    onTyped();
+  const known = () => [linkTarget(readings.get(near)?.score), bots?.posted, bots?.fastest, bots?.slowest]
+    .filter(Boolean);
+  const showNote = () => {
+    clear(note);
+    if (!holder.target) {
+      note.append(Number.parseInt(lost.value, 10) >= 0 ? "Give it turns too: blank turns is no target." : noneText);
+      return;
+    }
+    note.append(holder.target.beat
+      ? `${targetText(holder.target)}: strictly better clears it. Editing the numbers makes it an ordinary target.`
+      : targetText(holder.target));
+    const scores = known();
+    if (!scores.length) {
+      note.append(el("span", { class: "warn", text: " · No score on this setup to check it against." }));
+    } else if (!scores.some((score) => meetsTarget(score, holder.target))) {
+      note.append(el("span", { class: "warn",
+        text: " · Stricter than every score above: no one has shown it can be met, so it may be impossible." }));
+    }
   };
-  const showSuggest = () => {
-    clear(suggest);
-    suggest.classList.remove("bad");
+  const showFills = () => {
     const link = linkTarget(readings.get(near)?.score);
-    const known = [
-      link && ["Your link's score", link],
-      bot && [`Best bot (${bot.bot || "bot"})`, bot],
-    ].filter(Boolean);
-    for (const [i, [what, target]] of known.entries()) {
-      const button = el("a", { href: "#", text: "use" });
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        use(target);
-      });
-      suggest.append(i ? " · " : "", `${what}: ${targetScore(target)} (`, button, ")");
+    fromLink.textContent = link ? `From link: ${scoreText(link)}` : "From link";
+    fromLink.disabled = !link;
+    fromLink.title = link ? "" : "Paste a Challenge a friend link to use its score";
+    const asking = bots === undefined && near?.settings && configured();
+    fastest.textContent = bots?.fastest ? `Fastest bot: ${scoreText(bots.fastest)} (${bots.fastest.bot})`
+                                        : asking ? "Fastest bot: asking…" : "Fastest bot";
+    fastest.disabled = !bots?.fastest;
+    fastest.title = bots?.fastest || asking ? "" : bots === null ? "Couldn't ask the board for its bot scores"
+      : bots ? "No bot has won this setup" : "No bot scores without a map link and the board";
+    posted.hidden = !bots?.posted;
+    if (bots?.posted) {
+      posted.textContent = `Best posted: ${scoreText(bots.posted)}${bots.posted.by ? ` (${bots.posted.by})` : ""}`;
     }
-    if (!holder.target) return;
-    if (!known.length) {
-      suggest.append(el("span", { class: "warn",
-        text: "No score on this setup to check it against: paste a Challenge a friend link, or post a game on it." }));
-    } else if (!known.some(([, target]) => meetsTarget(target, holder.target))) {
-      suggest.append(el("br"), el("span", { class: "warn",
-        text: "Stricter than any score shown above: no one has shown it can be met, so it may be impossible." }));
-    }
+    slowest.hidden = !bots?.slowest;
+    if (bots?.slowest) slowest.textContent = `Slowest bot: ${scoreText(bots.slowest)} (${bots.slowest.bot})`;
   };
+  const fill = (target) => {
+    holder.target = { turns: target.turns, ...(Number.isInteger(target.lost) ? { lost: target.lost } : {}) };
+    show();
+    onChange();
+  };
+  fromLink.addEventListener("click", () => fill(linkTarget(readings.get(near)?.score)));
+  posted.addEventListener("click", () => bots?.posted && fill(bots.posted));
+  fastest.addEventListener("click", () => bots?.fastest && fill(bots.fastest));
+  slowest.addEventListener("click", () => bots?.slowest && fill(bots.slowest));
   const readTyped = () => {
     const n = Number.parseInt(turns.value, 10);
     const m = Number.parseInt(lost.value, 10);
     holder.target = n >= 1 ? { turns: n, ...(m >= 0 ? { lost: m } : {}) } : null;
-    showSuggest();
-    onTyped();
+    showNote();
+    onChange();
   };
   turns.addEventListener("input", readTyped);
   lost.addEventListener("input", readTyped);
 
   const show = () => {
-    const score = readings.get(near)?.score;
-    for (const option of select.options) {
-      if (option.value === "link") {
-        option.text = score ? `${option.dataset.base ?? (option.dataset.base = option.text)}: ${targetScore(linkTarget(score))}`
-                            : `${option.dataset.base ?? (option.dataset.base = option.text)} (paste a Challenge a friend link)`;
-        option.disabled = !score && holder.aim !== "link";
-      }
-      if (option.value === "bot") option.disabled = !configured() && holder.aim !== "bot";
-    }
-    select.value = holder.aim;
-    note.textContent = aimNotes.get(holder) ?? (holder.target && holder.aim !== "turns" ? targetText(holder.target) : "");
-    typed.hidden = holder.aim !== "turns";
-    if (typed.hidden) return;
     turns.value = holder.target?.turns ?? "";
     lost.value = Number.isInteger(holder.target?.lost) ? holder.target.lost : "";
-    showSuggest();
-    botBest(near).then((found) => {
-      bot = found;
-      if (holder.aim === "turns") showSuggest();
+    bots = undefined;
+    showFills();
+    showNote();
+    boardScores(near).then((found) => {
+      bots = found;
+      showFills();
+      showNote();
     });
   };
   show();
-  return { select, note, typed, show };
+  return { row, show };
 }
 
 /** The options of the lane `lane`, shown under its near stage's card. */
@@ -365,16 +343,13 @@ function renderLane(lane) {
   const near = stageAt(lane.from);
   const far = stageAt(lane.to);
   const idFor = (name) => `lane-${lane.from}-${lane.to}-${name}`;
-  const { select, note, typed, show } = aimControl(lane, near, idFor("aim"), [
-    ["none", `None: any clear of ${nameOf(near)} opens it`],
-    ["turns", "Custom: win in N turns"],
-    ["link", `Your score from ${nameOf(near)}'s link`],
-    ["bot", `Beat the best bot on ${nameOf(near)}`],
-  ], () => {
-    hidden.disabled = !lane.target;
-    changed();
-    showLabel();
-  });
+  const { row: gate } = targetControl(lane, near, idFor("aim"), `No gate: any clear of ${nameOf(near)} opens it.`,
+    () => {
+      if (!lane.target) lane.hidden = hidden.checked = false;
+      hidden.disabled = !lane.target;
+      changed();
+      showLabel();
+    });
   const label = el("p", { class: "lane-label" });
   const showLabel = () => {
     const body = buildBody(draft);
@@ -399,16 +374,6 @@ function renderLane(lane) {
     render(idFor("hidden"));
   });
 
-  select.addEventListener("change", async () => {
-    lane.aim = select.value;
-    aimNotes.set(lane, lane.aim === "bot" ? "Asking the board…" : "");
-    show();
-    await applyAim(lane, near);
-    if (!lane.target) lane.hidden = false;
-    changed();
-    render(idFor("aim"));
-  });
-
   const remove = el("button", { class: "drop", type: "button", text: "Remove lane" });
   remove.addEventListener("click", () => {
     dropLane(draft, lane);
@@ -426,7 +391,7 @@ function renderLane(lane) {
   return el("fieldset", { class: "lane-options" }, [
     el("legend", { text: `Lane: ${nameOf(near)} ${lane.two_way ? "↔" : "→"} ${nameOf(far)}` }),
     el("label", { class: "check" }, [twoWay, "Two-way (either end opens the other)"]),
-    el("label", { for: idFor("aim"), text: "Gate (what opens it)" }), select, typed, note,
+    el("span", { class: "label", text: "Gate (what opens it)" }), gate,
     el("label", { class: "check" }, [hidden, "Hidden until met (needs a gate)"]),
     label,
     el("div", { class: "row" }, [close, remove]),
@@ -549,30 +514,12 @@ function renderStage(stage, i, dupes) {
     render();
   });
 
-  const { select: aim, note: aimNote, typed: aimTyped, show: showAim } = aimControl(stage, stage, id("aim"), [
-    ["none", "None: any win opens the way on"],
-    ["turns", "Custom: win in N turns"],
-    ["link", "Your score from this link"],
-    ["bot", "Beat the best bot on the board"],
-  ], changed);
-  aim.addEventListener("change", async () => {
-    stage.aim = aim.value;
-    aimNotes.set(stage, stage.aim === "bot" ? "Asking the board…" : "");
-    showAim();
-    changed();
-    await applyAim(stage);
-    showAim();
-    changed();
-  });
-
+  const { row: aim, show: showAim } = targetControl(stage, stage, id("aim"),
+                                                    "No target: any win opens the way on.", changed);
   const [link] = textField(id("link"), stage.link, "https://…/play/#eNo…", 0, (v) => { stage.link = v; }, true);
   link.addEventListener("input", async () => {
     await readLink(stage);
     renderSummary(summary, stage, duplicates().has(draft.stages.indexOf(stage)));
-    if (stage.aim !== "none") await applyAim(stage);
-    // A lane gated on this stage's link or bot reads the new setup too.
-    const gated = draft.lanes.filter((l) => l.from === stage.key && (l.aim === "link" || l.aim === "bot"));
-    await Promise.all(gated.map((lane) => applyAim(lane, stage)));
     showAim();
     showProblem();
     keep();
@@ -623,7 +570,7 @@ function renderStage(stage, i, dupes) {
     ...paragraphs,
     el("div", { class: "row" }, [more, fewer]),
     el("label", { for: id("hint"), text: "Hint" }), hint, hintCount,
-    el("label", { for: id("aim"), text: "Target (to open the stages beyond)" }), aim, aimTyped, aimNote,
+    el("span", { class: "label", text: "Target (to open the stages beyond)" }), aim,
     el("label", { class: "check" }, [opens, "Open from the start"]),
     el("span", { class: "label", text: "Leads to (tap a lit one for its options)" }),
     renderChips(stage),
@@ -733,16 +680,6 @@ async function save(event) {
   if (draftProblem(draft)) return;
   $("save").disabled = true;
   say("Saving…");
-  // The best bot is read again now: the column moves, and the file fixes what
-  // it says at the moment of saving.
-  const aimed = [...draft.stages.filter((stage) => stage.aim === "bot").map((stage) => [stage, stage]),
-                 ...draft.lanes.filter((lane) => lane.aim === "bot").map((lane) => [lane, stageAt(lane.from)])];
-  await Promise.all(aimed.map(([holder, near]) => applyAim(holder, near)));
-  if (aimed.length) {
-    keep();
-    render();
-    $("save").disabled = true;
-  }
   const gauntlet = buildBody(draft);
   try {
     const response = await fetch(ENDPOINT, {

@@ -500,17 +500,21 @@ board, and no key moves. Boons cannot do that.
 - **A win short of the target leaves the stage open**: `open_stages` takes the
   won stages as well as the cleared ones, so a stage won out of order from a
   challenge link stays open to try again, but opens nothing beyond.
-- **Set on the board from the author's own game.** The page's per-stage Target
-  choice offers a pasted challenge link's score (`linkTarget`) as the stage's
-  target. An author plays their own
-  gauntlet, pastes the links, and gets targets they have shown can be met.
-  A third choice, Custom, takes typed-in turns (and ships lost), as a lane's
-  gate does, suggesting the link's score and the best bot's beside it; a
-  target stricter than both is warned about ("may be impossible",
-  `meetsTarget`), never refused. A saved body keeps a target's score but never
-  the challenge link it came from, so a stored gauntlet or a `.json` opened on
-  the page rebuilds plain links and opens such a target as Custom, holding its
-  numbers (`draftFromBody`).
+- **Set on the board as typed numbers.** A stage's Target, and a lane's
+  Gate, is one row always shown: "Win in [turns] turns, losing at most
+  [ships] ships", blank turns for none (changed 2026-11-12 from a dropdown of
+  how it was chosen). Buttons under it fill it in: *From link* (a pasted
+  challenge link's score, `linkTarget`), *Best posted* when the map is on the
+  board with a counted score (`game_summary`'s best, which shows through an
+  embargo as the map page's does; `postedBest`), *Fastest bot* and, when two
+  or more bots won, *Slowest bot* (`botWins`); the link and fastest bot are
+  greyed when there is none. An
+  author plays their own gauntlet, pastes the links, and gets targets they have
+  shown can be met; a target stricter than every score shown is warned about
+  ("may be impossible", `meetsTarget`), never refused. A saved body keeps a
+  target's numbers but never the challenge link they came from, so a stored
+  gauntlet or a `.json` opened on the page rebuilds plain links; paste a
+  challenge link again to fill from its score.
   `checkBody` refuses a malformed target (`checkTarget`); `from_dict` drops one
   (the stage then has none) and never raises. The id hashes the body, so adding a target is a
   new row and the old link keeps opening the old gauntlet.
@@ -534,6 +538,12 @@ board, and no key moves. Boons cannot do that.
   every map. A run's target is local and only gates its own stages.
 
 ### Beat the best bot
+
+No longer written by the page (2026-11-12): *Fastest bot* now fills the best
+bot's score as an ordinary target, met rather than beaten, and nothing is
+re-read on Save. A `beat` target in a file still works in the game, and the
+page keeps it as it is until its numbers are edited, so an opened gauntlet
+saves back to the same body. As first built:
 
 A second kind of target: the stage is cleared by a win better than the best bot
 on the board managed on the same setup. It is the figure a map's page already

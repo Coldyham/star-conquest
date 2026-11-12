@@ -1508,6 +1508,8 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 .lane-turns input[type="number"] { width: 6rem; }
 .lane-turns label { margin: 0; }
 .lane-turns[hidden] { display: none; }
+.target-fills { margin-top: 0.4rem; }
+.target-fills button[hidden] { display: none; }
 .lane-label { margin: 0; color: var(--cyan); font-size: 0.8rem; }
 .lane-label:empty { display: none; }
 .stage.flash { animation: card-flash 1.2s ease-out; }
