@@ -18,7 +18,7 @@
 // one is a new row. 19 + 1 + 12 = 32, gauntlet.py's NAME_MAX, so the id
 // survives the game's own clamp of a gauntlet's `id` intact.
 
-import { graphOf } from "./gauntlet-graph.mjs";
+import { deadEnd, graphOf } from "./gauntlet-graph.mjs";
 import { compareScores } from "./standings.mjs";
 
 export const LIMITS = Object.freeze({
@@ -32,6 +32,7 @@ export const LIMITS = Object.freeze({
   bodyBytes: 65536,
   slug: 19,
   bot: 24,
+  lives: 9,
 });
 
 /** `schema.sql`'s check on `gauntlets.gauntlet_id`. */
@@ -231,7 +232,22 @@ export function buildBody(draft) {
     && lanes.every((pair, i) => pair.length === 2 && pair[0] === i && pair[1] === i + 1);
   if (!linear) body.lanes = lanes;
   if (start.length !== 1 || start[0] !== 0) body.start = start;
+  writeBonus(body, list);
+  const lives = Number(draft.lives);
+  if (Number.isInteger(lives) && lives > 1) body.lives = Math.min(lives, LIMITS.lives);
   return body;
+}
+
+/** Each stage's `bonus_life` onto `body`, written only where it differs from
+ * the graph's default (`gauntlet.to_dict`), so ticking a box back to what the
+ * graph says moves no id. */
+function writeBonus(body, list) {
+  const graph = graphOf(body);
+  for (const [i, stage] of list.entries()) {
+    if (typeof stage.bonus_life === "boolean" && stage.bonus_life !== deadEnd(graph, i)) {
+      body.stages[i].bonus_life = stage.bonus_life;
+    }
+  }
 }
 
 /** A draft lane's third element: its target, hidden (only with one), two-way. */
@@ -285,6 +301,10 @@ export function checkBody(body) {
       if (typeof target === "string") return `${where} ${target}`;
       stage.target = target;
     }
+    if (raw.bonus_life !== undefined) {
+      if (typeof raw.bonus_life !== "boolean") return `${where}'s bonus_life is not true or false`;
+      stage.bonus_life = raw.bonus_life;
+    }
     stages.push(stage);
   }
 
@@ -305,6 +325,12 @@ export function checkBody(body) {
   if (body.start !== undefined) {
     if (!Array.isArray(body.start) || !body.start.every((s) => ids.has(s))) return "start names a stage that is not there";
     out.start = [...body.start];
+  }
+  if (body.lives !== undefined) {
+    if (!isInt(body.lives) || body.lives < 1 || body.lives > LIMITS.lives) {
+      return `lives must be a whole number from 1 to ${LIMITS.lives}`;
+    }
+    if (body.lives !== 1) out.lives = body.lives;
   }
   const stranded = unreachable(out);
   if (stranded >= 0) return `stage ${stranded + 1} can't be reached from a start`;
@@ -445,7 +471,7 @@ export function fileName(body, gauntletId) {
 
 /** A stage with nothing in it yet. */
 export function emptyStage(key = 0) {
-  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", target: null };
+  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", target: null, bonus_life: null };
 }
 
 /** A lane with no options: any clear of `from` opens `to`. */
@@ -462,7 +488,7 @@ function keptTarget(raw) {
 
 /** A draft with one empty stage, open from the start. */
 export function emptyDraft() {
-  return { name: "", by_name: "", wants_listing: false, stages: [emptyStage(0)], lanes: [], start: [0], next_key: 1 };
+  return { name: "", by_name: "", wants_listing: false, lives: 1, stages: [emptyStage(0)], lanes: [], start: [0], next_key: 1 };
 }
 
 /** Each stage joined to the next in list order: a linear gauntlet's lanes. */
@@ -495,6 +521,7 @@ export async function draftFromBody(body, linkFor) {
       briefing: briefing.length ? briefing : [""],
       hint: typeof stage.hint === "string" ? stage.hint : "",
       target,
+      bonus_life: typeof stage.bonus_life === "boolean" ? stage.bonus_life : null,
     });
   }
   if (!stages.length) return emptyDraft();
@@ -513,11 +540,17 @@ export async function draftFromBody(body, linkFor) {
     name: typeof body?.name === "string" ? body.name : "",
     by_name: "",
     wants_listing: false,
+    lives: livesOf(body?.lives),
     stages,
     lanes,
     start: graph.start.map((id) => keyOf.get(id)),
     next_key: stages.length,
   };
+}
+
+/** A kept or stored `lives`, clamped as `Gauntlet.from_dict` clamps it. */
+function livesOf(raw) {
+  return isInt(raw) ? Math.max(1, Math.min(LIMITS.lives, raw)) : 1;
 }
 
 function readLane(raw, have) {
@@ -561,6 +594,7 @@ export function readDraft(text) {
         ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
       hint: str(s.hint),
       target,
+      bonus_life: typeof s.bonus_life === "boolean" ? s.bonus_life : null,
     };
   });
   if (!stages.length) stages.push(emptyStage(0));
@@ -580,6 +614,7 @@ export function readDraft(text) {
     name: str(data.name),
     by_name: str(data.by_name),
     wants_listing: data.wants_listing === true,
+    lives: livesOf(data.lives),
     stages,
     lanes,
     start,

@@ -1145,8 +1145,8 @@ HIGHLIGHT = (120, 150, 210)   # `menu._HL_BORDER`: an open stage's status
 COPY_GAUNTLET = "Copy link"
 TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_", "run_")
 RUN_KEYS = ("run_start", "run_continue", "run_abandon")
-RUN_ABOUT = "Run: every stage in order, each within its target, one life"
-RUN_ABOUT_FORK = "Run: one way through to the end, each stage within its target, one life"
+RUN_ABOUT = "Run: every stage in order, each within its target, {lives}"
+RUN_ABOUT_FORK = "Run: any stage you've opened, to the end, each within its target, {lives}"
 PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
 
 Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
@@ -1324,8 +1324,9 @@ def live_run(ms):
 def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | None:
     """The list's run line and its buttons, ``(text, [(key, label)])``, or None
     for a gauntlet that can't be run (`run.offered`): the tutorial. Where the
-    run may go more than one way, the button names the selected stage once it
-    is one of them, and the line asks for one until it is."""
+    run may go more than one way, the button names the stage it will play, and
+    the line asks for one until there is one. A stage already won, kept for its
+    gate, is named as a replay."""
     if not gauntlet_run.offered(g):
         return None
     live = live_run(ms)
@@ -1333,26 +1334,35 @@ def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | Non
         at, total = gauntlet_run.position(live, g)
         abandon = "Sure? Abandon" if ms.run_confirm == "run_abandon" else "Abandon run"
         where = f"stage {at} of {total}" if total else f"stage {at}"
+        if gauntlet_run.counts_lives(live, g):
+            where += f" · {gauntlet_run.hearts(gauntlet_run.lives_left(live, g))} left"
         go = "Continue run"
-        ways = gauntlet_run.ways_on(live, g)
+        ways = gauntlet_run.frontier(live, g)
         if len(ways) > 1:
-            stage = g.stage(ms.stage_pick) if ms.stage_pick in ways else None
-            where += " · choose the way on: a stage marked run"
-            go = f"Continue run: {stage.title}" if stage is not None else go
+            sid = gauntlet_run.stage_to_play(live, g, ms.stage_pick)
+            stage = g.stage(sid) if sid is not None else None
+            if stage is None:
+                where += " · choose a stage marked run"
+            elif sid in live.won:
+                go = f"Replay for its gate: {stage.title}"
+            else:
+                go = f"Continue run: {stage.title}"
         return f"Run under way: {where}", [("run_continue", go), ("run_abandon", abandon)]
     if live is not None and ms.run_confirm == "run_start":
         return "Starting this ends your run of another gauntlet", [("run_start", "Start anyway")]
-    about = RUN_ABOUT if gauntlet_run.linear(g) else RUN_ABOUT_FORK
+    lives = "one life" if g.lives == 1 else f"{g.lives} lives"
+    about = (RUN_ABOUT if gauntlet_run.linear(g) else RUN_ABOUT_FORK).format(lives=lives)
     return gauntlet_run.summary(g, ms.runs) or about, [("run_start", "Start run")]
+
 
 
 def run_stages(ms, g: gauntlet.Gauntlet) -> list[int]:
     """The stages to mark "run" on the active run of ``g``: the one it is
-    playing, or every way it may go on."""
+    playing, or every stage on its frontier."""
     live = live_run(ms)
     if live is None or live.gauntlet_id != g.id or live.status != gauntlet_run.ACTIVE:
         return []
-    return [live.playing.stage] if live.playing is not None else gauntlet_run.ways_on(live, g)
+    return [live.playing.stage] if live.playing is not None else gauntlet_run.frontier(live, g)
 
 
 @dataclass(frozen=True)
@@ -1459,8 +1469,11 @@ def play_pick(ms, settings: Settings, g: gauntlet.Gauntlet,
 
 def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
     """The selected stage, settled: the pick if it is still shown, else the
-    stage being played, the run's, the first open stage not yet cleared, the
-    first start, in that order (and kept, so arrows step from it)."""
+    stage a run of ``g`` would play next, the stage being played, the first on
+    the run's frontier, the first open stage not yet cleared, the first start,
+    in that order (and kept, so arrows step from it). The run's next comes
+    before the stage just played, so Continue run never defaults to a replay
+    for a gate."""
     rows = stage_rows(ms, settings, g)
     shown = {r.stage.id for r in rows}
     if ms.stage_pick not in shown:
@@ -1468,9 +1481,12 @@ def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
         done = gauntlet.cleared(g, bests)
         here = next((r.stage.id for r in rows if r.here), None)
         run_on = next(iter(run_stages(ms, g)), None)
+        live = live_run(ms)
+        run_next = (gauntlet_run.stage_to_play(live, g) if live is not None and live.gauntlet_id == g.id
+                    else None)
         fresh = next((r.stage.id for r in rows if r.open and r.stage.id not in done), None)
         start = next((s for s in g.start if s in shown), None)
-        ms.stage_pick = next((s for s in (here, run_on, fresh, start) if s in shown),
+        ms.stage_pick = next((s for s in (run_next, here, run_on, fresh, start) if s in shown),
                              rows[0].stage.id if rows else None)
     return ms.stage_pick
 
@@ -1552,8 +1568,8 @@ def _run_press(ms, settings: Settings, g: gauntlet.Gauntlet, key: str, armed: st
     else:
         sid = gauntlet_run.stage_to_play(mine, g, pick) if mine is not None else None
         action = "run_continue"
-        if sid is None and mine is not None and gauntlet_run.ways_on(mine, g):
-            say_gauntlet(ms, g.id, "Select a stage marked run to choose the way on", False, say)
+        if sid is None and mine is not None and gauntlet_run.frontier(mine, g):
+            say_gauntlet(ms, g.id, "Select a stage marked run to choose where the run goes", False, say)
     if sid is None or load_stage(ms, settings, g, sid) is None:
         return None
     ms.tutorial_open = False
@@ -1570,12 +1586,14 @@ def graph_view(ms, settings: Settings, g: gauntlet.Gauntlet) -> dict:
     ends = gauntlet.goals(g)
     pick = picked_stage(ms, settings, g)
     run_on = run_stages(ms, g)
+    runs = gauntlet_run.offered(g)    # a bonus life means something only in a run
     shown = {r.stage.id for r in rows}
     bests = ms.stage_bests.get(g.id, {})
     nodes = []
     for r in rows:
         sid = r.stage.id
         marks = [m for m, on in (("start", sid in g.start), ("goal", sid in ends), ("run", sid in run_on),
+                                 ("life", runs and gauntlet.grants_life(g, sid)),
                                  ("here", r.here), ("picked", sid == pick)) if on]
         col, row = cells[sid]
         nodes.append({"key": f"stage_{sid}", "col": col, "row": row, "place": str(r.index + 1),

@@ -177,7 +177,8 @@ For authors. A gauntlet is one JSON file:
  "stages": [
    {"id": 0, "title": "First contact", "briefing": ["…", "…"], "hint": "…", "settings": {…}},
    …],
- "lanes": [[0, 1], [1, 2], …]}
+ "lanes": [[0, 1], [1, 2], …],
+ "lives": 3}
 ```
 
 - A stage's `settings` is exactly what the menu's Save writes
@@ -189,6 +190,16 @@ For authors. A gauntlet is one JSON file:
   beat, `{"turns": 31, "lost": 12, "bot": "thinker", "beat": true}` ("Stage
   targets", below). `turns` is a positive int, `lost` an int from 0, `bot` at
   most 24 characters.
+- `lives` is what a run of the gauntlet starts with, an int from 1 to
+  `gauntlet.LIVES_MAX` (9), default 1; `from_dict` clamps it and `to_dict`
+  writes it only when it isn't 1 ("Runs", *Lives*, below).
+- A stage's optional `bonus_life` says whether winning it within its target
+  in a run grants a life, once per run. **Its default follows the graph**: on
+  for a dead end (no lane out at all, and not a goal, such as the tutorial's
+  "Long odds" behind its gate), off otherwise (`gauntlet.grants_life`, mirrored
+  by the board's `gauntlet-graph.mjs` and pinned by `gauntlet-layout.json`).
+  The file writes it only when it differs from that default, so adding a lane
+  out of a dead end turns its bonus off unless the author ticked it.
 - `briefing` is a list of paragraphs, at most six of 240 characters each.
   `hint` is one line of at most 90. `title` is at most 32 characters.
 - `lanes` joins stages by `id`, as the weekly campaign's graph does. If `lanes`
@@ -334,26 +345,27 @@ board's halves.
 ## Runs (built 2026-11-04)
 
 A **run** plays a gauntlet's stages from a start to a goal, each won within
-its target, with one life. It is the first step towards the roguelite run
-below: forks (built 2026-11-12, *Forks* below), but no lives or boons. It needs no format change, so a gauntlet already made
-can be run, and in particular a generated one with stage targets (the form's
-"Stage targets", from the probes' wins) or one built on the board with "Beat
-the best bot". The working plan for the rest is
+its target, on the gauntlet's lives (one unless it says more). It is the
+first step towards the roguelite run below: forks, lives and movement over
+every stage opened (*Lives, and moving over everything unlocked* below), but
+no boons. A gauntlet already made can be run, and in particular a generated
+one with stage targets (the form's "Stage targets", from the probes' wins) or
+one built on the board with "Beat the best bot". Boons stay parked in
 [`graphical-gauntlet-maker.md`](../graphical-gauntlet-maker.md).
 
 - **Offered only where it adds something** (`run.offered`). The gauntlet must
   have a goal to end on, and either a stage target or a fork (`run.forks`:
   two starts, or a stage on the main path with more than one way out, gated or
-  not). At a fork the choice is the point: a run that takes a way it can't win
-  is over. On the tutorial, a single path with no target whose gates lead only
+  not). At a fork the choice is the point: a way the run can't win costs it
+  lives. On the tutorial, a single path with no target whose gates lead only
   off its last stage, a run would be the stage list again, so the list shows
   no run there.
 - **Only this game's score counts.** A run game's Next stage asks
   `can_post` and `met_target` on this game, never `stage_met_before`, so a fast
   free-play win on a stage doesn't carry a run over it
   (`Ui.offers_next_stage`). A loss, a win short of the target, or a win not
-  played by hand ends the run (`run.judge`), and so does being knocked out
-  while the bots play on.
+  played by hand costs a life (`run.judge`, `run.COSTS`), and so does being
+  knocked out while the bots play on.
 - **Run games are ordinary games.** They post, file bests and clear stages as
   any other. Nothing reaches `Settings` or the log, so the board and the
   verifier never see a run.
@@ -364,10 +376,12 @@ the best bot". The working plan for the rest is
   starts and again the moment that game is decided. The store keeps the active
   run and the last 20 finished.
 - **A run judges only its own game.** Each step names its game's log file.
-  Only that game moves the run, and only once (`run.finish`). A Retry, a rewind
-  or a fork after the game is decided is free play: `main.run_ui` marks only
-  the run's own game, and the run has already recorded the result. So none of
-  them is blocked. They just aren't the run. While the game is undecided it
+  Only that game moves the run, and only once (`run.finish`). A rewind or a
+  fork after the game is decided is free play: `main.run_ui` marks only the
+  run's own game, and the run has already recorded the result. The decided
+  game's overlay offers no free-play Retry, though: beside Try again (a new
+  step) it would be a fresh game of the same stage that the run doesn't
+  record. While the game is undecided it
   plays ironman (no History or Undo, so no rewind), and the Hint is
   not offered (`Ui.can_hint`).
 - **Quitting doesn't escape a bad game.** Continue run resumes the step's own
@@ -381,41 +395,98 @@ the best bot". The working plan for the rest is
 - **One run at a time.** Starting another gauntlet's run abandons the one
   under way, after a second press. Abandon run also takes two.
 - **An edited gauntlet ends its run.** A run stores a hash of its stages' setups
-  and targets (`run.fingerprint`). A desktop file changed under a run makes it
+  and targets, and of the stages that grant a life once there are any
+  (`run.fingerprint`). A desktop file changed under a run makes it
   a different gauntlet, as an edited stage is a new one (`run.active_for`).
 - **In the list:** a line under the stages ("Best run: 5/8 stages", "Run
   complete ✓", or what a run is), then **Start run**, or **Continue run** and
-  **Abandon run**. The stage the run is on reads "run · …" in its row. On
-  the overlay, the run's line ("Run: stage 2/8 done · Next stage carries it
-  on", "Run over at stage 3/8: Win in 14 turns or fewer not met") takes the
-  stage verdict's place.
+  **Abandon run**. The stages the run may play read "run · …" in their rows.
+  On the overlay, the run's line ("Run: stage 2/8 done · Next stage carries it
+  on", "Run: lost · ♥♥ left", "Run over at stage 3/8: Win in 14 turns or fewer
+  not met") takes the stage verdict's place.
 
-### Forks (built 2026-11-12)
+### Lives, and moving over everything unlocked (built 2026-11-12)
 
-The first build offered runs only on a single path. That left out exactly the
-gauntlets where a run means most: at a fork, the way chosen can end the run.
-This is the movement half of Phase 5 of the plan, without lives or boons.
+Forks came first (2026-11-12), moving a run only from the stage it last won.
+Lives came the same day, and with them a run that may play any stage it has
+opened: a loss costs a life rather than ending the run, and the next go can
+be the same stage (it was close) or another (the other track looked easier).
+That second choice is what turns a second track into a real choice rather
+than a coin toss at the start.
 
-- **A run moves from the stage it last won** (`run.ways_on`), never from bests.
-  At first its ways on are the starts. After a win they are each ungated lane
-  out of that stage to a stage the run hasn't won (so a two-way lane never
-  leads back), and each gated lane whose target **this game's** score meets.
-- **A win with no ungated way on completes the run** (`run.ends`): a goal, or a
-  bonus stage's dead end. A gated lane out of a goal (the tutorial's bonus
-  stages) is not taken, as the plan's "winning a goal wins the run" says.
-- **One way on: Next stage carries it on**, as before. The game works this out
-  from the ways out it was given (`Ui.run_ways`, set by `app.run_ui`) and this
-  game's score, in `app.record_run_step`.
-- **More than one: the list chooses.** The overlay says "choose the way on in
-  the gauntlet list". The list marks every way on "run", and Continue run plays
-  the selected stage, naming it on the button ("Continue run: Nebula Gate").
-  With nothing chosen it asks for a stage marked run. Two starts work the same
-  way for Start run.
+- **The frontier is every stage the run has opened and not yet won**
+  (`run.frontier`). A stage is open if it is a start, if an ungated lane leads
+  to it from a stage the run won, or if a gated lane does from a stage the run
+  won *with a game whose own score met the gate* (`run.unlocked`). Bests never
+  count.
+- **A stage is behind the run once a stage it leads to is won** (`run.behind`),
+  and leaves the frontier: in a concertina, the unplayed half of a pair closes
+  once the waist after it is won, so a run never wanders back. A two-way lane
+  leads back too, so it never puts a stage behind. A dead end leads nowhere,
+  so it stays until it is played; that is what makes its bonus life worth
+  anything.
+- **A missed gate can be tried again for a life.** A won stage with a gated
+  lane out to a stage the run hasn't opened or gone past stays on the frontier
+  (`run.gates_left`), even once it is behind: the gate is a bonus, and worth a
+  life to some players. A replay is judged against the gate, not the stage
+  target (`run.finish`): meeting it is MET and opens the far stage; any other
+  win is MISSED and costs a life, or a player could keep winning it and
+  missing the gate for free. A replay wins no stage (`Run.cleared` counts
+  stages). Before lives, a missed gate was lost for good.
+- **A loss costs a life**: LOST, MISSED and VOID each cost one, and the stage
+  stays on the frontier. GONE and ABANDONED still end the run, since
+  restarting would reward a reload or a quit.
+- **Only running out of lives ends the run** (beside GONE and ABANDONED).
+  With a missed gate replayable the frontier can't empty before a goal is won:
+  an ungated way always leads on to a goal, and anything else left can be
+  replayed for a life. So what comes next is always the player's choice.
+  (`run.finish` still ends a run whose frontier empties, which a gauntlet with
+  a goal never reaches.)
+- **Winning a goal completes the run** (`gauntlet.goals`). Before, a win with
+  no ungated way on completed it; once any stage can be played, a won dead end
+  mustn't end a run whose other tracks are still open. A gated lane out of a
+  goal (the tutorial's bonus stages) is not taken: winning the goal wins the
+  run.
+- **Lives are copied, and derived.** `Run.lives` is the gauntlet's `lives` when
+  the run began, so a later edit to the gauntlet never changes a run under way
+  (it stays out of the fingerprint); a record without it reads as 1, so a run
+  begun before lives finishes under the rules it began with. `run.lives_left`
+  counts from the steps: the lives it began with, one more for each first win
+  of a stage that grants one (`gauntlet.grants_life`), one fewer for each step
+  that cost one. The steps are already the complete record, so a stored count
+  could only drift. Meeting a gate earns no life; there is no cap on lives
+  earned past the start.
+- **Next stage** follows a win only, and only when one stage not yet won is on
+  the frontier (`run.next_up`; a won stage kept for its gate is a replay,
+  never the next stage). Otherwise the overlay says to choose in the list.
+- **After a loss**, with lives left, the overlay says "Run: lost · ♥♥ left"
+  and offers **Try again**, a fresh game of the same stage as a new step, and
+  **Choose a stage**, to the list. The two are the same: the life is already
+  spent when the loss is recorded, and Try again is only the list's pick made
+  for the player. After the last life: "Run over: no lives left · 3 stages
+  won". A one-life run with no bonus stage says nothing about lives
+  (`run.counts_lives`), as before.
+- **In the list** every frontier stage is marked "run", the run line reads
+  "Run under way: stage 3 · ♥♥ left", and Continue run plays the selected
+  stage, naming it on the button ("Continue run: Nebula Gate", or "Replay for
+  its gate: …" for a won stage). With nothing chosen it plays the one stage
+  not yet won, if there is one. The list's default selection is the run's next
+  stage before the one just played (`setupmenu.picked_stage`), so Continue run
+  never defaults to a replay that costs a life. A stage that grants a life is
+  marked ♥ on gauntlets that offer a run.
+- **On the board**, a Lives input sits beside the gauntlet's name, shared by
+  Build and Generate, and each stage card has "Grants a bonus life", ticked by
+  default for a dead end; a tick either way sticks in the draft. `checkBody`
+  checks both, and the diagram marks a bonus stage ♥.
 - **No total where runs differ in length** (`run.linear`: a single path with no
   gated lane). The list and overlay say "stage 3", not "stage 3 of 8", and a
   finished run "Run complete: 4 stages".
 - **The fingerprint covers the lanes** of any gauntlet that isn't a plain path,
-  so a lane edited under a run ends it. A plain path hashes as before.
+  so a lane edited under a run ends it, and the stages that grant a life once
+  there are any. A gauntlet with no bonus stage hashes as before.
+- **Not built:** checkpoints (a life already gives what going back to the last
+  waist would); a run on a linear gauntlet with no targets ("finish within
+  three losses" is a different challenge, left to the author to decide).
 
 ## The gauntlet: proposed, not built
 

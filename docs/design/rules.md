@@ -630,15 +630,24 @@ Reasons: `docs/design/gauntlet.md`.
   game's or an earlier best meeting the target (`Ui.stage_cleared`,
   `Ui.offers_next_stage`).
 - **A run** (`run.py`) plays a gauntlet from a start to a goal, each stage
-  within its target, with one life. It is offered where it adds something to
-  the list: a target, or a fork (`run.offered`, `run.forks`). It moves from
-  the stage it last won (`run.ways_on`): along any ungated lane to a stage it
-  hasn't won, and along a gated one only when this game's score meets it. At a
-  fork the list marks the ways on and Continue run plays the one selected; a
-  win with no ungated way on completes the run. It is the one piece of gauntlet progress that is stored
+  within its target, on the gauntlet's `lives` (1 to `LIVES_MAX`, default 1).
+  It is offered where it adds something to the list: a target, or a fork
+  (`run.offered`, `run.forks`). It may play any stage on its frontier
+  (`run.frontier`): opened (a start, or an ungated lane from a stage it won, or
+  a gated one from a stage won with a game whose own score met the gate), not
+  won, and not behind a won stage; a won stage with a gate still worth meeting
+  stays, its replay judged against the gate (`run.gates_left`). LOST, MISSED and
+  VOID cost a life and keep the stage; only the last life, GONE or ABANDONED
+  ends the run; a won goal (`gauntlet.goals`) completes it. Lives left are
+  derived from the steps (`run.lives_left`), never stored; `Run.lives` is
+  copied from the gauntlet when the run begins. A stage's first win in a run
+  grants a life where `gauntlet.grants_life` says so: the stage's
+  `bonus_life`, by default on for a dead end. It is the one piece of gauntlet
+  progress that is stored
   (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
-  decided. Only the step's own game moves it, once (`run.finish`), so a Retry
-  or fork is free play. That game plays ironman with no Hint, and its Next
+  decided. Only the step's own game moves it, once (`run.finish`), so a rewind
+  or fork is free play; its decided overlay offers Try again (a new step) or
+  Choose a stage, never a free-play Retry. That game plays ironman with no Hint, and its Next
   stage reads this game's score alone. Continue resumes the step's log (kept
   in `webstore` too, `run.keep_log`), never a fresh copy, and a log that can't
   be loaded ends the run. A run adds nothing to `Settings` or the log, and run

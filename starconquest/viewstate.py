@@ -385,9 +385,16 @@ class Ui:
     run_total: int = 0
     run_note: str = ""
     run_ok: bool = True
-    # The run's ways out of this stage as `run.ways_out` gives them, `(stage,
-    # gate)`: which way a win may go on, and whether it completes the run.
-    run_ways: tuple[tuple[int, Target | None], ...] = ()
+    # The stage the run is playing, and its lives left as the game began (0
+    # where the run doesn't count lives: one life and no bonus stage). Once the
+    # game is judged: `run_on` while the run goes on, `run_next` the stage Next
+    # stage begins (`run.next_up`), `run_again` when the game cost a life and
+    # Try again may replay the stage as a new step.
+    run_stage: int | None = None
+    run_lives: int = 0
+    run_on: bool = False
+    run_next: int | None = None
+    run_again: bool = False
     # The system whose star info card (`starlore`) is up over the board, or None.
     # The i button beside a selected system's name in the side panel and the I
     # key open it; any press closes it.
@@ -790,12 +797,12 @@ class Ui:
         cleared (`stage_cleared`), or, with no ungated way on, to the one stage a
         gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it. A
         gate open beside an ungated way is a fork: choose on the list. In a run
-        only this game's score counts, on the run's own ways on (`run_ways`, set
+        only this game's score counts: the run's one next stage (`run_next`, set
         by `main.record_run_step`)."""
         if not self.in_stage:
             return False
         if self.run_id:
-            return self.has_next_stage and self.can_post(state) and self.met_target(state)
+            return bool(self.run_note) and self.run_next is not None
         gates = self.unlocked(state)
         if self.has_next_stage:
             return not gates and self.stage_cleared(state)

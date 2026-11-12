@@ -30,7 +30,7 @@ import {
   fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveStage, parentsOf, readDraft, removeStage,
   postedBest, setStart, setupProblem, stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
-import { depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
+import { depths, goals, grantsLife, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
 // The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
 import { drawGraph } from "/play/js/stagegraph.mjs";
 import { inflate } from "./inflate-browser.mjs";
@@ -561,6 +561,16 @@ function renderStage(stage, i, dupes) {
   });
   const lane = openLane && openLane.from === stage.key && draft.lanes.includes(openLane) ? openLane : null;
 
+  // Ticked by default for a dead end (no lane out, not a goal); a tick either
+  // way sticks, so adding a lane out later doesn't untick one the author set.
+  const life = el("input", { id: id("life"), type: "checkbox" });
+  life.checked = typeof stage.bonus_life === "boolean" ? stage.bonus_life : grantsLife(graphOf(buildBody(draft)), i);
+  life.addEventListener("change", () => {
+    stage.bonus_life = life.checked;
+    changed();
+    render(id("life"));
+  });
+
   return el("fieldset", { class: "stage", id: `card-${stage.key}` }, [
     el("legend", { text: `Stage ${i + 1}${tidy(stage.title) ? `: ${tidy(stage.title)}` : ""}` }),
     tools,
@@ -572,6 +582,7 @@ function renderStage(stage, i, dupes) {
     el("label", { for: id("hint"), text: "Hint" }), hint, hintCount,
     el("span", { class: "label", text: "Target (to open the stages beyond)" }), aim,
     el("label", { class: "check" }, [opens, "Open from the start"]),
+    el("label", { class: "check" }, [life, "Grants a bonus life (♥) the first time a run wins it"]),
     el("span", { class: "label", text: "Leads to (tap a lit one for its options)" }),
     renderChips(stage),
     lane ? renderLane(lane) : null,
@@ -599,7 +610,8 @@ function diagramView() {
   const ends = goals(graph);
   const keyOf = (sid) => `card-${draft.stages[sid].key}`;
   const words = { start: "open from the start", goal: "ends the gauntlet", stranded: "no start reaches it",
-                  "off-path": "reached only through a gate", hidden: "hidden until met" };
+                  "off-path": "reached only through a gate", hidden: "hidden until met",
+                  life: "grants a bonus life" };
   const nodes = graph.ids.filter((sid) => !unseen.has(sid)).map((sid) => {
     const marks = [];
     if (graph.start.includes(sid)) marks.push("start");
@@ -607,6 +619,7 @@ function diagramView() {
     if (!reached.has(sid)) marks.push("stranded");
     else if (!plain.has(sid)) marks.push("off-path");
     if (hiddenOnly.has(sid)) marks.push("hidden");
+    if (grantsLife(graph, sid)) marks.push("life");
     const [col, row] = cells.get(sid);
     return { key: keyOf(sid), col, row, place: String(sid + 1), title: nameOf(draft.stages[sid]), open: true,
              marks, tip: [`Stage ${sid + 1}: ${nameOf(draft.stages[sid])}`, ...marks.map((m) => words[m])].join(" · ") };
@@ -670,6 +683,7 @@ function render(focusId = null) {
   counter($("g-name-count"), draft.name, LIMITS.name);
   $("g-by").value = draft.by_name;
   $("g-listing").checked = draft.wants_listing;
+  $("g-lives").value = String(draft.lives ?? 1);
   drawDiagram();
   showProblem();
   if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
@@ -827,6 +841,12 @@ function main() {
   });
   $("g-by").addEventListener("input", () => { draft.by_name = $("g-by").value; changed(); });
   $("g-listing").addEventListener("change", () => { draft.wants_listing = $("g-listing").checked; changed(); });
+  $("g-lives").addEventListener("input", () => {
+    const n = Number($("g-lives").value);
+    draft.lives = Number.isInteger(n) ? Math.max(1, Math.min(LIMITS.lives, n)) : 1;
+    changed();
+    drawDiagram();
+  });
   $("add-stage").addEventListener("click", () => {
     const stage = addStage(draft);
     changed();

@@ -17,7 +17,8 @@ const FORM_KEY = "sc_gauntlet_gen_form";
 const $ = (id) => document.getElementById(id);
 
 // The page's shared fields, read as the builder leaves them (gauntlet-page.mjs).
-const SHARED = { name: ["g-name", "text"], byName: ["g-by", "text"], wantsListing: ["g-listing", "check"] };
+const SHARED = { name: ["g-name", "text"], byName: ["g-by", "text"], wantsListing: ["g-listing", "check"],
+                 lives: ["g-lives", "text"] };
 
 const FIELDS = {
   stages: ["gen-stages", "text"], mode: ["gen-mode", "text"],

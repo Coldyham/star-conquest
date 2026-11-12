@@ -72,6 +72,8 @@ NAME_MAX = 32
 BRIEFING_MAX_LINES = 6
 BRIEFING_LINE_MAX = 240
 MAX_STAGES = 64
+# The most lives a run may start with (`Gauntlet.lives`).
+LIVES_MAX = 9
 BOT_MAX = 24
 
 
@@ -137,6 +139,9 @@ class Stage:
     hint: str
     settings: dict = field(compare=False)
     target: Target | None = None
+    # Does winning it within its target in a run grant a life: True or False
+    # as the file ticks it, None to follow the graph (`grants_life`).
+    bonus_life: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +158,8 @@ class Gauntlet:
     lane_targets: dict[tuple[int, int], Target] = field(default_factory=dict, hash=False)
     # Gated lanes not shown until met. Never an ungated one: nothing would reveal it.
     hidden: frozenset[tuple[int, int]] = frozenset()
+    # The lives a run starts with, 1 to LIVES_MAX.
+    lives: int = 1
 
     @classmethod
     def from_dict(cls, data) -> Gauntlet | None:
@@ -277,6 +284,7 @@ def _from_dict(data) -> Gauntlet | None:
             hint=_text(row.get("hint"), HINT_MAX),
             settings=setup,
             target=_target(row.get("target")),
+            bonus_life=row["bonus_life"] if isinstance(row.get("bonus_life"), bool) else None,
         ))
     if not stages:
         return None
@@ -312,9 +320,11 @@ def _from_dict(data) -> Gauntlet | None:
     if not start:
         start = [stages[0].id]
     gid = _text(data.get("id"), NAME_MAX) or "gauntlet"
+    lives = _int(data.get("lives"))
     return Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
                     stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
-                    two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden))
+                    two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden),
+                    lives=1 if lives is None else max(1, min(LIVES_MAX, lives)))
 
 
 def to_dict(g: Gauntlet) -> dict:
@@ -328,6 +338,8 @@ def to_dict(g: Gauntlet) -> dict:
                      "hint": s.hint, "settings": s.settings}
         if s.target is not None:
             row["target"] = s.target.to_dict()
+        if s.bonus_life is not None and s.bonus_life != dead_end(g, s.id):
+            row["bonus_life"] = s.bonus_life
         stages.append(row)
     lanes: list[list] = []
     for lane in g.lanes:
@@ -337,7 +349,10 @@ def to_dict(g: Gauntlet) -> dict:
         if lane in g.two_way:
             how["two_way"] = True
         lanes.append([*lane, how] if how else [*lane])
-    return {"id": g.id, "name": g.name, "start": list(g.start), "stages": stages, "lanes": lanes}
+    out = {"id": g.id, "name": g.name, "start": list(g.start), "stages": stages, "lanes": lanes}
+    if g.lives != 1:
+        out["lives"] = g.lives
+    return out
 
 
 def problems(g: Gauntlet) -> list[str]:
@@ -361,6 +376,23 @@ def goals(g: Gauntlet) -> set[int]:
     return {s.id for s in g.stages
             if s.id in reached and not g.onward(s.id, gated=False)
             and (s.id in g.start or s.id in plain_in)}
+
+
+def dead_end(g: Gauntlet, sid: int) -> bool:
+    """Is ``sid`` a dead end: no lane out at all, gated or not, and not a goal.
+    The tutorial's "Long odds", behind its gate, is one."""
+    return not g.onward(sid) and sid not in goals(g)
+
+
+def grants_life(g: Gauntlet, sid: int) -> bool:
+    """Does winning ``sid`` within its target in a run grant a life: the
+    stage's own ``bonus_life`` where the file ticks it either way, else whether
+    it is a dead end, so a lane added out of one turns its bonus off unless the
+    author kept it. Mirrored by the board's ``gauntlet-graph.mjs``."""
+    s = g.stage(sid)
+    if s is None:
+        return False
+    return s.bonus_life if s.bonus_life is not None else dead_end(g, sid)
 
 
 # The three words a gated lane is called, by the game and the board alike.

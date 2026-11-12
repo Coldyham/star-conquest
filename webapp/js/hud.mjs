@@ -471,11 +471,14 @@ export class Hud {
     const button = (label, key, colour, action) => h("button", { type: "button", class: `btn ${colour}`,
       onclick: () => this.on.action(action) }, label, key ? h("span", { class: "key" }, ` (${key})`) : null);
     const second = over.next_stage ? button("Next stage", "N", "teal", "next_stage")
-      : over.in_stage ? null : button("New map", "N", "green", "restart");
+      : over.choose_stage ? button("Choose a stage", "N", "teal", "run_list")
+        : over.in_stage ? null : button("New map", "N", "green", "restart");
+    const first = over.try_again ? button("Try again", "T", "amber", "run_retry")
+      : over.retry === false ? null : button("Retry", "T", "amber", "retry");
     const kids = [
       h("h1", { style: `color:${this.color(over.headline[1])}` }, over.headline[0]),
       ...over.lines.map(([kind, text, role]) => h("p", { class: kind, style: `color:${this.color(role)}` }, text)),
-      h("div", { class: "grid" }, button("Retry", "T", "amber", "retry"), second,
+      h("div", { class: "grid" }, first, second,
         button("Setup menu", "M", "blue", "menu"), button("History & coach", "H", "violet", "toggle_history")),
     ];
     if (over.share) {

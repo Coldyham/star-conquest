@@ -229,11 +229,17 @@ def over_key(state: GameState, ui: Ui, name: str) -> str | None:
     """A key on the game-over veil: retry, a new map (or the next stage),
     the menu, history, and the two ways to share."""
     if name == "t":
+        # A run's decided game offers Try again (a new step) or nothing.
+        if ui.run_id and ui.run_note:
+            return "run_retry" if ui.run_again else None
         return "retry"
     if name == "n":
-        # In a stage N is Next stage, or nothing after the last one.
+        # In a stage N is Next stage, or nothing after the last one; in a run
+        # that goes on more than one way, back to the list to choose.
         if ui.in_stage:
-            return "next_stage" if ui.offers_next_stage(state) else None
+            if ui.offers_next_stage(state):
+                return "next_stage"
+            return "run_list" if ui.run_id and ui.run_on else None
         return "restart"
     if name in ("m", "Escape"):
         return "menu"

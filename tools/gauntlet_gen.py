@@ -18,7 +18,9 @@ across the whole spread. The last stage may be a map no probe won (but every
 probe game finished), unless ``--no-unwon-last``.
 
 With ``--targets`` (or ``--targets fastest``) each stage some probe won gets a
-target: the slowest (or the fastest) probe win plus ``--target-slack`` turns. Design: docs/design/gauntlet-gen.md, "Generated gauntlets".
+target: the slowest (or the fastest) probe win plus ``--target-slack`` turns.
+``--lives`` sets the lives a run of it starts with. Design:
+docs/design/gauntlet-gen.md, "Generated gauntlets".
 
 Every game is a line in ``results/gauntlet_gen/<run>.jsonl`` the moment it
 finishes; the run's spec, seed and rounds head the file, and a rerun plays only
@@ -134,6 +136,8 @@ def main() -> None:
     ap.add_argument("--no-unwon-last", action="store_true",
                     help="never make the last stage a map no probe won")
     ap.add_argument("--target-slack", type=int, default=0, help="turns added to each target")
+    ap.add_argument("--lives", type=int, default=1,
+                    help=f"lives a run of it starts with, 1 to {gauntlet.LIVES_MAX} (default 1)")
     ap.add_argument("--out", help="also write the gauntlet file here")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = ap.parse_args()
@@ -201,7 +205,7 @@ def main() -> None:
     if len(picked) < spec.stages:
         print(f"  note: only {len(picked)} candidates could be picked; "
               f"deal more with a new --run and a larger --rounds")
-    data = gg.build(f"gen-{a.run}", a.name or f"Generated {seed}", picked, a.targets, a.target_slack)
+    data = gg.build(f"gen-{a.run}", a.name or f"Generated {seed}", picked, a.targets, a.target_slack, a.lives)
     g = gauntlet.Gauntlet.from_dict(data)
     if g is None or gauntlet.problems(g):
         sys.exit("the picked gauntlet does not read back: nothing written")

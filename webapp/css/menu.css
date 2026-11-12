@@ -245,6 +245,7 @@ input.seed:focus { border-color: var(--m-hl-edge); }
 .sg-node.sg-here { background: var(--m-hl); }
 .sg-node.sg-picked { border-color: var(--text); background: var(--m-hl); }
 .sg-node.sg-run { border-color: var(--m-start-edge); }
+.sg-node.sg-life .sg-title::after { content: " ♥"; color: var(--m-warn); }
 .mmodal.tutorial .tpick { margin-top: 10px; padding: 10px 14px; border: 1px solid var(--m-border); border-radius: 6px; }
 .mmodal.tutorial .tpick p { line-height: 22px; }
 .mmodal.tutorial .tptitle { font-size: 18px; }

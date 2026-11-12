@@ -201,3 +201,15 @@ def test_the_boards_sliders_are_the_games():
     assert {a for a, *_ in board["Advanced"]} == set(dealer.ROLLED)
     switches = {s["attr"] for t in fx["knobs"] for g in t["groups"] for s in g["switches"]}
     assert switches == {"neutral_produces", "in_lane_battles"} <= set(dealer.CHOICES)
+
+
+def test_lives_ride_in_the_link_and_the_file_but_not_the_id():
+    spec = {"stages": 2, "rules": {"players": {"fix": 2}, "systems": {"range": [8, 10]}},
+            "opponents": ["rusherplus"]}
+    plain, lived = gg.job_from_link(spec, 7), gg.job_from_link({**spec, "lives": 3}, 7)
+    assert plain.lives == 1 and lived.lives == 3 and plain.gid == lived.gid
+    assert gg.job_from_link({**spec, "lives": 40}, 7).lives == gauntlet.LIVES_MAX
+    assert gg.job_from_link({**spec, "lives": "x"}, 7).lives == 1
+    picked = [{"stage": {"players": 2, "nodes": 8, "seed": 1}, "wins": [], "played": 2}]
+    assert "lives" not in gg.build("gen-x", "X", picked, None, 0)
+    assert gg.build("gen-x", "X", picked, None, 0, lives=3)["lives"] == 3

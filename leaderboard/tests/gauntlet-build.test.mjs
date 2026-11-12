@@ -214,10 +214,10 @@ test("a draft read back from storage is tolerant of anything", () => {
   const out = readDraft(JSON.stringify({ name: 5, wants_listing: "yes",
     stages: [null, { link: 3, briefing: [], settings: [] }, { title: "t", briefing: ["a", 2] }] }));
   assert.deepEqual(out, {
-    name: "", by_name: "", wants_listing: false,
+    name: "", by_name: "", wants_listing: false, lives: 1,
     stages: [
-      { key: 0, link: "", settings: null, title: "", briefing: [""], hint: "", target: null },
-      { key: 1, link: "", settings: null, title: "t", briefing: ["a", ""], hint: "", target: null },
+      { key: 0, link: "", settings: null, title: "", briefing: [""], hint: "", target: null, bonus_life: null },
+      { key: 1, link: "", settings: null, title: "t", briefing: ["a", ""], hint: "", target: null, bonus_life: null },
     ],
     lanes: [emptyLane(0, 1)],
     start: [0],
@@ -500,4 +500,37 @@ test("a kept draft's lanes are read tolerantly", () => {
   assert.deepEqual(relinked.stages.map((s) => s.key), [0, 1]);
   assert.deepEqual(relinked.lanes, [emptyLane(0, 1)]);
   assert.deepEqual(relinked.start, [0]);
+});
+
+test("lives are kept from 1 to 9 and written only when not 1", () => {
+  assert.equal(checkBody(body({ lives: 3 })).lives, 3);
+  assert.equal("lives" in checkBody(body({ lives: 1 })), false);
+  assert.equal("lives" in checkBody(body()), false);
+  for (const bad of [0, 10, 2.5, "3", true]) assert.match(checkBody(body({ lives: bad })), /lives must be/);
+  const draft = { ...emptyDraft(), name: "L", stages: [{ ...emptyStage(0), settings: { ...SETUP } }] };
+  assert.equal("lives" in buildBody(draft), false);
+  assert.equal(buildBody({ ...draft, lives: 4 }).lives, 4);
+  assert.equal(readDraft(JSON.stringify({ ...draft, lives: 40 })).lives, LIMITS.lives);
+  assert.equal(readDraft(JSON.stringify({ ...draft, lives: "x" })).lives, 1);
+});
+
+test("a stage's bonus life is written only where it differs from the graph's default", async () => {
+  const draft = { ...emptyDraft(), name: "B", next_key: 3, start: [0],
+    stages: [0, 1, 2].map((k) => ({ ...emptyStage(k), settings: { ...SETUP, seed: k } })),
+    lanes: [emptyLane(0, 1), { ...emptyLane(0, 2), target: { turns: 9 } }] };
+  // 2 is a dead end behind a gate: on by default, so a tick says nothing.
+  assert.equal(buildBody(draft).stages.some((s) => "bonus_life" in s), false);
+  draft.stages[2].bonus_life = true;
+  assert.equal(buildBody(draft).stages.some((s) => "bonus_life" in s), false);
+  draft.stages[2].bonus_life = false;
+  draft.stages[1].bonus_life = true;
+  const built = buildBody(draft);
+  assert.equal(built.stages[2].bonus_life, false);
+  assert.equal(built.stages[1].bonus_life, true);
+  assert.equal("bonus_life" in built.stages[0], false);
+  assert.equal(checkBody(built).stages[2].bonus_life, false);
+  assert.match(checkBody(body({ stages: [stage({ bonus_life: "yes" })] })), /bonus_life is not true or false/);
+  const back = await draftFromBody(checkBody(built), async () => "link");
+  assert.deepEqual(back.stages.map((s) => s.bonus_life), [null, true, false]);
+  assert.deepEqual(buildBody({ ...back, name: "B" }).stages.map((s) => s.bonus_life), [undefined, true, false]);
 });

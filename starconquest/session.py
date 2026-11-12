@@ -216,15 +216,15 @@ class Session:
                 return app.land_daily(self._settings(), st, body, kind)
             self.menu_waits.append((pending, land))
 
-    def _open_run(self, fresh: bool, reopen: bool = True) -> bool:
+    def _open_run(self, fresh: bool, reopen: bool = True, pick: int | None = None) -> bool:
         """Start a run of the gauntlet picked in the list, or carry on the active
-        one (`app.open_run`); the match goes to the page with the next menu
-        reply (``opened``). False, with the list open again saying why, when
-        there is nothing to play."""
+        one (`app.open_run`) on ``pick``, else the stage the list has selected;
+        the match goes to the page with the next menu reply (``opened``). False,
+        with the list open again saying why, when there is nothing to play."""
         ms, settings = self.menu, self._settings()
         opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
                                     lambda g, sid: setupmenu.load_stage(ms, settings, g, sid),
-                                    ms.stage_pick)
+                                    ms.stage_pick if pick is None else pick)
         self._note(note)
         if opened is None:
             if reopen:
@@ -828,8 +828,9 @@ class Session:
             self.seed += 1
             self.state, self.ui, self.log = app.start_game(self.settings, self.seed, app.carry_autoplay(ui))
             return self._whole()
-        elif name == "retry":
-            # Fork the log at turn 0, so the finished record stays intact.
+        elif name == "retry" and not (ui.run_id and ui.run_note):
+            # Fork the log at turn 0, so the finished record stays intact. Not
+            # on a run's decided game: a fresh game the run wouldn't record.
             self.log = self.log.fork(0)
             try:
                 self.log.save()
@@ -859,7 +860,7 @@ class Session:
             # becomes that stage's, so going back to the menu lands on it. In
             # a run it is the run's next stage, begun as its next step.
             if ui.run_id:
-                if self._open_run(fresh=False, reopen=False):
+                if self._open_run(fresh=False, reopen=False, pick=ui.run_next):
                     self.opened = None
                     return self._whole()
             else:
@@ -872,6 +873,18 @@ class Session:
                     self.history = self.live_fog = None
                     app.stamp_campaign(self.ui, self.campaign)
                     return self._whole()
+        elif name == "run_retry" and ui.run_again and ui.run_stage is not None:
+            # The same stage again as the run's next step: the life is already
+            # spent, so this is only the list's pick made for the player.
+            if self._open_run(fresh=False, reopen=False, pick=ui.run_stage):
+                self.opened = None
+                return self._whole()
+        elif name == "run_list" and ui.run_id and ui.run_on:
+            # To the gauntlet list, to choose where the run goes next.
+            self.state = self.ui = self.log = None
+            self.history = self.live_fog = None
+            setupmenu.reopen_gauntlets(self.menu, self._settings(), self._say)
+            return {"menu": self._menu()}
         elif name == "share" and ui.can_post(state):
             # A challenge link to the clipboard, or a daily's result line.
             ui.share_msg = (app.copy_daily_result(self.settings, state, ui) if ui.daily_day

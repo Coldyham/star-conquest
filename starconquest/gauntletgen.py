@@ -199,10 +199,12 @@ def target(m: dict, slack: int, which: str = "slowest") -> dict:
     return {"turns": win["turns"], "lost": win["lost"]}
 
 
-def build(gid: str, name: str, picked: list[dict], targets: str | None, slack: int) -> dict:
+def build(gid: str, name: str, picked: list[dict], targets: str | None, slack: int,
+          lives: int = 1) -> dict:
     """The gauntlet file: linear, a stage per pick, its briefing the setup in a
     line and how many probes won it. ``targets`` is one of ``TARGETS`` or None;
-    a stage no probe won has no target, there being no bot score to set it."""
+    a stage no probe won has no target, there being no bot score to set it.
+    ``lives`` is what a run of it starts with, written when it isn't 1."""
     stages = []
     for i, m in enumerate(picked):
         cfg = Settings.from_dict(m["stage"])
@@ -213,7 +215,10 @@ def build(gid: str, name: str, picked: list[dict], targets: str | None, slack: i
         if targets and m["wins"]:
             row["target"] = target(m, slack, targets)
         stages.append(row)
-    return {"id": gid[:gauntlet.NAME_MAX], "name": name[:gauntlet.NAME_MAX], "stages": stages}
+    out = {"id": gid[:gauntlet.NAME_MAX], "name": name[:gauntlet.NAME_MAX], "stages": stages}
+    if lives != 1:
+        out["lives"] = max(1, min(gauntlet.LIVES_MAX, lives))
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -226,13 +231,14 @@ class Job:
     ``result`` is the gauntlet file once it is done (None if no candidate was
     won). ``listing`` is the author's name when the link asked for the result
     to be listed on the board, the one consent to send it there; None (the
-    default) keeps it in this browser only."""
+    default) keeps it in this browser only. ``lives`` is written into the file
+    and left out of ``gid``: it changes nothing about which stages are picked."""
 
     def __init__(self, spec: dealer.Spec, seed: int, rounds: int = ROUNDS,
                  probes=PROBES, targets: str | None = None, slack: int = 0, name: str = "",
-                 unwon_last: bool = True, listing: str | None = None):
+                 unwon_last: bool = True, listing: str | None = None, lives: int = 1):
         self.spec, self.seed, self.rounds = spec, seed, rounds
-        self.listing = listing
+        self.listing, self.lives = listing, lives
         self.probes = tuple(probes)
         self.targets, self.slack = targets, slack
         self.unwon_last = unwon_last
@@ -292,7 +298,7 @@ class Job:
         if not self.done:
             return None
         picked = pick(measure(self.cands, self.rows, self.probes), self.spec.stages, self.unwon_last)
-        return build(self.gid, self.name, picked, self.targets, self.slack) if picked else None
+        return build(self.gid, self.name, picked, self.targets, self.slack, self.lives) if picked else None
 
 
 # --------------------------------------------------------------------------- #
@@ -300,7 +306,7 @@ class Job:
 # --------------------------------------------------------------------------- #
 # The board's gauntlet page builds `#gauntlet-spec=<payload>`: the spec as
 # deflated JSON in base64url, as a settings token is, with the run's own options
-# beside it (`candidates`, `targets`, `slack`, `name`, `unwon_last`, and
+# beside it (`candidates`, `targets`, `slack`, `name`, `unwon_last`, `lives`, and
 # `wants_listing` with `by_name`), which `Spec.from_dict` ignores.
 # `candidates` is the most rounds to deal (it once counted candidates per stage,
 # which a round deals one of). A spec is a recipe, not a result: it is never kept
@@ -346,8 +352,11 @@ def job_from_link(data: dict, seed: int) -> Job:
     by_name = data.get("by_name")
     by_name = " ".join(by_name.split())[:gauntlet.BY_NAME_MAX] if isinstance(by_name, str) else ""
     listing = by_name if data.get("wants_listing") is True else None
+    lives = data.get("lives")
+    lives = lives if isinstance(lives, int) and not isinstance(lives, bool) else 1
     return Job(spec, spec.seed if spec.seed is not None else seed,
                rounds=max(1, min(MAX_ROUNDS, rounds)),
                targets=targets, slack=slack,
                name=" ".join(name.split()) if isinstance(name, str) else "",
-               unwon_last=data.get("unwon_last") is not False, listing=listing)
+               unwon_last=data.get("unwon_last") is not False, listing=listing,
+               lives=max(1, min(gauntlet.LIVES_MAX, lives)))

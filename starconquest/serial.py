@@ -285,6 +285,11 @@ def over(state: GameState, ui: Ui) -> dict:
         "lines": [list(line) for line in hud.result_lines(state, ui)],
         "next_stage": ui.offers_next_stage(state),
         "in_stage": ui.in_stage,
+        # A run's decided game: Try again in Retry's place (or nothing), and
+        # Choose a stage where Next stage would be.
+        "retry": not (ui.run_id and ui.run_note),
+        "try_again": bool(ui.run_id and ui.run_again),
+        "choose_stage": bool(ui.run_id and ui.run_on),
         "share": list(hud.share_label(ui)) if share else None,
         "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
         "notes": ui.share_msg if share else "",

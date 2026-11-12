@@ -321,6 +321,7 @@ def test_layout_is_the_one_the_board_draws(case):
     assert gauntlet.layout(g) == {int(k): tuple(v) for k, v in case["layout"].items()}
     assert gauntlet.goals(g) == set(case["goals"])
     assert g.hidden_stages() == set(case["hidden_stages"])
+    assert [s.id for s in g.stages if gauntlet.grants_life(g, s.id)] == case["bonus_lives"]
     assert {s.id for s in g.stages} - g.reachable() == set(case["unreachable"])
     assert [[a, b, gauntlet.lane_label(g, a, b)] for a, b, _ in g.ways()] == case["labels"]
 
@@ -654,3 +655,57 @@ def test_asking_for_a_listing_saves_the_file_under_the_authors_name(monkeypatch)
     assert json.loads(body) == {"gauntlet": data, "by_name": "Ann", "wants_listing": True}
     monkeypatch.setattr(gauntlet.webstore, "leaderboard_url", lambda path: "")
     assert gauntlet.ask_listing(data, "Ann") is None and len(sent) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Lives and bonus lives
+# --------------------------------------------------------------------------- #
+def _lived(lives=None, lanes=None, bonus=()) -> gauntlet.Gauntlet:
+    stages = [{"id": i, "settings": {}} for i in range(4)]
+    for i, on in bonus:
+        stages[i]["bonus_life"] = on
+    data: dict = {"id": "lives", "stages": stages,
+                  "lanes": lanes if lanes is not None else [[0, 1], [1, 2], [0, 3, {"turns": 9}]]}
+    if lives is not None:
+        data["lives"] = lives
+    g = gauntlet.Gauntlet.from_dict(data)
+    assert g is not None
+    return g
+
+
+def test_lives_are_clamped_and_written_only_when_not_one():
+    assert _lived().lives == 1 and "lives" not in gauntlet.to_dict(_lived())
+    assert _lived(3).lives == 3 and gauntlet.to_dict(_lived(3))["lives"] == 3
+    assert _lived(0).lives == 1 and _lived(-4).lives == 1
+    assert _lived(99).lives == gauntlet.LIVES_MAX
+    assert _lived("3").lives == 1 and _lived(True).lives == 1
+
+
+def test_a_dead_end_grants_a_life_by_default():
+    g = _lived()
+    assert gauntlet.dead_end(g, 3) and gauntlet.grants_life(g, 3)
+    assert not gauntlet.grants_life(g, 2)       # a goal
+    assert not gauntlet.grants_life(g, 1)       # a lane out
+    assert not gauntlet.grants_life(g, 9)       # no such stage
+
+
+def test_an_explicit_flag_overrides_the_default_either_way():
+    g = _lived(bonus=[(1, True), (3, False)])
+    assert gauntlet.grants_life(g, 1) and not gauntlet.grants_life(g, 3)
+
+
+def test_bonus_life_is_written_only_when_it_differs_from_the_default():
+    rows = {r["id"]: r for r in gauntlet.to_dict(_lived(bonus=[(1, True), (3, False), (0, False), (2, False)]))["stages"]}
+    assert rows[1]["bonus_life"] is True and rows[3]["bonus_life"] is False
+    assert "bonus_life" not in rows[0] and "bonus_life" not in rows[2]
+    rows = {r["id"]: r for r in gauntlet.to_dict(_lived(bonus=[(3, True)]))["stages"]}
+    assert "bonus_life" not in rows[3]
+    back = gauntlet.Gauntlet.from_dict(gauntlet.to_dict(_lived(bonus=[(1, True)])))
+    assert back is not None and gauntlet.grants_life(back, 1)
+
+
+def test_a_lane_out_of_a_dead_end_turns_its_bonus_off():
+    g = _lived(lanes=[[0, 1], [1, 2], [0, 3, {"turns": 9}], [3, 2]])
+    assert not gauntlet.grants_life(g, 3)
+    g = _lived(lanes=[[0, 1], [1, 2], [0, 3, {"turns": 9}], [3, 2]], bonus=[(3, True)])
+    assert gauntlet.grants_life(g, 3)

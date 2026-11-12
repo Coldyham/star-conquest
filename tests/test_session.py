@@ -814,7 +814,7 @@ def test_a_forked_run_asks_for_the_way_on_and_plays_the_stage_picked(session, ga
     assert session.ui.run_id and session.menu.stage_at == ("fork-me", 0)
     r = gauntlet_run.active()
     assert r is not None and r.playing is not None
-    gauntlet_run.finish(r.id, r.playing.log, gauntlet_run.MET, 20, 3, last=False)
+    gauntlet_run.finish(r.id, r.playing.log, gauntlet_run.MET, 20, 3, g)
     # Back on the list both ways on are marked, and Continue names the pick.
     _menu(session, "menu.open")
     session.menu.gauntlets = [g]
@@ -822,7 +822,7 @@ def test_a_forked_run_asks_for_the_way_on_and_plays_the_stage_picked(session, ga
     session.menu.stage_pick = 0
     tut = _menu(session, "menu.survey")["menu"]["tutorial"]
     marked = [n["key"] for n in tut["graph"]["nodes"] if "run" in n["marks"]]
-    assert marked == ["stage_1", "stage_2"] and "choose the way on" in tut["run"]["text"]
+    assert marked == ["stage_1", "stage_2"] and "choose a stage marked run" in tut["run"]["text"]
     assert tut["run"]["buttons"][0]["label"] == "Continue run"
     res = _menu(session, "menu.press", key="run_continue")      # nothing picked: it asks
     assert "game" not in res and session.menu.gauntlet_note[1].startswith("Select a stage marked run")
@@ -832,6 +832,45 @@ def test_a_forked_run_asks_for_the_way_on_and_plays_the_stage_picked(session, ga
     if "game" not in res and res["menu"]["modal"]:
         res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
     assert res["game"] and session.ui.run_id and session.menu.stage_at == ("fork-me", 2)
+
+
+def test_a_run_with_lives_offers_try_again_and_the_list_after_a_loss(session, games, monkeypatch):
+    from starconquest import gauntlet, serial, setupmenu
+    from starconquest import run as gauntlet_run
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    _menu(session, "menu.press", key="tutorial")
+    g = gauntlet.Gauntlet.from_dict({**_chain_data("lives"), "lives": 2})
+    assert g is not None
+    monkeypatch.setattr(gauntlet, "every", lambda: [g])
+    session.menu.gauntlets, session.menu.gauntlet_pick = [g], 0
+    _menu(session, "menu.press", key="gauntlet_pick_inc")
+    res = _menu(session, "menu.press", key="run_start")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert session.ui.run_id and session.ui.run_lives == 2 and session.ui.stage_label.endswith("· run ♥♥")
+    first = gauntlet_run.active()
+    assert first is not None and first.lives == 2
+    # Lose the run's game: knocked out by hand.
+    state, ui = session.state, session.ui
+    state.winner = next(pid for pid in state.players if pid not in (0, ui.human_id))
+    from starconquest import app
+    app.record_run_step(state, ui, session.log)
+    assert ui.run_note == "Run: lost · ♥ left" and ui.run_again and ui.run_on
+    over = serial.over(state, ui)
+    assert over["try_again"] and over["choose_stage"] and over["retry"] is False and not over["next_stage"]
+    assert _menu(session, "ui.key", name="t")["action"] == "run_retry"
+    res = _menu(session, "game.action", name="retry")              # no free-play Retry here
+    assert session.ui is ui
+    res = _menu(session, "game.action", name="run_retry")
+    assert res["fresh"] and session.ui is not ui and session.ui.run_id == first.id
+    again = gauntlet_run.active()
+    assert again is not None and len(again.steps) == 2 and again.steps[-1].stage == 0
+    # The same loss again from here is the last life; Choose a stage only while it goes on.
+    session.ui.run_on = True
+    res = _menu(session, "game.action", name="run_list")
+    assert res["menu"]["menu"]["tutorial"] is not None and session.ui is None
+    assert setupmenu.picked_gauntlet(session.menu).id == "lives"
 
 
 def test_a_daily_link_fetches_the_day_onto_the_menu(session, games):

@@ -1,9 +1,9 @@
-"""A run of a gauntlet: a way from a start to a goal, each stage won within
-its target, with one life — pure core, no pygame.
+"""A run of a gauntlet: from a start to a goal, each stage won within its
+target, on the lives the gauntlet gives — pure core, no pygame.
 
 Offered only where a run adds something to the stage list (``offered``): a
 target to meet, or a fork, where the way chosen matters because losing on it
-ends the run. On the tutorial, a single path with no stage target, a run would
+costs a life. On the tutorial, a single path with no stage target, a run would
 be the list over again. A run's games are ordinary games. They post, file bests and clear
 stages as any other, and nothing about a run reaches ``Settings`` or the log,
 so the board and the verifier never see one.
@@ -24,13 +24,17 @@ as well as on disk, rewritten every turn (``keep_log``), because ``games/`` is
 MEMFS on the web build. Continuing resumes that game, never a fresh one. A game
 that can no longer be loaded ends the run (``GONE``).
 
-**It moves from the stage it last won** (``ways_on``): on along any ungated
-lane to a stage it hasn't played, and along a gated lane only when that game's
-own score meets the lane's target, never a best. A win with no ungated way on
-completes it (a goal, or a bonus stage's dead end).
+**It may play any stage it has unlocked** (``frontier``): a start, a stage an
+ungated lane leads to from a stage it won, or one a gated lane leads to from a
+stage it won with a game whose own score met the gate, never a best. A stage is
+behind the run, and leaves the frontier, once a stage it leads to is won; a won
+stage with a gate out still unmet stays, to be replayed for the gate. A loss
+costs a life and keeps the stage; only the last life (or a lost or abandoned
+game) ends the run. Winning a goal (``gauntlet.goals``) completes it, and
+winning a stage that grants a bonus life (``gauntlet.grants_life``) the first
+time adds one. The lives left are derived from the steps, never stored.
 
-Reasons and the rest of the plan: ``docs/graphical-gauntlet-maker.md``, Phases 0
-and 5.
+Reasons: ``docs/design/gauntlet.md``, *Runs*.
 """
 
 from __future__ import annotations
@@ -52,6 +56,9 @@ VOID = "void"            # won, but not by the player's own hand (`Ui.can_post`)
 GONE = "gone"            # its game could no longer be loaded
 ABANDONED = "abandoned"  # given up from the gauntlet list
 OUTCOMES = (MET, MISSED, LOST, VOID, GONE, ABANDONED)
+
+# The outcomes that cost a life. GONE and ABANDONED end the run outright.
+COSTS = (MISSED, LOST, VOID)
 
 ACTIVE, COMPLETE, OVER = "active", "complete", "over"
 STATUSES = (ACTIVE, COMPLETE, OVER)
@@ -81,6 +88,10 @@ class Run:
     started_at: str
     steps: tuple[Step, ...] = ()
     status: str = ACTIVE
+    # The lives it started with, copied from the gauntlet when it began, so an
+    # edit to the gauntlet never changes a run under way. A record without it
+    # (one begun before runs had lives) reads as 1.
+    lives: int = 1
 
     @property
     def playing(self) -> Step | None:
@@ -88,17 +99,25 @@ class Run:
         return self.steps[-1] if self.steps and not self.steps[-1].outcome else None
 
     @property
+    def won(self) -> set[int]:
+        """The stages it has won within their target."""
+        return {s.stage for s in self.steps if s.outcome == MET}
+
+    @property
     def cleared(self) -> int:
         """Stages won within their target, which is also the stage being
-        played (or next), counted from 0."""
-        return sum(1 for s in self.steps if s.outcome == MET)
+        played (or next), counted from 0. A replay for a gate wins no stage."""
+        return len(self.won)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "gauntlet_id": self.gauntlet_id, "gauntlet_hash": self.gauntlet_hash,
-                "started_at": self.started_at, "status": self.status,
-                "steps": [{k: v for k, v in (("stage", s.stage), ("log", s.log), ("outcome", s.outcome),
-                                             ("turns", s.turns), ("lost", s.lost)) if v is not None}
-                          for s in self.steps]}
+        out = {"id": self.id, "gauntlet_id": self.gauntlet_id, "gauntlet_hash": self.gauntlet_hash,
+               "started_at": self.started_at, "status": self.status,
+               "steps": [{k: v for k, v in (("stage", s.stage), ("log", s.log), ("outcome", s.outcome),
+                                            ("turns", s.turns), ("lost", s.lost)) if v is not None}
+                         for s in self.steps]}
+        if self.lives != 1:
+            out["lives"] = self.lives
+        return out
 
     @classmethod
     def from_dict(cls, data) -> Run | None:
@@ -118,8 +137,10 @@ class Run:
             if step is None:
                 break
             steps.append(step)
+        lives = _int(data.get("lives"))
         return cls(id=rid, gauntlet_id=gid, gauntlet_hash=ghash, started_at=began,  # type: ignore[arg-type]
-                   steps=tuple(steps), status=status)
+                   steps=tuple(steps), status=status,
+                   lives=1 if lives is None else max(1, min(gauntlet.LIVES_MAX, lives)))
 
 
 def _int(value) -> int | None:
@@ -165,7 +186,9 @@ def linear(g: gauntlet.Gauntlet) -> list[int] | None:
 
 def fingerprint(g: gauntlet.Gauntlet) -> str:
     """A hash of what a run of ``g`` plays: its stages' setups and targets, in
-    path order, and its lanes once it is not a plain path. A run whose
+    path order, its lanes once it is not a plain path, and the stages that
+    grant a life once there are any. The gauntlet's ``lives`` stays out: the run
+    keeps its own copy. A run whose
     gauntlet no longer matches it (a desktop file edited) is over, as an edited
     stage is a new, uncleared one."""
     order = gauntlet.chain(g) or [s.id for s in g.stages]
@@ -179,6 +202,9 @@ def fingerprint(g: gauntlet.Gauntlet) -> str:
     if linear(g) is None:
         body.append([[a, b, (a, b) in g.two_way, _gate(g.lane_targets.get((a, b)))] for a, b in sorted(g.lanes)])
         body.append(sorted(g.start))
+    bonus = sorted(s.id for s in g.stages if gauntlet.grants_life(g, s.id))
+    if bonus:
+        body.append(["bonus", bonus])
     raw = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
@@ -187,54 +213,101 @@ def _gate(t: gauntlet.Target | None) -> list | None:
     return None if t is None else [t.turns, t.lost, t.beat]
 
 
-Way = tuple[int, gauntlet.Target | None]
+def _score(step: Step) -> tuple[int, int]:
+    return (step.turns if step.turns is not None else 0, step.lost if step.lost is not None else 0)
 
 
-def ways_out(r: Run, g: gauntlet.Gauntlet, sid: int) -> tuple[Way, ...]:
-    """The lanes out of ``sid`` a run could take next, as ``(stage, gate)``,
-    ``gate`` None for an ungated lane: every way on to a stage the run hasn't
-    already won, in the list's order."""
-    won = {s.stage for s in r.steps if s.outcome == MET}
-    out = {b: g.lane_targets.get(lane) for a, b, lane in g.ways() if a == sid and b not in won and b != sid}
-    return tuple((b, out[b]) for b in sorted(out, key=g.position))
+def unlocked(r: Run, g: gauntlet.Gauntlet) -> set[int]:
+    """Every stage the run has opened: the starts, each stage an ungated lane
+    leads to from a stage it won, and each a gated lane leads to from a stage
+    it won with a game whose own score met the gate. A best never counts."""
+    out = set(g.start)
+    for step in r.steps:
+        if step.outcome != MET:
+            continue
+        for a, b, lane in g.ways():
+            gate = g.lane_targets.get(lane)
+            if a == step.stage and (gate is None or gate.met(_score(step))):
+                out.add(b)
+    return out
 
 
-def ends(ways: tuple[Way, ...]) -> bool:
-    """Does a win with these ways out complete the run: no ungated way on."""
-    return all(gate is not None for _, gate in ways)
+def behind(g: gauntlet.Gauntlet, sid: int, won: set[int]) -> bool:
+    """Has the run gone past ``sid``: a one-way lane leads from it to a stage
+    won. A two-way lane leads back as well, so it never puts a stage behind."""
+    return any(a == sid and b in won and lane not in g.two_way for a, b, lane in g.ways())
 
 
-def open_ways(ways: tuple[Way, ...], score: tuple[int, int]) -> list[int]:
-    """The stages a win scoring ``score`` may go on to: every ungated way, and
-    each gated one whose target this score meets."""
-    return [b for b, gate in ways if gate is None or gate.met(score)]
+def gates_left(r: Run, g: gauntlet.Gauntlet, sid: int) -> list[gauntlet.Target]:
+    """The gates out of ``sid`` a replay of it could still meet: each gated
+    lane to a stage the run has neither opened nor gone past. A replay of a
+    won stage is judged against these, not the stage's own target."""
+    won, opened = r.won, unlocked(r, g)
+    return [g.lane_targets[lane] for a, b, lane in g.ways()
+            if a == sid and lane in g.lane_targets and b not in opened and b not in won
+            and not behind(g, b, won)]
 
 
-def ways_on(r: Run, g: gauntlet.Gauntlet) -> list[int]:
-    """The stages the run may play next: a start at first, then the ways out
-    of the stage it last won. Empty while a game is undecided and once the run
+def frontier(r: Run, g: gauntlet.Gauntlet) -> list[int]:
+    """The stages the run may play next, in the list's order: every stage it
+    has opened and neither won nor gone past, and every won stage with a gate
+    out it may still meet. A dead end leads nowhere, so it is never behind and
+    stays until it is played. Empty while a game is undecided and once the run
     is finished."""
     if r.status != ACTIVE or r.playing is not None:
         return []
-    if not r.steps:
-        return sorted(g.start, key=g.position)
-    last = r.steps[-1]
-    score = (last.turns if last.turns is not None else 0, last.lost if last.lost is not None else 0)
-    return open_ways(ways_out(r, g, last.stage), score)
+    won = r.won
+    out = {sid for sid in unlocked(r, g) if sid not in won and not behind(g, sid, won)}
+    out |= {sid for sid in won if gates_left(r, g, sid)}
+    return sorted((sid for sid in out if g.stage(sid) is not None), key=g.position)
+
+
+def next_up(r: Run, g: gauntlet.Gauntlet) -> int | None:
+    """The one stage the run hasn't won on its frontier, if there is just one:
+    where Next stage goes. A won stage kept for its gate is a replay, never
+    the next stage."""
+    fresh = [sid for sid in frontier(r, g) if sid not in r.won]
+    return fresh[0] if len(fresh) == 1 else None
 
 
 def stage_to_play(r: Run, g: gauntlet.Gauntlet, pick: int | None = None) -> int | None:
-    """The stage the run is on: the one being played, else ``pick`` if it is a
-    way on, else the only way on. None at a fork with nothing picked, and once
-    the run is finished."""
+    """The stage the run is on: the one being played, else ``pick`` if it is on
+    the frontier, else the only stage there, else the only one not yet won
+    (``next_up``). None where the list must choose, and once the run is
+    finished."""
     if r.status != ACTIVE:
         return None
     if r.playing is not None:
         return r.playing.stage
-    ways = ways_on(r, g)
-    if pick in ways:
+    front = frontier(r, g)
+    if pick in front:
         return pick
-    return ways[0] if len(ways) == 1 else None
+    return front[0] if len(front) == 1 else next_up(r, g)
+
+
+def lives_left(r: Run, g: gauntlet.Gauntlet) -> int:
+    """The lives the run has left, derived from its steps: those it began
+    with, one more for each first win of a stage that grants one, one fewer
+    for each game that cost one (``COSTS``)."""
+    left, seen = r.lives, set()
+    for step in r.steps:
+        if step.outcome == MET and step.stage not in seen:
+            seen.add(step.stage)
+            left += gauntlet.grants_life(g, step.stage)
+        elif step.outcome in COSTS:
+            left -= 1
+    return left
+
+
+def counts_lives(r: Run, g: gauntlet.Gauntlet) -> bool:
+    """Are lives worth showing for this run: it began with more than one, or
+    a stage may grant one. Else it is a one-life run, said as one."""
+    return r.lives > 1 or any(gauntlet.grants_life(g, s.id) for s in g.stages)
+
+
+def hearts(n: int) -> str:
+    """Lives as hearts, "♥♥♥", or a count past the most a run can start with."""
+    return "♥" * n if 0 < n <= gauntlet.LIVES_MAX else f"♥×{n}"
 
 
 def position(r: Run, g: gauntlet.Gauntlet) -> tuple[int, int]:
@@ -323,7 +396,7 @@ def start(g: gauntlet.Gauntlet, now: str | None = None) -> Run:
     began = now or _now()
     stamp = re.sub(r"[^0-9]", "", began)
     return save(Run(id=f"{stamp}-{g.id}", gauntlet_id=g.id, gauntlet_hash=fingerprint(g),
-                    started_at=began))
+                    started_at=began, lives=g.lives))
 
 
 def begin(r: Run, stage: int, log: GameLog) -> Run:
@@ -344,20 +417,28 @@ def judge(won: bool, by_hand: bool, met: bool) -> str:
 
 
 def finish(run_id: str, log_name: str, outcome: str, turns: int, lost: int,
-           last: bool) -> Run | None:
-    """Record the run's game ``log_name`` as decided, once; ``last`` when a
-    win on its stage completes the run (``ends``). None (and nothing written)
-    when the run is not active or that game is not its undecided one: a fork or
-    a Retry of a run's stage is free play."""
+           g: gauntlet.Gauntlet) -> Run | None:
+    """Record the run's game ``log_name`` as decided, once. A replay of a stage
+    already won is judged against the gates still left out of it
+    (``gates_left``): meeting one is MET, any other win MISSED. A game that
+    costs a life ends the run only on its last life, and a win on a goal of
+    ``g`` completes it. None (and nothing written) when the run is not active or
+    that game is not its undecided one: a fork or a Retry of a run's stage is
+    free play."""
     r = next((x for x in runs() if x.id == run_id), None)
     if r is None or r.status != ACTIVE or r.playing is None or r.playing.log != log_name:
         return None
+    sid = r.playing.stage
+    if sid in r.won and outcome in (MET, MISSED):
+        outcome = MET if any(gate.met((turns, lost)) for gate in gates_left(r, g, sid)) else MISSED
     step = replace(r.playing, outcome=outcome, turns=turns, lost=lost)
     r = replace(r, steps=(*r.steps[:-1], step))
-    if outcome != MET:
+    if outcome in COSTS and lives_left(r, g) <= 0:
         r = replace(r, status=OVER)
-    elif last:
+    elif outcome == MET and sid in gauntlet.goals(g):
         r = replace(r, status=COMPLETE)
+    elif not frontier(r, g):
+        r = replace(r, status=OVER)    # nowhere left to go: never so on a gauntlet with a goal
     if r.status != ACTIVE:
         webstore.set(paths.WEB_RUN_LOG_KEY, "")
     return save(r)
@@ -381,21 +462,37 @@ def lose_game(r: Run) -> Run:
     return _end(r, GONE)
 
 
-def note(outcome: str, at: int, total: int, target: gauntlet.Target | None,
-         status: str = ACTIVE, ways: int = 1) -> tuple[str, bool]:
-    """The win overlay's line about the run once its game is decided, and
-    whether it is good news. ``status`` is the run's after it, ``ways`` how
-    many stages it may go on to."""
+def note(r: Run, g: gauntlet.Gauntlet, at: int, total: int,
+         target: gauntlet.Target | None) -> tuple[str, bool]:
+    """The win overlay's line about the run once its last game is decided, and
+    whether it is good news. ``at``/``total`` are the stage's place in the run
+    as the game began (``position``), ``target`` the stage's own."""
+    step = r.steps[-1]
+    outcome, replay = step.outcome, step.stage in {s.stage for s in r.steps[:-1] if s.outcome == MET}
+    left = lives_left(r, g)
+    lives = f" · {hearts(left)} left" if counts_lives(r, g) and r.status == ACTIVE else ""
     if outcome == MET:
-        if status == COMPLETE:
+        if r.status == COMPLETE:
             return (f"Run complete: all {total} stages" if total
                     else f"Run complete: {at} stage{'s' if at != 1 else ''}"), True
-        if ways > 1:
-            return f"Run: stage {_of(at, total)} done · choose the way on in the gauntlet list", True
-        return f"Run: stage {_of(at, total)} done · Next stage carries it on", True
-    why = {MISSED: f": {target.text()} not met" if target is not None else "",
-           VOID: ": not played by hand"}.get(outcome, "")
-    return f"Run over at stage {_of(at, total)}{why}", False
+        if r.status == OVER:
+            return "Run over: nowhere left to go", False
+        done = "gate met" if replay else f"stage {_of(at, total)} done"
+        if gauntlet.grants_life(g, step.stage) and not replay:
+            done += " · bonus life"
+        on = " · Next stage carries it on" if next_up(r, g) is not None else " · choose the way on in the gauntlet list"
+        return f"Run: {done}{lives}{on}", True
+    if replay and outcome == MISSED:
+        why = ": gate not met"
+    else:
+        why = {MISSED: f": {target.text()} not met" if target is not None else "",
+               VOID: ": not played by hand", LOST: ": lost"}.get(outcome, "")
+    if r.status == ACTIVE:
+        return f"Run{why}{lives}", False
+    if not counts_lives(r, g):
+        return f"Run over at stage {_of(at, total)}{why}", False
+    won = r.cleared
+    return f"Run over: no lives left · {won} stage{'s' if won != 1 else ''} won", False
 
 
 # --------------------------------------------------------------------------- #

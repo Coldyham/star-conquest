@@ -1555,6 +1555,7 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 .diagram .sg-node.sg-start { box-shadow: inset 5px 0 0 var(--cyan); }
 .diagram .sg-node.sg-goal { border-color: var(--gold); }
 .diagram .sg-node.sg-goal .sg-title::before { content: "★ "; color: var(--gold); }
+.diagram .sg-node.sg-life .sg-title::after { content: " ♥"; color: var(--bad); }
 .diagram .sg-node.sg-off-path { border-style: dashed; }
 .diagram .sg-node.sg-hidden { border-style: dotted; }
 .diagram .sg-node.sg-stranded { border-color: var(--bad); color: var(--bad); }

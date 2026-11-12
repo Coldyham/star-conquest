@@ -227,13 +227,15 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
 def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     """Mark ``ui`` as the run's own game, after `stage_ui`. It plays ironman, so
     History and Undo (both rewinds) wait until the game is decided; the Hint is not offered (`Ui.can_hint`); and the top bar says it is
-    a run."""
+    a run, with its lives where it counts them."""
     ui.run_at, ui.run_total = gauntlet_run.position(r, g)
     ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
-    ui.run_ways = gauntlet_run.ways_out(r, g, r.playing.stage) if r.playing is not None else ()
+    ui.run_stage = r.playing.stage if r.playing is not None else None
+    ui.run_lives = gauntlet_run.lives_left(r, g) if gauntlet_run.counts_lives(r, g) else 0
+    ui.run_next, ui.run_again, ui.run_on = None, False, False
     ui.ironman = True
     if ui.stage_label is not None:
-        ui.stage_label += " · run"
+        ui.stage_label += " · run" + (f" {gauntlet_run.hearts(ui.run_lives)}" if ui.run_lives else "")
 
 
 def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
@@ -244,16 +246,19 @@ def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
     me = ui.human_id
     if log.path is None or (state.winner is None and not state.is_defeated(me)):
         return
-    score = (state.turn, state.players[me].ships_lost)
+    r = gauntlet_run.active()
+    g = gauntlet.find(gauntlet.every(), r.gauntlet_id) if r is not None and r.id == ui.run_id else None
     outcome = gauntlet_run.judge(state.winner == me, ui.can_post(state), ui.met_target(state))
-    done = gauntlet_run.finish(ui.run_id, log.path.name, outcome, *score, gauntlet_run.ends(ui.run_ways))
-    if done is None:
+    done = (gauntlet_run.finish(ui.run_id, log.path.name, outcome, state.turn,
+                                state.players[me].ships_lost, g) if g is not None else None)
+    if g is None or done is None:
         ui.run_id = ""
         return
-    ways = len(gauntlet_run.open_ways(ui.run_ways, score)) if done.status == gauntlet_run.ACTIVE else 0
-    ui.has_next_stage = ways == 1
-    ui.run_note, ui.run_ok = gauntlet_run.note(outcome, ui.run_at, ui.run_total, ui.stage_target,
-                                               done.status, ways)
+    ui.run_on = done.status == gauntlet_run.ACTIVE
+    ui.run_again = ui.run_on and done.steps[-1].outcome in gauntlet_run.COSTS
+    ui.run_next = gauntlet_run.next_up(done, g) if ui.run_on and not ui.run_again else None
+    ui.has_next_stage = ui.run_next is not None
+    ui.run_note, ui.run_ok = gauntlet_run.note(done, g, ui.run_at, ui.run_total, ui.stage_target)
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:

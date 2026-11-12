@@ -1,6 +1,6 @@
-"""Runs of a gauntlet: a way from a start to a goal, each stage within its
-target, one life (`starconquest/run.py`, `docs/graphical-gauntlet-maker.md`,
-Phases 0 and 5)."""
+"""Runs of a gauntlet: from a start to a goal, each stage within its target,
+on the gauntlet's lives, over every stage the run has opened
+(`starconquest/run.py`, `docs/design/gauntlet.md`, *Runs*)."""
 
 from __future__ import annotations
 
@@ -22,24 +22,27 @@ def _setup(seed: int) -> dict:
     return Settings(players=2, nodes=8, seed=seed).to_dict()
 
 
-def _chain(targets=(14, None, 20), gid: str = "run-me") -> gauntlet.Gauntlet:
+def _chain(targets=(14, None, 20), gid: str = "run-me", lives: int = 1) -> gauntlet.Gauntlet:
     stages = []
     for i, turns in enumerate(targets):
         row = {"id": i, "title": f"Stage {i}", "settings": _setup(10 + i)}
         if turns is not None:
             row["target"] = {"turns": turns}
         stages.append(row)
-    g = gauntlet.Gauntlet.from_dict({"id": gid, "name": "Run me", "stages": stages})
+    g = gauntlet.Gauntlet.from_dict({"id": gid, "name": "Run me", "stages": stages, "lives": lives})
     assert g is not None
     return g
 
 
-def _graph(lanes, start=(0,), targets=(), gid: str = "fork-me", n: int = 3) -> gauntlet.Gauntlet:
+def _graph(lanes, start=(0,), targets=(), gid: str = "fork-me", n: int = 3, lives: int = 1,
+           bonus=()) -> gauntlet.Gauntlet:
     stages = [{"id": i, "title": f"Stage {i}", "settings": _setup(10 + i)} for i in range(n)]
     for i, turns in targets:
         stages[i]["target"] = {"turns": turns}
+    for i, on in bonus:
+        stages[i]["bonus_life"] = on
     g = gauntlet.Gauntlet.from_dict({"id": gid, "name": "Fork me", "stages": stages,
-                                     "lanes": lanes, "start": list(start)})
+                                     "lanes": lanes, "start": list(start), "lives": lives})
     assert g is not None
     return g
 
@@ -103,7 +106,7 @@ def test_a_run_goes_stage_by_stage_and_completes():
                       (2, "game_20261104_101000_3.json")):
         r = run.begin(r, sid, _played(_log(), name))
         assert r.playing is not None and run.stage_to_play(r, g) == sid
-        done = run.finish(r.id, name, run.MET, 12, 3, last=sid == 2)
+        done = run.finish(r.id, name, run.MET, 12, 3, g)
         assert done is not None
         r = done
     assert r.status == run.COMPLETE and r.cleared == 3
@@ -112,10 +115,10 @@ def test_a_run_goes_stage_by_stage_and_completes():
 
 
 @pytest.mark.parametrize("outcome", [run.MISSED, run.LOST, run.VOID])
-def test_anything_but_meeting_the_target_ends_the_run(outcome):
+def test_with_one_life_anything_but_meeting_the_target_ends_the_run(outcome):
     g = _chain()
     r = run.begin(run.start(g), 0, _played(_log(), "game_20261104_100000_1.json"))
-    r = run.finish(r.id, "game_20261104_100000_1.json", outcome, 30, 9, last=False)
+    r = run.finish(r.id, "game_20261104_100000_1.json", outcome, 30, 9, g)
     assert r is not None and r.status == run.OVER
     assert run.stage_to_play(r, g) is None
     assert run.summary(g) == "Best run: 0/3 stages"
@@ -126,9 +129,9 @@ def test_only_the_runs_own_game_moves_it_and_only_once():
     name = "game_20261104_100000_1.json"
     r = run.begin(run.start(g), 0, _played(_log(), name))
     # a Retry or fork of the stage is another file: free play
-    assert run.finish(r.id, "game_20261104_100100_1.json", run.LOST, 5, 5, last=False) is None
-    assert run.finish(r.id, name, run.MET, 12, 1, last=False) is not None
-    assert run.finish(r.id, name, run.LOST, 12, 1, last=False) is None   # decided already
+    assert run.finish(r.id, "game_20261104_100100_1.json", run.LOST, 5, 5, g) is None
+    assert run.finish(r.id, name, run.MET, 12, 1, g) is not None
+    assert run.finish(r.id, name, run.LOST, 12, 1, g) is None   # decided already
     after = run.active()
     assert after is not None and after.cleared == 1 and after.playing is None
 
@@ -136,23 +139,28 @@ def test_only_the_runs_own_game_moves_it_and_only_once():
 # --------------------------------------------------------------------------- #
 # A run over a graph
 # --------------------------------------------------------------------------- #
-def _win(r: run.Run, g: gauntlet.Gauntlet, sid: int, n: int, turns: int = 12) -> run.Run:
-    """Play ``sid`` as the run's next step and win it in ``turns`` turns."""
+def _play(r: run.Run, g: gauntlet.Gauntlet, sid: int, n: int, outcome: str = run.MET,
+          turns: int = 12) -> run.Run:
+    """Play ``sid`` as the run's next step, decided as ``outcome`` in ``turns`` turns."""
     name = f"game_20261112_10{n:02d}00_{n}.json"
+    assert sid in run.frontier(r, g), (sid, run.frontier(r, g))
     r = run.begin(r, sid, _played(_log(), name))
-    last = run.ends(run.ways_out(r, g, sid))
-    done = run.finish(r.id, name, run.MET, turns, 1, last=last)
+    done = run.finish(r.id, name, outcome, turns, 1, g)
     assert done is not None
     return done
+
+
+def _win(r: run.Run, g: gauntlet.Gauntlet, sid: int, n: int, turns: int = 12) -> run.Run:
+    return _play(r, g, sid, n, run.MET, turns)
 
 
 def test_a_fork_waits_for_a_pick_and_goes_the_way_picked():
     g = _graph([[0, 1], [0, 2]])
     r = _win(run.start(g), g, 0, 1)
     assert r.status == run.ACTIVE
-    assert run.ways_on(r, g) == [1, 2]
+    assert run.frontier(r, g) == [1, 2]
     assert run.stage_to_play(r, g) is None          # nothing picked: the list asks
-    assert run.stage_to_play(r, g, pick=0) is None   # not a way on
+    assert run.stage_to_play(r, g, pick=0) is None   # won, and no gate out: not on it
     assert run.stage_to_play(r, g, pick=2) == 2
     r = _win(r, g, 2, 2)
     assert r.status == run.COMPLETE and r.cleared == 2
@@ -160,34 +168,146 @@ def test_a_fork_waits_for_a_pick_and_goes_the_way_picked():
     assert run.position(r, g) == (3, 0)          # no total: runs may differ in length
 
 
+def test_the_frontier_holds_every_stage_opened_and_not_gone_past():
+    # two tracks that rejoin: 0 -> 1 -> 3, 0 -> 2 -> 3, 3 -> 4
+    g = _graph([[0, 1], [0, 2], [1, 3], [2, 3], [3, 4]], n=5)
+    r = _win(run.start(g), g, 0, 1)
+    assert run.frontier(r, g) == [1, 2]
+    r = _win(r, g, 1, 2)
+    assert run.frontier(r, g) == [2, 3]          # the other track is still open
+    r = _win(r, g, 3, 3)
+    assert run.frontier(r, g) == [4]             # 2 leads to 3, won: behind the run
+    assert run.next_up(r, g) == 4
+
+
 def test_a_gated_lane_opens_only_on_the_runs_own_score():
     g = _graph([[0, 1], [0, 2, {"turns": 10}], [2, 1]])
     slow = _win(run.start(g), g, 0, 1, turns=15)
-    assert run.ways_on(slow, g) == [1]
-    assert run.stage_to_play(slow, g, pick=2) == 1     # the one way on, whatever is picked
+    assert run.unlocked(slow, g) == {0, 1}
+    assert run.frontier(slow, g) == [0, 1]           # 0 kept: its gate can still be met
+    assert run.next_up(slow, g) == 1
+    assert run.stage_to_play(slow, g) == 1           # nothing picked: the one stage not won
     fast = _win(run.start(g), g, 0, 2, turns=10)
-    assert run.ways_on(fast, g) == [1, 2]
+    assert run.frontier(fast, g) == [1, 2]
 
 
-def test_a_run_ends_on_a_stage_with_no_ungated_way_on():
-    # 1 is a goal with a bonus beyond it: winning 1 completes the run
+def test_a_best_never_opens_a_gate_for_a_run(monkeypatch):
+    g = _graph([[0, 1], [0, 2, {"turns": 10}], [2, 1]])
+    monkeypatch.setattr(gauntlet, "best", lambda stage: (1, 0))
+    r = _win(run.start(g), g, 0, 1, turns=15)
+    assert 2 not in run.unlocked(r, g)
+
+
+def test_a_missed_gate_is_replayed_for_a_life():
+    g = _graph([[0, 1], [1, 2], [0, 3, {"turns": 10}]], n=4, lives=3)
+    r = _win(run.start(g), g, 0, 1, turns=15)
+    assert run.gates_left(r, g, 0) and run.frontier(r, g) == [0, 1]
+    r = _win(r, g, 1, 2)
+    assert run.frontier(r, g) == [0, 2]              # behind, but its gate is still worth a life
+    r = _play(r, g, 0, 3, run.MET, turns=14)         # a win short of the gate costs a life
+    assert r.steps[-1].outcome == run.MISSED and run.lives_left(r, g) == 2
+    assert r.cleared == 2                            # a replay wins no stage
+    r = _play(r, g, 0, 4, run.MISSED, turns=9)       # judged on the gate, not the stage target
+    assert r.steps[-1].outcome == run.MET and run.lives_left(r, g) == 2
+    assert 3 in run.unlocked(r, g) and 0 not in run.frontier(r, g)
+
+
+def test_a_gate_to_a_stage_gone_past_is_not_worth_a_replay():
+    g = _graph([[0, 1], [1, 2], [0, 3, {"turns": 10}], [3, 1]], n=4)
+    r = _win(_win(run.start(g), g, 0, 1, turns=15), g, 1, 2)
+    assert run.frontier(r, g) == [2]             # 3 leads to 1, won
+
+
+def test_a_gate_to_a_stage_already_open_is_not_worth_a_replay():
+    g = _graph([[0, 1], [1, 2], [0, 2, {"turns": 10}]])
+    r = _win(_win(run.start(g), g, 0, 1, turns=15), g, 1, 2)
+    assert run.frontier(r, g) == [2]
+
+
+def test_a_loss_costs_a_life_and_keeps_the_stage():
+    g = _chain(lives=3)
+    r = run.start(g)
+    assert r.lives == 3 and run.lives_left(r, g) == 3
+    r = _play(r, g, 0, 1, run.LOST)
+    assert r.status == run.ACTIVE and run.lives_left(r, g) == 2 and run.frontier(r, g) == [0]
+    r = _play(r, g, 0, 2, run.VOID)
+    assert r.status == run.ACTIVE and run.lives_left(r, g) == 1
+    r = _play(r, g, 0, 3, run.MISSED)
+    assert r.status == run.OVER and run.lives_left(r, g) == 0
+    assert run.note(r, g, 1, 3, None) == ("Run over: no lives left · 0 stages won", False)
+
+
+@pytest.mark.parametrize("outcome", [run.MISSED, run.LOST, run.VOID])
+def test_each_loss_costs_one_life(outcome):
+    g = _chain(lives=2)
+    r = _play(run.start(g), g, 0, 1, outcome)
+    assert r.status == run.ACTIVE and run.lives_left(r, g) == 1
+
+
+def test_gone_and_abandoned_end_the_run_whatever_its_lives():
+    g = _chain(lives=5)
+    r = run.begin(run.start(g), 0, _played(_log(), "game_20261104_100000_1.json"))
+    assert run.lose_game(r).status == run.OVER
+    r = run.begin(run.start(g), 0, _played(_log(), "game_20261104_100100_1.json"))
+    assert run.abandon(r).status == run.OVER
+
+
+def test_try_again_and_picking_the_stage_from_the_list_make_the_same_step():
+    g = _chain(lives=2)
+    r = _play(run.start(g), g, 0, 1, run.LOST)
+    assert run.stage_to_play(r, g) == 0 == run.stage_to_play(r, g, pick=0)
+    r = run.begin(r, 0, _played(_log(), "game_20261112_100200_2.json"))
+    assert r.playing is not None and r.playing.stage == 0 and len(r.steps) == 2
+
+
+def test_a_bonus_stage_grants_a_life_once():
+    # 0 -> 1 (goal); a gate from 0 to the dead end 2, which grants a life by default
+    g = _graph([[0, 1], [0, 2, {"turns": 10}]], lives=2)
+    assert gauntlet.grants_life(g, 2) and not gauntlet.grants_life(g, 1)
+    r = _win(run.start(g), g, 0, 1, turns=10)
+    assert run.frontier(r, g) == [1, 2]
+    r = _play(r, g, 2, 2, run.MISSED)                # a missed target grants nothing
+    assert run.lives_left(r, g) == 1
+    r = _win(r, g, 2, 3)
+    assert run.lives_left(r, g) == 2 and r.status == run.ACTIVE   # a dead end won doesn't complete it
+    assert run.note(r, g, 2, 0, None)[0] == "Run: stage 2 done · bonus life · ♥♥ left · Next stage carries it on"
+    assert run.frontier(r, g) == [1]
+    r = _win(r, g, 1, 4)
+    assert r.status == run.COMPLETE
+
+
+def test_a_dead_end_stays_on_the_frontier_until_played():
+    g = _graph([[0, 1], [1, 2], [0, 3, {"turns": 10}]], n=4)
+    r = _win(_win(run.start(g), g, 0, 1, turns=9), g, 1, 2)
+    assert run.frontier(r, g) == [2, 3]
+
+
+def test_a_won_goal_completes_the_run_with_tracks_still_open():
+    g = _graph([[0, 1], [0, 2], [2, 3]], n=4)
+    r = _win(_win(run.start(g), g, 0, 1), g, 1, 2)
+    assert r.status == run.COMPLETE
+
+
+def test_a_run_ends_on_a_goal_with_a_bonus_beyond_it():
     g = _graph([[0, 1], [0, 2], [1, 3, {"turns": 99}]], n=4)
     r = _win(_win(run.start(g), g, 0, 1), g, 1, 2)
     assert r.status == run.COMPLETE
-    assert run.ways_on(r, g) == []
+    assert run.frontier(r, g) == []
 
 
 def test_a_two_way_lane_never_leads_back_to_a_stage_won():
     g = _graph([[0, 1, {"two_way": True}], [0, 2]])
     r = _win(run.start(g), g, 0, 1)
+    assert run.frontier(r, g) == [1, 2]          # a two-way lane puts nothing behind
     r = _win(r, g, 1, 2)
-    assert r.status == run.COMPLETE        # the way back to 0 is not a way on
+    assert run.frontier(r, g) == [2]             # 1 leads back to 0, so it is no goal
+    assert _win(r, g, 2, 3).status == run.COMPLETE
 
 
 def test_two_starts_wait_for_a_pick():
     g = _graph([[0, 2], [1, 2]], start=[0, 1])
     r = run.start(g)
-    assert run.ways_on(r, g) == [0, 1]
+    assert run.frontier(r, g) == [0, 1]
     assert run.stage_to_play(r, g) is None and run.stage_to_play(r, g, pick=1) == 1
 
 
@@ -197,12 +317,55 @@ def test_a_changed_lane_ends_a_forked_run():
     assert run.active_for(_graph([[0, 1], [0, 2], [1, 2]])) is None
 
 
-def test_the_overlay_line_on_a_fork():
-    assert run.note(run.MET, 1, 0, None, run.ACTIVE, ways=2) == (
-        "Run: stage 1 done · choose the way on in the gauntlet list", True)
-    assert run.note(run.MET, 2, 0, None, run.COMPLETE, ways=0) == ("Run complete: 2 stages", True)
-    assert run.note(run.MET, 3, 3, None, run.COMPLETE, ways=0) == ("Run complete: all 3 stages", True)
-    assert run.note(run.LOST, 2, 0, None, run.OVER) == ("Run over at stage 2", False)
+def test_the_run_keeps_its_own_lives():
+    g = _chain(lives=3)
+    r = run.start(g)
+    assert run.active_for(_chain(lives=1)) == r      # lives are out of the hash
+    assert r.to_dict()["lives"] == 3 and "lives" not in run.start(_chain(gid="x")).to_dict()
+    old = {k: v for k, v in r.to_dict().items() if k != "lives"}   # a record from before lives
+    back = run.Run.from_dict(old)
+    assert back is not None and back.lives == 1
+    assert run.Run.from_dict({**r.to_dict(), "lives": 99}).lives == gauntlet.LIVES_MAX
+
+
+def test_an_old_record_ends_on_its_first_loss():
+    g = _chain(lives=3)
+    r = run.start(g)
+    run.save(run.Run.from_dict({k: v for k, v in r.to_dict().items() if k != "lives"}))
+    r = _play(run.active(), g, 0, 1, run.LOST)
+    assert r.status == run.OVER
+
+
+def test_the_fingerprint_moves_only_for_a_bonus_stage():
+    plain = _graph([[0, 1], [0, 2]])
+    body = [[sid, plain.stage(sid).settings, None] for sid in (0, 1, 2)]
+    body.append([[a, b, False, None] for a, b in sorted(plain.lanes)])
+    body.append([0])
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    import hashlib
+    assert run.fingerprint(plain) == hashlib.sha256(raw.encode()).hexdigest()[:16]   # as before lives
+    ticked = _graph([[0, 1], [0, 2]], bonus=[(1, True)])
+    assert run.fingerprint(ticked) != run.fingerprint(plain)
+
+
+def test_the_overlay_line():
+    g = _graph([[0, 1], [0, 2]])
+    r = _win(run.start(g), g, 0, 1)
+    assert run.note(r, g, 1, 0, None) == ("Run: stage 1 done · choose the way on in the gauntlet list", True)
+    r = _win(r, g, 1, 2)
+    assert run.note(r, g, 2, 0, None) == ("Run complete: 2 stages", True)
+    c = _chain()
+    r = _win(_win(_win(run.start(c), c, 0, 1), c, 1, 2), c, 2, 3)
+    assert run.note(r, c, 3, 3, None) == ("Run complete: all 3 stages", True)
+    r = _play(run.start(c), c, 0, 4, run.LOST)
+    assert run.note(r, c, 1, 3, None) == ("Run over at stage 1/3: lost", False)
+    lives = _chain(lives=3)
+    r = _play(run.start(lives), lives, 0, 5, run.LOST)
+    assert run.note(r, lives, 1, 3, None) == ("Run: lost · ♥♥ left", False)
+    r = _play(r, lives, 0, 6, run.MISSED)
+    target = lives.stage(0).target
+    assert target is not None
+    assert run.note(r, lives, 1, 3, target) == (f"Run: {target.text()} not met · ♥ left", False)
 
 
 def test_judging_a_decided_game():
@@ -267,7 +430,7 @@ def test_a_run_over_lets_its_kept_game_go():
     log = _played(_log(), "game_20261104_100000_1.json")
     r = run.begin(run.start(g), 0, log)
     assert webstore.get(paths.WEB_RUN_LOG_KEY)
-    run.finish(r.id, "game_20261104_100000_1.json", run.LOST, 3, 3, last=False)
+    run.finish(r.id, "game_20261104_100000_1.json", run.LOST, 3, 3, g)
     assert not webstore.get(paths.WEB_RUN_LOG_KEY)
 
 

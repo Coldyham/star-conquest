@@ -1,7 +1,7 @@
 // A gauntlet's graph as the game reads it, and where each stage is drawn: pure,
 // no DOM. The board's mirror of `starconquest/gauntlet.py`'s `Gauntlet.from_dict`
-// (lanes and start only), `depths`, `reachable`, `hidden_stages`, `goals`,
-// `lane_label` and `layout`, so the page's diagram is the picture the game will
+// (lanes, start and each stage's `bonus_life`), `depths`, `reachable`,
+// `hidden_stages`, `goals`, `grants_life`, `lane_label` and `layout`, so the page's diagram is the picture the game will
 // show. `leaderboard/tests/fixtures/gauntlet-layout.json` is read by both
 // suites, so the two cannot drift (docs/design/gauntlet.md, "Lanes on the
 // board").
@@ -35,8 +35,12 @@ const pairKey = (a, b) => `${a},${b}`;
  */
 export function graphOf(body) {
   const ids = [];
+  const bonus = new Map();
   for (const stage of Array.isArray(body?.stages) ? body.stages : []) {
-    if (isObject(stage) && isInt(stage.id) && !ids.includes(stage.id)) ids.push(stage.id);
+    if (isObject(stage) && isInt(stage.id) && !ids.includes(stage.id)) {
+      ids.push(stage.id);
+      if (typeof stage.bonus_life === "boolean") bonus.set(stage.id, stage.bonus_life);
+    }
   }
   const have = new Set(ids);
   const lanes = [];
@@ -67,7 +71,7 @@ export function graphOf(body) {
   let start = (Array.isArray(body?.start) ? body.start : []).filter((s) => have.has(s));
   start = [...new Set(start)];
   if (!start.length && ids.length) start = [ids[0]];
-  return { ids, lanes, twoWay, gates, hidden, start };
+  return { ids, lanes, twoWay, gates, hidden, start, bonus };
 }
 
 /** Every way a lane runs, as `{from, to, lane}`; a two-way lane gives two. */
@@ -130,6 +134,18 @@ export function goals(graph) {
   const plainIn = new Set(ways(graph).filter((w) => !graph.gates.has(w.lane)).map((w) => w.to));
   return new Set(graph.ids.filter((sid) => reached.has(sid) && onward(graph, sid, false).size === 0
                                           && (graph.start.includes(sid) || plainIn.has(sid))));
+}
+
+/** No lane out at all, gated or not, and not a goal (`gauntlet.dead_end`). */
+export function deadEnd(graph, sid) {
+  return onward(graph, sid).size === 0 && !goals(graph).has(sid);
+}
+
+/** Does winning `sid` in a run grant a life (`gauntlet.grants_life`): the
+ * stage's own `bonus_life` where it is ticked either way, else a dead end. */
+export function grantsLife(graph, sid) {
+  if (!graph.ids.includes(sid)) return false;
+  return graph.bonus.has(sid) ? graph.bonus.get(sid) : deadEnd(graph, sid);
 }
 
 export const BONUS = "Bonus";

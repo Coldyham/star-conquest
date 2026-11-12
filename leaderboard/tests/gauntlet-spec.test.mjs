@@ -128,3 +128,9 @@ test("the link carries the spec to the game, and the fixture is what it builds t
   assert.deepEqual(fixture.spec, spec);
   assert.deepEqual(fixture.knobs, JSON.parse(JSON.stringify(KNOB_TABS)));
 });
+
+test("lives ride beside the spec only when more than one", () => {
+  assert.equal("lives" in buildSpec(emptyForm(), seven), false);
+  assert.equal(buildSpec({ ...emptyForm(), lives: "3" }, seven).lives, 3);
+  assert.match(buildSpec({ ...emptyForm(), lives: 12 }, seven), /lives must be 1 to 9/);
+});
