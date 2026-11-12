@@ -274,6 +274,11 @@ line gives only the verdict. Ideas that lost are in
 - evolved.md · **Where it stands.** Third of six; weaker multi-seat; borrowed by Council since 2026-10-20.
 - evolved.md · **Training it** (CMA-ES, the turn-40 share); **measuring it** (the +4 bar); **why multi-seat is short** (no blind remedy).
 
+## chaotic.md
+- chaotic.md · **How it plays.** A fresh pool bot each turn (no oracle, no memory; the weak baselines in on purpose); marshal's pincers become lone feints; the pick derived from seed, turn and seat; the entry at its own stop.
+- chaotic.md · **Why this is not the dispatcher the random seat refused.** The pool holds no oracle, so `is_oracle_seat` is always False and knower runs it exactly.
+- chaotic.md · **Where it stands.** Unranked, in no random pool; between marshal and thinker.
+
 ## field.md: actuary's Style: Field (once fulcrum)
 - field.md · **The middle game the roster plays.** Half of strikes land on empty systems; evacuees step into the striker's source; defensive losses separate winner from loser.
 - field.md · **Where a ledger's moves come from.** Traps, full relief, new phase bots dropped; `FRONT_BONUS` 0 collapses actuary; pulls that steer; pinning.

@@ -37,7 +37,8 @@ uv run python main.py                          # serves the game at 127.0.0.1:80
                                                # symmetric --seed 42 --nodes 24; --no-open)
 uv run python main.py --no-menu --autoplay     # AI plays every seat (demo)
 
-uv run pytest                                  # full suite (or a file / file::test)
+uv run pytest -n auto                          # full suite in parallel, ~25 s (pytest-xdist)
+uv run pytest tests/test_x.py                  # a file / file::test (serial is faster for a few)
 
 uv run python -m tests.sim --seed 1 --verbose    # watch one AI-vs-AI game
 uv run python -m tests.sim --trials 200          # batch stats; add --film to check playback
@@ -303,6 +304,8 @@ when to re-run it, is `docs/design/ladder.md`):
 - `thinker` (Claudebot, Thinker): flows ships to the front.
 - `heuristic` (in `ai.py`, the fallback) and `rusherplus` (attacks the weakest
   neighbour): the weak baselines.
+- `chaotic` (unranked): a different non-oracle, memoryless bot each turn, the
+  pick derived from seed, turn and seat (`docs/design/chaotic.md`).
 
 
 - **AI is per-seat and pluggable** (`Player.ai_strategy`, `model.AiParams`).

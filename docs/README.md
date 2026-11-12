@@ -81,6 +81,7 @@ grows past that, split it by topic and update this page and `sections.md`.
 | [`design/hunter.md`](design/hunter.md) | actuary's Hunt stop: edge risk, the look-ahead, the field by lane length |
 | [`design/convoy.md`](design/convoy.md) | convoy (built, not shipped; code at `7153065`) |
 | [`design/evolved.md`](design/evolved.md) | evolved: CMA-ES weights over principled moves, its look-ahead |
+| [`design/chaotic.md`](design/chaotic.md) | chaotic: a different pool bot every turn, and why it may be a dispatcher |
 
 **Not design notes.** [`bot-api.md`](bot-api.md) (the wire protocol) and
 [`bot-brief.md`](bot-brief.md) (a brief a player pastes into an AI assistant)

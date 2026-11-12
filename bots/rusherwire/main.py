@@ -51,7 +51,7 @@ class Bot:
             if attacked_by > ships[sid] + reinforced_by:
                 orders.append({"src": sid, "dst": target, "ships": ships[sid]})
                 continue
-            send = (ships[sid] + reinforced_by - 1) - attacked_by
+            send = min((ships[sid] + reinforced_by - 1) - attacked_by, ships[sid])
             if send > ships[target] + 1:
                 orders.append({"src": sid, "dst": target, "ships": send})
         return orders
