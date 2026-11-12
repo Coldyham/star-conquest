@@ -795,6 +795,45 @@ def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, game
     assert res["game"] and session.ui.run_id
 
 
+def test_a_forked_run_asks_for_the_way_on_and_plays_the_stage_picked(session, games):
+    from starconquest import gauntlet
+    from starconquest import run as gauntlet_run
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    _menu(session, "menu.press", key="tutorial")
+    data = {**_chain_data("fork-me"), "lanes": [[0, 1], [0, 2]]}
+    for row in data["stages"]:
+        row.pop("target")                      # a fork alone makes it a run
+    g = gauntlet.Gauntlet.from_dict(data)
+    assert g is not None
+    session.menu.gauntlets, session.menu.gauntlet_pick = [g], 0
+    _menu(session, "menu.press", key="gauntlet_pick_inc")
+    res = _menu(session, "menu.press", key="run_start")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert session.ui.run_id and session.menu.stage_at == ("fork-me", 0)
+    r = gauntlet_run.active()
+    assert r is not None and r.playing is not None
+    gauntlet_run.finish(r.id, r.playing.log, gauntlet_run.MET, 20, 3, last=False)
+    # Back on the list both ways on are marked, and Continue names the pick.
+    _menu(session, "menu.open")
+    session.menu.gauntlets = [g]
+    session.menu.tutorial_open, session.menu.runs = True, gauntlet_run.runs()
+    session.menu.stage_pick = 0
+    tut = _menu(session, "menu.survey")["menu"]["tutorial"]
+    marked = [n["key"] for n in tut["graph"]["nodes"] if "run" in n["marks"]]
+    assert marked == ["stage_1", "stage_2"] and "choose the way on" in tut["run"]["text"]
+    assert tut["run"]["buttons"][0]["label"] == "Continue run"
+    res = _menu(session, "menu.press", key="run_continue")      # nothing picked: it asks
+    assert "game" not in res and session.menu.gauntlet_note[1].startswith("Select a stage marked run")
+    tut = _menu(session, "menu.press", key="stage_2")["menu"]["tutorial"]
+    assert tut["run"]["buttons"][0]["label"] == "Continue run: Stage 2"
+    res = _menu(session, "menu.press", key="run_continue")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert res["game"] and session.ui.run_id and session.menu.stage_at == ("fork-me", 2)
+
+
 def test_a_daily_link_fetches_the_day_onto_the_menu(session, games):
     from starconquest.settings import Settings as _S
     _call(session, "boot", page={**PAGE, "hash": "#daily"}, store={})

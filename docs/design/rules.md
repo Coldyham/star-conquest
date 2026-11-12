@@ -629,9 +629,13 @@ Reasons: `docs/design/gauntlet.md`.
   pinned); Next stage appears only for a win that leaves it cleared, this
   game's or an earlier best meeting the target (`Ui.stage_cleared`,
   `Ui.offers_next_stage`).
-- **A run** (`run.py`) plays a single-path gauntlet with at least one target
-  (`run.offered`, `gauntlet.chain`) in order, each stage within its target,
-  with one life. It is the one piece of gauntlet progress that is stored
+- **A run** (`run.py`) plays a gauntlet from a start to a goal, each stage
+  within its target, with one life. It is offered where it adds something to
+  the list: a target, or a fork (`run.offered`, `run.forks`). It moves from
+  the stage it last won (`run.ways_on`): along any ungated lane to a stage it
+  hasn't won, and along a gated one only when this game's score meets it. At a
+  fork the list marks the ways on and Continue run plays the one selected; a
+  win with no ungated way on completes the run. It is the one piece of gauntlet progress that is stored
   (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
   decided. Only the step's own game moves it, once (`run.finish`), so a Retry
   or fork is free play. That game plays ironman with no Hint, and its Next

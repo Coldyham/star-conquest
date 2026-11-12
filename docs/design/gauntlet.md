@@ -333,18 +333,21 @@ board's halves.
 
 ## Runs (built 2026-11-04)
 
-A **run** plays a gauntlet's stages in order, each won within its target, with
-one life. It is the first, linear step towards the roguelite run below: no
-branching and no boons. It needs no format change, so a gauntlet already made
+A **run** plays a gauntlet's stages from a start to a goal, each won within
+its target, with one life. It is the first step towards the roguelite run
+below: forks (built 2026-11-12, *Forks* below), but no lives or boons. It needs no format change, so a gauntlet already made
 can be run, and in particular a generated one with stage targets (the form's
 "Stage targets", from the probes' wins) or one built on the board with "Beat
 the best bot". The working plan for the rest is
 [`graphical-gauntlet-maker.md`](../graphical-gauntlet-maker.md).
 
-- **Offered only where it adds something** (`run.offered`). The gauntlet must be
-  a single path (`gauntlet.chain`: one start, and one way on from each stage),
-  and at least one stage must carry a target. On the tutorial, which has none,
-  a run would be the stage list again, so the list shows no run there.
+- **Offered only where it adds something** (`run.offered`). The gauntlet must
+  have a goal to end on, and either a stage target or a fork (`run.forks`:
+  two starts, or a stage on the main path with more than one way out, gated or
+  not). At a fork the choice is the point: a run that takes a way it can't win
+  is over. On the tutorial, a single path with no target whose gates lead only
+  off its last stage, a run would be the stage list again, so the list shows
+  no run there.
 - **Only this game's score counts.** A run game's Next stage asks
   `can_post` and `met_target` on this game, never `stage_met_before`, so a fast
   free-play win on a stage doesn't carry a run over it
@@ -386,6 +389,33 @@ the best bot". The working plan for the rest is
   the overlay, the run's line ("Run: stage 2/8 done · Next stage carries it
   on", "Run over at stage 3/8: Win in 14 turns or fewer not met") takes the
   stage verdict's place.
+
+### Forks (built 2026-11-12)
+
+The first build offered runs only on a single path. That left out exactly the
+gauntlets where a run means most: at a fork, the way chosen can end the run.
+This is the movement half of Phase 5 of the plan, without lives or boons.
+
+- **A run moves from the stage it last won** (`run.ways_on`), never from bests.
+  At first its ways on are the starts. After a win they are each ungated lane
+  out of that stage to a stage the run hasn't won (so a two-way lane never
+  leads back), and each gated lane whose target **this game's** score meets.
+- **A win with no ungated way on completes the run** (`run.ends`): a goal, or a
+  bonus stage's dead end. A gated lane out of a goal (the tutorial's bonus
+  stages) is not taken, as the plan's "winning a goal wins the run" says.
+- **One way on: Next stage carries it on**, as before. The game works this out
+  from the ways out it was given (`Ui.run_ways`, set by `app.run_ui`) and this
+  game's score, in `app.record_run_step`.
+- **More than one: the list chooses.** The overlay says "choose the way on in
+  the gauntlet list". The list marks every way on "run", and Continue run plays
+  the selected stage, naming it on the button ("Continue run: Nebula Gate").
+  With nothing chosen it asks for a stage marked run. Two starts work the same
+  way for Start run.
+- **No total where runs differ in length** (`run.linear`: a single path with no
+  gated lane). The list and overlay say "stage 3", not "stage 3 of 8", and a
+  finished run "Run complete: 4 stages".
+- **The fingerprint covers the lanes** of any gauntlet that isn't a plain path,
+  so a lane edited under a run ends it. A plain path hashes as before.
 
 ## The gauntlet: proposed, not built
 

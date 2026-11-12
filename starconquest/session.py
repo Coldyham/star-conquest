@@ -223,7 +223,8 @@ class Session:
         there is nothing to play."""
         ms, settings = self.menu, self._settings()
         opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
-                                    lambda g, sid: setupmenu.load_stage(ms, settings, g, sid))
+                                    lambda g, sid: setupmenu.load_stage(ms, settings, g, sid),
+                                    ms.stage_pick)
         self._note(note)
         if opened is None:
             if reopen:

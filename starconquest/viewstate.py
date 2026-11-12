@@ -385,6 +385,9 @@ class Ui:
     run_total: int = 0
     run_note: str = ""
     run_ok: bool = True
+    # The run's ways out of this stage as `run.ways_out` gives them, `(stage,
+    # gate)`: which way a win may go on, and whether it completes the run.
+    run_ways: tuple[tuple[int, Target | None], ...] = ()
     # The system whose star info card (`starlore`) is up over the board, or None.
     # The i button beside a selected system's name in the side panel and the I
     # key open it; any press closes it.
@@ -787,7 +790,8 @@ class Ui:
         cleared (`stage_cleared`), or, with no ungated way on, to the one stage a
         gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it. A
         gate open beside an ungated way is a fork: choose on the list. In a run
-        only this game's score counts, and gated lanes are off its path."""
+        only this game's score counts, on the run's own ways on (`run_ways`, set
+        by `main.record_run_step`)."""
         if not self.in_stage:
             return False
         if self.run_id:

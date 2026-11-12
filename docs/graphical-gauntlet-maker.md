@@ -557,6 +557,11 @@ Then run the full suite, since this touches `replay` and `main`.
 
 ## Phase 5: runs (core `run.py`, menu graph overlay, main)
 
+**Movement over the graph is built (2026-11-12)**, without lives or boons:
+`docs/design/gauntlet.md`, *Runs*, *Forks*. A run moves from the stage it last
+won, gated lanes open on its own score, and the list chooses at a fork; a win
+with no ungated way on completes it. What follows for movement stands as built.
+
 **This grows Phase 0's run rather than starting one.** The record, its storage,
 Continue run through `active_log`, the boot prompt, no Retry or rewind, no Hint,
 and one active run all stay as Phase 0 built them. What Phase 5 adds:

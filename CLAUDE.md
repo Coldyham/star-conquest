@@ -392,8 +392,9 @@ stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup
 matches it (`setupmenu.active_stage`). Built-in stages pin every field and a seed.
 `from_dict` never raises. The play screen never sees a `Gauntlet` (`app.stage_ui`).
-**A run (`run.py`) is the one stored progress**: a single-path gauntlet with a
-target, in order, one life. It judges only its own game (`run.finish`), so a
+**A run (`run.py`) is the one stored progress**: one way from a start to a
+goal, chosen at each fork (offered for a target or a fork, `run.offered`), one
+life; a gated lane opens on the run's own score (`run.ways_on`). It judges only its own game (`run.finish`), so a
 Retry is free play; Continue resumes that game's log, never a fresh copy.
 **A stage's place on the graph is computed (`gauntlet.layout`, mirrored by
 `gauntlet-graph.mjs`; `gauntlet-layout.json`), never stored**; the board page
