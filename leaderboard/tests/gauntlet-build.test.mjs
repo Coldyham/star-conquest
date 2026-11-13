@@ -467,7 +467,7 @@ test("a stored place must be on every stage, in its own cell", () => {
   assert.match(checkBody(body({ stages: [stage({ at: [64, 0] })] })), /place on the graph/);
 });
 
-test("a dashed box adds a stage at the foot of its column, joined to nothing but what link mode drew", () => {
+test("a dashed box adds a stage at the foot of its column, joined to nothing but the lane being drawn", () => {
   const { draft, b } = fork();
   assert.equal(newStageName(draft, 1), "Stage 2-3");
   assert.equal(newStageName(draft, 3), "Stage 4");

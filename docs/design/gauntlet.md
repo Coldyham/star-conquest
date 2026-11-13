@@ -772,13 +772,13 @@ The board's gauntlet page edits the graph: Phase 3 of
   didn't ask for.
   - **A dashed box at the foot of every column**, and one past the last, adds a
     stage there with no lanes and no start mark (`addStageAt`); it shows as
-    unreachable until linked. They are always drawn, so starting a link never
-    resizes the graph.
-  - **+ Add link** on the card, then a stage, joins the selected stage to it
+    unreachable until a lane reaches it. They are always drawn, so starting a
+    lane never resizes the graph.
+  - **+ Add lane** on the card, then a stage, joins the selected stage to it
     (or makes a lane back two-way, since the format keeps a pair's first lane;
     a pair already joined opens its options). Then a dashed box adds a stage
     with that one lane from the selected stage, in whatever column was tapped.
-    Esc or Cancel link stops.
+    Esc or Cancel stops.
   - **Arrows round the selected stage** move it a cell (`moveOptions`,
     `moveStageTo`): up and down swap it with its neighbour in the column; left
     and right take it into the next column at the same row, or into a new

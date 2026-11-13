@@ -7,7 +7,7 @@
 // `gauntlet.layout`, so it is the picture the game will show. A tap selects a
 // stage, and the one card under the graph is that stage's. Arrows round the
 // selected stage move it a row or a column; a dashed box at the foot of each
-// column adds a stage there, joined to nothing; the card's Add link, then a
+// column adds a stage there, joined to nothing; the card's Add lane, then a
 // stage or a dashed box, draws a lane from it; a tap on a lane opens its options
 // (two-way, a gate, hidden) in the card. The author places each stage (its
 // `at`), and no edit moves a stage or draws a lane the author didn't ask for
@@ -70,7 +70,7 @@ let saved = null;   // {id, body} once saved, until the draft changes again
 let openLane = null;   // the lane whose options show in its near stage's card
 let view = "author";   // the graph as the author sees it, or as a new player does
 let picked = null;     // the selected stage's key: its card is the one shown
-let linking = false;   // Add link pressed: the next stage or dashed box pressed is joined from `picked`
+let linking = false;   // Add lane pressed: the next stage or dashed box pressed is joined from `picked`
 let said = "";         // what the last edit on the graph did, said under it
 
 const $ = (id) => document.getElementById(id);
@@ -555,7 +555,7 @@ function renderChips(stage) {
     chip.addEventListener("blur", glow(false));
     return chip;
   });
-  if (!chips.length) chips.push(el("span", { class: "hint", text: "None yet: + Add link draws one." }));
+  if (!chips.length) chips.push(el("span", { class: "hint", text: "None yet: + Add lane draws one." }));
   return el("div", { class: "chips" }, chips);
 }
 
@@ -575,7 +575,7 @@ function renderStage(stage, i, dupes) {
   renderSummary(summary, stage, dupes.has(i));
 
   const join = el("button", { id: "add-link", class: `drop link${linking ? " on" : ""}`, type: "button",
-                              "aria-pressed": String(linking), text: linking ? "Cancel link" : "+ Add link",
+                              "aria-pressed": String(linking), text: linking ? "Cancel" : "+ Add lane",
                               title: "Then tap a stage to join this one to it, or a dashed box for a new stage" });
   join.disabled = view !== "author";
   join.addEventListener("click", () => {
@@ -743,9 +743,9 @@ function diagramView() {
 
 /**
  * The dashed box at the foot of every column, and one past the last: each adds
- * a stage there (`addStageAt`), joined to nothing, or in link mode with a lane
- * from the selected stage. Always drawn, so starting a link never resizes the
- * graph.
+ * a stage there (`addStageAt`), joined to nothing, or while adding a lane with
+ * one from the selected stage. Always drawn, so starting a lane never resizes
+ * the graph.
  */
 function ghosts(shape) {
   const from = linking ? nameOf(stageAt(picked)) : "";
@@ -822,18 +822,18 @@ function drawDiagram() {
   box.classList.toggle("linking", linking);
   $("relayout").disabled = !editing || !laidOutApart(draft);
   $("diagram-note").textContent = shape.stranded.length
-    ? `No start reaches ${shape.stranded.join(", ")}: link it from a stage, or tick it as open from the start.`
+    ? `No start reaches ${shape.stranded.join(", ")}: draw a lane to it, or tick it as open from the start.`
     : "";
   const hint = $("graph-hint");
   hint.classList.toggle("linking", linking);
   hint.textContent = linking
-    ? `Linking from ${nameOf(stageAt(picked))}: tap a stage to join them, or a dashed box for a new stage with a lane `
-      + "from it. Esc or Cancel link stops."
+    ? `Drawing a lane from ${nameOf(stageAt(picked))}: tap a stage to join them, or a dashed box for a new stage with a lane `
+      + "from it. Esc or Cancel stops."
     : said || (editing ? "Tap a stage to edit it, a lane for its options, or a dashed box to add a stage there."
                        : "The graph a new player sees: no hidden lanes, and no stage only they reach.");
 }
 
-/** A press on a stage: select it, or in link mode join the selected stage to it. */
+/** A press on a stage: select it, or while adding a lane join the selected stage to it. */
 function pressStage(key) {
   if (!linking) {
     picked = key;
