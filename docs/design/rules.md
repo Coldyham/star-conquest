@@ -652,7 +652,10 @@ Reasons: `docs/design/gauntlet.md`.
   stage reads this game's score alone. Continue resumes the step's log (kept
   in `webstore` too, `run.keep_log`), never a fresh copy, and a log that can't
   be loaded ends the run. A run adds nothing to `Settings` or the log, and run
-  games post as ordinary games (`tests/test_run.py`).
+  games post as ordinary games (`tests/test_run.py`). With a run under way the
+  menu opens on its list (`setupmenu.open_run_list`), and anything else played
+  beside it says "Free play": the list's button, the stage banner, the top bar
+  (`setupmenu.play_pick`, `app.FREE_PLAY_TAG`).
 - **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
   the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in

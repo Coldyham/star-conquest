@@ -573,7 +573,7 @@ export class SetupMenu {
       h("p", { class: "tptitle" }, pick.title),
       ...pick.lines.map((l) => h("p", { class: "tpline", style: `color:${l.color}` }, l.text)),
       h("div", { class: "mbuttons" },
-        h("button", { type: "button", class: "mbtn start", disabled: !pick.play.enabled,
+        h("button", { type: "button", class: `mbtn ${pick.play.tone || "start"}`, disabled: !pick.play.enabled,
                       onclick: () => this.press(pick.play.key) }, pick.play.label),
         pick.edit ? h("button", { type: "button", class: "mbtn blue",
                                   onclick: () => this.press(pick.edit.key) }, pick.edit.label) : null)) : null;

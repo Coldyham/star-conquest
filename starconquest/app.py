@@ -194,6 +194,10 @@ def _briefing_again() -> str:
     return "Tap here to read the briefing again" if config.touch_ui else "B: read the briefing again"
 
 
+# The top bar's word for a stage played beside a run under way, not as part of it.
+FREE_PLAY_TAG = " · free play"
+
+
 def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
              briefing: bool = True) -> None:
     """Copy a gauntlet stage onto ``ui`` as plain values, so render never sees a
@@ -207,6 +211,8 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
         return
     g, s = stage
     ui.stage_label = f"{g.name} {gauntlet.place(g, s.id)} · {s.title}"
+    if gauntlet_run.active() is not None:
+        ui.stage_label += FREE_PLAY_TAG    # `run_ui` takes it off the run's own game
     ui.stage_target = s.target
     ui.stage_met_before = gauntlet.met(s, gauntlet.best(s))
     ui.stage_title = s.title
@@ -236,7 +242,7 @@ def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     ui.run_next, ui.run_again, ui.run_on = None, False, False
     ui.ironman = True
     if ui.stage_label is not None:
-        ui.stage_label += " · run" + (f" {gauntlet_run.hearts(ui.run_lives)}" if ui.run_lives else "")
+        ui.stage_label = ui.stage_label.removesuffix(FREE_PLAY_TAG) + " · run" + (f" {gauntlet_run.hearts(ui.run_lives)}" if ui.run_lives else "")
 
 
 def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:

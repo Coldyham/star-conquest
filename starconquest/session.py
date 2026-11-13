@@ -287,7 +287,8 @@ class Session:
         """Show the menu: at boot (``first``) on a fresh setup, pre-filled from
         the address (``prefill``) and then a shared link, as the command line
         and the link pre-fill pygame's; afterwards on the setup last played,
-        the match left behind."""
+        the match left behind. With a run under way it opens on the run's
+        gauntlet list, unless something else has the screen (`_run_list`)."""
         self.touch, self.compact = bool(touch), bool(compact)
         if first or self.settings is None:
             self.settings = Settings.from_dict(prefill or {})
@@ -307,7 +308,18 @@ class Session:
         self.history = self.live_fog = None
         self.maker = None
         self.menu.strategies = setupmenu.strategy_options()
+        self._run_list()
         return self._menu()
+
+    def _run_list(self) -> None:
+        """Open the gauntlet list on the run under way, where running it is
+        what the player came back to do: not over the resume prompt, a link
+        that took the launch (a replay, a match, a gauntlet, a daily or a
+        generator still to land), or a list already open."""
+        if (self.resume_log is not None or self.fetching is not None or self.pbp.invite is not None
+                or self.gen_job is not None or self.menu_waits or self.menu.tutorial_open):
+            return
+        setupmenu.open_run_list(self.menu, self._settings(), self._say)
 
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
@@ -576,7 +588,8 @@ class Session:
             elif name in setupmenu.STEPS and g is not None:
                 setupmenu.step_pick(ms, self._settings(), g, *setupmenu.STEPS[name])
             elif name == "Enter" and g is not None:
-                return self._menu(self._then(setupmenu.play_pick(ms, self._settings(), g, self._begin)))
+                return self._menu(self._then(setupmenu.play_pick(ms, self._settings(), g, self._begin,
+                                                                          self._say)))
             return self._menu()
         if ms.pbp_prompt:
             if name == "Enter":
@@ -639,6 +652,7 @@ class Session:
         """Answer the boot prompt: play the unfinished match on, or leave it."""
         log, self.resume_log = self.resume_log, None
         if not accept or log is None:
+            self._run_list()
             return self._menu()
         if gauntlet_run.is_playing(log):
             # A run's own game comes back as the run's, so it keeps the run's

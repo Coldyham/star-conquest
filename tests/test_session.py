@@ -834,6 +834,43 @@ def test_a_forked_run_asks_for_the_way_on_and_plays_the_stage_picked(session, ga
     assert res["game"] and session.ui.run_id and session.menu.stage_at == ("fork-me", 2)
 
 
+def test_the_menu_opens_on_the_run_and_says_what_is_free_play(session, games, monkeypatch):
+    from starconquest import app, gauntlet, replay, setupmenu
+    from starconquest import run as gauntlet_run
+    from starconquest.settings import Settings
+    _call(session, "boot", page=PAGE, store={})
+    data = {**_chain_data("fork-me"), "lanes": [[0, 1], [0, 2]]}
+    g = gauntlet.Gauntlet.from_dict(data)
+    assert g is not None
+    monkeypatch.setattr(gauntlet, "every", lambda: [g])
+    assert _menu(session, "menu.open", first=True)["menu"]["tutorial"] is None   # no run: no list
+    r = gauntlet_run.start(g)
+    log = replay.new_log(Settings(players=2, nodes=8, seed=5), 5)
+    r = gauntlet_run.begin(r, 0, log)
+    assert log.path is not None
+    gauntlet_run.finish(r.id, log.path.name, gauntlet_run.MET, 20, 3, g)
+    tut = _menu(session, "menu.open")["menu"]["tutorial"]
+    assert tut is not None and tut["run"]["text"].startswith("Run under way")
+    # The run's stages play in the run; any other is free play, and says so.
+    assert tut["graph"]["focus"] == "stage_1" and tut["pick"]["play"]["label"] == "Play in run"
+    tut = _menu(session, "menu.press", key="stage_0")["menu"]["tutorial"]
+    assert tut["pick"]["play"]["label"] == setupmenu.FREE_PLAY and tut["pick"]["play"]["tone"] == "go"
+    assert any(line["text"] == setupmenu.FREE_PLAY_NOTE for line in tut["pick"]["lines"])
+    res = _menu(session, "menu.press", key="stage_0")             # a second tap only selects it
+    assert "game" not in res and res["menu"]["tutorial"] is not None
+    assert _menu(session, "menu.press", key="stage_play")["action"] == "start"   # the button plays it, free
+    _menu(session, "game.start")
+    assert session.ui is not None and not session.ui.run_id
+    assert session.ui.stage_label.endswith(app.FREE_PLAY_TAG)
+    menu = _menu(session, "menu.open")["menu"]
+    assert menu["subtitle"][-1]["text"].startswith("Start is free play")
+    _menu(session, "menu.press", key="stage_2")
+    res = _menu(session, "menu.press", key="stage_2")              # a second tap on a run stage: the run
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    assert res["game"] and session.ui.run_id and session.ui.stage_label.endswith("· run")
+
+
 def test_a_run_with_lives_offers_try_again_and_the_list_after_a_loss(session, games, monkeypatch):
     from starconquest import gauntlet, serial, setupmenu
     from starconquest import run as gauntlet_run

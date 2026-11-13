@@ -482,6 +482,19 @@ than a coin toss at the start.
   stage before the one just played (`setupmenu.picked_stage`), so Continue run
   never defaults to a replay that costs a life. A stage that grants a life is
   marked ♥ on gauntlets that offer a run.
+- **With a run under way the menu opens on its list** (`setupmenu.open_run_list`,
+  `Session._run_list`), at boot and on every return from a game, unless the
+  resume prompt or a link has the screen. Running it is what the player came
+  back to do; Close puts the list away as before.
+- **Anything beside a run says it is free play.** In the list, the strip's
+  button reads "Play in run" (or "Replay for its gate") on a stage the run may
+  play now and plays it as Continue run does; on any other stage it reads
+  "Free play", in amber, under a line saying the run won't count it. A second
+  tap or Enter on a run stage plays the run; on any other stage it only
+  selects, so free play is only ever the button that says so
+  (`setupmenu.play_pick`). On the menu, a stage's banner adds "Start is free
+  play, not your run", and in the game the top bar's stage label ends
+  "· free play" (`app.FREE_PLAY_TAG`) where a run's own game ends "· run".
 - **On the board**, a Lives input sits beside the gauntlet's name, shared by
   Build and Generate, and each stage card has "Grants a bonus life", ticked by
   default for a dead end; a tick either way sticks in the draft. `checkBody`
