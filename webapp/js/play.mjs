@@ -488,7 +488,7 @@ async function actOn(action) {
   } else if (action === "reset_view") {
     game.board_view.rest(game.view.snap);
     redraw();
-  } else if (GAME_ACTIONS.has(action)) {
+  } else if (GAME_ACTIONS.has(action) || /^stage_\d+$/.test(action)) {   // or a stage on the run's graph
     if (game.busy) {
       queue(action);
       return;

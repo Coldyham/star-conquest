@@ -648,7 +648,9 @@ Reasons: `docs/design/gauntlet.md`.
   (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
   decided. Only the step's own game moves it, once (`run.finish`), so a rewind
   or fork is free play; its decided overlay offers Try again (a new step) or
-  Choose a stage, never a free-play Retry. That game plays ironman with no Hint, and its Next
+  the run's graph where it may go more than one way (`app.run_graph`; a tap
+  picks, Next stage plays the pick, `run.way_on` the default), else Choose a
+  stage, never a free-play Retry. That game plays ironman with no Hint, and its Next
   stage reads this game's score alone. Continue resumes the step's log (kept
   in `webstore` too, `run.keep_log`), never a fresh copy, and a log that can't
   be loaded ends the run. A run adds nothing to `Settings` or the log, and run

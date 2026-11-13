@@ -1503,9 +1503,9 @@ def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
     """The selected stage, settled: the pick if it is still shown, else the
     stage a run of ``g`` would play next, the stage being played, the first on
     the run's frontier, the first open stage not yet cleared, the first start,
-    in that order (and kept, so arrows step from it). The run's next comes
-    before the stage just played, so Continue run never defaults to a replay
-    for a gate."""
+    in that order (and kept, so arrows step from it). The run's next
+    (`run.way_on` where it may go more than one way) comes before the stage
+    just played, so Continue run never defaults to a replay for a gate."""
     rows = stage_rows(ms, settings, g)
     shown = {r.stage.id for r in rows}
     if ms.stage_pick not in shown:
@@ -1514,8 +1514,10 @@ def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
         here = next((r.stage.id for r in rows if r.here), None)
         run_on = next(iter(run_stages(ms, g)), None)
         live = live_run(ms)
-        run_next = (gauntlet_run.stage_to_play(live, g) if live is not None and live.gauntlet_id == g.id
-                    else None)
+        mine = live if live is not None and live.gauntlet_id == g.id else None
+        run_next = gauntlet_run.stage_to_play(mine, g) if mine is not None else None
+        if run_next is None and mine is not None:
+            run_next = gauntlet_run.way_on(mine, g)
         fresh = next((r.stage.id for r in rows if r.open and r.stage.id not in done), None)
         start = next((s for s in g.start if s in shown), None)
         ms.stage_pick = next((s for s in (run_next, here, run_on, fresh, start) if s in shown),

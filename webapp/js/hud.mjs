@@ -3,6 +3,8 @@
 // (`serial.view`). The words are Python's (`hud`); this only lays them out,
 // picks the longest wording that fits, and turns presses into calls.
 
+import { drawGraph } from "./stagegraph.mjs";
+
 const NEUTRAL = [122, 128, 140];
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -470,7 +472,7 @@ export class Hud {
     }
     const button = (label, key, colour, action) => h("button", { type: "button", class: `btn ${colour}`,
       onclick: () => this.on.action(action) }, label, key ? h("span", { class: "key" }, ` (${key})`) : null);
-    const second = over.next_stage ? button("Next stage", "N", "teal", "next_stage")
+    const second = over.next_stage ? button(over.next_label || "Next stage", "N", "teal", "next_stage")
       : over.choose_stage ? button("Choose a stage", "N", "teal", "run_list")
         : over.in_stage ? null : button("New map", "N", "green", "restart");
     const first = over.try_again ? button("Try again", "T", "amber", "run_retry")
@@ -489,14 +491,25 @@ export class Hud {
       buttons.push(...group([button(over.share[0], over.share[1], "teal", "share"),
         over.board ? button(over.board[0], over.board[1], "gold", "leaderboard") : null], "share"));
     }
+    // Where the run may go more than one way, its graph: a tap picks the
+    // stage Next stage plays, a second tap plays it (`play.over_pick`).
+    const old = veil.querySelector(".tgraph");
+    const scroll = old ? [old.scrollLeft, old.scrollTop] : null;
+    const box = over.run_graph ? h("div", { class: "tgraph vgraph" }) : null;
     const kids = [
       h("h1", { style: `color:${this.color(over.headline[1])}` }, over.headline[0]),
       ...over.lines.map(([kind, text, role]) => h("p", { class: kind, style: `color:${this.color(role)}` }, text)),
+      box,
       h("div", { class: "grid" }, ...buttons),
-    ];
+    ].filter(Boolean);
     if (over.share && over.notes) kids.push(h("p", { class: "small dim" }, over.notes));
     veil.replaceChildren(h("div", { class: "stack" }, ...kids));
     veil.hidden = false;
+    if (box) {
+      const graph = drawGraph(box, over.run_graph, { onPress: (key) => this.on.action(key), label: "Where the run goes next" });
+      if (scroll) [box.scrollLeft, box.scrollTop] = scroll;
+      if (over.run_graph.focus) graph.show(over.run_graph.focus, scroll ? undefined : { block: "nearest", inline: "center" });
+    }
   }
 
   /** History's bar (`render._draw_scrubber`): Exit, Play, ◀ the track ▶, the

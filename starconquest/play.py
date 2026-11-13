@@ -225,6 +225,18 @@ def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     return None
 
 
+def over_pick(ui: Ui, sid: int) -> str | None:
+    """A tap on stage ``sid`` in the win overlay's run graph: pick a stage the
+    run may go to; a second tap on the pick plays it, as Next stage does (or
+    Try again, for the stage just lost). Answers that action, or None."""
+    if ui.run_graph is None or sid not in ui.run_choices:
+        return None
+    if sid != ui.run_next:
+        ui.run_next = sid
+        return None
+    return "run_retry" if ui.run_again and sid == ui.run_stage else "next_stage"
+
+
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:
     """A key on the game-over veil: retry, a new map (or the next stage),
     the menu, history, and the two ways to share."""

@@ -240,6 +240,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   #veil .grid .share:not(.row-start) { margin-top: 0; }
 }
 #veil .btn { min-width: 220px; }
+/* The run's graph (`app.run_graph`), drawn as the gauntlet list's (menu.css). */
+#veil .vgraph { margin-top: 12px; max-width: min(100%, 720px); max-height: 40vh; }
+#veil .vgraph .sg { padding: 2rem 1rem 1.5rem; }
 /* the result lines' roles (`hud.result_lines`) */
 :root { --beat: rgb(130, 200, 150); --tie: rgb(190, 205, 225); --miss: rgb(214, 172, 92);
   --par: rgb(255, 220, 60); --failed: rgb(214, 130, 110); }

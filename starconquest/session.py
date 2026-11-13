@@ -887,6 +887,11 @@ class Session:
                     self.history = self.live_fog = None
                     app.stamp_campaign(self.ui, self.campaign)
                     return self._whole()
+        elif name.startswith("stage_") and name[len("stage_"):].isdigit():
+            # A stage on the overlay's run graph: picked, or played on a second tap.
+            then = play.over_pick(ui, int(name[len("stage_"):]))
+            if then is not None:
+                return self.op_game_action(then)
         elif name == "run_retry" and ui.run_again and ui.run_stage is not None:
             # The same stage again as the run's next step: the life is already
             # spent, so this is only the list's pick made for the player.

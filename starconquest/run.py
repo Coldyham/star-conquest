@@ -283,6 +283,27 @@ def next_up(r: Run, g: gauntlet.Gauntlet) -> int | None:
     return fresh[0] if len(fresh) == 1 else None
 
 
+def way_on(r: Run, g: gauntlet.Gauntlet) -> int | None:
+    """The stage the run goes on to by default, wherever it may go: the stage
+    a loss just cost a life on (Try again), else the one stage not yet won
+    (``next_up``), else one the stage just played leads to, straight on in its
+    row first, else the first not yet won, else the first replay. What the win
+    overlay's graph and the list select before the player chooses."""
+    front = frontier(r, g)
+    if not front:
+        return None
+    last = r.steps[-1] if r.steps else None
+    if last is not None and last.outcome in COSTS and last.stage in front:
+        return last.stage
+    fresh = [sid for sid in front if sid not in r.won]
+    if len(fresh) == 1 or last is None:
+        return (fresh or front)[0]
+    cells = gauntlet.layout(g)
+    ahead = [sid for sid in fresh if sid in g.onward(last.stage)]
+    row = [sid for sid in ahead if cells.get(sid, (0, -1))[1] == cells.get(last.stage, (0, -2))[1]]
+    return (row or ahead or fresh or front)[0]
+
+
 def stage_to_play(r: Run, g: gauntlet.Gauntlet, pick: int | None = None) -> int | None:
     """The stage the run is on: the one being played, else ``pick`` if it is on
     the frontier, else the only stage there, else the only one not yet won
@@ -493,7 +514,7 @@ def note(r: Run, g: gauntlet.Gauntlet, at: int, total: int,
         done = "gate met" if replay else f"stage {_of(at, total)} done"
         if gauntlet.grants_life(g, step.stage) and not replay:
             done += " · bonus life"
-        on = " · Next stage carries it on" if next_up(r, g) is not None else " · choose the way on in the gauntlet list"
+        on = " · Next stage carries it on" if next_up(r, g) is not None else " · choose the way on below"
         return f"Run: {done}{lives}{on}", True
     if replay and outcome == MISSED:
         why = ": gate not met"

@@ -240,6 +240,7 @@ def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     ui.run_stage = r.playing.stage if r.playing is not None else None
     ui.run_lives = gauntlet_run.lives_left(r, g) if gauntlet_run.counts_lives(r, g) else 0
     ui.run_next, ui.run_again, ui.run_on = None, False, False
+    ui.run_graph, ui.run_choices, ui.run_replays = None, (), ()
     ui.ironman = True
     if ui.stage_label is not None:
         ui.stage_label = ui.stage_label.removesuffix(FREE_PLAY_TAG) + " · run" + (f" {gauntlet_run.hearts(ui.run_lives)}" if ui.run_lives else "")
@@ -263,9 +264,63 @@ def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
         return
     ui.run_on = done.status == gauntlet_run.ACTIVE
     ui.run_again = ui.run_on and done.steps[-1].outcome in gauntlet_run.COSTS
-    ui.run_next = gauntlet_run.next_up(done, g) if ui.run_on and not ui.run_again else None
+    front = gauntlet_run.frontier(done, g) if ui.run_on else []
+    ui.run_next = gauntlet_run.way_on(done, g) if ui.run_on else None
+    ui.run_choices = tuple(front)
+    ui.run_replays = tuple(sid for sid in front if sid in done.won)
+    ui.run_graph = run_graph(done, g) if len(front) > 1 else None
     ui.has_next_stage = ui.run_next is not None
     ui.run_note, ui.run_ok = gauntlet_run.note(done, g, ui.run_at, ui.run_total, ui.stage_target)
+
+
+# How the overlay's graph says how the game just played went.
+_PLAYED = {gauntlet_run.MET: "✓ won", gauntlet_run.MISSED: "target missed", gauntlet_run.LOST: "lost",
+           gauntlet_run.VOID: "not by hand"}
+
+
+def run_graph(r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> dict:
+    """The win overlay's picture of where the run may go next, for
+    `webapp/js/stagegraph.mjs`: the stage just played and every stage on the
+    frontier, at their `gauntlet.layout` cells with the empty columns and rows
+    closed up, and the lanes between them. Plain values, so render never sees
+    a `Gauntlet`; the pick is marked when it is served (`serial.over`)."""
+    front = gauntlet_run.frontier(r, g)
+    step = r.steps[-1]
+    ids = sorted({step.stage, *front}, key=g.position)
+    cells = gauntlet.layout(g)
+    cols = sorted({cells[sid][0] for sid in ids})
+    rows = sorted({cells[sid][1] for sid in ids})
+    goals, opened = gauntlet.goals(g), gauntlet_run.unlocked(r, g)
+    nodes = []
+    for sid in ids:
+        s = g.stage(sid)
+        if s is None:
+            continue
+        if sid not in front:
+            status, colour = _PLAYED.get(step.outcome, ""), "var(--m-start-edge)"
+        elif sid in r.won:
+            status, colour = "replay for its gate", "var(--m-warn)"
+        elif sid == step.stage:
+            status, colour = f"{_PLAYED.get(step.outcome, '')} · try again", "var(--m-warn)"
+        else:
+            status = s.target.short() if s.target is not None else "next"
+            colour = "var(--m-hl-edge)"
+        marks = [m for m, on in (("run", sid in front), ("goal", sid in goals),
+                                 ("life", sid not in r.won and gauntlet.grants_life(g, sid))) if on]
+        col, row = cells[sid]
+        nodes.append({"key": f"stage_{sid}", "col": cols.index(col), "row": rows.index(row),
+                      "place": str(g.position(sid)), "title": s.title, "status": status, "color": colour,
+                      "open": True, "marks": marks})
+    shown = {sid for sid in ids if g.stage(sid) is not None}
+    lanes = []
+    for a, b in g.lanes:
+        gate = g.lane_targets.get((a, b))
+        if a not in shown or b not in shown or ((a, b) in g.hidden and b not in opened):
+            continue
+        lanes.append({"from": f"stage_{a}", "to": f"stage_{b}", "gated": gate is not None,
+                      "short": gate.short() if gate is not None else "", "hidden": (a, b) in g.hidden,
+                      "two_way": (a, b) in g.two_way})
+    return {"nodes": nodes, "lanes": lanes}
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:

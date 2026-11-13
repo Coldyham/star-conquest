@@ -464,14 +464,24 @@ than a coin toss at the start.
   that cost one. The steps are already the complete record, so a stored count
   could only drift. Meeting a gate earns no life; there is no cap on lives
   earned past the start.
-- **Next stage** follows a win only, and only when one stage not yet won is on
-  the frontier (`run.next_up`; a won stage kept for its gate is a replay,
-  never the next stage). Otherwise the overlay says to choose in the list.
+- **Next stage plays the run's pick, chosen on the overlay.** Where the run
+  may go more than one way, the win overlay draws where it can go: the stage
+  just played and every frontier stage, at their layout cells closed up
+  (`app.run_graph`, drawn by `stagegraph.mjs`). The way on is picked already
+  (`run.way_on`: the stage a loss just cost a life on, else the one stage not
+  yet won, else one the stage just played leads to, straight on in its row
+  first); a tap picks another, and a second tap or Next stage plays it
+  (`play.over_pick`), so a run never has to go back to the menu. Next stage
+  reads "Replay for its gate" on a won stage kept for its gate. With one way
+  on there is no graph, and Next stage plays it as before. The list's default
+  selection is the same `run.way_on`.
 - **After a loss**, with lives left, the overlay says "Run: lost · ♥♥ left"
-  and offers **Try again**, a fresh game of the same stage as a new step, and
-  **Choose a stage**, to the list. The two are the same: the life is already
-  spent when the loss is recorded, and Try again is only the list's pick made
-  for the player. After the last life: "Run over: no lives left · 3 stages
+  and offers **Try again**, a fresh game of the same stage as a new step,
+  and, where the run may go another way, the graph with that stage picked:
+  picking another puts Next stage beside Try again. With no other way on it
+  offers **Choose a stage**, to the list. They are all the same: the life is
+  already spent when the loss is recorded, and Try again is only the list's
+  pick made for the player. After the last life: "Run over: no lives left · 3 stages
   won". A one-life run with no bonus stage says nothing about lives
   (`run.counts_lives`), as before.
 - **In the list** every frontier stage is marked "run", the run line reads

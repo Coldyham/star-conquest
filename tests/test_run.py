@@ -392,7 +392,7 @@ def test_the_fingerprint_moves_only_for_a_bonus_stage():
 def test_the_overlay_line():
     g = _graph([[0, 1], [0, 2]])
     r = _win(run.start(g), g, 0, 1)
-    assert run.note(r, g, 1, 0, None) == ("Run: stage 1 done · choose the way on in the gauntlet list", True)
+    assert run.note(r, g, 1, 0, None) == ("Run: stage 1 done · choose the way on below", True)
     r = _win(r, g, 1, 2)
     assert run.note(r, g, 2, 0, None) == ("Run complete: 2 stages", True)
     c = _chain()
@@ -473,3 +473,17 @@ def test_a_run_over_lets_its_kept_game_go():
     assert webstore.get(paths.WEB_RUN_LOG_KEY)
     run.finish(r.id, "game_20261104_100000_1.json", run.LOST, 3, 3, g)
     assert not webstore.get(paths.WEB_RUN_LOG_KEY)
+
+
+def test_the_way_on_goes_straight_on_and_back_to_a_loss():
+    # a cross-stitch: 0, 1 -> 2, 3 -> 4
+    g = _graph([[0, 2], [0, 3], [1, 2], [1, 3], [2, 4], [3, 4]], start=(0, 1), n=5, lives=2)
+    cells = gauntlet.layout(g)
+    r = _win(run.start(g), g, 1, 1)
+    straight = next(sid for sid in (2, 3) if cells[sid][1] == cells[1][1])
+    assert run.frontier(r, g) == [2, 3] and run.way_on(r, g) == straight
+    other = 5 - straight
+    r = _play(r, g, other, 2, run.LOST)
+    assert run.way_on(r, g) == other              # Try again's stage
+    r = _win(r, g, straight, 3)
+    assert run.way_on(r, g) == 4

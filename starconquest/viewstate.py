@@ -391,13 +391,20 @@ class Ui:
     # The stage the run is playing, and its lives left as the game began (0
     # where the run doesn't count lives: one life and no bonus stage). Once the
     # game is judged: `run_on` while the run goes on, `run_next` the stage Next
-    # stage begins (`run.next_up`), `run_again` when the game cost a life and
-    # Try again may replay the stage as a new step.
+    # stage begins (`run.way_on`, then the overlay graph's pick), `run_again`
+    # when the game cost a life and Try again may replay the stage as a new
+    # step. Where the run may go more than one way, `run_graph` is the overlay's
+    # picture of it (`app.run_graph`, without the pick), `run_choices` the
+    # stages a tap on it may pick (the frontier) and `run_replays` those already
+    # won, kept for a gate.
     run_stage: int | None = None
     run_lives: int = 0
     run_on: bool = False
     run_next: int | None = None
     run_again: bool = False
+    run_graph: dict | None = None
+    run_choices: tuple[int, ...] = ()
+    run_replays: tuple[int, ...] = ()
     # The system whose star info card (`starlore`) is up over the board, or None.
     # The i button beside a selected system's name in the side panel and the I
     # key open it; any press closes it.
@@ -800,12 +807,14 @@ class Ui:
         cleared (`stage_cleared`), or, with no ungated way on, to the one stage a
         gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it. A
         gate open beside an ungated way is a fork: choose on the list. In a run
-        only this game's score counts: the run's one next stage (`run_next`, set
-        by `main.record_run_step`)."""
+        only this game's score counts: the stage picked to go on to (`run_next`,
+        set by `main.record_run_step`, moved by a tap on the overlay's graph),
+        unless that is the stage just lost, which Try again plays."""
         if not self.in_stage:
             return False
         if self.run_id:
-            return bool(self.run_note) and self.run_next is not None
+            return (bool(self.run_note) and self.run_next is not None
+                    and not (self.run_again and self.run_next == self.run_stage))
         gates = self.unlocked(state)
         if self.has_next_stage:
             return not gates and self.stage_cleared(state)
