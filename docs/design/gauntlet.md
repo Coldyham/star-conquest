@@ -201,7 +201,7 @@ For authors. A gauntlet is one JSON file:
   The file writes it only when it differs from that default, so adding a lane
   out of a dead end turns its bonus off unless the author ticked it.
 - `briefing` is a list of paragraphs, at most six of 240 characters each.
-  `hint` is one line of at most 90. `title` is at most 32 characters.
+  `hint` is one line of at most 90. `title` is at most 32 characters; left blank, the stage is named for its place on the graph ("Stage 3-2", `gauntlet.cell_names`).
 - `lanes` joins stages by `id`, as the weekly campaign's graph does. If `lanes`
   is missing, the stages are joined in list order, so a linear gauntlet can
   leave it out. `start` lists the stages open from the beginning (default: the
@@ -832,5 +832,13 @@ The game's gauntlet list draws the graph in place of a list of rows: Phase 2 of
 - **Edit on the board** opens a gauntlet the board stored on its maker as a
   draft (`gauntlet.on_board`: the board's id shape, not a generated
   `gen-<hash>`; `paths.LEADERBOARD_MAKER_PATH`).
+- **A node's corner reads column-row** (`gauntlet.cell_names`, mirrored by the
+  board's `cellNames`; the layout fixture pins both): "3" for the only stage in
+  column 3, "3-2" for the second row of a column holding more, so a chain reads
+  1, 2, 3 and only a fork grows a row number. It is counted over the stages the
+  player can see, so a hidden bonus neither takes a number nor makes one
+  appear. It replaced the list index, which read "8 · Stage 6" on a generated
+  concertina whose titles count columns. The win overlay's graph uses the same
+  names, though it closes up the columns it draws.
 - **Every gauntlet draws as a graph, linear ones too**: a chain is one row that
   scrolls sideways, opened on the stage to play next.

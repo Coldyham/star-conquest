@@ -1,7 +1,7 @@
 // A gauntlet's graph as the game reads it, and where each stage is drawn: pure,
 // no DOM. The board's mirror of `starconquest/gauntlet.py`'s `Gauntlet.from_dict`
 // (lanes, start and each stage's `bonus_life`), `depths`, `reachable`,
-// `hidden_stages`, `goals`, `grants_life`, `lane_label` and `layout`, so the page's diagram is the picture the game will
+// `hidden_stages`, `goals`, `grants_life`, `lane_label`, `layout` and `cell_names`, so the page's diagram is the picture the game will
 // show. `leaderboard/tests/fixtures/gauntlet-layout.json` is read by both
 // suites, so the two cannot drift (docs/design/gauntlet.md, "Lanes on the
 // board").
@@ -218,4 +218,29 @@ export function layout(graph) {
     here.forEach((sid, r) => row.set(sid, r));
   }
   return new Map(graph.ids.map((sid) => [sid, [column.get(sid), row.get(sid)]]));
+}
+
+/**
+ * Each stage's place on the graph, as a node's corner shows it
+ * (`gauntlet.cell_names`): "3" for the only stage in column 3, "3-2" for the
+ * second row down of a column that holds more. Counted over `shown` (every
+ * stage by default), so a stage a player can't see yet takes no row number.
+ * An untitled stage is named from these over every stage ("Stage 3-2").
+ */
+export function cellNames(graph, shown = null) {
+  const cells = layout(graph);
+  const keep = shown === null ? null : new Set(shown);
+  const columns = new Map();
+  for (const sid of graph.ids) {
+    if (keep && !keep.has(sid)) continue;
+    const col = cells.get(sid)[0];
+    if (!columns.has(col)) columns.set(col, []);
+    columns.get(col).push(sid);
+  }
+  const out = new Map();
+  for (const [col, here] of columns) {
+    here.sort((a, b) => cells.get(a)[1] - cells.get(b)[1]);
+    here.forEach((sid, r) => out.set(sid, here.length === 1 ? `${col + 1}` : `${col + 1}-${r + 1}`));
+  }
+  return out;
 }

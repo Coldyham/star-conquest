@@ -52,7 +52,8 @@ import json
 import re
 import zlib
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import paths, pbp, webstore
@@ -279,7 +280,7 @@ def _from_dict(data) -> Gauntlet | None:
         lines = briefing if isinstance(briefing, list) else [briefing]
         stages.append(Stage(
             id=sid,
-            title=_text(row.get("title"), TITLE_MAX) or f"Stage {len(stages) + 1}",
+            title=_text(row.get("title"), TITLE_MAX),
             briefing=tuple(t for t in (_text(x, BRIEFING_LINE_MAX) for x in lines) if t)[:BRIEFING_MAX_LINES],
             hint=_text(row.get("hint"), HINT_MAX),
             settings=setup,
@@ -321,10 +322,14 @@ def _from_dict(data) -> Gauntlet | None:
         start = [stages[0].id]
     gid = _text(data.get("id"), NAME_MAX) or "gauntlet"
     lives = _int(data.get("lives"))
-    return Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
-                    stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
-                    two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden),
-                    lives=1 if lives is None else max(1, min(LIVES_MAX, lives)))
+    g = Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
+                 stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
+                 two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden),
+                 lives=1 if lives is None else max(1, min(LIVES_MAX, lives)))
+    if all(s.title for s in g.stages):
+        return g
+    names = cell_names(g)
+    return replace(g, stages=tuple(s if s.title else replace(s, title=f"Stage {names[s.id]}") for s in g.stages))
 
 
 def to_dict(g: Gauntlet) -> dict:
@@ -493,6 +498,27 @@ def layout(g: Gauntlet) -> dict[int, tuple[int, int]]:
         for r, sid in enumerate(here):
             row[sid] = r
     return {s.id: (column[s.id], row[s.id]) for s in g.stages}
+
+
+def cell_names(g: Gauntlet, shown: Iterable[int] | None = None) -> dict[int, str]:
+    """Each stage's place on the graph, as a node's corner shows it: "3" for
+    the only stage in column 3, "3-2" for the second row down of a column that
+    holds more. Counted over ``shown`` (every stage by default), so a stage a
+    player can't see yet neither takes a row number nor makes one appear. An
+    untitled stage is named from these over every stage ("Stage 3-2"), and the
+    board's ``cellNames`` is the same rule (gauntlet-layout.json pins both)."""
+    cells = layout(g)
+    keep = None if shown is None else set(shown)
+    columns: dict[int, list[int]] = {}
+    for s in g.stages:
+        if keep is None or s.id in keep:
+            columns.setdefault(cells[s.id][0], []).append(s.id)
+    out: dict[int, str] = {}
+    for col, here in columns.items():
+        here.sort(key=lambda sid: cells[sid][1])
+        for r, sid in enumerate(here):
+            out[sid] = str(col + 1) if len(here) == 1 else f"{col + 1}-{r + 1}"
+    return out
 
 
 def stage_settings(stage: Stage) -> Settings:

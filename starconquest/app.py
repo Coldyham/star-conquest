@@ -291,6 +291,8 @@ def run_graph(r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> dict:
     cols = sorted({cells[sid][0] for sid in ids})
     rows = sorted({cells[sid][1] for sid in ids})
     goals, opened = gauntlet.goals(g), gauntlet_run.unlocked(r, g)
+    unseen = g.hidden_stages() - opened
+    places = gauntlet.cell_names(g, (s.id for s in g.stages if s.id not in unseen))
     nodes = []
     for sid in ids:
         s = g.stage(sid)
@@ -309,7 +311,7 @@ def run_graph(r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> dict:
                                  ("life", sid not in r.won and gauntlet.grants_life(g, sid))) if on]
         col, row = cells[sid]
         nodes.append({"key": f"stage_{sid}", "col": cols.index(col), "row": rows.index(row),
-                      "place": str(g.position(sid)), "title": s.title, "status": status, "color": colour,
+                      "place": places.get(sid, ""), "title": s.title, "status": status, "color": colour,
                       "open": True, "marks": marks})
     shown = {sid for sid in ids if g.stage(sid) is not None}
     lanes = []

@@ -167,6 +167,8 @@ def test_the_graph_draws_each_shown_stage_at_its_cell_and_hides_an_unmet_bonus()
     assert json.loads(json.dumps(view)) == view
     cells = {n["key"]: (n["col"], n["row"]) for n in view["nodes"]}
     assert cells == {"stage_0": (0, 0), "stage_1": (1, 0), "stage_2": (1, 1), "stage_3": (2, 0)}
+    # The corner reads column-row, the row only where a column holds more than one.
+    assert [n["place"] for n in view["nodes"]] == ["1", "2-1", "2-2", "3"]
     assert [(n["key"], n["open"]) for n in view["nodes"]] == [
         ("stage_0", True), ("stage_1", True), ("stage_2", True), ("stage_3", False)]
     assert "start" in view["nodes"][0]["marks"] and "goal" in view["nodes"][3]["marks"]
@@ -184,6 +186,7 @@ def test_a_hidden_lane_is_drawn_once_met():
     ms, g = _forked({0: (20, 5), 1: (20, 5), 3: (9, 0)})
     view = setupmenu.graph_view(ms, Settings(), g)
     [bonus] = [lane for lane in view["lanes"] if lane["to"] == "stage_4"]
+    assert [n["place"] for n in view["nodes"]][-1] == "4"
     assert bonus["gated"] and bonus["hidden"] and bonus["short"] == "target 10"
     ms.stage_pick = 3
     lines = [line["text"] for line in setupmenu.pick_view(ms, Settings(), g, web=True)["lines"]]

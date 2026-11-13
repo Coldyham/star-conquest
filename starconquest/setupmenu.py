@@ -1621,6 +1621,7 @@ def graph_view(ms, settings: Settings, g: gauntlet.Gauntlet) -> dict:
     run_on = run_stages(ms, g)
     runs = gauntlet_run.offered(g)    # a bonus life means something only in a run
     shown = {r.stage.id for r in rows}
+    places = gauntlet.cell_names(g, shown)
     bests = ms.stage_bests.get(g.id, {})
     nodes = []
     for r in rows:
@@ -1629,7 +1630,7 @@ def graph_view(ms, settings: Settings, g: gauntlet.Gauntlet) -> dict:
                                  ("life", runs and gauntlet.grants_life(g, sid)),
                                  ("here", r.here), ("picked", sid == pick)) if on]
         col, row = cells[sid]
-        nodes.append({"key": f"stage_{sid}", "col": col, "row": row, "place": str(r.index + 1),
+        nodes.append({"key": f"stage_{sid}", "col": col, "row": row, "place": places[sid],
                       "title": r.stage.title, "status": r.short, "color": _hex(r.colour),
                       "open": r.open, "marks": marks})
     lanes = []

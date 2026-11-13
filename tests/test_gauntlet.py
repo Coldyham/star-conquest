@@ -348,6 +348,23 @@ def test_layout_is_the_one_the_board_draws(case):
     assert [s.id for s in g.stages if gauntlet.grants_life(g, s.id)] == case["bonus_lives"]
     assert {s.id for s in g.stages} - g.reachable() == set(case["unreachable"])
     assert [[a, b, gauntlet.lane_label(g, a, b)] for a, b, _ in g.ways()] == case["labels"]
+    assert gauntlet.cell_names(g) == {int(k): v for k, v in case["names"].items()}
+    known = [s.id for s in g.stages if s.id not in g.hidden_stages()]
+    assert gauntlet.cell_names(g, known) == {int(k): v for k, v in case["names_known"].items()}
+
+
+def test_an_untitled_stage_is_named_for_its_place_on_the_graph():
+    """"Stage 2-1": its column, and its row when the column holds more than one;
+    a chain reads Stage 1, Stage 2, as list order always named it."""
+    def titles(lanes=None):
+        body = {"stages": [{"id": i, "settings": {}, "title": "Named" if i == 3 else ""} for i in range(4)]}
+        if lanes is not None:
+            body["lanes"] = lanes
+        g = gauntlet.Gauntlet.from_dict(body)
+        assert g is not None
+        return [s.title for s in g.stages]
+    assert titles() == ["Stage 1", "Stage 2", "Stage 3", "Named"]
+    assert titles([[0, 1], [0, 2], [1, 3], [2, 3]]) == ["Stage 1", "Stage 2-1", "Stage 2-2", "Named"]
 
 
 def test_layout_ignores_list_order_for_gated_only_stages():

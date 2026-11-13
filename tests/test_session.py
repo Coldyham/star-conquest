@@ -915,6 +915,7 @@ def test_the_overlay_shows_where_the_run_goes_and_next_stage_plays_the_pick(sess
     graph = over["run_graph"]
     assert [n["key"] for n in graph["nodes"]] == ["stage_0", "stage_1", "stage_2"]
     assert [(n["col"], "run" in n["marks"]) for n in graph["nodes"]] == [(0, False), (1, True), (1, True)]
+    assert [n["place"] for n in graph["nodes"]] == ["1", "2-1", "2-2"]
     assert graph["focus"] == "stage_1" and over["next_stage"] and not over["choose_stage"]
     assert _menu(session, "game.action", name="stage_0")["view"]["over"]["run_graph"]["focus"] == "stage_1"
     view = _menu(session, "game.action", name="stage_2")["view"]     # a tap picks
