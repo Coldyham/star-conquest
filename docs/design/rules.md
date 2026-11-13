@@ -635,9 +635,10 @@ Reasons: `docs/design/gauntlet.md`.
   (`run.offered`, `run.forks`). It may play any stage on its frontier
   (`run.frontier`): opened (a start, or an ungated lane from a stage it won, or
   a gated one from a stage won with a game whose own score met the gate), not
-  won, and not behind a won stage; a won stage with a gate still worth meeting
-  stays, its replay judged against the gate (`run.gates_left`). LOST, MISSED and
-  VOID cost a life and keep the stage; only the last life, GONE or ABANDONED
+  won, not behind a won stage, and not spent (winning it would open nothing
+  not open already, `run.spent`; never a goal or a stage that grants a life);
+  a won stage with a gate still worth meeting stays, its replay judged against
+  the gate (`run.gates_left`). LOST, MISSED and VOID cost a life and keep the stage; only the last life, GONE or ABANDONED
   ends the run; a won goal (`gauntlet.goals`) completes it. Lives left are
   derived from the steps (`run.lives_left`), never stored; `Run.lives` is
   copied from the gauntlet when the run begins. A stage's first win in a run

@@ -238,26 +238,39 @@ def behind(g: gauntlet.Gauntlet, sid: int, won: set[int]) -> bool:
     return any(a == sid and b in won and lane not in g.two_way for a, b, lane in g.ways())
 
 
+def spent(g: gauntlet.Gauntlet, sid: int, won: set[int], opened: set[int]) -> bool:
+    """Would winning ``sid`` give the run nothing: it leads somewhere, is no
+    goal and grants no life, and every stage it leads to is open, won or gone
+    past already. In a cross-stitch, the other stage of a pair once the one
+    beside it is won, since that opened both stages after them."""
+    if sid in gauntlet.goals(g) or gauntlet.grants_life(g, sid):
+        return False
+    ahead = g.onward(sid)
+    return bool(ahead) and all(b in opened or b in won or behind(g, b, won) for b in ahead)
+
+
 def gates_left(r: Run, g: gauntlet.Gauntlet, sid: int) -> list[gauntlet.Target]:
     """The gates out of ``sid`` a replay of it could still meet: each gated
-    lane to a stage the run has neither opened nor gone past. A replay of a
-    won stage is judged against these, not the stage's own target."""
+    lane to a stage the run has neither opened nor gone past, and that would
+    not be spent once opened. A replay of a won stage is judged against these,
+    not the stage's own target."""
     won, opened = r.won, unlocked(r, g)
     return [g.lane_targets[lane] for a, b, lane in g.ways()
             if a == sid and lane in g.lane_targets and b not in opened and b not in won
-            and not behind(g, b, won)]
+            and not behind(g, b, won) and not spent(g, b, won, opened)]
 
 
 def frontier(r: Run, g: gauntlet.Gauntlet) -> list[int]:
     """The stages the run may play next, in the list's order: every stage it
-    has opened and neither won nor gone past, and every won stage with a gate
-    out it may still meet. A dead end leads nowhere, so it is never behind and
-    stays until it is played. Empty while a game is undecided and once the run
-    is finished."""
+    has opened and neither won, gone past nor spent, and every won stage with
+    a gate out it may still meet. A dead end leads nowhere, so it is never
+    behind or spent and stays until it is played. Empty while a game is
+    undecided and once the run is finished."""
     if r.status != ACTIVE or r.playing is not None:
         return []
-    won = r.won
-    out = {sid for sid in unlocked(r, g) if sid not in won and not behind(g, sid, won)}
+    won, opened = r.won, unlocked(r, g)
+    out = {sid for sid in opened
+           if sid not in won and not behind(g, sid, won) and not spent(g, sid, won, opened)}
     out |= {sid for sid in won if gates_left(r, g, sid)}
     return sorted((sid for sid in out if g.stage(sid) is not None), key=g.position)
 

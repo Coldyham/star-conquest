@@ -425,6 +425,14 @@ than a coin toss at the start.
   leads back too, so it never puts a stage behind. A dead end leads nowhere,
   so it stays until it is played; that is what makes its bonus life worth
   anything.
+- **A stage is spent once winning it would open nothing new** (`run.spent`),
+  and leaves the frontier too: every stage it leads to is open, won or behind
+  already. In a cross-stitch, winning one stage of a pair opens both stages
+  after it, so the other stage of the pair is spent at once rather than once
+  the next column is won. A goal and a stage that grants a life are never
+  spent, since winning either is worth something of its own; a dead end leads
+  nowhere, so it never is. A gate to a stage that would be spent once opened
+  is not worth a replay (`run.gates_left`).
 - **A missed gate can be tried again for a life.** A won stage with a gated
   lane out to a stage the run hasn't opened or gone past stays on the frontier
   (`run.gates_left`), even once it is behind: the gate is a bonus, and worth a

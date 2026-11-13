@@ -174,14 +174,40 @@ def test_the_frontier_holds_every_stage_opened_and_not_gone_past():
     r = _win(run.start(g), g, 0, 1)
     assert run.frontier(r, g) == [1, 2]
     r = _win(r, g, 1, 2)
-    assert run.frontier(r, g) == [2, 3]          # the other track is still open
+    assert run.frontier(r, g) == [3]             # 2 leads only to 3, open already: spent
     r = _win(r, g, 3, 3)
     assert run.frontier(r, g) == [4]             # 2 leads to 3, won: behind the run
     assert run.next_up(r, g) == 4
 
 
+def test_a_stage_that_would_open_nothing_new_leaves_the_frontier():
+    # a cross-stitch: 0, 1 -> 2, 3 -> 4, 5 -> 6
+    lanes = [[a, b] for col in ((0, 1), (2, 3), (4, 5)) for a in col for b in (col[0] + 2, col[1] + 2)
+             if b < 6] + [[4, 6], [5, 6]]
+    g = _graph(lanes, start=(0, 1), n=7)
+    r = run.start(g)
+    assert run.frontier(r, g) == [0, 1]
+    r = _win(r, g, 0, 1)
+    assert run.frontier(r, g) == [2, 3]          # 1 would open only 2 and 3
+    r = _win(r, g, 3, 2)
+    assert run.frontier(r, g) == [4, 5]
+
+
+def test_a_stage_that_opens_something_new_stays():
+    # 0 -> 2, 1 -> 2, 1 -> 3, 2 -> 3 (goal)
+    g = _graph([[0, 2], [1, 2], [1, 3], [2, 3]], start=(0, 1), n=4)
+    r = _win(run.start(g), g, 0, 1)
+    assert run.frontier(r, g) == [1, 2]          # 1 still opens 3
+
+
+def test_a_spent_stage_that_grants_a_life_stays():
+    g = _graph([[0, 2], [1, 2], [2, 3]], start=(0, 1), n=4, bonus=[(1, True)])
+    r = _win(run.start(g), g, 0, 1)
+    assert run.frontier(r, g) == [1, 2]
+
+
 def test_a_gated_lane_opens_only_on_the_runs_own_score():
-    g = _graph([[0, 1], [0, 2, {"turns": 10}], [2, 1]])
+    g = _graph([[0, 1], [0, 2, {"turns": 10}], [1, 3], [2, 3]], n=4)
     slow = _win(run.start(g), g, 0, 1, turns=15)
     assert run.unlocked(slow, g) == {0, 1}
     assert run.frontier(slow, g) == [0, 1]           # 0 kept: its gate can still be met
@@ -192,7 +218,7 @@ def test_a_gated_lane_opens_only_on_the_runs_own_score():
 
 
 def test_a_best_never_opens_a_gate_for_a_run(monkeypatch):
-    g = _graph([[0, 1], [0, 2, {"turns": 10}], [2, 1]])
+    g = _graph([[0, 1], [0, 2, {"turns": 10}], [1, 3], [2, 3]], n=4)
     monkeypatch.setattr(gauntlet, "best", lambda stage: (1, 0))
     r = _win(run.start(g), g, 0, 1, turns=15)
     assert 2 not in run.unlocked(r, g)
@@ -216,6 +242,12 @@ def test_a_gate_to_a_stage_gone_past_is_not_worth_a_replay():
     g = _graph([[0, 1], [1, 2], [0, 3, {"turns": 10}], [3, 1]], n=4)
     r = _win(_win(run.start(g), g, 0, 1, turns=15), g, 1, 2)
     assert run.frontier(r, g) == [2]             # 3 leads to 1, won
+
+
+def test_a_gate_to_a_stage_that_would_open_nothing_new_is_not_worth_a_replay():
+    g = _graph([[0, 1], [0, 2, {"turns": 10}], [2, 1]])
+    r = _win(run.start(g), g, 0, 1, turns=15)
+    assert not run.gates_left(r, g, 0) and run.frontier(r, g) == [1]
 
 
 def test_a_gate_to_a_stage_already_open_is_not_worth_a_replay():
@@ -297,11 +329,20 @@ def test_a_run_ends_on_a_goal_with_a_bonus_beyond_it():
 
 def test_a_two_way_lane_never_leads_back_to_a_stage_won():
     g = _graph([[0, 1, {"two_way": True}], [0, 2]])
-    r = _win(run.start(g), g, 0, 1)
-    assert run.frontier(r, g) == [1, 2]          # a two-way lane puts nothing behind
-    r = _win(r, g, 1, 2)
-    assert run.frontier(r, g) == [2]             # 1 leads back to 0, so it is no goal
+    r = run.start(g)
+    assert run.frontier(r, g) == [0]
+    r = _win(r, g, 0, 1)
+    assert 0 not in run.frontier(r, g)           # won 0 is not behind 1, only won
+    assert run.behind(g, 1, r.won) is False      # a two-way lane puts nothing behind
+    assert run.frontier(r, g) == [2]             # 1 leads back to 0, so it is no goal, and opens nothing
     assert _win(r, g, 2, 3).status == run.COMPLETE
+
+
+def test_a_two_way_lane_to_a_stage_not_open_keeps_its_stage():
+    # 0 <-> 1 <-> 2, 0 -> 3: 1 is open on 0's win and still opens 2
+    g = _graph([[0, 1, {"two_way": True}], [1, 2, {"two_way": True}], [0, 3]], n=4)
+    r = _win(run.start(g), g, 0, 1)
+    assert run.frontier(r, g) == [1, 3]
 
 
 def test_two_starts_wait_for_a_pick():
@@ -432,5 +473,3 @@ def test_a_run_over_lets_its_kept_game_go():
     assert webstore.get(paths.WEB_RUN_LOG_KEY)
     run.finish(r.id, "game_20261104_100000_1.json", run.LOST, 3, 3, g)
     assert not webstore.get(paths.WEB_RUN_LOG_KEY)
-
-
