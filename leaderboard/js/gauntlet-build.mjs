@@ -791,6 +791,25 @@ export function placeStages(draft) {
   return draft;
 }
 
+/** Each stage's place, by list index, as `layout` makes of the lanes alone, closed up. */
+const fromLanes = (draft) => placed({ ...draft, stages: (draft?.stages || []).map((stage) => ({ ...stage, at: null })) });
+
+/** Whether laying the draft out from its lanes would move any stage. */
+export function laidOutApart(draft) {
+  const here = placed(draft);
+  return fromLanes(draft).some((cell, i) => String(cell) !== String(here[i]));
+}
+
+/**
+ * Place every stage afresh as `layout` makes of the lanes (column by depth,
+ * rows by the stages that lead in), for an author whose moves have left the
+ * lanes in a tangle. Lanes are never touched.
+ */
+export function layOutFromLanes(draft) {
+  fromLanes(draft).forEach((cell, i) => { draft.stages[i].at = cell; });
+  return draft;
+}
+
 /** Each stage's `[column, row]` by key, as the game will draw it. */
 export function draftCells(draft) {
   const cells = layout(draftGraph(draft));

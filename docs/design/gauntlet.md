@@ -784,6 +784,9 @@ The board's gauntlet page edits the graph: Phase 3 of
     and right take it into the next column at the same row, or into a new
     column at either end unless it is alone in its own. Lanes stay as they
     are.
+  - **Lay out from lanes**, by Undo, places every stage as `layout` computes
+    it (`layOutFromLanes`), for lanes left in a tangle by moves; it is lit only
+    when that would move a stage (`laidOutApart`), and is one undo step.
   - **A tap on a lane** (a wide invisible stroke over it, or its target) opens
     its options in its near stage's card. **Delete stage** is on the card.
   - **Undo and redo**: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, and buttons by the
@@ -792,10 +795,12 @@ The board's gauntlet page edits the graph: Phase 3 of
     selection too, and keeps each unchanged link's reading.
   The drawer takes these as `extras` (the dashed boxes), `onLane` and
   `after(rect, grid)` (the arrows); the game passes none of them.
-- **Places are stored (`at`), reversing an earlier decision.** The layout was
-  first computed from lanes alone, so the editor had to draw lanes to put a
-  stage in a column and rewire them to move one; in use that read as the page
-  linking stages behind the author's back. A draft stage keeps its `[column,
+- **Places are stored (`at`), as cells.** The layout was first computed from
+  lanes alone, so the editor had to draw lanes to put a stage in a column and
+  rewire them to move one; in use that read as the page linking stages behind
+  the author's back. What was being avoided was a freely placed, draggable
+  stage map like the map maker's; a column and row per stage is the
+  compromise, and the computed layout stays one press away. A draft stage keeps its `[column,
   row]`, closed up after each edit (`placeStages`); a draft opened from a body
   without places is placed as `layout` computes it. `buildBody` writes `at` on
   every stage only when the places differ from the computed layout, so a

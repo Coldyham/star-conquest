@@ -174,7 +174,8 @@
       its column. <strong>+ Add link</strong> on the card, then a stage or a
       dashed box, draws a lane; tap a lane to have it ask for a target, run
       both ways, or stay hidden until met, for shortcuts and bonus stages.
-      Ctrl+Z undoes an edit.
+      If the lanes get in a tangle, <strong>Lay out from lanes</strong> places
+      every stage by its lanes again. Ctrl+Z undoes an edit.
       Saving gives you a link that opens the gauntlet in the game's
       <strong>Gauntlets</strong> list.
     </p>
@@ -189,6 +190,8 @@
           <button id="view-author" class="chip lit" type="button" aria-pressed="true">As you see it</button>
           <button id="view-player" class="chip" type="button" aria-pressed="false">As a new player sees it</button>
           <span class="history">
+            <button id="relayout" class="chip" type="button" disabled
+                    title="Place every stage where its lanes put it, as a new gauntlet is laid out">⇶ Lay out from lanes</button>
             <button id="undo" class="chip" type="button" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
             <button id="redo" class="chip" type="button" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
           </span>

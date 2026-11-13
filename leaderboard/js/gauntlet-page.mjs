@@ -32,9 +32,9 @@ import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
   GAUNTLET_ID, LIMITS, addStageAt, botWins, buildBody, checkBody, draftFromBody, draftNames, draftProblem, dropLane,
-  emptyDraft, fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveOptions, moveStageTo,
-  newStageName, parentsOf, placeStages, readDraft, removeStage, postedBest, setStart, setupProblem, stageName,
-  stageSetup, targetText, textLength, tidy,
+  emptyDraft, fileName, gameLink, joinLane, laidOutApart, layOutFromLanes, laneBack, laneFrom, linkTarget,
+  meetsTarget, moveOptions, moveStageTo, newStageName, parentsOf, placeStages, readDraft, removeStage, postedBest,
+  setStart, setupProblem, stageName, stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { depths, goals, grantsLife, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
 // The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
@@ -820,6 +820,7 @@ function drawDiagram() {
   });
   box.scrollLeft = scroll;
   box.classList.toggle("linking", linking);
+  $("relayout").disabled = !editing || !laidOutApart(draft);
   $("diagram-note").textContent = shape.stranded.length
     ? `No start reaches ${shape.stranded.join(", ")}: link it from a stage, or tick it as open from the start.`
     : "";
@@ -1071,6 +1072,15 @@ function main() {
     draft.lives = Number.isInteger(n) ? Math.max(1, Math.min(LIMITS.lives, n)) : 1;
     changed();
     drawDiagram();
+  });
+  $("relayout").addEventListener("click", () => {
+    layOutFromLanes(draft);
+    linking = false;
+    openLane = null;
+    said = "Laid every stage out by its lanes. Ctrl+Z puts them back.";
+    changed();
+    render();
+    if (picked !== null) diagram?.show(nodeKey(picked));
   });
   $("undo").addEventListener("click", undo);
   $("redo").addEventListener("click", redo);

@@ -223,6 +223,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 
 ## gauntlet.md (Gauntlets)
 - gauntlet.md · An in-game gauntlet maker built on the map maker: it would lend placing, dragging, pan and zoom, which a gauntlet's lanes don't use, while the board page already edits everything else a stage needs. *Lanes on the board.*
+- gauntlet.md · Stages placed freely by dragging, as the map maker places systems: positions are a column and row per stage (`at`), moved by arrows, with the computed layout one press away. *Lanes on the board.*
 - gauntlet.md · Boons carried between a run's stages (a hand-map edit of the stage): a boon-modified stage scores as a different setup, and the bookkeeping is complicated. Stage targets give a run its pressure instead. *Carry-over.*
 
 ## par.md (Par search)

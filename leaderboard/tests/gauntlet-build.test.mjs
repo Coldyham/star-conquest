@@ -17,7 +17,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import {
   GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
   addStageAt, draftCells, draftFromBody, draftNames, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName,
-  gameLink, joinLane, laneBack, laneFrom, linkTarget, listingOf, meetsTarget, moveOptions, moveStageTo, newStageName,
+  gameLink, joinLane, laidOutApart, layOutFromLanes, laneBack, laneFrom, linkTarget, listingOf, meetsTarget, moveOptions, moveStageTo, newStageName,
   placeStages, postedBest, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem, slugOf, stageName,
   stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
@@ -507,6 +507,22 @@ test("arrows move a stage between cells and never touch a lane", () => {
   // Right off the end opens a new column; one alone there can't, as nothing would change.
   assert.deepEqual(moveOptions(draft, d), ["left"]);
   assert.equal(JSON.stringify(draft.lanes), lanes);
+});
+
+test("laying out from the lanes puts every stage back where its lanes place it", () => {
+  const { draft, a, b, c, d } = fork();
+  placeStages(draft);
+  const lanes = JSON.stringify(draft.lanes);
+  const body = buildBody(draft);
+  assert.equal(laidOutApart(draft), false, "as placed by the lanes, nothing would move");
+  moveStageTo(draft, d, "left");
+  moveStageTo(draft, a, "right");
+  assert.equal(laidOutApart(draft), true);
+  layOutFromLanes(draft);
+  assert.deepEqual([a, b, c, d].map((k) => draftCells(draft).get(k)), [[0, 0], [1, 0], [1, 1], [2, 0]]);
+  assert.equal(laidOutApart(draft), false);
+  assert.equal(JSON.stringify(draft.lanes), lanes);
+  assert.deepEqual(buildBody(draft), body, "the body is the one it was before the moves");
 });
 
 test("the reverse pair makes a lane two-way and never adds a second", () => {
