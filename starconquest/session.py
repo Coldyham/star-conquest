@@ -354,12 +354,16 @@ class Session:
             return self._menu(self._then(self._answer(key)))
         if ms.pbp_prompt:
             # Modal: only its own controls answer.
-            if key.startswith("pbp_"):
+            if key == "pbp_lobby":
+                self._browse(key)
+            elif key.startswith("pbp_"):
                 return self._menu(self._then(setupmenu.pbp_press(ms, settings, key)))
             return self._menu()
         if ms.tutorial_open:
             # Modal too: a stage, a run button, the picker, Leave, Copy, Close.
-            if key.startswith(setupmenu.TUTORIAL_KEYS):
+            if key == "tutorial_board":
+                self._browse(key)
+            elif key.startswith(setupmenu.TUTORIAL_KEYS):
                 return self._menu(self._then(setupmenu.tutorial_press(
                     ms, settings, key, paths.is_web(), self._say, self._begin)))
             return self._menu()
@@ -367,8 +371,8 @@ class Session:
             ms.editing_seed = False
         if not (key == "strategy" or key.startswith("strategy_opt_")):
             ms.strategy_open = False
-        daily_was, board_was, files_was = ms.daily_open, ms.board_open, ms.files_open
-        ms.daily_open = ms.board_open = ms.files_open = False
+        daily_was, files_was = ms.daily_open, ms.files_open
+        ms.daily_open = ms.files_open = False
         setupmenu.before_edit(ms, settings)
         action = None
         if key == "start":
@@ -379,8 +383,6 @@ class Session:
             self._daily(daily.PUZZLE if key == "puzzle" else daily.BOARD)
         elif key == "daily_menu":
             ms.daily_open = not daily_was
-        elif key == "board_menu":
-            ms.board_open = not board_was
         elif key == "files_menu":
             ms.files_open = not files_was
         elif key == "save_settings":
@@ -399,7 +401,7 @@ class Session:
                 self._say("Link updated — copy it from the address bar", True)
             else:
                 self._say("Couldn't create link", False)
-        elif key in ("browse_matches", "browse_configs"):
+        elif key == "leaderboard":
             self._browse(key)
         elif key == "play_by_post":
             # The same gate Start goes through (a hand map that cannot build),
@@ -451,11 +453,13 @@ class Session:
         return None
 
     def _browse(self, key: str) -> None:
-        """Open one of the board's lists in this tab, as pygame's footer does."""
-        path, opened, failed = (
-            (paths.LEADERBOARD_LOBBY_PATH, "Shared matches opened", "Couldn't open the lobby")
-            if key == "browse_matches" else
-            (paths.LEADERBOARD_RECENT_PATH, "Recently played opened", "Couldn't open the leaderboard"))
+        """Open one of the board's pages in this tab: the footer's Leaderboard,
+        or the link at the foot of the play-by-post prompt or the gauntlet list."""
+        path, opened, failed = {
+            "leaderboard": (paths.LEADERBOARD_RECENT_PATH, "Leaderboard opened", "Couldn't open the leaderboard"),
+            "pbp_lobby": (paths.LEADERBOARD_LOBBY_PATH, "Shared matches opened", "Couldn't open the lobby"),
+            "tutorial_board": (paths.LEADERBOARD_GAUNTLETS_PATH, "Gauntlets opened", "Couldn't open the gauntlets"),
+        }[key]
         url = webstore.leaderboard_url(path)
         if not url:
             self._say("No leaderboard is configured", False)
@@ -607,9 +611,9 @@ class Session:
             if name in ("n", "N", "Escape"):
                 return self.op_menu_press(modal["stay"]["key"])
             return self._menu()
-        if ms.strategy_open or ms.daily_open or ms.board_open or ms.files_open:
+        if ms.strategy_open or ms.daily_open or ms.files_open:
             if name == "Escape":
-                ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
+                ms.strategy_open = ms.daily_open = ms.files_open = False
             return self._menu()
         if name in ("Enter", " "):
             return self.op_menu_press("start")
@@ -623,7 +627,7 @@ class Session:
         only once it is let go."""
         ms, settings = self.menu, self._settings()
         if phase == "start":
-            ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
+            ms.strategy_open = ms.daily_open = ms.files_open = False
             setupmenu.before_edit(ms, settings)
             ms.drag_key = str(key)
         setupmenu.apply_slider(str(key), ms, settings, float(t))

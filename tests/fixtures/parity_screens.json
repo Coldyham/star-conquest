@@ -112,20 +112,6 @@
    ]
   },
   {
-   "name": "menu-board-list",
-   "surface": "menu",
-   "sizes": [
-    "phone"
-   ],
-   "steps": [
-    [
-     "menu",
-     "board_open",
-     true
-    ]
-   ]
-  },
-  {
    "name": "menu-pbp-prompt",
    "surface": "menu",
    "sizes": [
@@ -136,6 +122,21 @@
     [
      "menu",
      "pbp_prompt",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "menu-gauntlet-list",
+   "surface": "menu",
+   "sizes": [
+    "desktop",
+    "phone"
+   ],
+   "steps": [
+    [
+     "menu",
+     "tutorial_open",
      true
     ]
    ]

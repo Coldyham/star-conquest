@@ -58,8 +58,8 @@ pinned stages, each with a briefing. **Daily** opens the day's puzzle or map
 (see below). **Create map** opens an editor for drawing a board by hand. **Get
 Link** copies the whole setup as a URL. **Files** saves the setup or the last
 match as a `.json` file and opens one again. **Play by post** starts a shared
-match, and **Recently played** and **Shared matches** open the board's lists
-(see below).
+match, and **Leaderboard** opens the board (see below); the board's shared
+matches and gauntlets are linked from the Play by post and Gauntlets lists.
 
 ### Custom AIs
 

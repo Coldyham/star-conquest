@@ -444,8 +444,7 @@ export class SetupMenu {
     const row1 = h("div", { class: "row1" },
       a.tutorial ? btn("tutorial", a.tutorial, "go") : null,
       a.get_link ? btn("get_link", "Get Link", "plain") : null,
-      a.shared ? btn("browse_matches", "Shared matches", "plain") : null,
-      a.recent ? btn("browse_configs", "Recently played", "plain") : null,
+      a.leaderboard ? btn("leaderboard", a.leaderboard, "plain") : null,
       a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null,
       a.files ? listBtn("files_menu", a.files, "plain", m.lists.files) : null);
     // Start stays centred: the map creator to its left, the rest to its right.
@@ -457,15 +456,14 @@ export class SetupMenu {
       h("span", { class: "trail" },
         a.play_by_post ? btn("play_by_post", "Play by post", "blue") : null,
         btn("quit", "Quit", "plain quit")));
-    // A phone's grid: the board's two lists share one button, and Get Link
-    // joins the Files list as "Share or save", keeping it to six.
+    // A phone's grid: Get Link joins the Files list as "Share or save",
+    // keeping it to six.
     const grid = h("div", { class: "grid" },
       a.tutorial ? btn("tutorial", a.tutorial, "go") : null,
       a.daily ? listBtn("daily_menu", a.daily, "go", m.lists.daily) : null,
       a.play_by_post ? btn("play_by_post", "Play by post", "blue") : null,
       listBtn("files_menu", a.share_save, "plain", m.lists.share_save),
-      a.board ? listBtn("board_menu", a.board, "plain", m.lists.board)
-        : a.recent ? btn("browse_configs", "Recently played", "plain") : null,
+      a.leaderboard ? btn("leaderboard", a.leaderboard, "plain") : null,
       h("span", { class: "create" }, btn("create_map", a.create, "blue"),
         a.clear_map ? btn("clear_map", "x", "plain corner", { "aria-label": "Clear the drawn map" }) : null));
     this.actionsEl.replaceChildren(h("div", { class: "wide" }, row1, row2),
@@ -506,9 +504,16 @@ export class SetupMenu {
     this.modalEl.replaceChildren();
   }
 
+  /** A modal's link to a page on the board, pressed as its key like any control. */
+  link(l) {
+    return l ? h("p", { class: "mlink" },
+      h("button", { type: "button", class: "linkish", onclick: () => this.press(l.key) }, l.label)) : null;
+  }
+
   /** Play by post's roster prompt (`setupmenu.pbp_prompt_view`): who at the
-   * table is a person, the deadline, the lobby, and two optional words. A
-   * text field being typed into keeps its caret across the reply. */
+   * table is a person, the deadline, the lobby, and two optional words, with
+   * the board's shared matches linked at its foot. A text field being typed
+   * into keeps its caret across the reply. */
   drawPrompt(p) {
     const focused = this.modalEl.querySelector("input.ptext:focus");
     const which = focused?.dataset.which;
@@ -544,7 +549,8 @@ export class SetupMenu {
       ...texts,
       h("div", { class: "mbuttons" },
         h("button", { type: "button", class: "mbtn start", onclick: () => this.press(p.go.key) }, p.go.label),
-        h("button", { type: "button", class: "mbtn plain", onclick: () => this.press(p.stay.key) }, p.stay.label))));
+        h("button", { type: "button", class: "mbtn plain", onclick: () => this.press(p.stay.key) }, p.stay.label)),
+      this.link(p.link)));
     if (which) {
       const fresh = this.modalEl.querySelector(`input.ptext[data-which="${which}"]`);
       if (fresh && focused) {
@@ -558,8 +564,8 @@ export class SetupMenu {
   }
 
   /** The Tutorial list (`setupmenu.tutorial_view`): the gauntlet's stages as
-   * a graph (`stagegraph.mjs`), the selected stage's strip, its runs, and Leave,
-   * Copy link and Close. A tap selects a stage and a second tap plays it, both
+   * a graph (`stagegraph.mjs`), the selected stage's strip, its runs, Leave,
+   * Copy link and Close, and the board's gauntlets linked at its foot. A tap selects a stage and a second tap plays it, both
    * decided in Python; what stays here is the graph box's scroll and focus,
    * kept across the redraw every reply makes. */
   drawTutorial(t) {
@@ -591,7 +597,8 @@ export class SetupMenu {
       t.note ? h("p", { class: "tnote" }, t.note) : null,
       t.said ? h("p", { class: `tnote ${t.said.ok ? "ok" : "err"}` }, t.said.text) : null,
       h("div", { class: "mbuttons tbuttons" }, ...t.buttons.map((b) => h("button", {
-        type: "button", class: `mbtn ${tone[b.tone]}`, onclick: () => this.press(b.key) }, b.label)))));
+        type: "button", class: `mbtn ${tone[b.tone]}`, onclick: () => this.press(b.key) }, b.label))),
+      this.link(t.link)));
     const graph = drawGraph(box, t.graph, { onPress: (key) => this.press(key), label: "The gauntlet's stages" });
     const focus = t.graph.focus;
     if (scroll) [box.scrollLeft, box.scrollTop] = scroll;

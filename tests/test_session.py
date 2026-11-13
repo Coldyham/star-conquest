@@ -795,6 +795,27 @@ def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, game
     assert res["game"] and session.ui.run_id
 
 
+
+def test_the_footer_and_each_lists_foot_open_their_board_page(session, games):
+    from starconquest import paths
+
+    def opens(key: str) -> str:
+        reply = _call(session, "menu.press", key=key)
+        [nav] = _effects(reply, "navigate")
+        return nav["url"]
+
+    _call(session, "boot", page=PBP_PAGE, store={})
+    actions = _menu(session, "menu.open", first=True)["menu"]["actions"]
+    assert actions["leaderboard"] == "Leaderboard"
+    assert opens("leaderboard").endswith(paths.LEADERBOARD_RECENT_PATH)
+    prompt = _menu(session, "menu.press", key="play_by_post")["menu"]["pbp_prompt"]
+    assert opens(prompt["link"]["key"]).endswith(paths.LEADERBOARD_LOBBY_PATH)
+    assert session.menu.pbp_prompt   # the prompt stays open behind it
+    _menu(session, "menu.press", key="pbp_cancel")
+    tut = _menu(session, "menu.press", key="tutorial")["menu"]["tutorial"]
+    assert opens(tut["link"]["key"]).endswith(paths.LEADERBOARD_GAUNTLETS_PATH)
+    assert session.menu.tutorial_open
+
 def test_a_forked_run_asks_for_the_way_on_and_plays_the_stage_picked(session, games):
     from starconquest import gauntlet
     from starconquest import run as gauntlet_run

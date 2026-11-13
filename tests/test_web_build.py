@@ -135,7 +135,7 @@ def test_the_functions_answer_where_the_game_calls_them():
 
 def test_the_games_board_links_point_under_board():
     for path in (paths.LEADERBOARD_SUBMIT_PATH, paths.LEADERBOARD_RECENT_PATH,
-                 paths.LEADERBOARD_LOBBY_PATH, paths.LEADERBOARD_GAME_PATH,
+                 paths.LEADERBOARD_LOBBY_PATH, paths.LEADERBOARD_GAUNTLETS_PATH, paths.LEADERBOARD_GAME_PATH,
                  paths.LEADERBOARD_POST_MODULE_PATH):
         page = path.split("?")[0]
         assert page.startswith("/board/")

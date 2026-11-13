@@ -82,9 +82,12 @@ SEED_MAX_LEN = len(str(seed_top()))  # a typed seed stops at the newest pool's e
 # puzzle first as on the board site, each item the key a press is handled as.
 DAILY_LABEL = "Daily"
 DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily map"))
-# A phone's one button for the board's two lists.
+# The footer's one way to the board: its main list, whatever is on the menu.
 BOARD_LABEL = "Leaderboard"
-BOARD_ITEMS = (("browse_configs", "Recently played"), ("browse_matches", "Shared matches"))
+# The board's own lists of what the play-by-post prompt and the gauntlet list
+# start, linked at the foot of each.
+PBP_LOBBY_LINK = "Browse shared matches"
+GAUNTLETS_LINK = "Browse more gauntlets"
 # The HTML build's Save and Load (`files`): the setup and the last match saved
 # as files the browser keeps, and any of them, or a map, opened again.
 FILES_LABEL = "Files"
@@ -132,7 +135,6 @@ class Menu:
     drag_key: str | None = None
     strategy_open: bool = False
     daily_open: bool = False
-    board_open: bool = False
     files_open: bool = False
     confirm_quit: bool = False
     strategies: list[str] = field(default_factory=lambda: strategy_options())
@@ -1003,9 +1005,7 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
             "tutorial": gauntlets_label(ms) if ms.gauntlets else None,
             "daily": DAILY_LABEL if board else None,
             "get_link": True,
-            "shared": shared,
-            "recent": board,
-            "board": BOARD_LABEL if board and shared else None,
+            "leaderboard": BOARD_LABEL if board else None,
             "play_by_post": shared,
             "create": "Edit map" if drawn else "Create map",
             "clear_map": drawn,
@@ -1014,8 +1014,6 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
         },
         "lists": {"daily": {"open": ms.daily_open,
                             "items": [{"key": k, "label": label} for k, label in DAILY_ITEMS]},
-                  "board": {"open": ms.board_open,
-                            "items": [{"key": k, "label": label} for k, label in BOARD_ITEMS]},
                   "files": {"open": ms.files_open,
                             "items": [{"key": k, "label": label} for k, label in FILES_ITEMS]},
                   "share_save": {"open": ms.files_open,
@@ -1023,7 +1021,7 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
         "hint": None if touch else KEY_HINT,
         "modal": modal(ms, settings, touch),
         "pbp_prompt": pbp_prompt_view(ms, settings, touch),
-        "tutorial": tutorial_view(ms, settings, touch),
+        "tutorial": tutorial_view(ms, settings, touch, board=board),
         "sketch": sketch_view(ms),
         "dragging": ms.drag_key,
     }
@@ -1133,6 +1131,7 @@ def pbp_prompt_view(ms, settings: Settings, touch: bool) -> dict | None:
                   "limit": cap, "editing": ms.pbp_editing == which} for label, which, cap in PBP_TEXT_ROWS],
         "go": {"key": "pbp_confirm", "label": go},
         "stay": {"key": "pbp_cancel", "label": stay},
+        "link": {"key": "pbp_lobby", "label": PBP_LOBBY_LINK},
     }
 
 
@@ -1686,8 +1685,9 @@ def pick_view(ms, settings: Settings, g: gauntlet.Gauntlet, web: bool) -> dict |
             "edit": {"key": "stage_edit", "label": "Edit on the board"} if edit else None}
 
 
-def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True) -> dict | None:
-    """The Tutorial list as it stands, or None while it is shut."""
+def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True, board: bool = False) -> dict | None:
+    """The Tutorial list as it stands, or None while it is shut. ``board`` says
+    there is a leaderboard whose gauntlets to link."""
     g = picked_gauntlet(ms) if ms.tutorial_open else None
     if g is None:
         return None
@@ -1711,4 +1711,5 @@ def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True) -> dict
         "note": PROGRESS_NOTE if web else "",
         "said": {"text": said[1], "ok": said[2]} if said is not None else None,
         "buttons": buttons,
+        "link": {"key": "tutorial_board", "label": GAUNTLETS_LINK} if web and board else None,
     }
