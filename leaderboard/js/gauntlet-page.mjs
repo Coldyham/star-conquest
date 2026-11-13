@@ -33,8 +33,8 @@ import { clear, el, mapSummary } from "./format.mjs";
 import {
   GAUNTLET_ID, LIMITS, addStageAt, botWins, buildBody, checkBody, draftFromBody, draftNames, draftProblem, dropLane,
   emptyDraft, fileName, gameLink, joinLane, laidOutApart, layOutFromLanes, laneBack, laneFrom, linkTarget,
-  meetsTarget, moveOptions, moveStageTo, newStageName, parentsOf, placeStages, readDraft, removeStage, postedBest,
-  setStart, setupProblem, stageName, stageSetup, targetText, textLength, tidy,
+  meetsTarget, moveOptions, moveStageTo, newStageName, opens as laneOpens, parentsOf, placeStages, readDraft,
+  removeStage, postedBest, setOpens, setStart, setupProblem, shutLanes, stageName, stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { depths, goals, grantsLife, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
 // The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
@@ -467,12 +467,15 @@ function targetControl(holder, near, idFor, noneText, onChange) {
   return { row, show };
 }
 
-/** The options of the lane `lane`, shown under its near stage's card. */
-function renderLane(lane) {
+/** The options of the lane `lane`, shown under the card of `stage`, one of its ends. */
+function renderLane(lane, stage) {
   const near = stageAt(lane.from);
-  const far = stageAt(lane.to);
-  const idFor = (name) => `lane-${lane.from}-${lane.to}-${name}`;
-  const { row: gate } = targetControl(lane, near, idFor("aim"), `No gate: any clear of ${nameOf(near)} opens it.`,
+  const here = stage;
+  const there = stageAt(lane.from === stage.key ? lane.to : lane.from);
+  const ends = [here.key, there.key].sort((x, y) => x - y);
+  const idFor = (name) => `lane-${ends[0]}-${ends[1]}-${name}`;
+  const plain = lane.shut ? "No gate." : `No gate: any clear of ${nameOf(near)} opens it.`;
+  const { row: gate } = targetControl(lane, near, idFor("aim"), plain,
     () => {
       if (!lane.target) lane.hidden = hidden.checked = false;
       hidden.disabled = !lane.target;
@@ -487,13 +490,17 @@ function renderLane(lane) {
     label.textContent = named ? `${named}: ${LABEL_WHY[named]}` : "";
   };
 
-  const twoWay = el("input", { id: idFor("two-way"), type: "checkbox" });
-  twoWay.checked = lane.two_way;
-  twoWay.addEventListener("change", () => {
-    lane.two_way = twoWay.checked;
-    changed();
-    render(idFor("two-way"));
-  });
+  // One box per end, this card's far end first, so neither moves when a tick turns the lane round.
+  const opensBox = (from, to) => {
+    const box = el("input", { id: idFor(`opens-${to.key}`), type: "checkbox" });
+    box.checked = laneOpens(lane, to.key);
+    box.addEventListener("change", () => {
+      setOpens(lane, to.key, box.checked);
+      changed();
+      render(box.id);
+    });
+    return el("label", { class: "check" }, [box, `Clearing ${nameOf(from)} opens ${nameOf(to)}`]);
+  };
   const hidden = el("input", { id: idFor("hidden"), type: "checkbox" });
   hidden.checked = lane.hidden;
   hidden.disabled = !lane.target;
@@ -508,18 +515,21 @@ function renderLane(lane) {
     dropLane(draft, lane);
     openLane = null;
     changed();
-    render(`s${lane.from}-to-${lane.to}`);
+    render("add-link");
   });
   const close = el("button", { class: "drop", type: "button", text: "Done" });
   close.addEventListener("click", () => {
     openLane = null;
-    render(`s${lane.from}-to-${lane.to}`);
+    render(document.getElementById(chipId(lane)) ? chipId(lane) : "add-link");
   });
   showLabel();
 
-  return el("fieldset", { class: "lane-options" }, [
-    el("legend", { text: `Lane: ${nameOf(near)} ${lane.two_way ? "↔" : "→"} ${nameOf(far)}` }),
-    el("label", { class: "check" }, [twoWay, "Two-way (either end opens the other)"]),
+  const arrow = lane.shut ? "–" : lane.two_way ? "↔" : lane.from === here.key ? "→" : "←";
+  return el("fieldset", { class: `lane-options${lane.shut ? " shut" : ""}` }, [
+    el("legend", { text: `Lane: ${nameOf(here)} ${arrow} ${nameOf(there)}` }),
+    opensBox(here, there),
+    opensBox(there, here),
+    lane.shut ? el("p", { class: "warn", text: "It opens neither stage: tick one, or remove it." }) : null,
     el("span", { class: "label", text: "Gate (what opens it)" }), gate,
     el("label", { class: "check" }, [hidden, "Hidden until met (needs a gate)"]),
     label,
@@ -534,15 +544,24 @@ const LABEL_WHY = {
   Gated: "it opens on a target, not a plain win.",
 };
 
-/** The "Leads to" chips of `stage`: one per lane out, each opening its options. */
+/** A lane's chip's id, the same whichever way it runs. */
+function chipId(lane) {
+  return `lane-${Math.min(lane.from, lane.to)}-${Math.max(lane.from, lane.to)}`;
+}
+
+/**
+ * The "Leads to" chips of `stage`: one per lane out, each opening its options,
+ * and one (red) per lane that opens neither end, on both its stages.
+ */
 function renderChips(stage) {
-  const chips = (draft.lanes || []).filter((l) => l.from === stage.key || (l.two_way && l.to === stage.key)).map((lane) => {
+  const chips = (draft.lanes || []).filter((l) => leadsOut(l, stage.key)).map((lane) => {
     const other = stageAt(lane.from === stage.key ? lane.to : lane.from);
-    const text = `${nameOf(other)}${lane.two_way ? " ↔" : ""}${lane.target ? ` · ${shortTarget(lane.target)}` : ""}`
-      + `${lane.hidden && lane.target ? " · hidden" : ""}`;
+    const text = `${nameOf(other)}${lane.shut ? " · opens neither" : lane.two_way ? " ↔" : ""}`
+      + `${lane.target ? ` · ${shortTarget(lane.target)}` : ""}${lane.hidden && lane.target ? " · hidden" : ""}`;
     const chip = el("button", {
-      id: `s${lane.from}-to-${lane.to}`, type: "button", text,
-      class: `chip lit${lane === openLane ? " open" : ""}`, "aria-expanded": String(lane === openLane),
+      id: chipId(lane), type: "button", text,
+      class: `chip lit${lane.shut ? " shut" : ""}${lane === openLane ? " open" : ""}`,
+      "aria-expanded": String(lane === openLane),
     });
     chip.addEventListener("click", () => {
       openLane = openLane === lane ? null : lane;
@@ -644,7 +663,8 @@ function renderStage(stage, i, dupes) {
     changed();
     render(id("start"));
   });
-  const lane = openLane && parentsOrSelf(openLane, stage.key) && draft.lanes.includes(openLane) ? openLane : null;
+  const lane = openLane && [openLane.from, openLane.to].includes(stage.key) && draft.lanes.includes(openLane)
+    ? openLane : null;
 
   // Ticked by default for a dead end (no lane out, not a goal); a tick either
   // way sticks, so adding a lane out later doesn't untick one the author set.
@@ -670,14 +690,14 @@ function renderStage(stage, i, dupes) {
     el("label", { class: "check" }, [life, "Grants a bonus life (♥) the first time a run wins it"]),
     el("span", { class: "label", text: "Leads to (tap one for its options)" }),
     renderChips(stage),
-    lane ? renderLane(lane) : null,
+    lane ? renderLane(lane, stage) : null,
     fromNote(stage),
   ]);
 }
 
-/** Does `lane` run out of `key`: its near stage, or the far one of a two-way lane? */
-function parentsOrSelf(lane, key) {
-  return lane.from === key || (lane.two_way && lane.to === key);
+/** Is `lane` one of `key`'s "Leads to": out of it either way it runs, or shut at either end? */
+function leadsOut(lane, key) {
+  return lane.from === key || (lane.to === key && (lane.two_way || lane.shut));
 }
 
 // -- the graph -----------------------------------------------------------------
@@ -735,10 +755,14 @@ function diagramView() {
     lanes.push({ from: keyOf(a), to: keyOf(b), gated: Boolean(gate), short: gate ? shortTarget(gate) : "",
                  hidden: graph.hidden.has(pair), two_way: graph.twoWay.has(pair), warn: only });
   }
+  if (!player) {
+    for (const [a, b] of shutLanes(draft)) lanes.push({ from: nodeKey(a.key), to: nodeKey(b.key), shut: true });
+  }
   const stranded = graph.ids.filter((sid) => !reached.has(sid)).map((sid) => stageName(draft, draft.stages[sid], names));
+  const shut = shutLanes(draft).map(([a, b]) => `${stageName(draft, a, names)} and ${stageName(draft, b, names)}`);
   const columns = Math.max(1, ...[...cells.values()].map(([c]) => c + 1));
   const rows = (c) => [...cells.values()].filter(([cc]) => cc === c).length;
-  return { nodes, lanes, stranded, columns, rows };
+  return { nodes, lanes, stranded, shut, columns, rows };
 }
 
 /**
@@ -821,9 +845,12 @@ function drawDiagram() {
   box.scrollLeft = scroll;
   box.classList.toggle("linking", linking);
   $("relayout").disabled = !editing || !laidOutApart(draft);
-  $("diagram-note").textContent = shape.stranded.length
-    ? `No start reaches ${shape.stranded.join(", ")}: draw a lane to it, or tick it as open from the start.`
-    : "";
+  $("diagram-note").textContent = [
+    shape.shut.length ? `The lane between ${shape.shut.join(", and between ")} opens neither stage: `
+      + "tap it to tick an end, or remove it." : "",
+    shape.stranded.length
+      ? `No start reaches ${shape.stranded.join(", ")}: draw a lane to it, or tick it as open from the start.` : "",
+  ].filter(Boolean).join(" ");
   const hint = $("graph-hint");
   hint.classList.toggle("linking", linking);
   hint.textContent = linking
@@ -861,7 +888,7 @@ function pressStage(key) {
 
 /** A press on a lane: select its near stage and open the lane's options. */
 function pressLane(from, to) {
-  const lane = draft.lanes.find((l) => l.from === from && l.to === to);
+  const lane = draft.lanes.find((l) => (l.from === from && l.to === to) || (l.shut && l.from === to && l.to === from));
   if (!lane) return;
   linking = false;
   picked = from;

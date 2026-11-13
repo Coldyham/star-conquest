@@ -1494,6 +1494,9 @@ button.chip {
 button.chip:hover { color: var(--ink); border-color: var(--dim); background: transparent; }
 button.chip.lit { border: 1px solid var(--cyan); color: var(--cyan); background: #0b1a2c; }
 button.chip.open { border-color: var(--gold); color: var(--gold); }
+button.chip.shut { border-color: var(--bad); color: var(--bad); }
+.lane-options.shut { border-color: var(--bad); }
+.lane-options .warn { color: var(--bad); margin: 0; }
 .stage-from { margin: 0; color: var(--dim); font-size: 0.8rem; }
 .stage-from:empty { display: none; }
 .lane-options {
@@ -1533,6 +1536,7 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 .diagram .sg-lane.sg-hidden path:not(.sg-hit) { stroke-dasharray: 2 4; }
 .diagram .sg-lane.sg-warn path:not(.sg-hit) { stroke: var(--gold); }
 .diagram .sg-lane.sg-warn .sg-head { fill: var(--gold); }
+.diagram .sg-lane.sg-shut path:not(.sg-hit) { stroke: var(--bad); }
 .diagram .sg-lane.sg-hot path:not(.sg-hit) { stroke: var(--cyan); stroke-width: 2.5; }
 .diagram .sg-lane.sg-hot .sg-head { fill: var(--cyan); }
 .diagram .sg-lane.sg-lit path:not(.sg-hit) { stroke: var(--magenta); stroke-width: 3; }

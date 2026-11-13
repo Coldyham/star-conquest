@@ -80,7 +80,8 @@ card already has a **map link** on it.
 | **stage** | one map of a gauntlet; **cleared** when won (within its **target**, if it has one) | `Stage` | level, node |
 | **stage number**, `2-1` | where a stage sits on the graph: its column, then its row when the column holds more than one ("2" alone). An untitled stage is named by it ("Stage 2-1") | `gauntlet.cell_names`, `cellNames`, `Stage.at`, a node's `place` | the stage's index or id |
 | **lane** (between stages) | the connection from one stage to another: winning the first opens the second ("+ Add lane", "Leads to", "Reached from") | `Gauntlet.lanes`, the body's `lanes`, `gauntlet.ways`, `joinLane`, `sg-lane` | link (that is a map link), edge, path, connection |
-| **two-way** lane | a lane either end of which opens the other | `two_way` | |
+| **two-way** lane | a lane either end of which opens the other; in the maker, both "Clearing A opens B" boxes ticked | `two_way` | |
+| lane that **opens neither stage** | the maker's lane with both boxes unticked: drawn red, and Save refused until one is ticked or it is removed. Never stored | a draft lane's `shut`, `sg-shut` | dead lane |
 | **start** | a stage open from the beginning of a run ("Open from the start"); a bar on its left | `Gauntlet.start` | |
 | **★** ("ends the gauntlet") | a stage whose win finishes a run: one no ungated lane leads on from | `gauntlet.goals`; **goal** in docs | |
 | **target** | the turns, and ships lost, to win a stage within ("Win in 12 turns, losing at most 30 ships"; `≤12` on the graph). A stage's target must be met before any lane out of it opens | `Stage.target`, `gauntlet.Target`, `targetText` | par (that is the puzzle's) |

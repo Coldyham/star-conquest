@@ -760,7 +760,7 @@ The board's gauntlet page edits the graph: Phase 3 of
 - **Lanes join stages by a draft key, never by place.** Each draft stage gets a
   `key` from the draft's `next_key` counter when it is made, so a move and a
   delete never rewire a lane. `draft.lanes` is `{from, to, two_way, aim, target,
-  hidden}` by key, `draft.start` a list of keys (`gauntlet-build.mjs`).
+  hidden, shut?}` by key, `draft.start` a list of keys (`gauntlet-build.mjs`).
 - **A linear gauntlet saves exactly the body it saved before**, so its id holds:
   `buildBody` numbers stages in list order and writes `lanes` and `start` only
   when they differ from what `from_dict` assumes without them. A draft kept
@@ -813,7 +813,17 @@ The board's gauntlet page edits the graph: Phase 3 of
 - **Each card**: the stage's link, title, briefing, hint and target; *Open from
   the start*; **Leads to**, one chip per lane out, each opening its options; a
   "Reached from" note, so either end explains a lane.
-- **A lane's options**: two-way; a gate (none, turns typed
+- **A lane's options**: one box per end, "Clearing A opens B" and "Clearing B
+  opens A" (`setOpens`), in the same order whichever way the lane runs, so a
+  tick never moves a box. Both is two-way; one alone turns the lane round to
+  run into the end ticked (`from` and `to` swap; its gate stays, now read from
+  the other stage); neither is a lane that opens neither stage (`shut`). The
+  body has no way to say that, so it builds to no lane: it is drawn red with no
+  arrowhead, listed on both its stages' chips and under the graph, and Save is
+  refused until an end is ticked or it is removed, as an unreachable stage is.
+  Drawing the lane again opens it the way it was drawn. This replaced a
+  two-way box, under which reversing a lane meant removing and redrawing it.
+  Then a gate (none, turns typed
   in, the near stage's link score, or the best bot on it: the stage target's
   choices plus one, through the same `applyAim`); hidden, only when gated; the
   derived label (`laneLabel`) as it is set; remove. A bot gate is read again on

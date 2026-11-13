@@ -10,7 +10,7 @@
 // changes. The box it is drawn into scrolls; nothing here keeps an offset.
 //
 // A view is `{nodes: [{key, col, row, title, place?, status?, color?, open,
-// marks?}], lanes: [{from, to, gated?, short?, hidden?, two_way?, warn?}]}`,
+// marks?}], lanes: [{from, to, gated?, short?, hidden?, two_way?, warn?, shut?}]}`,
 // lanes naming nodes by key. Marks become classes (`sg-start`, `sg-goal`, …),
 // which each page styles in its own theme.
 
@@ -69,7 +69,8 @@ export function nodeClasses(node) {
 
 /** A lane's classes, by what it is. */
 export function laneClasses(lane) {
-  return ["sg-lane", lane.gated ? "sg-gated" : "", lane.hidden ? "sg-hidden" : "", lane.warn ? "sg-warn" : ""]
+  return ["sg-lane", lane.gated ? "sg-gated" : "", lane.hidden ? "sg-hidden" : "", lane.warn ? "sg-warn" : "",
+          lane.shut ? "sg-shut" : ""]
     .filter(Boolean).join(" ");
 }
 
@@ -155,7 +156,7 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
       const curve = laneCurve(a, b, cellOf.get(lane.to).col - cellOf.get(lane.from).col);
       const g = svg("g", { class: laneClasses(lane), "data-from": lane.from, "data-to": lane.to }, layer);
       svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}` }, g);
-      svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
+      if (!lane.shut) svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
       if (lane.two_way) svg("polygon", { points: arrowPoints(curve.start, curve.c1).join(" "), class: "sg-head" }, g);
       const short = lane.short ? svg("text", { x: curveMid(curve)[0], y: curveMid(curve)[1] - 5, "text-anchor": "middle",
                                                 class: "sg-short" }, g) : null;

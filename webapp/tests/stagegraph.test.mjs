@@ -38,4 +38,5 @@ test("marks and kinds become classes", () => {
   assert.equal(nodeClasses({ open: true }), "sg-node");
   assert.equal(laneClasses({ gated: true, hidden: true }), "sg-lane sg-gated sg-hidden");
   assert.equal(laneClasses({ warn: true }), "sg-lane sg-warn");
+  assert.equal(laneClasses({ shut: true }), "sg-lane sg-shut");
 });

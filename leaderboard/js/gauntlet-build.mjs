@@ -214,7 +214,7 @@ export function buildBody(draft, { at = true } = {}) {
   const id = new Map(list.map((stage, i) => [stage.key, i]));
   const joined = new Set();
   const lanes = draft.lanes
-    .filter((lane) => id.has(lane.from) && id.has(lane.to) && lane.from !== lane.to)
+    .filter((lane) => !lane.shut && id.has(lane.from) && id.has(lane.to) && lane.from !== lane.to)
     .map((lane) => {
       const how = laneHow(lane);
       const pair = [id.get(lane.from), id.get(lane.to)];
@@ -487,7 +487,9 @@ export function fileName(body, gauntletId) {
 // Lanes join stages by a `key` each stage gets when it is made (from the
 // draft's `next_key` counter), never by place, so reordering and removing never
 // rewire a lane: `lanes` is `[{from, to, two_way, target, hidden}]` by key
-// and `start` a list of keys. A stage's or lane's target is whatever numbers
+// and `start` a list of keys. A lane the author has set to open neither stage
+// carries `shut: true`: the body has no way to say that, so it builds to no
+// lane and Save is refused until one end is ticked or the lane removed. A stage's or lane's target is whatever numbers
 // were typed or filled in; an older draft's `aim` beside it is ignored.
 
 /** A stage with nothing in it yet. */
@@ -581,9 +583,10 @@ function readLane(raw, have) {
   return {
     from: raw.from,
     to: raw.to,
-    two_way: raw.two_way === true,
+    two_way: raw.two_way === true && raw.shut !== true,
     target,
     hidden: Boolean(target) && raw.hidden === true,
+    ...(raw.shut === true ? { shut: true } : {}),
   };
 }
 
@@ -662,6 +665,8 @@ export function draftProblem(draft) {
   if (Array.isArray(draft?.start) && !draft.stages.some((s) => draft.start.includes(s.key))) {
     return "tick at least one stage as open from the start";
   }
+  const shut = shutLanes(draft)[0];
+  if (shut) return `the lane between ${name(shut[0])} and ${name(shut[1])} opens neither stage: tick one end, or remove it`;
   const body = checkBody(buildBody(draft), (i) => name(draft.stages[i]));
   if (typeof body === "string") return body;
   if (checkByName(draft.by_name) === null) return `your name is over ${LIMITS.byName} characters`;
@@ -699,8 +704,35 @@ export function addStage(draft) {
 
 /** The stages a lane leads into `key` from, the way each lane runs. */
 export function parentsOf(draft, key) {
-  return (draft.lanes || []).flatMap((lane) => (lane.to === key ? [lane.from]
-                                              : lane.two_way && lane.from === key ? [lane.to] : []));
+  return (draft.lanes || []).flatMap((lane) => (lane.shut ? []
+    : lane.to === key ? [lane.from] : lane.two_way && lane.from === key ? [lane.to] : []));
+}
+
+/** The stage pairs, as `[stage, stage]` in list order, of the lanes set to open neither end. */
+export function shutLanes(draft) {
+  const list = draft?.stages || [];
+  const at = new Map(list.map((s, i) => [s.key, i]));
+  return (draft?.lanes || []).filter((l) => l.shut && at.has(l.from) && at.has(l.to))
+    .map((l) => [at.get(l.from), at.get(l.to)].sort((x, y) => x - y).map((i) => list[i]));
+}
+
+/** Does `lane` open stage `key`: does a clear of its other end lead there? */
+export function opens(lane, key) {
+  return !lane.shut && (lane.to === key || (lane.two_way && lane.from === key));
+}
+
+/**
+ * Tick or untick "opens `key`" on `lane`, one of its ends. Both ends ticked is
+ * two-way; one is a lane into it, so `from` and `to` swap when the end left
+ * ticked is `from`; neither is a shut lane. Its gate stays, read from whichever
+ * stage now leads.
+ */
+export function setOpens(lane, key, on) {
+  const into = new Set([lane.from, lane.to].filter((k) => (k === key ? on : opens(lane, k))));
+  delete lane.shut;
+  lane.two_way = into.size === 2;
+  if (into.size === 0) lane.shut = true;
+  else if (into.size === 1 && into.has(lane.from)) [lane.from, lane.to] = [lane.to, lane.from];
 }
 
 /** Remove a stage with its lanes and its start mark; nothing is rewired. */
@@ -712,13 +744,19 @@ export function removeStage(draft, key) {
 
 /** The lane that runs from `a` to `b` (one-way that way, or two-way), or null. */
 export function laneFrom(draft, a, b) {
-  return (draft.lanes || []).find((l) => (l.from === a && l.to === b) || (l.two_way && l.from === b && l.to === a))
-    ?? null;
+  return (draft.lanes || []).find((l) => !l.shut && ((l.from === a && l.to === b)
+                                                     || (l.two_way && l.from === b && l.to === a))) ?? null;
 }
 
 /** A one-way lane from `b` back to `a`, which `a`'s chip offers to make two-way. */
 export function laneBack(draft, a, b) {
-  return (draft.lanes || []).find((l) => l.from === b && l.to === a && !l.two_way) ?? null;
+  return (draft.lanes || []).find((l) => !l.shut && l.from === b && l.to === a && !l.two_way) ?? null;
+}
+
+/** The lane between `a` and `b` that opens neither, or null. */
+export function laneShut(draft, a, b) {
+  return (draft.lanes || []).find((l) => l.shut && ((l.from === a && l.to === b) || (l.from === b && l.to === a)))
+    ?? null;
 }
 
 /**
@@ -733,6 +771,11 @@ export function joinLane(draft, a, b) {
   if (back) {
     back.two_way = true;
     return back;
+  }
+  const shut = laneShut(draft, a, b);
+  if (shut) {
+    setOpens(shut, b, true);
+    return shut;
   }
   const lane = emptyLane(a, b);
   draft.lanes.push(lane);

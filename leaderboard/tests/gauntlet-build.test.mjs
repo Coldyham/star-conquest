@@ -18,7 +18,7 @@ import {
   GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
   addStageAt, draftCells, draftFromBody, draftNames, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName,
   gameLink, joinLane, laidOutApart, layOutFromLanes, laneBack, laneFrom, linkTarget, listingOf, meetsTarget, moveOptions, moveStageTo, newStageName,
-  placeStages, postedBest, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem, slugOf, stageName,
+  opens, placeStages, postedBest, parentsOf, readDraft, removeStage, setOpens, setStart, shutLanes, mintId, setupProblem, slugOf, stageName,
   stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
@@ -537,6 +537,37 @@ test("the reverse pair makes a lane two-way and never adds a second", () => {
   assert.deepEqual(checkBody(buildBody(draft)).lanes, [[0, 1, { two_way: true }]]);
   dropLane(draft, lane);
   assert.deepEqual(draft.lanes, []);
+});
+
+test("a lane's two ends are ticked apart: both is two-way, one turns it round, neither is shut", () => {
+  const draft = linear(2);
+  const [a, b] = draft.stages.map((s) => s.key);
+  const lane = draft.lanes[0];
+  lane.target = { turns: 9 };
+  setStart(draft, b, true);
+  assert.deepEqual([opens(lane, a), opens(lane, b)], [false, true]);
+  setOpens(lane, a, true);
+  assert.deepEqual([lane.from, lane.to, lane.two_way], [a, b, true]);
+  setOpens(lane, b, false);
+  assert.deepEqual([lane.from, lane.to, lane.two_way], [b, a, false], "only a is opened: the lane runs b to a");
+  assert.deepEqual(checkBody(buildBody(draft)).lanes, [[1, 0, { turns: 9 }]], "its gate rides along");
+  assert.deepEqual(parentsOf(draft, a), [b]);
+  setOpens(lane, a, false);
+  assert.equal(lane.shut, true);
+  assert.equal(lane.two_way, false);
+  assert.deepEqual([opens(lane, a), opens(lane, b)], [false, false]);
+  assert.deepEqual(parentsOf(draft, a), []);
+  assert.equal(laneFrom(draft, b, a), null);
+  assert.deepEqual(shutLanes(draft).map((pair) => pair.map((s) => s.key)), [[a, b]], "in list order");
+  assert.deepEqual(checkBody(buildBody(draft)).lanes ?? [], [], "the body has no way to say shut");
+  assert.match(draftProblem(draft), /^the lane between Stage .* and Stage .* opens neither stage/);
+  // A shut lane is kept, and read back shut.
+  assert.equal(readDraft(JSON.stringify(draft)).lanes[0].shut, true);
+  // Drawing the lane again opens it the way it was drawn, and never adds a second.
+  assert.equal(joinLane(draft, a, b), lane);
+  assert.equal(draft.lanes.length, 1);
+  assert.deepEqual([lane.from, lane.to, lane.two_way, "shut" in lane], [a, b, false, false]);
+  assert.equal(draftProblem(draft), "");
 });
 
 test("a lane's gate, hidden and two-way build as the game reads them", () => {
