@@ -604,11 +604,14 @@ Reasons: `docs/design/gauntlet.md`.
   one before it. **Every stage must be reachable from a start**
   (`gauntlet.problems`): the board's `checkBody` refuses a gauntlet that fails,
   `tools/gauntlet_check.py` will not play one, and the built-ins are held to it.
-- **A stage's place on the graph is computed, never stored** (`gauntlet.layout`,
-  mirrored by the board's `gauntlet-graph.mjs`; both read
-  `leaderboard/tests/fixtures/gauntlet-layout.json`). The board page edits
-  lanes by draft key, never by place, and a draft whose lanes were never
-  touched builds exactly the linear body it always did, so its id holds.
+- **A stage's place on the graph is computed from the lanes unless its author
+  placed every stage** (`gauntlet.layout`, mirrored by the board's
+  `gauntlet-graph.mjs`; both read `leaderboard/tests/fixtures/gauntlet-layout.json`).
+  A stage's `at` is used only when every stage has one, no two alike. The
+  board writes `at` only when the author's places differ from the computed
+  layout, edits lanes by draft key, never moves a stage or draws a lane the
+  author didn't ask for, and a draft whose lanes and places were never touched
+  builds exactly the linear body it always did, so its id holds.
 - **The game's list and the board's diagram share one drawer**
   (`webapp/js/stagegraph.mjs`, imported by the board from `/play/` so the game
   never depends on `/board/` offline); it decides nothing. In the list a tap

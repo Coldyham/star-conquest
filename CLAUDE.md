@@ -399,9 +399,11 @@ on the run's own score. Lives left are derived from the steps
 (`run.lives_left`); a bonus life is `gauntlet.grants_life`, by default a dead
 end's. It judges only its own game (`run.finish`), so a
 rewind is free play; Continue resumes that game's log, never a fresh copy.
-**A stage's place on the graph is computed (`gauntlet.layout`, mirrored by
-`gauntlet-graph.mjs`; `gauntlet-layout.json`), never stored**; the board page
-edits lanes by draft key, and a linear draft builds exactly its old body. The
+**A stage's place on the graph is computed from the lanes (`gauntlet.layout`,
+mirrored by `gauntlet-graph.mjs`; `gauntlet-layout.json`) unless every stage
+carries its author's `at`**; the board writes `at` only when it differs from the
+computed layout, edits lanes by draft key, never moves a stage or draws a lane
+the author didn't ask for, and a linear draft builds exactly its old body. The
 game's list and the board draw it with one drawer, `webapp/js/stagegraph.mjs`
 (the board imports it from `/play/`; it decides nothing): a tap selects
 (`MenuState.stage_pick`), a second tap plays, and a hidden lane is drawn only

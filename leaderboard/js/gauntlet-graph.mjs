@@ -27,6 +27,16 @@ function gateOf(how) {
 
 const pairKey = (a, b) => `${a},${b}`;
 
+/** The game's MAX_STAGES: a stored `at` is two whole numbers below it. */
+const CELLS = 64;
+
+/** A stage's stored `at` as `_cell` reads it, or null. */
+export function cellOf(raw) {
+  if (!Array.isArray(raw) || raw.length !== 2) return null;
+  const [col, row] = raw;
+  return isInt(col) && isInt(row) && col >= 0 && row >= 0 && col < CELLS && row < CELLS ? [col, row] : null;
+}
+
 /**
  * A body's graph, read tolerantly as `Gauntlet.from_dict` reads it: stages by
  * int id in list order (a duplicate dropped), no `lanes` the list-order chain,
@@ -36,10 +46,12 @@ const pairKey = (a, b) => `${a},${b}`;
 export function graphOf(body) {
   const ids = [];
   const bonus = new Map();
+  const at = new Map();
   for (const stage of Array.isArray(body?.stages) ? body.stages : []) {
     if (isObject(stage) && isInt(stage.id) && !ids.includes(stage.id)) {
       ids.push(stage.id);
       if (typeof stage.bonus_life === "boolean") bonus.set(stage.id, stage.bonus_life);
+      if (cellOf(stage.at)) at.set(stage.id, cellOf(stage.at));
     }
   }
   const have = new Set(ids);
@@ -71,7 +83,7 @@ export function graphOf(body) {
   let start = (Array.isArray(body?.start) ? body.start : []).filter((s) => have.has(s));
   start = [...new Set(start)];
   if (!start.length && ids.length) start = [ids[0]];
-  return { ids, lanes, twoWay, gates, hidden, start, bonus };
+  return { ids, lanes, twoWay, gates, hidden, start, bonus, at };
 }
 
 /** Every way a lane runs, as `{from, to, lane}`; a two-way lane gives two. */
@@ -186,8 +198,15 @@ export function laneLabel(graph, a, b) {
  * walked level by level; an unreached stage takes a last column. Row is list
  * order within the column, then one pass sorting each later column by the mean
  * row of its parents in earlier columns (a stage with none by its own row).
+ *
+ * A graph whose every stage has its own stored `at`, no two alike, is drawn
+ * where its author put it instead (`graph.at`).
  */
 export function layout(graph) {
+  const stored = graph.ids.map((sid) => graph.at?.get(sid));
+  if (stored.every(Boolean) && new Set(stored.map(String)).size === stored.length) {
+    return new Map(graph.ids.map((sid, i) => [sid, stored[i]]));
+  }
   const column = depths(graph);
   const all = ways(graph);
   for (let level = 0; [...column.values()].includes(level); level++) {

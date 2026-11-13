@@ -367,6 +367,23 @@ def test_an_untitled_stage_is_named_for_its_place_on_the_graph():
     assert titles([[0, 1], [0, 2], [1, 3], [2, 3]]) == ["Stage 1", "Stage 2-1", "Stage 2-2", "Named"]
 
 
+def test_a_stage_placed_by_its_author_is_drawn_and_named_where_it_was_put():
+    """Every stage's ``at`` wins over the lanes: here 1 sits after 2 though the
+    lanes run 0 → 1 → 2, and an untitled stage is named for where it sits."""
+    g = gauntlet.Gauntlet.from_dict({
+        "stages": [{"id": i, "settings": _setup(i), "at": at} for i, at in enumerate([[0, 0], [2, 0], [1, 0]])],
+        "lanes": [[0, 1], [1, 2]]})
+    assert g is not None
+    assert gauntlet.layout(g) == {0: (0, 0), 1: (2, 0), 2: (1, 0)}
+    assert [s.title for s in g.stages] == ["Stage 1", "Stage 3", "Stage 2"]
+    data = gauntlet.to_dict(g)
+    assert [row["at"] for row in data["stages"]] == [[0, 0], [2, 0], [1, 0]]
+    assert gauntlet.Gauntlet.from_dict(json.loads(json.dumps(data))) == g
+    bad = gauntlet.Gauntlet.from_dict({"stages": [{"id": 0, "settings": {}, "at": [0, -1]},
+                                                  {"id": 1, "settings": {}, "at": "x"}]})
+    assert bad is not None and [s.at for s in bad.stages] == [None, None]
+
+
 def test_layout_ignores_list_order_for_gated_only_stages():
     """A chain of stages reached only by gated lanes lands in the same columns
     whichever order they are listed in."""

@@ -143,6 +143,9 @@ class Stage:
     # Does winning it within its target in a run grant a life: True or False
     # as the file ticks it, None to follow the graph (`grants_life`).
     bonus_life: bool | None = None
+    # Where the author put it on the graph, (column, row), or None to have
+    # `layout` place it from the lanes. Used only when every stage has one.
+    at: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -262,6 +265,16 @@ def _target(raw) -> Target | None:
                   beat=raw.get("beat") is True)
 
 
+def _cell(raw) -> tuple[int, int] | None:
+    """A stage's stored ``at``: two whole numbers from 0 below MAX_STAGES, or None."""
+    if not isinstance(raw, list | tuple) or len(raw) != 2:
+        return None
+    col, row = _int(raw[0]), _int(raw[1])
+    if col is None or row is None or not (0 <= col < MAX_STAGES and 0 <= row < MAX_STAGES):
+        return None
+    return col, row
+
+
 def _from_dict(data) -> Gauntlet | None:
     if not isinstance(data, dict):
         return None
@@ -286,6 +299,7 @@ def _from_dict(data) -> Gauntlet | None:
             settings=setup,
             target=_target(row.get("target")),
             bonus_life=row["bonus_life"] if isinstance(row.get("bonus_life"), bool) else None,
+            at=_cell(row.get("at")),
         ))
     if not stages:
         return None
@@ -345,6 +359,8 @@ def to_dict(g: Gauntlet) -> dict:
             row["target"] = s.target.to_dict()
         if s.bonus_life is not None and s.bonus_life != dead_end(g, s.id):
             row["bonus_life"] = s.bonus_life
+        if s.at is not None:
+            row["at"] = list(s.at)
         stages.append(row)
     lanes: list[list] = []
     for lane in g.lanes:
@@ -468,7 +484,14 @@ def layout(g: Gauntlet) -> dict[int, tuple[int, int]]:
     earlier columns, ties (and a stage with none, by its own row) keeping list
     order. Hidden stages are laid out like any other, so revealing one moves
     nothing else.
+
+    A gauntlet whose every stage has its own ``at``, no two alike, is drawn
+    where its author put it instead (the board's maker writes them only when
+    they differ from this layout), so lanes never move a stage the author placed.
     """
+    stored = [s.at for s in g.stages]
+    if all(at is not None for at in stored) and len(set(stored)) == len(stored):
+        return {s.id: s.at for s in g.stages if s.at is not None}
     column = dict(g.depths())
     level = 0
     while any(c == level for c in column.values()):

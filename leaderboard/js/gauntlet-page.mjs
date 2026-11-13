@@ -7,11 +7,12 @@
 // `gauntlet.layout`, so it is the picture the game will show. A tap selects a
 // stage, and the one card under the graph is that stage's. Arrows round the
 // selected stage move it a row or a column; a dashed box at the foot of each
-// column adds a stage there; the card's Add link, then a stage or a dashed box,
-// draws a lane from it; a tap on a lane opens its options (two-way, a gate,
-// hidden) in the card. A stage's place is never stored: a move changes its
-// lanes or list order, planned and checked in gauntlet-build.mjs before it is
-// offered (docs/design/gauntlet.md, "Lanes on the board").
+// column adds a stage there, joined to nothing; the card's Add link, then a
+// stage or a dashed box, draws a lane from it; a tap on a lane opens its options
+// (two-way, a gate, hidden) in the card. The author places each stage (its
+// `at`), and no edit moves a stage or draws a lane the author didn't ask for
+// (docs/design/gauntlet.md, "Lanes on the board"). Ctrl+Z and Ctrl+Shift+Z (or
+// the buttons by the graph) undo and redo an edit.
 //
 // The draft lives in localStorage under DRAFT_KEY as the form was typed, so a
 // reload loses nothing; once saved, the stored row is the record and the draft
@@ -30,10 +31,10 @@ import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
-  DIRECTIONS, GAUNTLET_ID, LIMITS, botWins, buildBody, checkBody, draftFromBody, draftNames, draftProblem,
-  dropLane, emptyDraft, fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, parentsOf, planAdd,
-  planMove, readDraft, removeStage, postedBest, setStart, setupProblem, stageName, stageSetup, targetText, textLength,
-  tidy,
+  GAUNTLET_ID, LIMITS, addStageAt, botWins, buildBody, checkBody, draftFromBody, draftNames, draftProblem, dropLane,
+  emptyDraft, fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveOptions, moveStageTo,
+  newStageName, parentsOf, placeStages, readDraft, removeStage, postedBest, setStart, setupProblem, stageName,
+  stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
 import { depths, goals, grantsLife, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
 // The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
@@ -84,18 +85,135 @@ function keep() {
 
 let redraw = 0;
 
-/** After an edit: keep the draft and redraw the graph (after a pause in typing, with `soon`). */
+/** After an edit: remember it for undo, keep the draft and redraw the graph (after a pause in typing, with `soon`). */
 function changed({ soon = false } = {}) {
+  remember(soon);
   keep();
   clearTimeout(redraw);
   if (soon) redraw = setTimeout(drawDiagram, 200);
   else drawDiagram();
-  if (saved) {
-    saved = null;
-    $("result").hidden = true;
-    say("");
-  }
+  unsave();
   showProblem();
+}
+
+/** The draft has changed since it was saved: the saved link no longer shows it. */
+function unsave() {
+  if (!saved) return;
+  saved = null;
+  $("result").hidden = true;
+  say("");
+}
+
+// -- undo and redo -------------------------------------------------------------
+// Every edit is remembered as the draft it left, with the stage then selected,
+// so Ctrl+Z (or Undo) steps back through them and Ctrl+Shift+Z or Ctrl+Y (or
+// Redo) forward again. Typing in one go is one step. In a text field the
+// author has typed in since focusing it, the keys are the field's own.
+
+const UNDO_STEPS = 100;
+const TYPING_MS = 1500;
+let past = [];      // the states before each edit, oldest first
+let future = [];    // the states undone, the latest last
+let shown = null;   // the state as history last saw it: {draft (JSON), picked}
+let typedAt = 0;    // when the last edit happened, if it was typing
+
+function snapshot() {
+  return { draft: JSON.stringify(draft), picked };
+}
+
+/** Start history afresh on the draft as it stands. */
+function forget() {
+  past = [];
+  future = [];
+  shown = snapshot();
+  typedAt = 0;
+  showHistory();
+}
+
+/** Remember an edit just made, folding typing that follows typing into one step. */
+function remember(typing) {
+  const now = snapshot();
+  if (!shown || now.draft === shown.draft) {
+    shown = shown || now;
+    return;
+  }
+  if (!(typing && Date.now() - typedAt < TYPING_MS)) {
+    past.push(shown);
+    if (past.length > UNDO_STEPS) past.shift();
+  }
+  future = [];
+  shown = now;
+  typedAt = typing ? Date.now() : 0;
+  showHistory();
+}
+
+/** Put the draft back as `entry` had it, keeping what each unchanged link was read as. */
+async function restore(entry, word) {
+  const back = readDraft(entry.draft);
+  if (!back) return;
+  const was = new Map(draft.stages.map((stage) => [stage.key, stage]));
+  const unread = [];
+  for (const stage of back.stages) {
+    const old = was.get(stage.key);
+    if (old && old.link === stage.link && readings.has(old)) {
+      readings.set(stage, readings.get(old));
+      if (botBests.has(old)) botBests.set(stage, botBests.get(old));
+    } else if (stage.link.trim()) {
+      unread.push(stage);
+    }
+  }
+  draft = placeStages(back);
+  picked = entry.picked;
+  openLane = null;
+  linking = false;
+  said = word;
+  shown = snapshot();
+  typedAt = 0;
+  keep();
+  unsave();
+  render();
+  showHistory();
+  if (unread.length) {
+    await Promise.all(unread.map(readLink));
+    render();
+  }
+}
+
+function undo() {
+  if (!past.length) return;
+  future.push(snapshot());
+  restore(past.pop(), "Undone.");
+}
+
+function redo() {
+  if (!future.length) return;
+  past.push(snapshot());
+  restore(future.pop(), "Redone.");
+}
+
+function showHistory() {
+  $("undo").disabled = !past.length;
+  $("redo").disabled = !future.length;
+}
+
+// What each text field held when it was focused, so Ctrl+Z there is the
+// field's own only once something has been typed in it.
+const heldOnFocus = new WeakMap();
+const TEXT = "textarea, input:not([type=checkbox]):not([type=radio]):not([type=file])";
+
+function typingIn(target) {
+  return Boolean(target?.matches?.(TEXT)) && target.value !== heldOnFocus.get(target);
+}
+
+function undoKeys(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || $("way-build").hidden) return;
+  const key = event.key.toLowerCase();
+  const back = key === "z" && !event.shiftKey;
+  const ahead = (key === "z" && event.shiftKey) || key === "y";
+  if ((!back && !ahead) || typingIn(event.target)) return;
+  event.preventDefault();
+  if (back) undo();
+  else redo();
 }
 
 function say(message, kind = "") {
@@ -472,6 +590,7 @@ function renderStage(stage, i, dupes) {
     const gone = nameOf(stage);
     const at = draft.stages.indexOf(stage);
     removeStage(draft, stage.key);
+    placeStages(draft);
     if (openLane && !draft.lanes.includes(openLane)) openLane = null;
     picked = (draft.stages[at] || draft.stages[at - 1]).key;
     linking = false;
@@ -624,40 +743,38 @@ function diagramView() {
 
 /**
  * The dashed box at the foot of every column, and one past the last: each adds
- * a stage there (`planAdd`), joined from the selected stage when it can be, and
- * in link mode with a lane from it. Always drawn, so a link starting never
- * resizes the graph; one the link can't reach is greyed.
+ * a stage there (`addStageAt`), joined to nothing, or in link mode with a lane
+ * from the selected stage. Always drawn, so starting a link never resizes the
+ * graph.
  */
 function ghosts(shape) {
+  const from = linking ? nameOf(stageAt(picked)) : "";
   return Array.from({ length: shape.columns + 1 }, (_, col) => {
-    const plan = planAdd(draft, col, { from: picked, link: linking });
-    const name = plan ? stageName(plan.draft, plan.stage) : "";
+    const name = newStageName(draft, col);
     const box = el("button", {
-      type: "button", class: "sg-ghost",
-      title: plan ? `Add ${name}, ${plan.how}` : linking ? "A lane from the selected stage can't reach this column"
-        : "No stage can be added here",
-    }, [el("span", { class: "sg-title", text: plan ? `+ ${name}` : "+ Stage" }),
-        el("span", { class: "sg-status", text: plan ? plan.how : linking ? "out of the link's reach" : "" })]);
-    box.disabled = !plan;
+      type: "button", class: "sg-ghost", title: `Add ${name}${from ? `, with a lane from ${from}` : ""}`,
+    }, [el("span", { class: "sg-title", text: `+ ${name}` }),
+        from ? el("span", { class: "sg-status", text: `with a lane from ${from}` }) : null].filter(Boolean));
+    box.disabled = draft.stages.length >= LIMITS.stages;
     box.addEventListener("click", () => {
-      const fresh = planAdd(draft, col, { from: picked, link: linking });
-      if (!fresh) return;
-      draft = fresh.draft;
-      picked = fresh.stage.key;
+      const stage = addStageAt(draft, col, { from: linking ? picked : null });
+      if (!stage) return;
+      said = `Added ${nameOf(stage)}${from ? `, with a lane from ${from}` : ""}.`;
+      picked = stage.key;
       linking = false;
       openLane = null;
-      said = `Added ${stageName(draft, fresh.stage)}, ${fresh.how}.`;
       changed();
       render(`s${picked}-link`);
+      diagram?.show(nodeKey(picked));
     });
     return { col, row: shape.rows(col), el: box };
   });
 }
 
-/** The move arrows round the selected stage, where a move lands (`planMove`), set once the boxes are placed. */
+/** The move arrows round the selected stage, where it can go (`moveOptions`), set once the boxes are placed. */
 function arrows() {
   if (view !== "author" || linking || picked === null) return () => {};
-  const moves = DIRECTIONS.map((dir) => [dir, planMove(draft, picked, dir)]).filter(([, plan]) => plan);
+  const moves = moveOptions(draft, picked);
   return (rect, grid) => {
     for (const old of grid.querySelectorAll(".sg-move")) old.remove();
     const r = rect(nodeKey(picked));
@@ -668,15 +785,15 @@ function arrows() {
       up: [r.x + (r.w - ARROW_PX) / 2, r.y - ARROW_PX - ARROW_GAP],
       down: [r.x + (r.w - ARROW_PX) / 2, r.y + r.h + ARROW_GAP],
     };
-    for (const [dir, plan] of moves) {
+    for (const dir of moves) {
+      const words = `Move ${dir === "up" || dir === "down" ? `${dir} a row` : `${dir} a column`}`;
       const button = el("button", { id: `move-${dir}`, type: "button", class: "sg-move", text: ARROWS[dir],
-                                    title: plan.note, "aria-label": plan.note });
+                                    title: words, "aria-label": words });
       button.style.left = `${spot[dir][0]}px`;
       button.style.top = `${spot[dir][1]}px`;
       button.addEventListener("click", () => {
-        draft = plan.draft;
+        said = moveStageTo(draft, picked, dir) || "";
         openLane = null;
-        said = plan.note;
         changed();
         render();
         (document.getElementById(`move-${dir}`) || diagram?.node(nodeKey(picked)))?.focus({ preventScroll: true });
@@ -778,6 +895,7 @@ function showView(which) {
 /** Redraw the form (the selected stage's card and the graph), then put the focus back on `focusId`. */
 function render(focusId = null) {
   if (picked === null || !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
+  if (shown) shown.picked = picked;   // a selection is no edit, but an undo comes back to it
   if (openLane && !draft.lanes.includes(openLane)) openLane = null;
   const dupes = duplicates();
   const i = draft.stages.findIndex((s) => s.key === picked);
@@ -900,8 +1018,10 @@ async function load() {
     }
     draft = stored || freshDraft();
   }
+  placeStages(draft);
   await Promise.all(draft.stages.map(readLink));
   render();
+  forget();
 }
 
 /**
@@ -926,7 +1046,7 @@ async function openFile() {
     return;
   }
   if (!confirm("Replace this draft with the file?")) return;
-  draft = { ...opened, by_name: draft.by_name, wants_listing: draft.wants_listing };
+  draft = placeStages({ ...opened, by_name: draft.by_name, wants_listing: draft.wants_listing });
   openLane = null;
   picked = null;
   changed();
@@ -952,6 +1072,12 @@ function main() {
     changed();
     drawDiagram();
   });
+  $("undo").addEventListener("click", undo);
+  $("redo").addEventListener("click", redo);
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches?.(TEXT)) heldOnFocus.set(event.target, event.target.value);
+  });
+  document.addEventListener("keydown", undoKeys);
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !linking) return;
     linking = false;
@@ -964,7 +1090,7 @@ function main() {
   $("download").addEventListener("click", download);
   $("reset").addEventListener("click", () => {
     if (!confirm("Clear this draft and start over?")) return;
-    draft = freshDraft();
+    draft = placeStages(freshDraft());
     openLane = null;
     picked = null;
     linking = false;

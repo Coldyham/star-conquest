@@ -202,6 +202,10 @@ For authors. A gauntlet is one JSON file:
   out of a dead end turns its bonus off unless the author ticked it.
 - `briefing` is a list of paragraphs, at most six of 240 characters each.
   `hint` is one line of at most 90. `title` is at most 32 characters; left blank, the stage is named for its place on the graph ("Stage 3-2", `gauntlet.cell_names`).
+- A stage's optional `at` is where its author put it on the graph,
+  `[column, row]` from 0. It counts only when every stage has one, no two
+  alike; otherwise the graph is laid out from the lanes (`gauntlet.layout`).
+  The board writes it only when the author's places differ from that layout.
 - `lanes` joins stages by `id`, as the weekly campaign's graph does. If `lanes`
   is missing, the stages are joined in list order, so a linear gauntlet can
   leave it out. `start` lists the stages open from the beginning (default: the
@@ -763,33 +767,40 @@ The board's gauntlet page edits the graph: Phase 3 of
   before lanes reads back as that chain (`readDraft`).
 - **The graph is the editor (built 2026-11-13).** A tap selects a stage and the
   one card under the graph is that stage's, so a 30-stage gauntlet is not 30
-  cards to scroll. The edits are made where the shape shows:
+  cards to scroll. The edits are made where the shape shows, and **the author
+  places every stage**: no edit moves a stage or draws a lane the author
+  didn't ask for.
   - **A dashed box at the foot of every column**, and one past the last, adds a
-    stage there (`planAdd`). A column is computed from lanes, so the new stage
-    is joined to land in it: open from the start in the first column; from the
-    selected stage when that is in the column before; beside it, from the
-    stages it comes from, when it is in this column (a fork); else from the
-    lowest stage a start reaches in the column before. Each box says which.
-    They are always drawn, so starting a link never resizes the graph.
+    stage there with no lanes and no start mark (`addStageAt`); it shows as
+    unreachable until linked. They are always drawn, so starting a link never
+    resizes the graph.
   - **+ Add link** on the card, then a stage, joins the selected stage to it
     (or makes a lane back two-way, since the format keeps a pair's first lane;
     a pair already joined opens its options). Then a dashed box adds a stage
-    with a lane from the selected one: only as far as the column after it,
-    since a plain lane can carry it no further, so the boxes beyond are greyed.
+    with that one lane from the selected stage, in whatever column was tapped.
     Esc or Cancel link stops.
-  - **Arrows round the selected stage** move it, shown only where a move lands
-    (`planMove`, each planned on a copy and checked against `layout`). Up and
-    down swap it in list order with the stage in the next row of its column,
-    which moves it only among stages that come from the same place, since
-    each later column is ordered by its parents. Right hangs it off the nearest
-    other stage in its column in place of its lanes from the column before (so
-    a stage alone in its column can't go right); left gives it the lanes in of
-    the stages that held it (in the second column, a start mark) in place of
-    their lanes to it. What changed is said under the graph.
+  - **Arrows round the selected stage** move it a cell (`moveOptions`,
+    `moveStageTo`): up and down swap it with its neighbour in the column; left
+    and right take it into the next column at the same row, or into a new
+    column at either end unless it is alone in its own. Lanes stay as they
+    are.
   - **A tap on a lane** (a wide invisible stroke over it, or its target) opens
     its options in its near stage's card. **Delete stage** is on the card.
+  - **Undo and redo**: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, and buttons by the
+    graph, over up to 100 edits; typing in one go is one step. In a text field
+    already typed in, the keys are the field's own. An undo restores the
+    selection too, and keeps each unchanged link's reading.
   The drawer takes these as `extras` (the dashed boxes), `onLane` and
   `after(rect, grid)` (the arrows); the game passes none of them.
+- **Places are stored (`at`), reversing an earlier decision.** The layout was
+  first computed from lanes alone, so the editor had to draw lanes to put a
+  stage in a column and rewire them to move one; in use that read as the page
+  linking stages behind the author's back. A draft stage keeps its `[column,
+  row]`, closed up after each edit (`placeStages`); a draft opened from a body
+  without places is placed as `layout` computes it. `buildBody` writes `at` on
+  every stage only when the places differ from the computed layout, so a
+  gauntlet laid out as its lanes would lay it out keeps its body and id, and
+  `checkBody` refuses places on only some stages or two in one cell.
 - **A stage's default name is its place** ("Stage 2-1", `draftNames`, the
   game's `cell_names`), so the card, the graph and Save's problems name a stage
   as the author sees it. The body stores a blank title as blank, and the game
@@ -802,17 +813,16 @@ The board's gauntlet page edits the graph: Phase 3 of
   choices plus one, through the same `applyAim`); hidden, only when gated; the
   derived label (`laneLabel`) as it is set; remove. A bot gate is read again on
   Save, as a stage's is.
-- **A stage's place is computed, never stored** (`gauntlet.layout`, mirrored by
-  `gauntlet-graph.mjs`): the column is ungated depth, so the main path reads
+- **Without stored places, a stage's place is computed** (`gauntlet.layout`,
+  mirrored by `gauntlet-graph.mjs`): the column is ungated depth, so the main path reads
   left to right and a shortcut is a long arrow; a stage reached only through
   gated lanes is one column past its shallowest source, walked level by level
   so list order never moves it; an unreached stage takes a last column. The
   row is list order, then one pass sorting each column by its parents' mean
-  row, not iterated, so the author's order (the up and down arrows) decides
-  most of the picture and a small edit never reshuffles it. Hidden stages are laid out too, so
-  revealing one moves nothing. `leaderboard/tests/fixtures/gauntlet-layout.json`
-  is read by both suites. A stored position (an `at` per stage) was decided
-  against: the author would be placing what `layout` already places.
+  row, not iterated, so a small edit never reshuffles it. Hidden stages are
+  laid out too, so revealing one moves nothing.
+  `leaderboard/tests/fixtures/gauntlet-layout.json` is read by both suites,
+  stored places included.
 - **The graph** is drawn by the game's own drawer (*The graph view*, below), so
   it is the picture the gauntlet list will show: a bar on starts and ★ on
   goals, dashed gated lanes with their short target, dotted hidden ones; a stage
