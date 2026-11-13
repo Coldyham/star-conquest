@@ -754,23 +754,50 @@ The board's gauntlet page edits the graph: Phase 3 of
   the board reads `bot_scores`), `checkBody`, Save and listing. HTML forms also
   edit text better on a phone.
 - **Lanes join stages by a draft key, never by place.** Each draft stage gets a
-  `key` from the draft's `next_key` counter when it is made, so ↑/↓ and Remove
-  never rewire a lane. `draft.lanes` is `{from, to, two_way, aim, target,
+  `key` from the draft's `next_key` counter when it is made, so a move and a
+  delete never rewire a lane. `draft.lanes` is `{from, to, two_way, aim, target,
   hidden}` by key, `draft.start` a list of keys (`gauntlet-build.mjs`).
 - **A linear gauntlet saves exactly the body it saved before**, so its id holds:
   `buildBody` numbers stages in list order and writes `lanes` and `start` only
-  when they differ from what `from_dict` assumes without them. A new draft and
-  **+ Add a stage** join the new stage from the last one, so an author who never
-  touches a lane gets today's gauntlet. A draft kept before lanes reads back as
-  that chain (`readDraft`).
-- **Each card**: *Open from the start*; a row of **Leads to** chips, one per
-  other stage, lit where a lane runs (past 16 stages only the lit ones show,
-  the rest behind "+ Lane to…"); a "Reached from" note, so either end explains
-  a lane; **+ After** (a stage below, with a lane from this one) and **+
-  Branch** (a stage beside it, with this one's lanes in, so a fork). Where the
-  other end already has a one-way lane back, the chip offers "↔ make two-way":
-  the format keeps a pair's first lane and drops the second.
-- **A lit chip opens the lane's options**: two-way; a gate (none, turns typed
+  when they differ from what `from_dict` assumes without them. A draft kept
+  before lanes reads back as that chain (`readDraft`).
+- **The graph is the editor (built 2026-11-13).** A tap selects a stage and the
+  one card under the graph is that stage's, so a 30-stage gauntlet is not 30
+  cards to scroll. The edits are made where the shape shows:
+  - **A dashed box at the foot of every column**, and one past the last, adds a
+    stage there (`planAdd`). A column is computed from lanes, so the new stage
+    is joined to land in it: open from the start in the first column; from the
+    selected stage when that is in the column before; beside it, from the
+    stages it comes from, when it is in this column (a fork); else from the
+    lowest stage a start reaches in the column before. Each box says which.
+    They are always drawn, so starting a link never resizes the graph.
+  - **+ Add link** on the card, then a stage, joins the selected stage to it
+    (or makes a lane back two-way, since the format keeps a pair's first lane;
+    a pair already joined opens its options). Then a dashed box adds a stage
+    with a lane from the selected one: only as far as the column after it,
+    since a plain lane can carry it no further, so the boxes beyond are greyed.
+    Esc or Cancel link stops.
+  - **Arrows round the selected stage** move it, shown only where a move lands
+    (`planMove`, each planned on a copy and checked against `layout`). Up and
+    down swap it in list order with the stage in the next row of its column,
+    which moves it only among stages that come from the same place, since
+    each later column is ordered by its parents. Right hangs it off the nearest
+    other stage in its column in place of its lanes from the column before (so
+    a stage alone in its column can't go right); left gives it the lanes in of
+    the stages that held it (in the second column, a start mark) in place of
+    their lanes to it. What changed is said under the graph.
+  - **A tap on a lane** (a wide invisible stroke over it, or its target) opens
+    its options in its near stage's card. **Delete stage** is on the card.
+  The drawer takes these as `extras` (the dashed boxes), `onLane` and
+  `after(rect, grid)` (the arrows); the game passes none of them.
+- **A stage's default name is its place** ("Stage 2-1", `draftNames`, the
+  game's `cell_names`), so the card, the graph and Save's problems name a stage
+  as the author sees it. The body stores a blank title as blank, and the game
+  names it the same way.
+- **Each card**: the stage's link, title, briefing, hint and target; *Open from
+  the start*; **Leads to**, one chip per lane out, each opening its options; a
+  "Reached from" note, so either end explains a lane.
+- **A lane's options**: two-way; a gate (none, turns typed
   in, the near stage's link score, or the best bot on it: the stage target's
   choices plus one, through the same `applyAim`); hidden, only when gated; the
   derived label (`laneLabel`) as it is set; remove. A bot gate is read again on
@@ -781,19 +808,19 @@ The board's gauntlet page edits the graph: Phase 3 of
   gated lanes is one column past its shallowest source, walked level by level
   so list order never moves it; an unreached stage takes a last column. The
   row is list order, then one pass sorting each column by its parents' mean
-  row, not iterated, so the author's order (↑/↓) decides most of the picture
-  and a small edit never reshuffles it. Hidden stages are laid out too, so
+  row, not iterated, so the author's order (the up and down arrows) decides
+  most of the picture and a small edit never reshuffles it. Hidden stages are laid out too, so
   revealing one moves nothing. `leaderboard/tests/fixtures/gauntlet-layout.json`
   is read by both suites. A stored position (an `at` per stage) was decided
   against: the author would be placing what `layout` already places.
-- **The diagram above the cards is read-only**, drawn by the game's own drawer
-  (*The graph view*, below), so it is the picture the gauntlet list will show:
-  a bar on starts and ★ on goals, dashed gated lanes with their short target,
-  dotted hidden ones; a stage no start reaches is red with a note, and a gated
-  lane that is a stage's only way in is amber (a warning: that is what a bonus
-  stage is). *As a new player sees it* drops hidden lanes and the stages only
-  they reach, leaving the gap the game will leave. Clicking a stage scrolls to
-  its card; hovering a chip lights its lane. It scrolls sideways in its own box.
+- **The graph** is drawn by the game's own drawer (*The graph view*, below), so
+  it is the picture the gauntlet list will show: a bar on starts and ★ on
+  goals, dashed gated lanes with their short target, dotted hidden ones; a stage
+  no start reaches is red with a note, and a gated lane that is a stage's only
+  way in is amber (a warning: that is what a bonus stage is). *As a new player
+  sees it* drops hidden lanes and the stages only they reach, leaving the gap
+  the game will leave, and edits nothing. Hovering a chip lights its lane. It
+  scrolls sideways in its own box.
 
 ### The graph view (built 2026-11-11)
 

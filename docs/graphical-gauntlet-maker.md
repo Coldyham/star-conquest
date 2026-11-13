@@ -398,8 +398,13 @@ by hand.
   dotted border. A lane that skips columns arcs over the stages it skips; a
   lane back or within a column dips below.
 - **`branches()` is gone** with its warning.
-- Not done: a click on stage A then B in the diagram to toggle a lane (the
-  plan's "later step"), and the end-to-end check on a deploy preview.
+- Not done: the end-to-end check on a deploy preview.
+- **Superseded 2026-11-13: the graph is the editor.** The cards below gave way
+  to one card for the stage selected on the graph, with a dashed box per column
+  to add a stage, + Add link then a stage (the "later step" above), move arrows
+  round the selected stage, and a tap on a lane for its options; chips, + After,
+  + Branch and ↑/↓ went. As built: `docs/design/gauntlet.md`, *Lanes on the
+  board*.
 
 The page keeps its stage cards: one pasted link per stage, title, briefing,
 hint, target, ↑/↓, Remove. Phase 3 adds the graph to them. Nothing in the game

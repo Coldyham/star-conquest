@@ -15,6 +15,8 @@
 // which each page styles in its own theme.
 
 const SVG = "http://www.w3.org/2000/svg";
+// What watches each box's grid for a resize, so a redraw stops watching the grid it replaces.
+const watching = new WeakMap();
 const LOOP = 22;   // how far a lane bends past the nodes: over a skip, under a lane back
 const HEAD = 8;    // an arrowhead's length
 
@@ -91,10 +93,17 @@ function span(cls, text, style = "") {
  * a stage calls `onPress(key)`; `onHover(key | null)` follows the pointer and
  * focus. Answers `{light(from, to), show(key), node(key)}`: light a lane (either
  * way; `light(null)` for none), scroll a stage into view, find its button.
+ *
+ * For an editor (the board's gauntlet maker): `extras` are more elements to
+ * set in the grid, as `{col, row, el}`; with `onLane(from, to)` a lane (and its
+ * target) can be pressed, through a wide invisible stroke over it; `after(rect,
+ * grid)` runs each time the lanes are drawn, with `rect(key)` giving a stage's
+ * box in `grid`, for whatever the editor sets beside a stage.
  */
-export function drawGraph(box, view, { onPress = null, onHover = null, label = "" } = {}) {
+export function drawGraph(box, view, { onPress = null, onHover = null, label = "", extras = [], onLane = null,
+                                      after = null } = {}) {
   const nodes = view?.nodes || [];
-  const cols = Math.max(1, ...nodes.map((n) => n.col + 1));
+  const cols = Math.max(1, ...nodes.map((n) => n.col + 1), ...extras.map((x) => x.col + 1));
   const grid = document.createElement("div");
   grid.className = "sg";
   grid.style.gridTemplateColumns = `repeat(${cols}, minmax(6rem, max-content))`;
@@ -123,6 +132,11 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
     buttons.set(n.key, button);
     grid.append(button);
   }
+  for (const x of extras) {
+    x.el.style.gridColumn = String(x.col + 1);
+    x.el.style.gridRow = String(x.row + 1);
+    grid.append(x.el);
+  }
   box.replaceChildren(grid);
 
   const cellOf = new Map(nodes.map((n) => [n.key, n]));
@@ -143,14 +157,28 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
       svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}` }, g);
       svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
       if (lane.two_way) svg("polygon", { points: arrowPoints(curve.start, curve.c1).join(" "), class: "sg-head" }, g);
-      if (lane.short) {
-        const [x, y] = curveMid(curve);
-        svg("text", { x, y: y - 5, "text-anchor": "middle", class: "sg-short" }, g).textContent = lane.short;
+      const short = lane.short ? svg("text", { x: curveMid(curve)[0], y: curveMid(curve)[1] - 5, "text-anchor": "middle",
+                                                class: "sg-short" }, g) : null;
+      if (short) short.textContent = lane.short;
+      if (onLane) {
+        const hit = svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}`, class: "sg-hit" }, g);
+        for (const target of [hit, short].filter(Boolean)) {
+          target.addEventListener("click", () => onLane(lane.from, lane.to));
+          target.addEventListener("mouseenter", () => g.classList.add("sg-hot"));
+          target.addEventListener("mouseleave", () => g.classList.remove("sg-hot"));
+        }
       }
     }
+    if (after) after(rect, grid);
   };
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(drawLanes).observe(grid);
-  else requestAnimationFrame(drawLanes);
+  watching.get(box)?.disconnect();
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(drawLanes);
+    observer.observe(grid);
+    watching.set(box, observer);
+  } else {
+    requestAnimationFrame(drawLanes);
+  }
 
   return {
     node: (key) => buttons.get(key) || null,

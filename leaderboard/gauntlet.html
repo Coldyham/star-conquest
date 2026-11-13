@@ -169,16 +169,19 @@
       <strong>Challenge a friend</strong> link's score or a bot's.
     </p>
     <p class="lede">
-      Each stage leads to the next unless you say otherwise: a stage's
-      <strong>Leads to</strong> chips join it to any other, and a lane can ask
-      for a target, run both ways, or stay hidden until met, for shortcuts and
-      bonus stages. Saving gives you a link that opens the gauntlet in the
-      game's <strong>Gauntlets</strong> list.
+      Build it on the graph. Tap a stage to edit it in the card below; the
+      arrows round it move it a row or a column. A dashed box adds a stage to
+      its column. <strong>+ Add link</strong> on the card, then a stage or a
+      dashed box, draws a lane; tap a lane to have it ask for a target, run
+      both ways, or stay hidden until met, for shortcuts and bonus stages.
+      Saving gives you a link that opens the gauntlet in the game's
+      <strong>Gauntlets</strong> list.
     </p>
 
     <form id="form" class="form gauntlet-form" autocomplete="off">
-      <!-- The diagram is drawn by the same layout as the game's graph
-           (gauntlet-graph.mjs, the game's gauntlet.layout). It never edits. -->
+      <!-- The graph is drawn by the same layout as the game's graph
+           (gauntlet-graph.mjs, the game's gauntlet.layout), and is where the
+           gauntlet is edited; the card under it is the selected stage's. -->
       <section class="diagram-box" aria-label="The gauntlet's shape">
         <div class="row">
           <span class="label">Shape</span>
@@ -186,17 +189,18 @@
           <button id="view-player" class="chip" type="button" aria-pressed="false">As a new player sees it</button>
         </div>
         <div id="diagram" class="diagram"></div>
+        <p class="graph-hint" id="graph-hint" role="status" aria-live="polite"></p>
         <p class="diagram-key">
-          Starts have a bar on the left; ★ ends the gauntlet. Dashed lanes need
-          a target, dotted ones are hidden until met, and amber is a stage's only
-          way in. Tap a stage to go to its card.
+          A stage's number is its column, then its row where the column holds
+          more than one. Starts have a bar on the left; ★ ends the gauntlet; ♥
+          grants a life. Dashed lanes need a target, dotted ones are hidden until
+          met, and amber is a stage's only way in.
         </p>
         <p class="status error" id="diagram-note" role="status" aria-live="polite"></p>
       </section>
 
       <div id="stages" class="stages"></div>
       <div class="row">
-        <button id="add-stage" class="mini" type="button">+ Add a stage</button>
         <label class="file-open mini" for="open-file">Open a .json file</label>
         <input id="open-file" type="file" accept=".json,application/json" hidden>
       </div>

@@ -1515,34 +1515,44 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 .stage.flash { animation: card-flash 1.2s ease-out; }
 @keyframes card-flash { from { border-color: var(--gold); box-shadow: 0 0 18px rgba(255, 210, 63, 0.5); } }
 
-/* The diagram: scrolls sideways in its own box, so 64 stages never widen the page. */
+/* The graph: the gauntlet is edited on it, and it scrolls sideways in its own
+ * box, so 64 stages never widen the page. Gaps leave room for the move arrows
+ * round the selected stage. */
 .diagram-box { margin-top: 1rem; }
 .diagram { overflow-x: auto; border: 1px solid var(--line); background: #070a18; }
+.diagram.linking { border-color: var(--magenta); box-shadow: inset 0 0 0 1px var(--magenta); }
 /* The stages and lanes are drawn by the game's own drawer (/play/js/stagegraph.mjs):
  * buttons in a grid at their cells, the lanes an SVG layer over them. */
-.diagram .sg { position: relative; display: grid; column-gap: 2.5rem; row-gap: 1.1rem; width: max-content;
-  padding: 2.2rem 1rem 1.8rem; }
+.diagram .sg { position: relative; display: grid; column-gap: 4rem; row-gap: 2.6rem; width: max-content;
+  align-items: center; padding: 3rem 2rem 2.6rem 2.6rem; }
 .diagram .sg-lanes { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible;
-  font-family: var(--mono); font-size: 10px; }
-.diagram .sg-lane path { fill: none; stroke: var(--dim); stroke-width: 1.5; }
+  font-family: var(--mono); font-size: 11px; }
+.diagram .sg-lane path:not(.sg-hit) { fill: none; stroke: var(--dim); stroke-width: 1.5; }
 .diagram .sg-lane .sg-head { fill: var(--dim); }
-.diagram .sg-lane.sg-gated path { stroke-dasharray: 6 4; }
-.diagram .sg-lane.sg-hidden path { stroke-dasharray: 2 4; }
-.diagram .sg-lane.sg-warn path { stroke: var(--gold); }
+.diagram .sg-lane.sg-gated path:not(.sg-hit) { stroke-dasharray: 6 4; }
+.diagram .sg-lane.sg-hidden path:not(.sg-hit) { stroke-dasharray: 2 4; }
+.diagram .sg-lane.sg-warn path:not(.sg-hit) { stroke: var(--gold); }
 .diagram .sg-lane.sg-warn .sg-head { fill: var(--gold); }
-.diagram .sg-lane.sg-lit path { stroke: var(--magenta); stroke-width: 3; }
+.diagram .sg-lane.sg-hot path:not(.sg-hit) { stroke: var(--cyan); stroke-width: 2.5; }
+.diagram .sg-lane.sg-hot .sg-head { fill: var(--cyan); }
+.diagram .sg-lane.sg-lit path:not(.sg-hit) { stroke: var(--magenta); stroke-width: 3; }
 .diagram .sg-lane.sg-lit .sg-head { fill: var(--magenta); }
 .diagram .sg-lane .sg-short { fill: var(--gold); paint-order: stroke; stroke: #070a18; stroke-width: 4px; }
-.diagram button.sg-node {
+/* A lane is pressed through a wide invisible stroke over it, and its target. */
+.diagram .sg-lane path.sg-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
+.diagram .sg-lane .sg-short { pointer-events: all; cursor: pointer; }
+.diagram button.sg-node, .diagram button.sg-ghost {
   position: relative;
+  min-width: 8.5rem;
   margin: 0;
-  padding: 0.45rem 0.7rem 0.45rem 0.9rem;
+  padding: 0.7rem 0.9rem 0.7rem 1.1rem;
   border: 1.5px solid var(--cyan);
   border-radius: 3px;
   background: var(--panel);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
   text-transform: none;
   letter-spacing: 0;
   text-align: left;
@@ -1550,8 +1560,9 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
   animation: none;
 }
 .diagram button.sg-node:hover { background: #10283f; }
-.diagram .sg-node .sg-place { position: absolute; top: -0.6rem; left: 0.4rem; padding: 0 0.25rem;
-  background: #070a18; color: var(--dim); font-size: 0.65rem; }
+.diagram .sg-node .sg-title, .diagram .sg-ghost .sg-title, .diagram .sg-ghost .sg-status { display: block; }
+.diagram .sg-node .sg-place { position: absolute; top: -0.65rem; left: 0.45rem; padding: 0 0.3rem;
+  background: #070a18; color: var(--dim); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .diagram .sg-node.sg-start { box-shadow: inset 5px 0 0 var(--cyan); }
 .diagram .sg-node.sg-goal { border-color: var(--gold); }
 .diagram .sg-node.sg-goal .sg-title::before { content: "★ "; color: var(--gold); }
@@ -1559,7 +1570,42 @@ button.chip.open { border-color: var(--gold); color: var(--gold); }
 .diagram .sg-node.sg-off-path { border-style: dashed; }
 .diagram .sg-node.sg-hidden { border-style: dotted; }
 .diagram .sg-node.sg-stranded { border-color: var(--bad); color: var(--bad); }
+.diagram .sg-node.sg-picked { outline: 2px solid var(--gold); outline-offset: 4px; background: #1a1a0a; }
+.diagram .sg-node.sg-source { outline: 2px solid var(--magenta); outline-offset: 4px; }
+.diagram.linking .sg-node:not(.sg-source) { cursor: crosshair; }
+.diagram.linking .sg-node:not(.sg-source):hover { border-color: var(--magenta); background: #2a0f22; }
+/* The dashed box at the foot of every column: adds a stage there. */
+.diagram button.sg-ghost { align-self: start; justify-self: start; max-width: 11rem; border: 1.5px dashed var(--line);
+  background: transparent; color: var(--dim); }
+.diagram .sg-ghost .sg-status { color: var(--dim); font-size: 0.7rem; opacity: 0.8; }
+.diagram button.sg-ghost:hover { border-color: var(--cyan); color: var(--cyan); background: #10283f; }
+.diagram.linking button.sg-ghost { border-color: var(--magenta); color: var(--magenta); }
+.diagram.linking button.sg-ghost:hover { background: #2a0f22; }
+.diagram button.sg-ghost:disabled { opacity: 0.35; border-color: var(--line); color: var(--dim); cursor: default; }
+.diagram button.sg-ghost:disabled:hover { background: transparent; }
+/* The arrows round the selected stage, where it can move. */
+.diagram button.sg-move {
+  position: absolute;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid var(--gold);
+  border-radius: 50%;
+  background: #070a18;
+  color: var(--gold);
+  font: 0.95rem/1 var(--mono);
+  text-transform: none;
+  box-shadow: none;
+  animation: none;
+}
+.diagram button.sg-move:hover, .diagram button.sg-move:focus-visible { background: var(--gold); color: #070a18; }
 .diagram-box #diagram-note:empty { display: none; }
+.graph-hint { margin: 0.4rem 0 0; min-height: 3em; color: var(--dim); font-size: 0.85rem; }
+.graph-hint.linking { color: var(--magenta); }
+.stage-tools .drop.link { border-color: var(--magenta); color: var(--magenta); }
+.stage-tools .drop.link.on { background: var(--magenta); color: #070a18; }
 .diagram-key { margin: 0.4rem 0 0; color: var(--dim); font-size: 0.8rem; }
 .gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
 

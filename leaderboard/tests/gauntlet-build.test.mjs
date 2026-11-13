@@ -16,9 +16,9 @@ import { deflateSync, inflateSync } from "node:zlib";
 
 import {
   GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
-  draftFromBody, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName, gameLink, joinLane, laneBack,
-  laneFrom, linkTarget, listingOf, meetsTarget, moveStage, postedBest, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem,
-  slugOf, stageSetup, targetText, textLength, tidy,
+  draftCells, draftFromBody, draftNames, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName, gameLink,
+  joinLane, laneBack, laneFrom, linkTarget, listingOf, meetsTarget, planAdd, planMove, postedBest, parentsOf, readDraft,
+  removeStage, setStart, mintId, setupProblem, slugOf, stageName, stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
 
@@ -238,22 +238,17 @@ test("a draft read back from storage is tolerant of anything", () => {
 
 test("a draft names its first problem, link problems first", () => {
   const draft = emptyDraft();
-  assert.match(draftProblem(draft), /stage 1 needs a game link/);
+  assert.match(draftProblem(draft), /Stage 1 needs a game link/);
   draft.stages[0].link = "garbage";
-  assert.match(draftProblem(draft), /stage 1's link can't be used/);
+  assert.match(draftProblem(draft), /Stage 1's link can't be used/);
+  draft.stages[0].title = "Opening";
+  assert.match(draftProblem(draft), /Opening's link can't be used/, "a titled stage goes by its title");
   draft.stages[0].settings = { ...SETUP };
   assert.match(draftProblem(draft), /needs a name/);
   draft.name = "Fine";
   assert.equal(draftProblem(draft), "");
   draft.by_name = "x".repeat(33);
   assert.match(draftProblem(draft), /your name is over 32/);
-});
-
-test("moving a stage swaps it with its neighbour, and not past either end", () => {
-  assert.deepEqual(moveStage(["a", "b", "c"], 0, 1), ["b", "a", "c"]);
-  assert.deepEqual(moveStage(["a", "b", "c"], 2, -1), ["a", "c", "b"]);
-  assert.deepEqual(moveStage(["a", "b", "c"], 0, -1), ["a", "b", "c"]);
-  assert.deepEqual(moveStage(["a", "b", "c"], 2, 1), ["a", "b", "c"]);
 });
 
 // -- stage targets ------------------------------------------------------------
@@ -407,11 +402,11 @@ test("a draft whose lanes were never touched builds today's linear body, so its 
 test("lanes join stages by key, so reordering and removing never rewire one", () => {
   const draft = linear(3);
   const [a, b, c] = draft.stages.map((s) => s.key);
-  draft.stages = moveStage(draft.stages, 2, -1);   // A, C, B: the lanes still run A→B→C
+  draft.stages = [draft.stages[0], draft.stages[2], draft.stages[1]];   // A, C, B: the lanes still run A→B→C
   assert.deepEqual(checkBody(buildBody(draft)).lanes, [[0, 2], [2, 1]]);
   removeStage(draft, b);
   assert.deepEqual(draft.lanes, [], "B's lanes go with it");
-  assert.match(draftProblem(draft), /stage 2 can't be reached/);
+  assert.match(draftProblem(draft), /Stage 2 can't be reached/);
   joinLane(draft, a, c);
   assert.equal(draftProblem(draft), "");
   removeStage(draft, a);
@@ -421,19 +416,97 @@ test("lanes join stages by key, so reordering and removing never rewire one", ()
   assert.equal(draftProblem(draft), "");
 });
 
-test("+ After and + Branch place a stage and join it", () => {
-  const draft = linear(2);
-  const [a, b] = draft.stages.map((s) => s.key);
-  const fork = addStage(draft, { beside: b });
-  assert.deepEqual(draft.stages.map((s) => s.key), [a, b, fork.key]);
-  assert.deepEqual(parentsOf(draft, fork.key), [a]);
-  const next = addStage(draft, { after: b });
-  assert.deepEqual(draft.stages.map((s) => s.key), [a, b, next.key, fork.key]);
-  assert.deepEqual(parentsOf(draft, next.key), [b]);
-  const twin = addStage(draft, { beside: a });
-  assert.deepEqual(parentsOf(draft, twin.key), []);
-  assert.deepEqual(draft.start, [a, twin.key], "a branch beside a start is a start");
-  assert.equal(new Set(draft.stages.map((s) => s.key)).size, 5, "keys are never reused");
+/** A, then B and C forking from it, rejoining at D: "1", "2-1", "2-2", "3". */
+function fork() {
+  const draft = linear(4);
+  const [a, b, c, d] = draft.stages.map((s) => s.key);
+  draft.lanes = [emptyLane(a, b), emptyLane(a, c), emptyLane(b, d), emptyLane(c, d)];
+  return { draft, a, b, c, d };
+}
+
+const cellsOf = (draft) => Object.fromEntries([...draftCells(draft)].map(([k, cell]) => [k, cell]));
+const namesOf = (draft) => [...draftNames(draft).values()];
+
+test("a stage is named for its place on the graph until it is titled", () => {
+  const { draft, a, b, c, d } = fork();
+  assert.deepEqual(cellsOf(draft), { [a]: [0, 0], [b]: [1, 0], [c]: [1, 1], [d]: [2, 0] });
+  assert.deepEqual(namesOf(draft), ["1", "2-1", "2-2", "3"]);
+  assert.equal(stageName(draft, draft.stages[1]), "Stage 2-1");
+  draft.stages[1].title = "  The fork ";
+  assert.equal(stageName(draft, draft.stages[1]), "The fork");
+  assert.deepEqual([...draftNames(draft, [a, b, d]).values()], ["1", "2", "3"], "counted over the stages shown");
+  assert.deepEqual(namesOf(linear(3)), ["1", "2", "3"]);
+});
+
+test("a dashed box adds a stage at the foot of its column, joined so it lands there", () => {
+  const { draft, a, b, c, d } = fork();
+  const start = planAdd(draft, 0, { from: b });
+  assert.equal(start.how, "open from the start");
+  assert.deepEqual(draftCells(start.draft).get(start.stage.key), [0, 1]);
+  assert.deepEqual(start.draft.start, [a, start.stage.key]);
+  const after = planAdd(draft, 2, { from: b });
+  assert.equal(after.how, "from Stage 2-1");
+  assert.deepEqual(parentsOf(after.draft, after.stage.key), [b]);
+  const beside = planAdd(draft, 1, { from: c });
+  assert.equal(beside.how, "from Stage 1, beside Stage 2-2");
+  assert.deepEqual(parentsOf(beside.draft, beside.stage.key), [a]);
+  assert.deepEqual(draftCells(beside.draft).get(beside.stage.key), [1, 2]);
+  const last = planAdd(draft, 3, { from: a });
+  assert.equal(last.how, "from Stage 3", "from the lowest stage in the column before");
+  assert.deepEqual(parentsOf(last.draft, last.stage.key), [d]);
+  assert.equal(planAdd(draft, 5, { from: a }), null);
+  assert.equal(draft.stages.length, 4, "a plan never touches the draft it was made from");
+  assert.equal(new Set(after.draft.stages.map((s) => s.key)).size, 5);
+});
+
+test("in link mode a dashed box adds a lane from the selected stage, no further than one column on", () => {
+  const { draft, a, b } = fork();
+  const near = planAdd(draft, 1, { from: a, link: true });
+  assert.deepEqual(parentsOf(near.draft, near.stage.key), [a]);
+  const back = planAdd(draft, 1, { from: b, link: true });
+  assert.equal(back.how, "from Stage 1, beside Stage 2-1, with a lane from Stage 2-1");
+  assert.deepEqual(parentsOf(back.draft, back.stage.key).sort(), [a, b].sort());
+  assert.equal(planAdd(draft, 3, { from: a, link: true }), null, "a lane from column 1 lands in column 2");
+});
+
+test("an arrow moves a stage a row by list order, where its column lets it", () => {
+  const { draft, b, c, d } = fork();
+  assert.equal(planMove(draft, b, "up"), null);
+  const down = planMove(draft, b, "down");
+  assert.equal(down.note, "Moved Stage 2-1 down a row, past Stage 2-2.");
+  assert.deepEqual(draftCells(down.draft).get(b), [1, 1]);
+  assert.equal(planMove(draft, d, "down"), null);
+  // Two stages in column 3 from different parents keep their parents' order.
+  const split = fork();
+  split.draft.lanes = split.draft.lanes.filter((l) => l.from !== split.c);
+  const e = addStage(split.draft);
+  split.draft.lanes = split.draft.lanes.filter((l) => l.to !== e.key).concat([emptyLane(split.c, e.key)]);
+  assert.deepEqual(draftCells(split.draft).get(e.key), [2, 1]);
+  assert.equal(planMove(split.draft, e.key, "up"), null, "a row follows where its stage comes from");
+  assert.ok(c);
+});
+
+test("an arrow moves a stage a column by changing the lanes that hold it there", () => {
+  const { draft, a, b, c, d } = fork();
+  assert.equal(planMove(draft, a, "left"), null);
+  assert.equal(planMove(draft, a, "right"), null, "nothing else in its column to hang it from");
+  const right = planMove(draft, c, "right");
+  assert.equal(right.note, "Moved Stage 2-2 to column 3: it is reached from Stage 2-1, and its lane from Stage 1 went.");
+  assert.deepEqual(draftCells(right.draft).get(c), [2, 0]);
+  assert.deepEqual(parentsOf(right.draft, c), [b]);
+  assert.deepEqual(draftCells(right.draft).get(d), [2, 1], "D is still reached from B, so it stays");
+  const left = planMove(draft, b, "left");
+  assert.equal(left.note, "Moved Stage 2-1 to column 1: it is open from the start, and its lane from Stage 1 went.");
+  assert.deepEqual(left.draft.start, [a, b]);
+  assert.deepEqual(draftCells(left.draft).get(b), [0, 1]);
+  const back = planMove(draft, d, "left");
+  assert.equal(back.note, "Moved Stage 3 to column 2: it is reached from Stage 1, and its lane from Stage 2-1 and Stage 2-2 went.");
+  assert.deepEqual(parentsOf(back.draft, d), [a]);
+  // Right out of the first column needs another start there.
+  const two = planMove(left.draft, a, "right");
+  assert.deepEqual(two.draft.start, [b]);
+  assert.match(two.note, /no longer open from the start/);
+  assert.equal(draftProblem({ ...two.draft, name: "Moved" }), "");
 });
 
 test("the reverse pair makes a lane two-way and never adds a second", () => {

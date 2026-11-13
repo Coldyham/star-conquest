@@ -18,7 +18,7 @@
 // one is a new row. 19 + 1 + 12 = 32, gauntlet.py's NAME_MAX, so the id
 // survives the game's own clamp of a gauntlet's `id` intact.
 
-import { deadEnd, graphOf } from "./gauntlet-graph.mjs";
+import { cellNames, deadEnd, graphOf, layout, reachable } from "./gauntlet-graph.mjs";
 import { compareScores } from "./standings.mjs";
 
 export const LIMITS = Object.freeze({
@@ -267,7 +267,7 @@ function laneHow(lane) {
  * Keeps only the keys the game reads, so nothing else rides along into the
  * table; `id` is left out, being the store's to mint (`mintId`).
  */
-export function checkBody(body) {
+export function checkBody(body, nameOf = (i) => `stage ${i + 1}`) {
   if (!isObject(body)) return "not a gauntlet";
   const name = tidy(body.name);
   if (!name) return "the gauntlet needs a name";
@@ -278,7 +278,7 @@ export function checkBody(body) {
   const stages = [];
   const ids = new Set();
   for (const [i, raw] of body.stages.entries()) {
-    const where = `stage ${i + 1}`;
+    const where = nameOf(i);
     if (!isObject(raw)) return `${where} is not a stage`;
     if (!isInt(raw.id) || raw.id < 0 || ids.has(raw.id)) return `${where} has a bad id`;
     ids.add(raw.id);
@@ -333,7 +333,7 @@ export function checkBody(body) {
     if (body.lives !== 1) out.lives = body.lives;
   }
   const stranded = unreachable(out);
-  if (stranded >= 0) return `stage ${stranded + 1} can't be reached from a start`;
+  if (stranded >= 0) return `${nameOf(stranded)} can't be reached from a start`;
   if (new TextEncoder().encode(JSON.stringify(out)).length > LIMITS.bodyBytes) {
     return `the gauntlet is over ${LIMITS.bodyBytes / 1024} KiB`;
   }
@@ -625,19 +625,21 @@ export function readDraft(text) {
 /**
  * The first thing stopping a draft from being saved, or "" when it can be:
  * a stage with no link, or one whose link did not decode, is named before the
- * body's own checks run, then a draft with no stage open from the start.
+ * body's own checks run, then a draft with no stage open from the start. A
+ * stage is named as the graph shows it: its title, else "Stage 2-1".
  */
 export function draftProblem(draft) {
-  for (const [i, stage] of (draft?.stages || []).entries()) {
+  const names = draftNames(draft);
+  const name = (stage) => stageName(draft, stage, names);
+  for (const stage of draft?.stages || []) {
     if (!stage.settings) {
-      return stage.link.trim() ? `stage ${i + 1}'s link can't be used as a stage`
-                               : `stage ${i + 1} needs a game link`;
+      return stage.link.trim() ? `${name(stage)}'s link can't be used as a stage` : `${name(stage)} needs a game link`;
     }
   }
   if (Array.isArray(draft?.start) && !draft.stages.some((s) => draft.start.includes(s.key))) {
     return "tick at least one stage as open from the start";
   }
-  const body = checkBody(buildBody(draft));
+  const body = checkBody(buildBody(draft), (i) => name(draft.stages[i]));
   if (typeof body === "string") return body;
   if (checkByName(draft.by_name) === null) return `your name is over ${LIMITS.byName} characters`;
   return "";
@@ -655,33 +657,18 @@ function takeKey(draft) {
 }
 
 /**
- * Add a stage and return it. With `after` (a key) it goes directly below that
- * stage with a lane from it (+ After); with `beside` it goes below that stage
- * with a lane from each of its parents, and is open from the start if that
- * stage is (+ Branch), so it lands in the same column. With neither it goes at
- * the bottom, joined from the stage that was last (+ Stage): an author who never
- * touches a lane gets a linear gauntlet.
+ * Add a stage at the bottom, joined from the stage that was last, and return
+ * it: an author who never touches a lane gets a linear gauntlet. The page adds
+ * stages through `planAdd`, into the column the author picks.
  */
-export function addStage(draft, { after = null, beside = null } = {}) {
+export function addStage(draft) {
   if (!Array.isArray(draft.lanes)) draft.lanes = chainOf(draft.stages);
   if (!Array.isArray(draft.start)) draft.start = draft.stages.length ? [draft.stages[0].key] : [];
   const stage = emptyStage(takeKey(draft));
-  const near = after ?? beside;
-  const at = draft.stages.findIndex((s) => s.key === near);
-  if (at >= 0) {
-    draft.stages.splice(at + 1, 0, stage);
-    if (after !== null) {
-      draft.lanes.push(emptyLane(after, stage.key));
-    } else {
-      for (const from of parentsOf(draft, beside)) draft.lanes.push(emptyLane(from, stage.key));
-      if (draft.start.includes(beside)) draft.start.push(stage.key);
-    }
-  } else {
-    const last = draft.stages.at(-1);
-    draft.stages.push(stage);
-    if (last) draft.lanes.push(emptyLane(last.key, stage.key));
-    else draft.start.push(stage.key);
-  }
+  const last = draft.stages.at(-1);
+  draft.stages.push(stage);
+  if (last) draft.lanes.push(emptyLane(last.key, stage.key));
+  else draft.start.push(stage.key);
   return stage;
 }
 
@@ -740,11 +727,206 @@ export function setStart(draft, key, on) {
   draft.start = draft.stages.map((s) => s.key).filter((k) => opened.has(k));
 }
 
-/** Move the stage at `from` by `step` places; out of range is a no-op. */
-export function moveStage(stages, from, step) {
-  const to = from + step;
-  if (from < 0 || from >= stages.length || to < 0 || to >= stages.length) return stages;
-  const out = [...stages];
-  [out[from], out[to]] = [out[to], out[from]];
-  return out;
+// -- the graph as the page edits it -------------------------------------------
+// The page edits the gauntlet on its graph: a stage's cell is computed from the
+// lanes (`layout`), never stored, so moving a stage a column means changing its
+// lanes, and a row means changing list order. Each edit is planned on a copy and
+// checked against the layout before the page offers it, so an arrow or a dashed
+// box shows only where it does what it says. A plan copies the draft's lists
+// but keeps its stage and lane objects, which the page keys its readings by.
+
+/** The draft's graph as the game will read it: stages by list index. */
+function draftGraph(draft) {
+  return graphOf(buildBody(draft));
+}
+
+/** Each stage's `[column, row]` by key, as `gauntlet.layout` will place it. */
+export function draftCells(draft) {
+  const cells = layout(draftGraph(draft));
+  return new Map((draft?.stages || []).map((stage, i) => [stage.key, cells.get(i)]));
+}
+
+/**
+ * Each stage's corner name by key ("2-1", or "2" alone in its column), over
+ * the stages keyed in `shown` (every stage by default): `cellNames`.
+ */
+export function draftNames(draft, shown = null) {
+  const list = draft?.stages || [];
+  const index = new Map(list.map((stage, i) => [stage.key, i]));
+  const names = cellNames(draftGraph(draft), shown === null ? null : [...shown].map((key) => index.get(key)));
+  return new Map(list.flatMap((stage, i) => (names.has(i) ? [[stage.key, names.get(i)]] : [])));
+}
+
+/** A stage's name on the page: its title, else "Stage 2-1", as the game names an untitled one. */
+export function stageName(draft, stage, names = draftNames(draft)) {
+  return tidy(stage?.title) || `Stage ${names.get(stage?.key) ?? "?"}`;
+}
+
+/** "A", "A and B", "A, B and C". */
+function listed(words) {
+  return words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+}
+
+/** A copy to plan an edit on: its own lists, the same stage and lane objects. */
+function planned(draft) {
+  return {
+    ...draft,
+    stages: [...draft.stages],
+    lanes: [...(Array.isArray(draft.lanes) ? draft.lanes : chainOf(draft.stages))],
+    start: [...(Array.isArray(draft.start) ? draft.start : draft.stages.slice(0, 1).map((s) => s.key))],
+  };
+}
+
+function strandedCount(draft) {
+  const graph = draftGraph(draft);
+  const reached = reachable(graph);
+  return graph.ids.filter((i) => !reached.has(i)).length;
+}
+
+/** Does `key` land at `[col, row]` in `after` (any row when it is undefined), stranding nothing new? */
+function lands(before, after, key, [col, row]) {
+  const cell = draftCells(after).get(key);
+  return cell?.[0] === col && (row === undefined || cell[1] === row) && strandedCount(after) <= strandedCount(before);
+}
+
+/** The ungated lanes that hold `key` in its column: its ways in from the column before. */
+function pins(draft, key, cells) {
+  const col = cells.get(key)[0];
+  return (draft.lanes || []).filter((l) => !l.target && (
+    (l.to === key && cells.get(l.from)?.[0] === col - 1)
+    || (l.two_way && l.from === key && cells.get(l.to)?.[0] === col - 1)));
+}
+
+const otherEnd = (lane, key) => (lane.to === key ? lane.from : lane.to);
+const joined = (draft, a, b) => draft.lanes.some((l) => (l.from === a && l.to === b) || (l.from === b && l.to === a));
+
+/** Start keys in list order, with `key` added or taken out. */
+function startWith(draft, key, on) {
+  const opened = new Set(draft.start);
+  if (on) opened.add(key);
+  else opened.delete(key);
+  return draft.stages.map((s) => s.key).filter((k) => opened.has(k));
+}
+
+export const DIRECTIONS = ["left", "right", "up", "down"];
+
+/**
+ * Move the stage `key` one cell `dir` ("left", "right", "up", "down"):
+ * `{draft, note}` (a new draft and what changed, in words), or null where it
+ * can't go.
+ * - **Up/down** swaps it in list order with the stage in the next row of its
+ *   column. A column after the first is ordered by where its stages come from,
+ *   so a swap there moves it only between stages that come from the same place.
+ * - **Right** hangs it off the nearest other stage in its column, in place of
+ *   its lanes in from the column before (or its start mark): so it needs a
+ *   neighbour there.
+ * - **Left** gives it the lanes in of the stages that held it (a start, from
+ *   the second column), in place of their lanes to it.
+ * The stages after it move with it.
+ */
+export function planMove(draft, key, dir) {
+  const cells = draftCells(draft);
+  const at = cells.get(key);
+  if (!at) return null;
+  const [col, row] = at;
+  const names = draftNames(draft);
+  const name = (k) => stageName(draft, draft.stages.find((s) => s.key === k), names);
+  const column = (c) => draft.stages.map((s) => s.key).filter((k) => cells.get(k)[0] === c);
+  if (dir === "up" || dir === "down") {
+    const want = row + (dir === "up" ? -1 : 1);
+    const other = column(col).find((k) => cells.get(k)[1] === want);
+    if (other === undefined) return null;
+    const next = planned(draft);
+    const i = next.stages.findIndex((s) => s.key === key);
+    const j = next.stages.findIndex((s) => s.key === other);
+    [next.stages[i], next.stages[j]] = [next.stages[j], next.stages[i]];
+    if (!lands(draft, next, key, [col, want])) return null;
+    return { draft: next, note: `Moved ${name(key)} ${dir} a row, past ${name(other)}.` };
+  }
+  if (dir === "right") {
+    const near = column(col).filter((k) => k !== key)
+      .sort((a, b) => Math.abs(cells.get(a)[1] - row) - Math.abs(cells.get(b)[1] - row));
+    const gone = pins(draft, key, cells);
+    for (const n of near) {
+      const there = draft.lanes.find((l) => l.from === n && l.to === key && !l.target);
+      if (!there && joined(draft, n, key)) continue;
+      const next = planned(draft);
+      next.lanes = next.lanes.filter((l) => !gone.includes(l));
+      if (!there) next.lanes.push(emptyLane(n, key));
+      if (col === 0) next.start = startWith(next, key, false);
+      if (!next.start.length || !lands(draft, next, key, [col + 1])) continue;
+      const left = gone.length ? `, and its lane from ${listed(gone.map((l) => name(otherEnd(l, key))))} went`
+        : col === 0 ? ", and it is no longer open from the start" : "";
+      return { draft: next, note: `Moved ${name(key)} to column ${col + 2}: it is reached from ${name(n)}${left}.` };
+    }
+    return null;
+  }
+  if (dir === "left") {
+    const gone = col > 0 ? pins(draft, key, cells) : [];
+    if (!gone.length) return null;
+    const next = planned(draft);
+    next.lanes = next.lanes.filter((l) => !gone.includes(l));
+    const parents = gone.map((l) => otherEnd(l, key));
+    let via;
+    if (col === 1) {
+      next.start = startWith(next, key, true);
+      via = "open from the start";
+    } else {
+      const above = [...new Set(parents.flatMap((p) => pins(draft, p, cells).map((l) => otherEnd(l, p))))]
+        .filter((k) => !joined(next, k, key));
+      if (!above.length) return null;
+      for (const k of above) next.lanes.push(emptyLane(k, key));
+      via = `reached from ${listed(above.map(name))}`;
+    }
+    if (!lands(draft, next, key, [col - 1])) return null;
+    return { draft: next,
+             note: `Moved ${name(key)} to column ${col}: it is ${via}, and its lane from ${listed(parents.map(name))} went.` };
+  }
+  return null;
+}
+
+/**
+ * Add a stage in column `col`: `{draft, stage, how}`, or null where none can
+ * go (the stage limit, or a link that can't reach that column). It lands at
+ * the foot of the column, joined so the layout puts it there:
+ * - in the first column, open from the start;
+ * - from `from` (the selected stage) when that is in the column before;
+ * - beside `from`, from the stages it comes from, when `from` is in this column;
+ * - else from the lowest stage a start reaches in the column before.
+ * With `link`, a lane from `from` is added too (link mode's dashed box), which
+ * can reach no further than the column after `from`'s.
+ */
+export function planAdd(draft, col, { from = null, link = false } = {}) {
+  if (draft.stages.length >= LIMITS.stages || col < 0) return null;
+  const cells = draftCells(draft);
+  const names = draftNames(draft);
+  const name = (k) => stageName(draft, draft.stages.find((s) => s.key === k), names);
+  const next = planned(draft);
+  const stage = emptyStage(takeKey(next));
+  const foot = draft.stages.reduce((last, s, i) => ([col, col - 1].includes(cells.get(s.key)[0]) ? i : last), -1);
+  next.stages.splice(foot >= 0 ? foot + 1 : next.stages.length, 0, stage);
+  const fromCol = cells.get(from)?.[0];
+  let wayIn = [];
+  if (col === 0) {
+    next.start = startWith(next, stage.key, true);
+  } else if (fromCol === col - 1) {
+    wayIn = [from];
+  } else if (fromCol === col && pins(draft, from, cells).length) {
+    wayIn = pins(draft, from, cells).map((l) => otherEnd(l, from));
+  } else {
+    const graph = draftGraph(draft);
+    const reached = reachable(graph);
+    const above = draft.stages.map((s, i) => [s.key, i]).filter(([k, i]) => cells.get(k)[0] === col - 1 && reached.has(i))
+      .sort(([a], [b]) => cells.get(b)[1] - cells.get(a)[1])[0];
+    if (!above) return null;
+    wayIn = [above[0]];
+  }
+  for (const k of wayIn) next.lanes.push(emptyLane(k, stage.key));
+  const linked = link && fromCol !== undefined && !wayIn.includes(from);
+  if (linked) next.lanes.push(emptyLane(from, stage.key));
+  if (!lands(draft, next, stage.key, [col])) return null;
+  let how = col === 0 ? "open from the start" : `from ${listed(wayIn.map(name))}`;
+  if (fromCol === col && col > 0) how += `, beside ${name(from)}`;
+  if (linked) how += `, with a lane from ${name(from)}`;
+  return { draft: next, stage, how };
 }
