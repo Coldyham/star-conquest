@@ -118,6 +118,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.queued { outline: 2px solid var(--text); outline-offset: 2px; }   /* pressed, waiting on the turn */
 .touch .key { display: none; }
+/* A finger's tap or press on a word must not select it: Android Chrome's
+   Touch to Search (and iOS's callout) would open a lookup sheet over the game. */
+.touch body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.touch :is(input, textarea, [contenteditable]) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 
 /* --- the side panel and End Turn ---------------------------------------- */
 #side { grid-column: 2; grid-row: 2 / 4; display: flex; flex-direction: column; min-height: 0; }
