@@ -23,6 +23,7 @@ ships or is dropped, delete its line here (and add it to
 - gauntlet-gen.md · The generated-gauntlet web build is untimed on a phone, and a shaped (cross-stitch) link most of all: time one before relying on the form's Shape there. *In the game*, *Shapes*.
 - bots.md · duelist (the simultaneous move as a matrix game), riposte (the counter-punch). *New bot families (proposed 2026-10-05).*
 - leaderboard.md · A full board snapshot per turn: set aside, not ruled out. *Checked scores.*
+- daily.md · Stars on a puzzle once its day ends: tiers from par frozen in `puzzle_stars`, the par public after the day, a star column on the past day's standings; daily boards wait for the bot-tier check on daily maps alone. *Stars after the day.*
 - daily.md · First tries: the game counts local attempts at a day's key and stamps the count on the score, and the board marks first-try wins. Also: offering `lane_turns` on the board's gauntlet form. *On the board*, *Ship speed follows the map*.
 - other-games.md · Racing the record holder's ghost: their systems-held curve beside yours. *Racing the record holder's ghost.*
 - other-games.md · Puzzles from real positions as hand-drawn maps; fleets in flight are not representable. *Puzzles from real positions.*
