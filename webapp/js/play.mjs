@@ -476,7 +476,8 @@ function playFilm(film, view, before) {
 }
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
-  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard", "next_stage"]);
+  "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard", "next_stage",
+  "run_retry", "run_list"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -487,7 +488,7 @@ async function actOn(action) {
   } else if (action === "reset_view") {
     game.board_view.rest(game.view.snap);
     redraw();
-  } else if (GAME_ACTIONS.has(action)) {
+  } else if (GAME_ACTIONS.has(action) || /^stage_\d+$/.test(action)) {   // or a stage on the run's graph
     if (game.busy) {
       queue(action);
       return;
@@ -498,7 +499,7 @@ async function actOn(action) {
       return null;
     });
     if (!res) return;
-    if (res.quit) {   // the browser kept the window open: back to the menu, saying how to leave
+    if (res.menu) {   // a quit the browser didn't close, or a run's Choose a stage
       toMenu(res.menu);
       return;
     }

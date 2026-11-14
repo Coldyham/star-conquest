@@ -8,8 +8,8 @@ import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { el } from "./format.mjs";
 import {
-  KNOB_TABS, KNOBS, OPPONENTS, SWITCH_VALUES, SWITCHES, buildSpec, emptyForm, gameCount, isSet, knobText,
-  specLink,
+  KNOB_TABS, KNOBS, OPPONENTS, SWITCH_VALUES, SWITCHES, buildSpec, emptyForm, freeAxes, gameCount, isSet, knobText,
+  specLink, stageCount,
 } from "./gauntlet-spec.mjs";
 import { SETUP_DEFAULTS } from "./config.mjs";
 
@@ -17,10 +17,11 @@ const FORM_KEY = "sc_gauntlet_gen_form";
 const $ = (id) => document.getElementById(id);
 
 // The page's shared fields, read as the builder leaves them (gauntlet-page.mjs).
-const SHARED = { name: ["g-name", "text"], byName: ["g-by", "text"], wantsListing: ["g-listing", "check"] };
+const SHARED = { name: ["g-name", "text"], byName: ["g-by", "text"], wantsListing: ["g-listing", "check"],
+                 lives: ["g-lives", "text"] };
 
 const FIELDS = {
-  stages: ["gen-stages", "text"], mode: ["gen-mode", "text"],
+  stages: ["gen-stages", "text"], shape: ["gen-shape", "text"], mode: ["gen-mode", "text"],
   playersMin: ["gen-players-min", "text"], playersMax: ["gen-players-max", "text"],
   systemsMin: ["gen-systems-min", "text"], systemsMax: ["gen-systems-max", "text"],
   fog: ["gen-fog", "text"],
@@ -180,6 +181,10 @@ function check() {
   $("gen-cost").textContent = bad ? ""
     : `The game will play at most ${gameCount(spec)} test games, often fewer: about a minute on a computer, longer on a phone.`;
   $("gen-make").disabled = bad;
+  $("gen-shape-note").textContent = bad || !spec.shape ? ""
+    : `${stageCount(spec)} stages, a run plays ${spec.stages} of them.`
+      + (freeAxes(spec).length ? ""
+        : " The two tracks may look alike: this spec fixes size, layout and lane length.");
   $("gen-slack").disabled = form.targets === "none";
 }
 

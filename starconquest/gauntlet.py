@@ -52,7 +52,8 @@ import json
 import re
 import zlib
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import paths, pbp, webstore
@@ -72,6 +73,8 @@ NAME_MAX = 32
 BRIEFING_MAX_LINES = 6
 BRIEFING_LINE_MAX = 240
 MAX_STAGES = 64
+# The most lives a run may start with (`Gauntlet.lives`).
+LIVES_MAX = 9
 BOT_MAX = 24
 
 
@@ -137,6 +140,12 @@ class Stage:
     hint: str
     settings: dict = field(compare=False)
     target: Target | None = None
+    # Does winning it within its target in a run grant a life: True or False
+    # as the file ticks it, None to follow the graph (`grants_life`).
+    bonus_life: bool | None = None
+    # Where the author put it on the graph, (column, row), or None to have
+    # `layout` place it from the lanes. Used only when every stage has one.
+    at: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +162,8 @@ class Gauntlet:
     lane_targets: dict[tuple[int, int], Target] = field(default_factory=dict, hash=False)
     # Gated lanes not shown until met. Never an ungated one: nothing would reveal it.
     hidden: frozenset[tuple[int, int]] = frozenset()
+    # The lives a run starts with, 1 to LIVES_MAX.
+    lives: int = 1
 
     @classmethod
     def from_dict(cls, data) -> Gauntlet | None:
@@ -254,6 +265,16 @@ def _target(raw) -> Target | None:
                   beat=raw.get("beat") is True)
 
 
+def _cell(raw) -> tuple[int, int] | None:
+    """A stage's stored ``at``: two whole numbers from 0 below MAX_STAGES, or None."""
+    if not isinstance(raw, list | tuple) or len(raw) != 2:
+        return None
+    col, row = _int(raw[0]), _int(raw[1])
+    if col is None or row is None or not (0 <= col < MAX_STAGES and 0 <= row < MAX_STAGES):
+        return None
+    return col, row
+
+
 def _from_dict(data) -> Gauntlet | None:
     if not isinstance(data, dict):
         return None
@@ -272,11 +293,13 @@ def _from_dict(data) -> Gauntlet | None:
         lines = briefing if isinstance(briefing, list) else [briefing]
         stages.append(Stage(
             id=sid,
-            title=_text(row.get("title"), TITLE_MAX) or f"Stage {len(stages) + 1}",
+            title=_text(row.get("title"), TITLE_MAX),
             briefing=tuple(t for t in (_text(x, BRIEFING_LINE_MAX) for x in lines) if t)[:BRIEFING_MAX_LINES],
             hint=_text(row.get("hint"), HINT_MAX),
             settings=setup,
             target=_target(row.get("target")),
+            bonus_life=row["bonus_life"] if isinstance(row.get("bonus_life"), bool) else None,
+            at=_cell(row.get("at")),
         ))
     if not stages:
         return None
@@ -312,9 +335,15 @@ def _from_dict(data) -> Gauntlet | None:
     if not start:
         start = [stages[0].id]
     gid = _text(data.get("id"), NAME_MAX) or "gauntlet"
-    return Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
-                    stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
-                    two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden))
+    lives = _int(data.get("lives"))
+    g = Gauntlet(id=gid, name=_text(data.get("name"), NAME_MAX) or gid,
+                 stages=tuple(stages), lanes=tuple(lanes), start=tuple(dict.fromkeys(start)),
+                 two_way=frozenset(two_way), lane_targets=gates, hidden=frozenset(hidden),
+                 lives=1 if lives is None else max(1, min(LIVES_MAX, lives)))
+    if all(s.title for s in g.stages):
+        return g
+    names = cell_names(g)
+    return replace(g, stages=tuple(s if s.title else replace(s, title=f"Stage {names[s.id]}") for s in g.stages))
 
 
 def to_dict(g: Gauntlet) -> dict:
@@ -328,6 +357,10 @@ def to_dict(g: Gauntlet) -> dict:
                      "hint": s.hint, "settings": s.settings}
         if s.target is not None:
             row["target"] = s.target.to_dict()
+        if s.bonus_life is not None and s.bonus_life != dead_end(g, s.id):
+            row["bonus_life"] = s.bonus_life
+        if s.at is not None:
+            row["at"] = list(s.at)
         stages.append(row)
     lanes: list[list] = []
     for lane in g.lanes:
@@ -337,7 +370,10 @@ def to_dict(g: Gauntlet) -> dict:
         if lane in g.two_way:
             how["two_way"] = True
         lanes.append([*lane, how] if how else [*lane])
-    return {"id": g.id, "name": g.name, "start": list(g.start), "stages": stages, "lanes": lanes}
+    out = {"id": g.id, "name": g.name, "start": list(g.start), "stages": stages, "lanes": lanes}
+    if g.lives != 1:
+        out["lives"] = g.lives
+    return out
 
 
 def problems(g: Gauntlet) -> list[str]:
@@ -361,6 +397,23 @@ def goals(g: Gauntlet) -> set[int]:
     return {s.id for s in g.stages
             if s.id in reached and not g.onward(s.id, gated=False)
             and (s.id in g.start or s.id in plain_in)}
+
+
+def dead_end(g: Gauntlet, sid: int) -> bool:
+    """Is ``sid`` a dead end: no lane out at all, gated or not, and not a goal.
+    The tutorial's "Long odds", behind its gate, is one."""
+    return not g.onward(sid) and sid not in goals(g)
+
+
+def grants_life(g: Gauntlet, sid: int) -> bool:
+    """Does winning ``sid`` within its target in a run grant a life: the
+    stage's own ``bonus_life`` where the file ticks it either way, else whether
+    it is a dead end, so a lane added out of one turns its bonus off unless the
+    author kept it. Mirrored by the board's ``gauntlet-graph.mjs``."""
+    s = g.stage(sid)
+    if s is None:
+        return False
+    return s.bonus_life if s.bonus_life is not None else dead_end(g, sid)
 
 
 # The three words a gated lane is called, by the game and the board alike.
@@ -431,7 +484,14 @@ def layout(g: Gauntlet) -> dict[int, tuple[int, int]]:
     earlier columns, ties (and a stage with none, by its own row) keeping list
     order. Hidden stages are laid out like any other, so revealing one moves
     nothing else.
+
+    A gauntlet whose every stage has its own ``at``, no two alike, is drawn
+    where its author put it instead (the board's maker writes them only when
+    they differ from this layout), so lanes never move a stage the author placed.
     """
+    stored = [s.at for s in g.stages]
+    if all(at is not None for at in stored) and len(set(stored)) == len(stored):
+        return {s.id: s.at for s in g.stages if s.at is not None}
     column = dict(g.depths())
     level = 0
     while any(c == level for c in column.values()):
@@ -461,6 +521,27 @@ def layout(g: Gauntlet) -> dict[int, tuple[int, int]]:
         for r, sid in enumerate(here):
             row[sid] = r
     return {s.id: (column[s.id], row[s.id]) for s in g.stages}
+
+
+def cell_names(g: Gauntlet, shown: Iterable[int] | None = None) -> dict[int, str]:
+    """Each stage's place on the graph, as a node's corner shows it: "3" for
+    the only stage in column 3, "3-2" for the second row down of a column that
+    holds more. Counted over ``shown`` (every stage by default), so a stage a
+    player can't see yet neither takes a row number nor makes one appear. An
+    untitled stage is named from these over every stage ("Stage 3-2"), and the
+    board's ``cellNames`` is the same rule (gauntlet-layout.json pins both)."""
+    cells = layout(g)
+    keep = None if shown is None else set(shown)
+    columns: dict[int, list[int]] = {}
+    for s in g.stages:
+        if keep is None or s.id in keep:
+            columns.setdefault(cells[s.id][0], []).append(s.id)
+    out: dict[int, str] = {}
+    for col, here in columns.items():
+        here.sort(key=lambda sid: cells[sid][1])
+        for r, sid in enumerate(here):
+            out[sid] = str(col + 1) if len(here) == 1 else f"{col + 1}-{r + 1}"
+    return out
 
 
 def stage_settings(stage: Stage) -> Settings:

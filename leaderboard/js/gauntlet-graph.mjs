@@ -1,7 +1,7 @@
 // A gauntlet's graph as the game reads it, and where each stage is drawn: pure,
 // no DOM. The board's mirror of `starconquest/gauntlet.py`'s `Gauntlet.from_dict`
-// (lanes and start only), `depths`, `reachable`, `hidden_stages`, `goals`,
-// `lane_label` and `layout`, so the page's diagram is the picture the game will
+// (lanes, start and each stage's `bonus_life`), `depths`, `reachable`,
+// `hidden_stages`, `goals`, `grants_life`, `lane_label`, `layout` and `cell_names`, so the page's diagram is the picture the game will
 // show. `leaderboard/tests/fixtures/gauntlet-layout.json` is read by both
 // suites, so the two cannot drift (docs/design/gauntlet.md, "Lanes on the
 // board").
@@ -27,6 +27,16 @@ function gateOf(how) {
 
 const pairKey = (a, b) => `${a},${b}`;
 
+/** The game's MAX_STAGES: a stored `at` is two whole numbers below it. */
+const CELLS = 64;
+
+/** A stage's stored `at` as `_cell` reads it, or null. */
+export function cellOf(raw) {
+  if (!Array.isArray(raw) || raw.length !== 2) return null;
+  const [col, row] = raw;
+  return isInt(col) && isInt(row) && col >= 0 && row >= 0 && col < CELLS && row < CELLS ? [col, row] : null;
+}
+
 /**
  * A body's graph, read tolerantly as `Gauntlet.from_dict` reads it: stages by
  * int id in list order (a duplicate dropped), no `lanes` the list-order chain,
@@ -35,8 +45,14 @@ const pairKey = (a, b) => `${a},${b}`;
  */
 export function graphOf(body) {
   const ids = [];
+  const bonus = new Map();
+  const at = new Map();
   for (const stage of Array.isArray(body?.stages) ? body.stages : []) {
-    if (isObject(stage) && isInt(stage.id) && !ids.includes(stage.id)) ids.push(stage.id);
+    if (isObject(stage) && isInt(stage.id) && !ids.includes(stage.id)) {
+      ids.push(stage.id);
+      if (typeof stage.bonus_life === "boolean") bonus.set(stage.id, stage.bonus_life);
+      if (cellOf(stage.at)) at.set(stage.id, cellOf(stage.at));
+    }
   }
   const have = new Set(ids);
   const lanes = [];
@@ -67,7 +83,7 @@ export function graphOf(body) {
   let start = (Array.isArray(body?.start) ? body.start : []).filter((s) => have.has(s));
   start = [...new Set(start)];
   if (!start.length && ids.length) start = [ids[0]];
-  return { ids, lanes, twoWay, gates, hidden, start };
+  return { ids, lanes, twoWay, gates, hidden, start, bonus, at };
 }
 
 /** Every way a lane runs, as `{from, to, lane}`; a two-way lane gives two. */
@@ -132,6 +148,18 @@ export function goals(graph) {
                                           && (graph.start.includes(sid) || plainIn.has(sid))));
 }
 
+/** No lane out at all, gated or not, and not a goal (`gauntlet.dead_end`). */
+export function deadEnd(graph, sid) {
+  return onward(graph, sid).size === 0 && !goals(graph).has(sid);
+}
+
+/** Does winning `sid` in a run grant a life (`gauntlet.grants_life`): the
+ * stage's own `bonus_life` where it is ticked either way, else a dead end. */
+export function grantsLife(graph, sid) {
+  if (!graph.ids.includes(sid)) return false;
+  return graph.bonus.has(sid) ? graph.bonus.get(sid) : deadEnd(graph, sid);
+}
+
 export const BONUS = "Bonus";
 export const SHORTCUT = "Shortcut";
 export const GATED = "Gated";
@@ -170,8 +198,15 @@ export function laneLabel(graph, a, b) {
  * walked level by level; an unreached stage takes a last column. Row is list
  * order within the column, then one pass sorting each later column by the mean
  * row of its parents in earlier columns (a stage with none by its own row).
+ *
+ * A graph whose every stage has its own stored `at`, no two alike, is drawn
+ * where its author put it instead (`graph.at`).
  */
 export function layout(graph) {
+  const stored = graph.ids.map((sid) => graph.at?.get(sid));
+  if (stored.every(Boolean) && new Set(stored.map(String)).size === stored.length) {
+    return new Map(graph.ids.map((sid, i) => [sid, stored[i]]));
+  }
   const column = depths(graph);
   const all = ways(graph);
   for (let level = 0; [...column.values()].includes(level); level++) {
@@ -202,4 +237,29 @@ export function layout(graph) {
     here.forEach((sid, r) => row.set(sid, r));
   }
   return new Map(graph.ids.map((sid) => [sid, [column.get(sid), row.get(sid)]]));
+}
+
+/**
+ * Each stage's place on the graph, as a node's corner shows it
+ * (`gauntlet.cell_names`): "3" for the only stage in column 3, "3-2" for the
+ * second row down of a column that holds more. Counted over `shown` (every
+ * stage by default), so a stage a player can't see yet takes no row number.
+ * An untitled stage is named from these over every stage ("Stage 3-2").
+ */
+export function cellNames(graph, shown = null) {
+  const cells = layout(graph);
+  const keep = shown === null ? null : new Set(shown);
+  const columns = new Map();
+  for (const sid of graph.ids) {
+    if (keep && !keep.has(sid)) continue;
+    const col = cells.get(sid)[0];
+    if (!columns.has(col)) columns.set(col, []);
+    columns.get(col).push(sid);
+  }
+  const out = new Map();
+  for (const [col, here] of columns) {
+    here.sort((a, b) => cells.get(a)[1] - cells.get(b)[1]);
+    here.forEach((sid, r) => out.set(sid, here.length === 1 ? `${col + 1}` : `${col + 1}-${r + 1}`));
+  }
+  return out;
 }

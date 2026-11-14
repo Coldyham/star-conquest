@@ -16,9 +16,10 @@ import { deflateSync, inflateSync } from "node:zlib";
 
 import {
   GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, canonicalJson, checkBody, checkByName, checkTarget,
-  draftFromBody, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName, gameLink, joinLane, laneBack,
-  laneFrom, linkTarget, listingOf, meetsTarget, moveStage, postedBest, parentsOf, readDraft, removeStage, setStart, mintId, setupProblem,
-  slugOf, stageSetup, targetText, textLength, tidy,
+  addStageAt, draftCells, draftFromBody, draftNames, draftProblem, dropLane, emptyDraft, emptyLane, emptyStage, fileName,
+  gameLink, joinLane, laidOutApart, layOutFromLanes, laneBack, laneFrom, linkTarget, listingOf, meetsTarget, moveOptions, moveStageTo, newStageName,
+  opens, placeStages, postedBest, parentsOf, readDraft, removeStage, setOpens, setStart, shutLanes, mintId, setupProblem, slugOf, stageName,
+  stageSetup, targetText, textLength, tidy,
 } from "../js/gauntlet-build.mjs";
 import { encodeToken } from "../js/token-encode.mjs";
 
@@ -214,10 +215,10 @@ test("a draft read back from storage is tolerant of anything", () => {
   const out = readDraft(JSON.stringify({ name: 5, wants_listing: "yes",
     stages: [null, { link: 3, briefing: [], settings: [] }, { title: "t", briefing: ["a", 2] }] }));
   assert.deepEqual(out, {
-    name: "", by_name: "", wants_listing: false,
+    name: "", by_name: "", wants_listing: false, lives: 1,
     stages: [
-      { key: 0, link: "", settings: null, title: "", briefing: [""], hint: "", target: null },
-      { key: 1, link: "", settings: null, title: "t", briefing: ["a", ""], hint: "", target: null },
+      { key: 0, link: "", settings: null, title: "", briefing: [""], hint: "", target: null, bonus_life: null, at: null },
+      { key: 1, link: "", settings: null, title: "t", briefing: ["a", ""], hint: "", target: null, bonus_life: null, at: null },
     ],
     lanes: [emptyLane(0, 1)],
     start: [0],
@@ -238,22 +239,17 @@ test("a draft read back from storage is tolerant of anything", () => {
 
 test("a draft names its first problem, link problems first", () => {
   const draft = emptyDraft();
-  assert.match(draftProblem(draft), /stage 1 needs a game link/);
+  assert.match(draftProblem(draft), /Stage 1 needs a game link/);
   draft.stages[0].link = "garbage";
-  assert.match(draftProblem(draft), /stage 1's link can't be used/);
+  assert.match(draftProblem(draft), /Stage 1's link can't be used/);
+  draft.stages[0].title = "Opening";
+  assert.match(draftProblem(draft), /Opening's link can't be used/, "a titled stage goes by its title");
   draft.stages[0].settings = { ...SETUP };
   assert.match(draftProblem(draft), /needs a name/);
   draft.name = "Fine";
   assert.equal(draftProblem(draft), "");
   draft.by_name = "x".repeat(33);
   assert.match(draftProblem(draft), /your name is over 32/);
-});
-
-test("moving a stage swaps it with its neighbour, and not past either end", () => {
-  assert.deepEqual(moveStage(["a", "b", "c"], 0, 1), ["b", "a", "c"]);
-  assert.deepEqual(moveStage(["a", "b", "c"], 2, -1), ["a", "c", "b"]);
-  assert.deepEqual(moveStage(["a", "b", "c"], 0, -1), ["a", "b", "c"]);
-  assert.deepEqual(moveStage(["a", "b", "c"], 2, 1), ["a", "b", "c"]);
 });
 
 // -- stage targets ------------------------------------------------------------
@@ -407,11 +403,11 @@ test("a draft whose lanes were never touched builds today's linear body, so its 
 test("lanes join stages by key, so reordering and removing never rewire one", () => {
   const draft = linear(3);
   const [a, b, c] = draft.stages.map((s) => s.key);
-  draft.stages = moveStage(draft.stages, 2, -1);   // A, C, B: the lanes still run A→B→C
+  draft.stages = [draft.stages[0], draft.stages[2], draft.stages[1]];   // A, C, B: the lanes still run A→B→C
   assert.deepEqual(checkBody(buildBody(draft)).lanes, [[0, 2], [2, 1]]);
   removeStage(draft, b);
   assert.deepEqual(draft.lanes, [], "B's lanes go with it");
-  assert.match(draftProblem(draft), /stage 2 can't be reached/);
+  assert.match(draftProblem(draft), /Stage 2 can't be reached/);
   joinLane(draft, a, c);
   assert.equal(draftProblem(draft), "");
   removeStage(draft, a);
@@ -421,19 +417,112 @@ test("lanes join stages by key, so reordering and removing never rewire one", ()
   assert.equal(draftProblem(draft), "");
 });
 
-test("+ After and + Branch place a stage and join it", () => {
-  const draft = linear(2);
-  const [a, b] = draft.stages.map((s) => s.key);
-  const fork = addStage(draft, { beside: b });
-  assert.deepEqual(draft.stages.map((s) => s.key), [a, b, fork.key]);
-  assert.deepEqual(parentsOf(draft, fork.key), [a]);
-  const next = addStage(draft, { after: b });
-  assert.deepEqual(draft.stages.map((s) => s.key), [a, b, next.key, fork.key]);
-  assert.deepEqual(parentsOf(draft, next.key), [b]);
-  const twin = addStage(draft, { beside: a });
-  assert.deepEqual(parentsOf(draft, twin.key), []);
-  assert.deepEqual(draft.start, [a, twin.key], "a branch beside a start is a start");
-  assert.equal(new Set(draft.stages.map((s) => s.key)).size, 5, "keys are never reused");
+/** A, then B and C forking from it, rejoining at D: "1", "2-1", "2-2", "3". */
+function fork() {
+  const draft = linear(4);
+  const [a, b, c, d] = draft.stages.map((s) => s.key);
+  draft.lanes = [emptyLane(a, b), emptyLane(a, c), emptyLane(b, d), emptyLane(c, d)];
+  return { draft, a, b, c, d };
+}
+
+const cellsOf = (draft) => Object.fromEntries([...draftCells(draft)].map(([k, cell]) => [k, cell]));
+const namesOf = (draft) => [...draftNames(draft).values()];
+
+test("a stage is named for its place on the graph until it is titled", () => {
+  const { draft, a, b, c, d } = fork();
+  assert.deepEqual(cellsOf(draft), { [a]: [0, 0], [b]: [1, 0], [c]: [1, 1], [d]: [2, 0] });
+  assert.deepEqual(namesOf(draft), ["1", "2-1", "2-2", "3"]);
+  assert.equal(stageName(draft, draft.stages[1]), "Stage 2-1");
+  draft.stages[1].title = "  The fork ";
+  assert.equal(stageName(draft, draft.stages[1]), "The fork");
+  assert.deepEqual([...draftNames(draft, [a, b, d]).values()], ["1", "2", "3"], "counted over the stages shown");
+  assert.deepEqual(namesOf(linear(3)), ["1", "2", "3"]);
+});
+
+test("a stage keeps the place it was given, whatever its lanes say", async () => {
+  const { draft, a, b, c, d } = fork();
+  placeStages(draft);
+  assert.deepEqual(draft.stages.map((s) => s.at), [[0, 0], [1, 0], [1, 1], [2, 0]], "placed as the lanes lay it out");
+  const before = buildBody(draft);
+  assert.equal(before.stages.some((s) => "at" in s), false, "places that match the layout are not written");
+  joinLane(draft, c, b);
+  dropLane(draft, laneFrom(draft, a, b));
+  assert.deepEqual(draftCells(draft).get(b), [1, 0], "B stays put though only C leads to it now");
+  const body = checkBody(buildBody(draft));
+  assert.deepEqual(body.stages.map((s) => s.at), [[0, 0], [1, 0], [1, 1], [2, 0]], "written once they differ");
+  const again = await draftFromBody({ ...body, stages: body.stages.map((s) => ({ ...s, settings: SETUP })) },
+                                    async () => "link");
+  assert.deepEqual(again.stages.map((s) => s.at), body.stages.map((s) => s.at));
+  assert.deepEqual(readDraft(JSON.stringify(draft)).stages.map((s) => s.at), body.stages.map((s) => s.at));
+  assert.deepEqual(draftCells(draft).get(d), [2, 0]);
+});
+
+test("a stored place must be on every stage, in its own cell", () => {
+  const two = { stages: [stage(), stage({ id: 1 })] };
+  assert.deepEqual(checkBody(body({ ...two, stages: [stage({ at: [0, 0] }), stage({ id: 1, at: [1, 0] })] })).stages
+    .map((s) => s.at), [[0, 0], [1, 0]]);
+  assert.match(checkBody(body({ ...two, stages: [stage({ at: [0, 0] }), stage({ id: 1 })] })), /some stages have a place/);
+  assert.match(checkBody(body({ ...two, stages: [stage({ at: [0, 0] }), stage({ id: 1, at: [0, 0] })] })), /share a place/);
+  assert.match(checkBody(body({ stages: [stage({ at: [0, -1] })] })), /place on the graph is not two whole numbers/);
+  assert.match(checkBody(body({ stages: [stage({ at: [64, 0] })] })), /place on the graph/);
+});
+
+test("a dashed box adds a stage at the foot of its column, joined to nothing but the lane being drawn", () => {
+  const { draft, b } = fork();
+  assert.equal(newStageName(draft, 1), "Stage 2-3");
+  assert.equal(newStageName(draft, 3), "Stage 4");
+  const loose = addStageAt(draft, 1);
+  assert.deepEqual(loose.at, [1, 2]);
+  assert.deepEqual(parentsOf(draft, loose.key), []);
+  assert.equal(draft.start.includes(loose.key), false);
+  assert.match(draftProblem({ ...draft, stages: draft.stages.map((s) => ({ ...s, settings: s.settings || SETUP })) }),
+               /Stage 2-3 can't be reached/);
+  const linked = addStageAt(draft, 3, { from: b });
+  assert.deepEqual(linked.at, [3, 0]);
+  assert.deepEqual(parentsOf(draft, linked.key), [b]);
+  const back = addStageAt(draft, 0, { from: b });
+  assert.deepEqual(back.at, [0, 1], "a lane back leaves it where it was put");
+  assert.deepEqual(parentsOf(draft, back.key), [b]);
+  assert.equal(new Set(draft.stages.map((s) => s.key)).size, draft.stages.length);
+  assert.equal(draft.start.length, 1, "no stage is opened from the start for it");
+});
+
+test("arrows move a stage between cells and never touch a lane", () => {
+  const { draft, a, b, c, d } = fork();
+  const lanes = JSON.stringify(draft.lanes);
+  assert.deepEqual(moveOptions(draft, a), ["right"], "alone, it can join the next column, but not open one before");
+  assert.deepEqual(moveOptions(draft, b), ["left", "right", "down"]);
+  assert.deepEqual(moveOptions(draft, d), ["left"]);
+  assert.equal(moveStageTo(draft, a, "up"), null);
+  assert.equal(moveStageTo(draft, b, "down"), "Moved Stage 2-1 down a row.");
+  assert.deepEqual([b, c].map((k) => draftCells(draft).get(k)), [[1, 1], [1, 0]]);
+  assert.equal(moveStageTo(draft, c, "right"), "Moved Stage 2-1 right a column.");
+  assert.deepEqual([b, c, d].map((k) => draftCells(draft).get(k)), [[1, 0], [2, 0], [2, 1]]);
+  assert.equal(moveStageTo(draft, c, "left"), "Moved Stage 3-1 left a column.");
+  assert.deepEqual(draftCells(draft).get(c), [1, 0]);
+  // Left out of the first column opens a new one before it.
+  moveStageTo(draft, b, "left");
+  moveStageTo(draft, b, "left");
+  assert.deepEqual([b, a, c, d].map((k) => draftCells(draft).get(k)), [[0, 0], [1, 0], [2, 0], [3, 0]]);
+  // Right off the end opens a new column; one alone there can't, as nothing would change.
+  assert.deepEqual(moveOptions(draft, d), ["left"]);
+  assert.equal(JSON.stringify(draft.lanes), lanes);
+});
+
+test("laying out from the lanes puts every stage back where its lanes place it", () => {
+  const { draft, a, b, c, d } = fork();
+  placeStages(draft);
+  const lanes = JSON.stringify(draft.lanes);
+  const body = buildBody(draft);
+  assert.equal(laidOutApart(draft), false, "as placed by the lanes, nothing would move");
+  moveStageTo(draft, d, "left");
+  moveStageTo(draft, a, "right");
+  assert.equal(laidOutApart(draft), true);
+  layOutFromLanes(draft);
+  assert.deepEqual([a, b, c, d].map((k) => draftCells(draft).get(k)), [[0, 0], [1, 0], [1, 1], [2, 0]]);
+  assert.equal(laidOutApart(draft), false);
+  assert.equal(JSON.stringify(draft.lanes), lanes);
+  assert.deepEqual(buildBody(draft), body, "the body is the one it was before the moves");
 });
 
 test("the reverse pair makes a lane two-way and never adds a second", () => {
@@ -448,6 +537,37 @@ test("the reverse pair makes a lane two-way and never adds a second", () => {
   assert.deepEqual(checkBody(buildBody(draft)).lanes, [[0, 1, { two_way: true }]]);
   dropLane(draft, lane);
   assert.deepEqual(draft.lanes, []);
+});
+
+test("a lane's two ends are ticked apart: both is two-way, one turns it round, neither is shut", () => {
+  const draft = linear(2);
+  const [a, b] = draft.stages.map((s) => s.key);
+  const lane = draft.lanes[0];
+  lane.target = { turns: 9 };
+  setStart(draft, b, true);
+  assert.deepEqual([opens(lane, a), opens(lane, b)], [false, true]);
+  setOpens(lane, a, true);
+  assert.deepEqual([lane.from, lane.to, lane.two_way], [a, b, true]);
+  setOpens(lane, b, false);
+  assert.deepEqual([lane.from, lane.to, lane.two_way], [b, a, false], "only a is opened: the lane runs b to a");
+  assert.deepEqual(checkBody(buildBody(draft)).lanes, [[1, 0, { turns: 9 }]], "its gate rides along");
+  assert.deepEqual(parentsOf(draft, a), [b]);
+  setOpens(lane, a, false);
+  assert.equal(lane.shut, true);
+  assert.equal(lane.two_way, false);
+  assert.deepEqual([opens(lane, a), opens(lane, b)], [false, false]);
+  assert.deepEqual(parentsOf(draft, a), []);
+  assert.equal(laneFrom(draft, b, a), null);
+  assert.deepEqual(shutLanes(draft).map((pair) => pair.map((s) => s.key)), [[a, b]], "in list order");
+  assert.deepEqual(checkBody(buildBody(draft)).lanes ?? [], [], "the body has no way to say shut");
+  assert.match(draftProblem(draft), /^the lane between Stage .* and Stage .* opens neither stage/);
+  // A shut lane is kept, and read back shut.
+  assert.equal(readDraft(JSON.stringify(draft)).lanes[0].shut, true);
+  // Drawing the lane again opens it the way it was drawn, and never adds a second.
+  assert.equal(joinLane(draft, a, b), lane);
+  assert.equal(draft.lanes.length, 1);
+  assert.deepEqual([lane.from, lane.to, lane.two_way, "shut" in lane], [a, b, false, false]);
+  assert.equal(draftProblem(draft), "");
 });
 
 test("a lane's gate, hidden and two-way build as the game reads them", () => {
@@ -500,4 +620,37 @@ test("a kept draft's lanes are read tolerantly", () => {
   assert.deepEqual(relinked.stages.map((s) => s.key), [0, 1]);
   assert.deepEqual(relinked.lanes, [emptyLane(0, 1)]);
   assert.deepEqual(relinked.start, [0]);
+});
+
+test("lives are kept from 1 to 9 and written only when not 1", () => {
+  assert.equal(checkBody(body({ lives: 3 })).lives, 3);
+  assert.equal("lives" in checkBody(body({ lives: 1 })), false);
+  assert.equal("lives" in checkBody(body()), false);
+  for (const bad of [0, 10, 2.5, "3", true]) assert.match(checkBody(body({ lives: bad })), /lives must be/);
+  const draft = { ...emptyDraft(), name: "L", stages: [{ ...emptyStage(0), settings: { ...SETUP } }] };
+  assert.equal("lives" in buildBody(draft), false);
+  assert.equal(buildBody({ ...draft, lives: 4 }).lives, 4);
+  assert.equal(readDraft(JSON.stringify({ ...draft, lives: 40 })).lives, LIMITS.lives);
+  assert.equal(readDraft(JSON.stringify({ ...draft, lives: "x" })).lives, 1);
+});
+
+test("a stage's bonus life is written only where it differs from the graph's default", async () => {
+  const draft = { ...emptyDraft(), name: "B", next_key: 3, start: [0],
+    stages: [0, 1, 2].map((k) => ({ ...emptyStage(k), settings: { ...SETUP, seed: k } })),
+    lanes: [emptyLane(0, 1), { ...emptyLane(0, 2), target: { turns: 9 } }] };
+  // 2 is a dead end behind a gate: on by default, so a tick says nothing.
+  assert.equal(buildBody(draft).stages.some((s) => "bonus_life" in s), false);
+  draft.stages[2].bonus_life = true;
+  assert.equal(buildBody(draft).stages.some((s) => "bonus_life" in s), false);
+  draft.stages[2].bonus_life = false;
+  draft.stages[1].bonus_life = true;
+  const built = buildBody(draft);
+  assert.equal(built.stages[2].bonus_life, false);
+  assert.equal(built.stages[1].bonus_life, true);
+  assert.equal("bonus_life" in built.stages[0], false);
+  assert.equal(checkBody(built).stages[2].bonus_life, false);
+  assert.match(checkBody(body({ stages: [stage({ bonus_life: "yes" })] })), /bonus_life is not true or false/);
+  const back = await draftFromBody(checkBody(built), async () => "link");
+  assert.deepEqual(back.stages.map((s) => s.bonus_life), [null, true, false]);
+  assert.deepEqual(buildBody({ ...back, name: "B" }).stages.map((s) => s.bonus_life), [undefined, true, false]);
 });

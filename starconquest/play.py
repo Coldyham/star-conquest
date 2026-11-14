@@ -225,15 +225,33 @@ def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     return None
 
 
+def over_pick(ui: Ui, sid: int) -> str | None:
+    """A tap on stage ``sid`` in the win overlay's run graph: pick a stage the
+    run may go to; a second tap on the pick plays it, as Next stage does (or
+    Try again, for the stage just lost). Answers that action, or None."""
+    if ui.run_graph is None or sid not in ui.run_choices:
+        return None
+    if sid != ui.run_next:
+        ui.run_next = sid
+        return None
+    return "run_retry" if ui.run_again and sid == ui.run_stage else "next_stage"
+
+
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:
     """A key on the game-over veil: retry, a new map (or the next stage),
     the menu, history, and the two ways to share."""
     if name == "t":
+        # A run's decided game offers Try again (a new step) or nothing.
+        if ui.run_id and ui.run_note:
+            return "run_retry" if ui.run_again else None
         return "retry"
     if name == "n":
-        # In a stage N is Next stage, or nothing after the last one.
+        # In a stage N is Next stage, or nothing after the last one; in a run
+        # that goes on more than one way, back to the list to choose.
         if ui.in_stage:
-            return "next_stage" if ui.offers_next_stage(state) else None
+            if ui.offers_next_stage(state):
+                return "next_stage"
+            return "run_list" if ui.run_id and ui.run_on else None
         return "restart"
     if name in ("m", "Escape"):
         return "menu"

@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  BONUS, GATED, SHORTCUT, depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways,
+  BONUS, GATED, SHORTCUT, cellNames, depths, goals, grantsLife, graphOf, hiddenStages, laneLabel, layout, reachable, ways,
 } from "../js/gauntlet-graph.mjs";
 
 const read = (name) => JSON.parse(readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8"));
@@ -21,9 +21,14 @@ for (const c of cases) {
     assert.deepEqual(cells, c.layout);
     assert.deepEqual([...goals(graph)].sort((a, b) => a - b), c.goals);
     assert.deepEqual([...hiddenStages(graph)].sort((a, b) => a - b), c.hidden_stages);
+    assert.deepEqual(graph.ids.filter((sid) => grantsLife(graph, sid)), c.bonus_lives);
     const reached = reachable(graph);
     assert.deepEqual(graph.ids.filter((sid) => !reached.has(sid)), c.unreachable);
     assert.deepEqual(ways(graph).map((w) => [w.from, w.to, laneLabel(graph, w.from, w.to)]), c.labels);
+    const named = (shown) => Object.fromEntries([...cellNames(graph, shown)].map(([sid, n]) => [String(sid), n]));
+    assert.deepEqual(named(null), c.names);
+    const hidden = hiddenStages(graph);
+    assert.deepEqual(named(graph.ids.filter((sid) => !hidden.has(sid))), c.names_known);
   });
 }
 

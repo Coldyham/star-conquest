@@ -396,10 +396,16 @@ by hand.
 - **The diagram's marks**: starts get a bar on the left, goals a ★ and a gold
   border, stages reached only through a gate a dashed border, hidden ones a
   dotted border. A lane that skips columns arcs over the stages it skips; a
-  lane back or within a column dips below.
+  lane back dips below; a lane within a column runs straight between
+  neighbours, or bows out beside the column past a stage between them.
 - **`branches()` is gone** with its warning.
-- Not done: a click on stage A then B in the diagram to toggle a lane (the
-  plan's "later step"), and the end-to-end check on a deploy preview.
+- Not done: the end-to-end check on a deploy preview.
+- **Superseded 2026-11-13: the graph is the editor.** The cards below gave way
+  to one card for the stage selected on the graph, with a dashed box per column
+  to add a stage, + Add link then a stage (the "later step" above), move arrows
+  round the selected stage, and a tap on a lane for its options; chips, + After,
+  + Branch and ↑/↓ went. As built: `docs/design/gauntlet.md`, *Lanes on the
+  board*.
 
 The page keeps its stage cards: one pasted link per stage, title, briefing,
 hint, target, ↑/↓, Remove. Phase 3 adds the graph to them. Nothing in the game
@@ -557,17 +563,18 @@ Then run the full suite, since this touches `replay` and `main`.
 
 ## Phase 5: runs (core `run.py`, menu graph overlay, main)
 
-**Movement over the graph is built (2026-11-12)**, without lives or boons:
-`docs/design/gauntlet.md`, *Runs*, *Forks*. A run moves from the stage it last
-won, gated lanes open on its own score, and the list chooses at a fork; a win
-with no ungated way on completes it. What follows for movement stands as built.
+**Movement and lives are built (2026-11-12)**: `docs/design/gauntlet.md`,
+*Runs*, *Lives, and moving over everything unlocked*. A run may play any stage
+it has opened, gated lanes open on its own score, a loss costs a life, and a
+won goal completes it. Lives are the gauntlet's `lives` and a stage's
+`bonus_life`, not `config.RUN_LIVES`. What remains below is boons, parked:
+lives may prove enough, in which case boons move to `decided-against.md`.
 
 **This grows Phase 0's run rather than starting one.** The record, its storage,
 Continue run through `active_log`, the boot prompt, no Retry or rewind, no Hint,
 and one active run all stay as Phase 0 built them. What Phase 5 adds:
 - movement over a graph, which lifts `is_chain` from the offered rule;
 - lane gates judged on the run's own score;
-- lives;
 - boons, and with them the boon-pick card and the Use boons switch.
 
 The record's new fields (`seed`, `lives_left`, `boons_in_play` and `boon_taken`
@@ -595,8 +602,6 @@ progress (memory: complete records beat compact ones).
   - The player picks one or skips.
   - Add it to CLAUDE.md's list of sanctioned derived streams.
 - **Losses and endings:**
-  - A run starts with `config.RUN_LIVES` lives. A loss costs a life. With lives
-    left, the same stage is replayed fresh.
   - Winning a goal stage (`gauntlet.goals`, derived) wins the run.
   - A run game offers no Retry and no rewind, because otherwise a run can't be
     lost. Resuming a saved run game continues it.
@@ -625,8 +630,7 @@ progress (memory: complete records beat compact ones).
   - It then goes to the graph to choose the way on. If there is only one way, it
     goes straight there.
   - When the win is boonless and postable, Post and Challenge stay alongside.
-- **Loss overlay in a run:** "Run over · reached stage 6 · 3 boons". With lives
-  left: "Lives left: 1 · Try again".
+- **Loss overlay in a run:** "Run over · reached stage 6 · 3 boons".
 - **Free play and runs stay apart.** A run never clears a free-play stage except
   through an ordinary boonless win filing its best as now, and free-play bests
   never advance a run.

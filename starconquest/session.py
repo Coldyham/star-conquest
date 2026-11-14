@@ -216,15 +216,15 @@ class Session:
                 return app.land_daily(self._settings(), st, body, kind)
             self.menu_waits.append((pending, land))
 
-    def _open_run(self, fresh: bool, reopen: bool = True) -> bool:
+    def _open_run(self, fresh: bool, reopen: bool = True, pick: int | None = None) -> bool:
         """Start a run of the gauntlet picked in the list, or carry on the active
-        one (`app.open_run`); the match goes to the page with the next menu
-        reply (``opened``). False, with the list open again saying why, when
-        there is nothing to play."""
+        one (`app.open_run`) on ``pick``, else the stage the list has selected;
+        the match goes to the page with the next menu reply (``opened``). False,
+        with the list open again saying why, when there is nothing to play."""
         ms, settings = self.menu, self._settings()
         opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
                                     lambda g, sid: setupmenu.load_stage(ms, settings, g, sid),
-                                    ms.stage_pick)
+                                    ms.stage_pick if pick is None else pick)
         self._note(note)
         if opened is None:
             if reopen:
@@ -287,7 +287,8 @@ class Session:
         """Show the menu: at boot (``first``) on a fresh setup, pre-filled from
         the address (``prefill``) and then a shared link, as the command line
         and the link pre-fill pygame's; afterwards on the setup last played,
-        the match left behind."""
+        the match left behind. With a run under way it opens on the run's
+        gauntlet list, unless something else has the screen (`_run_list`)."""
         self.touch, self.compact = bool(touch), bool(compact)
         if first or self.settings is None:
             self.settings = Settings.from_dict(prefill or {})
@@ -307,7 +308,18 @@ class Session:
         self.history = self.live_fog = None
         self.maker = None
         self.menu.strategies = setupmenu.strategy_options()
+        self._run_list()
         return self._menu()
+
+    def _run_list(self) -> None:
+        """Open the gauntlet list on the run under way, where running it is
+        what the player came back to do: not over the resume prompt, a link
+        that took the launch (a replay, a match, a gauntlet, a daily or a
+        generator still to land), or a list already open."""
+        if (self.resume_log is not None or self.fetching is not None or self.pbp.invite is not None
+                or self.gen_job is not None or self.menu_waits or self.menu.tutorial_open):
+            return
+        setupmenu.open_run_list(self.menu, self._settings(), self._say)
 
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
@@ -342,12 +354,16 @@ class Session:
             return self._menu(self._then(self._answer(key)))
         if ms.pbp_prompt:
             # Modal: only its own controls answer.
-            if key.startswith("pbp_"):
+            if key == "pbp_lobby":
+                self._browse(key)
+            elif key.startswith("pbp_"):
                 return self._menu(self._then(setupmenu.pbp_press(ms, settings, key)))
             return self._menu()
         if ms.tutorial_open:
             # Modal too: a stage, a run button, the picker, Leave, Copy, Close.
-            if key.startswith(setupmenu.TUTORIAL_KEYS):
+            if key == "tutorial_board":
+                self._browse(key)
+            elif key.startswith(setupmenu.TUTORIAL_KEYS):
                 return self._menu(self._then(setupmenu.tutorial_press(
                     ms, settings, key, paths.is_web(), self._say, self._begin)))
             return self._menu()
@@ -355,8 +371,8 @@ class Session:
             ms.editing_seed = False
         if not (key == "strategy" or key.startswith("strategy_opt_")):
             ms.strategy_open = False
-        daily_was, board_was, files_was = ms.daily_open, ms.board_open, ms.files_open
-        ms.daily_open = ms.board_open = ms.files_open = False
+        daily_was, files_was = ms.daily_open, ms.files_open
+        ms.daily_open = ms.files_open = False
         setupmenu.before_edit(ms, settings)
         action = None
         if key == "start":
@@ -367,8 +383,6 @@ class Session:
             self._daily(daily.PUZZLE if key == "puzzle" else daily.BOARD)
         elif key == "daily_menu":
             ms.daily_open = not daily_was
-        elif key == "board_menu":
-            ms.board_open = not board_was
         elif key == "files_menu":
             ms.files_open = not files_was
         elif key == "save_settings":
@@ -387,7 +401,7 @@ class Session:
                 self._say("Link updated — copy it from the address bar", True)
             else:
                 self._say("Couldn't create link", False)
-        elif key in ("browse_matches", "browse_configs"):
+        elif key == "leaderboard":
             self._browse(key)
         elif key == "play_by_post":
             # The same gate Start goes through (a hand map that cannot build),
@@ -439,11 +453,13 @@ class Session:
         return None
 
     def _browse(self, key: str) -> None:
-        """Open one of the board's lists in this tab, as pygame's footer does."""
-        path, opened, failed = (
-            (paths.LEADERBOARD_LOBBY_PATH, "Shared matches opened", "Couldn't open the lobby")
-            if key == "browse_matches" else
-            (paths.LEADERBOARD_RECENT_PATH, "Recently played opened", "Couldn't open the leaderboard"))
+        """Open one of the board's pages in this tab: the footer's Leaderboard,
+        or the link at the foot of the play-by-post prompt or the gauntlet list."""
+        path, opened, failed = {
+            "leaderboard": (paths.LEADERBOARD_RECENT_PATH, "Leaderboard opened", "Couldn't open the leaderboard"),
+            "pbp_lobby": (paths.LEADERBOARD_LOBBY_PATH, "Shared matches opened", "Couldn't open the lobby"),
+            "tutorial_board": (paths.LEADERBOARD_GAUNTLETS_PATH, "Gauntlets opened", "Couldn't open the gauntlets"),
+        }[key]
         url = webstore.leaderboard_url(path)
         if not url:
             self._say("No leaderboard is configured", False)
@@ -576,7 +592,8 @@ class Session:
             elif name in setupmenu.STEPS and g is not None:
                 setupmenu.step_pick(ms, self._settings(), g, *setupmenu.STEPS[name])
             elif name == "Enter" and g is not None:
-                return self._menu(self._then(setupmenu.play_pick(ms, self._settings(), g, self._begin)))
+                return self._menu(self._then(setupmenu.play_pick(ms, self._settings(), g, self._begin,
+                                                                          self._say)))
             return self._menu()
         if ms.pbp_prompt:
             if name == "Enter":
@@ -594,9 +611,9 @@ class Session:
             if name in ("n", "N", "Escape"):
                 return self.op_menu_press(modal["stay"]["key"])
             return self._menu()
-        if ms.strategy_open or ms.daily_open or ms.board_open or ms.files_open:
+        if ms.strategy_open or ms.daily_open or ms.files_open:
             if name == "Escape":
-                ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
+                ms.strategy_open = ms.daily_open = ms.files_open = False
             return self._menu()
         if name in ("Enter", " "):
             return self.op_menu_press("start")
@@ -610,7 +627,7 @@ class Session:
         only once it is let go."""
         ms, settings = self.menu, self._settings()
         if phase == "start":
-            ms.strategy_open = ms.daily_open = ms.board_open = ms.files_open = False
+            ms.strategy_open = ms.daily_open = ms.files_open = False
             setupmenu.before_edit(ms, settings)
             ms.drag_key = str(key)
         setupmenu.apply_slider(str(key), ms, settings, float(t))
@@ -639,6 +656,7 @@ class Session:
         """Answer the boot prompt: play the unfinished match on, or leave it."""
         log, self.resume_log = self.resume_log, None
         if not accept or log is None:
+            self._run_list()
             return self._menu()
         if gauntlet_run.is_playing(log):
             # A run's own game comes back as the run's, so it keeps the run's
@@ -828,8 +846,9 @@ class Session:
             self.seed += 1
             self.state, self.ui, self.log = app.start_game(self.settings, self.seed, app.carry_autoplay(ui))
             return self._whole()
-        elif name == "retry":
-            # Fork the log at turn 0, so the finished record stays intact.
+        elif name == "retry" and not (ui.run_id and ui.run_note):
+            # Fork the log at turn 0, so the finished record stays intact. Not
+            # on a run's decided game: a fresh game the run wouldn't record.
             self.log = self.log.fork(0)
             try:
                 self.log.save()
@@ -859,7 +878,7 @@ class Session:
             # becomes that stage's, so going back to the menu lands on it. In
             # a run it is the run's next stage, begun as its next step.
             if ui.run_id:
-                if self._open_run(fresh=False, reopen=False):
+                if self._open_run(fresh=False, reopen=False, pick=ui.run_next):
                     self.opened = None
                     return self._whole()
             else:
@@ -872,6 +891,23 @@ class Session:
                     self.history = self.live_fog = None
                     app.stamp_campaign(self.ui, self.campaign)
                     return self._whole()
+        elif name.startswith("stage_") and name[len("stage_"):].isdigit():
+            # A stage on the overlay's run graph: picked, or played on a second tap.
+            then = play.over_pick(ui, int(name[len("stage_"):]))
+            if then is not None:
+                return self.op_game_action(then)
+        elif name == "run_retry" and ui.run_again and ui.run_stage is not None:
+            # The same stage again as the run's next step: the life is already
+            # spent, so this is only the list's pick made for the player.
+            if self._open_run(fresh=False, reopen=False, pick=ui.run_stage):
+                self.opened = None
+                return self._whole()
+        elif name == "run_list" and ui.run_id and ui.run_on:
+            # To the gauntlet list, to choose where the run goes next.
+            self.state = self.ui = self.log = None
+            self.history = self.live_fog = None
+            setupmenu.reopen_gauntlets(self.menu, self._settings(), self._say)
+            return {"menu": self._menu()}
         elif name == "share" and ui.can_post(state):
             # A challenge link to the clipboard, or a daily's result line.
             ui.share_msg = (app.copy_daily_result(self.settings, state, ui) if ui.daily_day

@@ -285,10 +285,26 @@ def over(state: GameState, ui: Ui) -> dict:
         "lines": [list(line) for line in hud.result_lines(state, ui)],
         "next_stage": ui.offers_next_stage(state),
         "in_stage": ui.in_stage,
+        # A run's decided game: Try again in Retry's place (or nothing), and
+        # Choose a stage where Next stage would be.
+        "retry": not (ui.run_id and ui.run_note),
+        "try_again": bool(ui.run_id and ui.run_again),
+        "choose_stage": bool(ui.run_id and ui.run_on and ui.run_graph is None),
+        "next_label": "Replay for its gate" if ui.run_next in ui.run_replays else "Next stage",
+        "run_graph": _run_graph(ui) if ui.run_id and ui.run_note else None,
         "share": list(hud.share_label(ui)) if share else None,
         "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
         "notes": ui.share_msg if share else "",
     }
+
+
+def _run_graph(ui: Ui) -> dict | None:
+    """The overlay's run graph (`app.run_graph`) with the pick marked."""
+    if ui.run_graph is None:
+        return None
+    pick = f"stage_{ui.run_next}" if ui.run_next is not None else None
+    nodes = [{**n, "marks": [*n["marks"], "picked"]} if n["key"] == pick else n for n in ui.run_graph["nodes"]]
+    return {**ui.run_graph, "nodes": nodes, "focus": pick}
 
 
 def route(state: GameState, ui: Ui) -> dict:

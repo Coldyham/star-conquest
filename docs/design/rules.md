@@ -604,11 +604,14 @@ Reasons: `docs/design/gauntlet.md`.
   one before it. **Every stage must be reachable from a start**
   (`gauntlet.problems`): the board's `checkBody` refuses a gauntlet that fails,
   `tools/gauntlet_check.py` will not play one, and the built-ins are held to it.
-- **A stage's place on the graph is computed, never stored** (`gauntlet.layout`,
-  mirrored by the board's `gauntlet-graph.mjs`; both read
-  `leaderboard/tests/fixtures/gauntlet-layout.json`). The board page edits
-  lanes by draft key, never by place, and a draft whose lanes were never
-  touched builds exactly the linear body it always did, so its id holds.
+- **A stage's place on the graph is computed from the lanes unless its author
+  placed every stage** (`gauntlet.layout`, mirrored by the board's
+  `gauntlet-graph.mjs`; both read `leaderboard/tests/fixtures/gauntlet-layout.json`).
+  A stage's `at` is used only when every stage has one, no two alike. The
+  board writes `at` only when the author's places differ from the computed
+  layout, edits lanes by draft key, never moves a stage or draws a lane the
+  author didn't ask for, and a draft whose lanes and places were never touched
+  builds exactly the linear body it always did, so its id holds.
 - **The game's list and the board's diagram share one drawer**
   (`webapp/js/stagegraph.mjs`, imported by the board from `/play/` so the game
   never depends on `/board/` offline); it decides nothing. In the list a tap
@@ -630,19 +633,34 @@ Reasons: `docs/design/gauntlet.md`.
   game's or an earlier best meeting the target (`Ui.stage_cleared`,
   `Ui.offers_next_stage`).
 - **A run** (`run.py`) plays a gauntlet from a start to a goal, each stage
-  within its target, with one life. It is offered where it adds something to
-  the list: a target, or a fork (`run.offered`, `run.forks`). It moves from
-  the stage it last won (`run.ways_on`): along any ungated lane to a stage it
-  hasn't won, and along a gated one only when this game's score meets it. At a
-  fork the list marks the ways on and Continue run plays the one selected; a
-  win with no ungated way on completes the run. It is the one piece of gauntlet progress that is stored
+  within its target, on the gauntlet's `lives` (1 to `LIVES_MAX`, default 1).
+  It is offered where it adds something to the list: a target, or a fork
+  (`run.offered`, `run.forks`). It may play any stage on its frontier
+  (`run.frontier`): opened (a start, or an ungated lane from a stage it won, or
+  a gated one from a stage won with a game whose own score met the gate), not
+  won, not behind a won stage, and not spent (winning it would open nothing
+  not open already, `run.spent`; never a goal or a stage that grants a life);
+  a won stage with a gate still worth meeting stays, its replay judged against
+  the gate (`run.gates_left`). LOST, MISSED and VOID cost a life and keep the stage; only the last life, GONE or ABANDONED
+  ends the run; a won goal (`gauntlet.goals`) completes it. Lives left are
+  derived from the steps (`run.lives_left`), never stored; `Run.lives` is
+  copied from the gauntlet when the run begins. A stage's first win in a run
+  grants a life where `gauntlet.grants_life` says so: the stage's
+  `bonus_life`, by default on for a dead end. It is the one piece of gauntlet
+  progress that is stored
   (`paths.WEB_RUNS_KEY`): a step is written when its game starts and when it is
-  decided. Only the step's own game moves it, once (`run.finish`), so a Retry
-  or fork is free play. That game plays ironman with no Hint, and its Next
+  decided. Only the step's own game moves it, once (`run.finish`), so a rewind
+  or fork is free play; its decided overlay offers Try again (a new step) or
+  the run's graph where it may go more than one way (`app.run_graph`; a tap
+  picks, Next stage plays the pick, `run.way_on` the default), else Choose a
+  stage, never a free-play Retry. That game plays ironman with no Hint, and its Next
   stage reads this game's score alone. Continue resumes the step's log (kept
   in `webstore` too, `run.keep_log`), never a fresh copy, and a log that can't
   be loaded ends the run. A run adds nothing to `Settings` or the log, and run
-  games post as ordinary games (`tests/test_run.py`).
+  games post as ordinary games (`tests/test_run.py`). With a run under way the
+  menu opens on its list (`setupmenu.open_run_list`), and anything else played
+  beside it says "Free play": the list's button, the stage banner, the top bar
+  (`setupmenu.play_pick`, `app.FREE_PLAY_TAG`).
 - **User gauntlets** are read when the Tutorial list opens (`gauntlet.user`):
   the ones opened from a link, kept under `paths.WEB_GAUNTLETS_KEY`
   (`gauntlet.remember`, the last `REMEMBER_MAX`), then on desktop the files in
