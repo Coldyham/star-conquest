@@ -191,7 +191,7 @@ class Par:
     """A puzzle's par, as the board answers a result that matched or beat it."""
 
     turns: int
-    lost: int
+    lost: int | None    # None: the result matched only the turns, so not told
     proved: bool        # a full search finished: no faster win exists
     turns_only: bool    # ...for the turn; the ships lost are the fewest found
 
@@ -216,16 +216,24 @@ def par_from_reply(body: str) -> Par | None:
     if not isinstance(par, dict):
         return None
     turns, lost = par.get("turns"), par.get("lost")
-    if not isinstance(turns, int) or not isinstance(lost, int) or isinstance(turns, bool) or isinstance(lost, bool):
+    if not isinstance(turns, int) or isinstance(turns, bool):
+        return None
+    if lost is not None and (not isinstance(lost, int) or isinstance(lost, bool)):
         return None
     return Par(turns, lost, par.get("status") == "proved", bool(par.get("turns_only")))
 
 
 def par_note(par: Par, turns: int, lost: int) -> str:
     """The win overlay's congratulation for a result that met ``par``. The board
-    answers only such a result; a par the result is short of says nothing."""
-    if (turns, lost) > (par.turns, par.lost):
+    answers only such a result; a par the result is short of says nothing. A
+    result that matched only the par's turns is told so, and that a win losing
+    fewer ships exists, never how few."""
+    if turns > par.turns:
         return ""
+    if turns == par.turns and (par.lost is None or lost > par.lost):
+        if par.proved:
+            return f"Fastest win! You matched the par of {par.turns} turns, proven the fastest; a win losing fewer ships exists"
+        return f"Par turns! You matched the par of {par.turns} turns; a win losing fewer ships exists"
     score = f"{par.turns} turns / {par.lost} lost"
     if turns < par.turns:
         return f"Beyond par! You won faster than the par of {score}"

@@ -487,7 +487,8 @@ join public.games g
 -- No policy and no public grant: nobody reads a par. sc_puzzle_par answers a
 -- claimed result with the par only when the result matches or beats it, and
 -- sc_my_puzzle_par a signed-in player whose posted score does, so the
--- congratulation reaches only the players who earned it. A forged claim
+-- congratulation reaches only the players who earned it. A result that matches
+-- only the par's turns is told those turns, never the par's ships lost. A forged claim
 -- can read it: like fog, a convenience, not a secret.
 -- ---------------------------------------------------------------------------
 create table if not exists public.puzzle_pars (
@@ -505,11 +506,14 @@ create table if not exists public.puzzle_pars (
 );
 
 -- The par of p_day's puzzle when (p_turns, p_lost) matches or beats it (fewer
--- turns, then fewer lost), else null; never for a day not yet started.
+-- turns, then fewer lost), else null; never for a day not yet started. A result
+-- that matches the par's turns but loses more ships is told the turns alone:
+-- 'lost' is null, and the par's ships lost stay unsaid.
 create or replace function public.sc_puzzle_par(p_day date, p_turns integer, p_lost integer)
 returns jsonb language sql stable security definer set search_path = public as $$
-  select jsonb_build_object('turns', p.turns, 'lost', p.lost, 'status', p.status,
-                            'turns_only', p.turns_only,
+  select jsonb_build_object('turns', p.turns,
+                            'lost', case when p_lost <= p.lost or p_turns < p.turns then p.lost end,
+                            'status', p.status, 'turns_only', p.turns_only,
                             'beaten', (p_turns, p_lost) < (p.turns, p.lost))
   from public.puzzle_pars p
   join public.dailies d on d.day = p.day and d.kind = 'puzzle'
@@ -517,7 +521,7 @@ returns jsonb language sql stable security definer set search_path = public as $
     and p.day <= (now() at time zone 'UTC')::date
     and p.rules_version = d.rules_version
     and p_turns >= 1 and p_lost >= 0
-    and (p_turns, p_lost) <= (p.turns, p.lost)
+    and p_turns <= p.turns
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -934,15 +938,18 @@ alter table public.puzzle_pars enable row level security;
 
 -- The par of p_day's puzzle for the signed-in caller, when the best score
 -- they have posted on it under their own claimed name, counted and played
--- wholly by hand, matches or beats it; else null. The board's puzzle and map
+-- wholly by hand, matches or beats it (or its turns alone, when 'lost' is
+-- null, as sc_puzzle_par answers); else null. The board's puzzle and map
 -- pages show it to that player alone (js/post.mjs's ownPar). my_turns and
 -- my_lost are their best score, which they posted themselves, so even an
 -- embargoed day gives away nothing. Defined here, after counted_scores, which
 -- it reads.
 create or replace function public.sc_my_puzzle_par(p_day date)
 returns jsonb language sql stable security definer set search_path = public as $$
-  select jsonb_build_object('turns', p.turns, 'lost', p.lost, 'status', p.status,
-                            'turns_only', p.turns_only, 'my_turns', b.turns, 'my_lost', b.lost)
+  select jsonb_build_object('turns', p.turns,
+                            'lost', case when (b.turns, b.lost) <= (p.turns, p.lost) then p.lost end,
+                            'status', p.status, 'turns_only', p.turns_only,
+                            'my_turns', b.turns, 'my_lost', b.lost)
   from public.users u
   join public.daily_games g on g.day = p_day and g.kind = 'puzzle'
   join lateral (
@@ -952,7 +959,7 @@ returns jsonb language sql stable security definer set search_path = public as $
   join public.puzzle_pars p on p.day = p_day
   join public.dailies d on d.day = p_day and d.kind = 'puzzle' and d.rules_version = p.rules_version
   where auth.uid() is not null and u.owner = auth.uid()
-    and (b.turns, b.lost) <= (p.turns, p.lost)
+    and b.turns <= p.turns
   order by b.turns, b.lost
   limit 1
 $$;
