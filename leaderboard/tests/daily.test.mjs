@@ -240,7 +240,12 @@ test("the par's congratulation is only for a score that met it, in the game's wo
   assert.equal(parNote(likely, 10, 3), "Par! You matched the best line our search found: 10 turns / 3 lost");
   assert.equal(parNote(likely, 9, 8), "Beyond par! You won faster than the par of 10 turns / 3 lost");
   assert.equal(parNote(proved, 10, 2), "Beyond par! The par's 10 turns with fewer ships lost than its 3");
-  assert.equal(parNote(likely, 10, 4), "");
+  assert.equal(parNote({ ...proved, lost: null }, 10, 4),
+    "Fastest win! You matched the par of 10 turns, proven the fastest; a win losing fewer ships exists");
+  assert.equal(parNote({ ...likely, lost: null }, 10, 4),
+    "Par turns! You matched the par of 10 turns; a win losing fewer ships exists");
+  assert.equal(parNote(likely, 10, 4), "Par turns! You matched the par of 10 turns; a win losing fewer ships exists");
+  assert.equal(parNote({ ...likely, lost: null }, 11, 0), "");
   assert.equal(parNote(likely, 11, 0), "");
   assert.equal(parNote(null, 10, 3), "");
 });

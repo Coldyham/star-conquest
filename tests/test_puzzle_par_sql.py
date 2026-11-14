@@ -37,20 +37,21 @@ def board():
         select {_TODAY} + d, 'puzzle', jsonb_build_object('seed', d + 10), '{{}}'::jsonb, '[]'::jsonb, 5
         from generate_series(-1, 1) d;
       -- Today's puzzle map, posted on by alice (11/0, then 10/3, owned), bob
-      -- (12/1, owned, short of the par), carol (9/9 with turns autoplayed) and
-      -- an unclaimed dave (10/3).
+      -- (12/1, owned, short of the par), carol (9/9 with turns autoplayed), erin
+      -- (10/5, owned, the par's turns only) and an unclaimed dave (10/3).
       insert into auth.users (id) values
         ('00000000-0000-0000-0000-00000000000a'), ('00000000-0000-0000-0000-00000000000b'),
-        ('00000000-0000-0000-0000-00000000000c');
+        ('00000000-0000-0000-0000-00000000000c'), ('00000000-0000-0000-0000-00000000000e');
       insert into users (name, owner) values
         ('alice', '00000000-0000-0000-0000-00000000000a'), ('bob', '00000000-0000-0000-0000-00000000000b'),
-        ('carol', '00000000-0000-0000-0000-00000000000c'), ('dave', null);
+        ('carol', '00000000-0000-0000-0000-00000000000c'), ('dave', null),
+        ('erin', '00000000-0000-0000-0000-00000000000e');
       insert into games (game_key, mode, players, nodes, seed, settings_json)
         values ('p0', 'random', 2, 6, 10, jsonb_build_object('seed', 10));
       insert into scores (game_key, user_id, turns, lost, hand, raw_token, match_id)
         select 'p0', u.id, t, l, h, '', m from (values
           ('alice', 11, 0, 11, 'a1'), ('alice', 10, 3, 10, 'a2'), ('bob', 12, 1, 12, 'b1'),
-          ('carol', 9, 9, 4, 'c1'), ('dave', 10, 3, 10, 'd1')) v(n, t, l, h, m)
+          ('carol', 9, 9, 4, 'c1'), ('dave', 10, 3, 10, 'd1'), ('erin', 10, 5, 10, 'e1')) v(n, t, l, h, m)
         join users u on u.name = v.n;
       insert into score_checks (score_id, verdict) select id, 'verified' from scores;
       insert into puzzle_pars (day, turns, lost, status, line, rules_version) values
@@ -68,7 +69,11 @@ def _ask(board: str, day: str, turns: int, lost: int) -> str:
 
 def test_a_result_short_of_the_par_learns_nothing(board):
     assert _ask(board, _TODAY, 11, 0) == ""
-    assert _ask(board, _TODAY, 10, 4) == ""
+
+
+def test_matching_only_the_turns_is_told_the_turns_alone(board):
+    got = _ask(board, _TODAY, 10, 4)
+    assert '"turns": 10' in got and '"lost": null' in got and '"beaten": false' in got
 
 
 def test_a_match_or_a_beat_is_answered_with_the_par(board):
@@ -99,6 +104,11 @@ def _mine(board: str, who: str) -> str:
 def test_a_signed_in_player_whose_score_met_the_par_is_told(board):
     got = _mine(board, "a")
     assert '"my_turns": 10' in got and '"my_lost": 3' in got and '"turns": 10' in got
+
+
+def test_a_player_who_met_only_the_turns_is_told_the_turns(board):
+    got = _mine(board, "e")
+    assert '"turns": 10' in got and '"lost": null' in got and '"my_lost": 5' in got
 
 
 def test_nobody_else_is_told(board):

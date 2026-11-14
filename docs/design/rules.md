@@ -369,7 +369,8 @@ already resolve simultaneously. The rationale for each rule is in
   (`puzzle_par.better`). The table has no policy and no public grant, and its
   `line` never leaves it; `/api/daily?…&turns=T&lost=L` asks `sc_puzzle_par`,
   which answers the par only when `(T, L)` matches or beats it, on a started day,
-  under the puzzle's rules. The game asks only at a puzzle win played wholly by
+  under the puzzle's rules; a result that matches only its turns is told the
+  turns alone (`lost` null) and that a win losing fewer ships exists. The game asks only at a puzzle win played wholly by
   hand (`main.wants_par`) and shows the gold line only for that answer
   (`Ui.par_note`); nothing is stored or posted. A forged claim can read the par:
   a convenience, not a secret. The board's `puzzle.html` and map page show the

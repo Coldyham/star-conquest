@@ -630,6 +630,14 @@ score on the win overlay (`Ui.par_note`, `daily.par_note`): *Perfect puzzle!* fo
 proved par, *Par!* for a likely one, *Beyond par!* for a result better than it.
 Nothing is stored or posted, and *Copy daily result* does not mention it.
 
+**Matching only the turns is told the turns** (the author, 2026-11-14). A result
+that wins in the par's turns but loses more ships than it is answered with the
+turns and `lost: null`, and the line says so without the par's ships lost:
+*Fastest win!* (a proved turn) or *Par turns!* (a likely one), each ending "a win
+losing fewer ships exists". Before this, such a result heard nothing, though
+matching a proved fastest win is the harder half. The board's line below follows
+the same rule.
+
 **On the board too, for a signed-in player who posted it** (the author,
 2026-11-05). `puzzle.html` for that day and the map's `game.html` show the same
 gold line (`.par-note`, `daily.mjs`'s `parNote`, worded as the game's and pinned
