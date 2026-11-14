@@ -95,6 +95,74 @@ strength stays flat").
 That matters because a random map is decided by position as much as by play
 (the tutorial's seed hunt, above).
 
+## Shapes (built 2026-11-12)
+
+A generated gauntlet may branch. The shape is a run option beside `targets`
+and `unwon_last`, never a `dealer.Spec` field: the spec says which setups may
+be dealt, the shape how they are joined.
+
+| Shape | Columns (n = the spec's `stages`) | Starts |
+|---|---|---|
+| `line` (the default) | 1, 1, 1 … | the first; `lanes` left out |
+| `concertina` | 1, 2, 1, 2 … 1 (an even count ends 2, 1, 1) | the single first stage |
+| `cross-stitch` | 2, 2 … 2, 1 | both of the first column |
+
+- **`stages` keeps meaning the run's length**, the number of columns, which is
+  what the form already asked and what a run plays (`gauntletgen.widths`):
+  concertina 7 is 10 stages, cross-stitch 6 is 11. A concertina of an even
+  count ends on two single stages so a run still plays exactly the count
+  asked; two starts would have made its opening a cross-stitch.
+- **Both end on one stage**, the unwon-last map when `unwon_last` is set, so a
+  run has one goal. Each stage leads to every stage in the next column. **No
+  lane gates**: each stage keeps its own target; gated cross-overs would stack
+  a second target on stages that already carry one.
+- **The two stages in a column are about as hard as each other but differ in
+  kind**, on at least one axis (`dealer.AXES`, read once at deal time into a
+  candidate's `axes`): **size**, the larger at least 1.25 times the smaller's
+  systems; **lane length**, medians 2 turns apart or more, at the stage's ship
+  speed (`lane_lengths`, `lane_turns`, as a `lane_turns` rule reads them);
+  **layout**, random against symmetric. The symmetric `layout` (hub and the
+  rest) could be a fourth, but it is subtler to see on the map.
+- **The second deal is steered, not filtered after probing.** A wide column
+  deals two candidates a round, the second drawn up to `PAIR_TRIES` (20) times
+  from the run's rng until it differs from the first on an axis, keeping the
+  last draw if none does (`candidates`). Probe games are what a run spends its
+  time on and dealing costs next to nothing, so an alike deal is cheaper turned
+  away here than probed and found out afterwards. Every draw is in order from
+  the one rng, so `candidates` stays a pure function of the spec, the seed and
+  the shape; a line deals exactly as before, with no `axes`.
+- **Picking a pair** (`pick_shape`): the usable candidates ranked as for a
+  line, each column at its evenly spaced point; a wide column then takes the
+  nearest unused candidate (difficulty first, then winning turns) that differs
+  from it on an axis, else the nearest at all, and that pair is **alike**,
+  named in the tool's output and its ledger (a `pick` line beside the games).
+- **Settling** (`settled` with the shape's widths): every column full and,
+  where the spec leaves an axis free (`dealer.free_axes`), every pair
+  differing, with the usable levels shown as for a line; otherwise it stops
+  when a round adds nothing, a pair turning unlike counting as something.
+- **The file** lists stages column by column, a pair's "a" before its "b", so
+  `gauntlet.layout` draws the pair in one column, "a" above. A pair's titles say
+  how they differ, since the graph shows titles and that is where the choice is
+  made: "Stage 3: more systems" / "fewer systems", "longer lanes" / "shorter
+  lanes", "symmetric" / "scattered", by the first axis they differ on; an
+  alike pair is "Stage 3a" / "Stage 3b". Single stages stay "Stage N", N the
+  column. `start` and `lanes` are written out.
+- **`gid` hashes the shape only when it isn't `line`**, so every spec link
+  made before keeps its gauntlet's id, and so its bests and runs.
+- **Asked for** on the board's generate form (**Shape**, written into the link
+  as `shape`, the stage count it makes shown beside it, and "the two tracks may
+  look alike" when `freeAxes` finds none), by `job_from_link` (anything
+  unknown is a line), and by `tools/gauntlet_gen.py --shape`, kept in the
+  ledger's header since it changes what is dealt.
+- **Cost:** a wide column probes twice the candidates a round, so a
+  concertina of 7 costs about 1.4 times a 7-stage line and a cross-stitch of 6
+  about 1.8 times; minutes on desktop. A phone is untimed, as the line is
+  (*In the game*); if a shaped link is too slow there, it could default to
+  `LINK_ROUNDS - 1`. The second deal's retries cost no probe games.
+- **Lives** ride the same way (`lives` in the link, `--lives`), written into
+  the file and left out of `gid`. No shape has a dead end, so no generated
+  stage grants a bonus life.
+
 ## The benchmark
 
 1. **Deal candidates a round at a time** (`gauntletgen.candidates`, since

@@ -10,11 +10,13 @@
 // changes. The box it is drawn into scrolls; nothing here keeps an offset.
 //
 // A view is `{nodes: [{key, col, row, title, place?, status?, color?, open,
-// marks?}], lanes: [{from, to, gated?, short?, hidden?, two_way?, warn?}]}`,
+// marks?}], lanes: [{from, to, gated?, short?, hidden?, two_way?, warn?, shut?}]}`,
 // lanes naming nodes by key. Marks become classes (`sg-start`, `sg-goal`, …),
 // which each page styles in its own theme.
 
 const SVG = "http://www.w3.org/2000/svg";
+// What watches each box's grid for a resize, so a redraw stops watching the grid it replaces.
+const watching = new WeakMap();
 const LOOP = 22;   // how far a lane bends past the nodes: over a skip, under a lane back
 const HEAD = 8;    // an arrowhead's length
 
@@ -24,10 +26,29 @@ const mid = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 /**
  * The curve of a lane from box `a` to box `b`, `step` columns on: `{start, c1,
  * c2, end}` (a cubic Bézier). To the next column it runs edge to edge; further
- * on (a shortcut) it arcs over the stages it skips; back or within a column it
- * dips below the two.
+ * on (a shortcut) it arcs over the stages it skips; back a column or more it
+ * dips below the two. Within a column it runs straight from one box's edge to
+ * the other's, or, with `blocked` (a stage between them), bows out beside the
+ * column: right going down, left going up, so a lane each way stays apart.
  */
-export function laneCurve(a, b, step) {
+export function laneCurve(a, b, step, blocked = false) {
+  if (step === 0) {
+    const down = b.y > a.y;
+    if (blocked) {
+      // Off the side's middle, toward the other box: the middle is where lanes between columns land.
+      const side = down ? (r) => r.x + r.w : (r) => r.x;
+      const lean = down ? 0.25 : -0.25;
+      const start = [side(a), mid(a)[1] + lean * a.h];
+      const end = [side(b), mid(b)[1] - lean * b.h];
+      const out = down ? Math.max(start[0], end[0]) + LOOP : Math.min(start[0], end[0]) - LOOP;
+      return { start, c1: [out, start[1]], c2: [out, end[1]], end };
+    }
+    const x = (r) => mid(r)[0] + (down ? 6 : -6);
+    const start = [x(a), down ? a.y + a.h : a.y];
+    const end = [x(b), down ? b.y : b.y + b.h];
+    const third = (end[1] - start[1]) / 3;
+    return { start, c1: [start[0], start[1] + third], c2: [end[0], end[1] - third], end };
+  }
   if (step === 1) {
     const start = [a.x + a.w, mid(a)[1]];
     const end = [b.x, mid(b)[1]];
@@ -67,7 +88,8 @@ export function nodeClasses(node) {
 
 /** A lane's classes, by what it is. */
 export function laneClasses(lane) {
-  return ["sg-lane", lane.gated ? "sg-gated" : "", lane.hidden ? "sg-hidden" : "", lane.warn ? "sg-warn" : ""]
+  return ["sg-lane", lane.gated ? "sg-gated" : "", lane.hidden ? "sg-hidden" : "", lane.warn ? "sg-warn" : "",
+          lane.shut ? "sg-shut" : ""]
     .filter(Boolean).join(" ");
 }
 
@@ -91,10 +113,17 @@ function span(cls, text, style = "") {
  * a stage calls `onPress(key)`; `onHover(key | null)` follows the pointer and
  * focus. Answers `{light(from, to), show(key), node(key)}`: light a lane (either
  * way; `light(null)` for none), scroll a stage into view, find its button.
+ *
+ * For an editor (the board's gauntlet maker): `extras` are more elements to
+ * set in the grid, as `{col, row, el}`; with `onLane(from, to)` a lane (and its
+ * target) can be pressed, through a wide invisible stroke over it; `after(rect,
+ * grid)` runs each time the lanes are drawn, with `rect(key)` giving a stage's
+ * box in `grid`, for whatever the editor sets beside a stage.
  */
-export function drawGraph(box, view, { onPress = null, onHover = null, label = "" } = {}) {
+export function drawGraph(box, view, { onPress = null, onHover = null, label = "", extras = [], onLane = null,
+                                      after = null } = {}) {
   const nodes = view?.nodes || [];
-  const cols = Math.max(1, ...nodes.map((n) => n.col + 1));
+  const cols = Math.max(1, ...nodes.map((n) => n.col + 1), ...extras.map((x) => x.col + 1));
   const grid = document.createElement("div");
   grid.className = "sg";
   grid.style.gridTemplateColumns = `repeat(${cols}, minmax(6rem, max-content))`;
@@ -123,6 +152,11 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
     buttons.set(n.key, button);
     grid.append(button);
   }
+  for (const x of extras) {
+    x.el.style.gridColumn = String(x.col + 1);
+    x.el.style.gridRow = String(x.row + 1);
+    grid.append(x.el);
+  }
   box.replaceChildren(grid);
 
   const cellOf = new Map(nodes.map((n) => [n.key, n]));
@@ -138,19 +172,36 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
       const a = rect(lane.from);
       const b = rect(lane.to);
       if (!a || !b) continue;
-      const curve = laneCurve(a, b, cellOf.get(lane.to).col - cellOf.get(lane.from).col);
+      const [from, to] = [cellOf.get(lane.from), cellOf.get(lane.to)];
+      const [lo, hi] = [Math.min(from.row, to.row), Math.max(from.row, to.row)];
+      const blocked = from.col === to.col && nodes.some((n) => n.col === from.col && n.row > lo && n.row < hi);
+      const curve = laneCurve(a, b, to.col - from.col, blocked);
       const g = svg("g", { class: laneClasses(lane), "data-from": lane.from, "data-to": lane.to }, layer);
       svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}` }, g);
-      svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
+      if (!lane.shut) svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
       if (lane.two_way) svg("polygon", { points: arrowPoints(curve.start, curve.c1).join(" "), class: "sg-head" }, g);
-      if (lane.short) {
-        const [x, y] = curveMid(curve);
-        svg("text", { x, y: y - 5, "text-anchor": "middle", class: "sg-short" }, g).textContent = lane.short;
+      const short = lane.short ? svg("text", { x: curveMid(curve)[0], y: curveMid(curve)[1] - 5, "text-anchor": "middle",
+                                                class: "sg-short" }, g) : null;
+      if (short) short.textContent = lane.short;
+      if (onLane) {
+        const hit = svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}`, class: "sg-hit" }, g);
+        for (const target of [hit, short].filter(Boolean)) {
+          target.addEventListener("click", () => onLane(lane.from, lane.to));
+          target.addEventListener("mouseenter", () => g.classList.add("sg-hot"));
+          target.addEventListener("mouseleave", () => g.classList.remove("sg-hot"));
+        }
       }
     }
+    if (after) after(rect, grid);
   };
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(drawLanes).observe(grid);
-  else requestAnimationFrame(drawLanes);
+  watching.get(box)?.disconnect();
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(drawLanes);
+    observer.observe(grid);
+    watching.set(box, observer);
+  } else {
+    requestAnimationFrame(drawLanes);
+  }
 
   return {
     node: (key) => buttons.get(key) || null,

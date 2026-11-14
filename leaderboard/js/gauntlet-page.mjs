@@ -2,12 +2,17 @@
 // briefing and hint, join stages by lanes, save, and share the short link that
 // opens it in the game.
 //
-// Each stage card has a row of "Leads to" chips, one per other stage: lit means
-// a lane from this stage to that one, and tapping a lit chip opens the lane's
-// options under the card (two-way, a gate, hidden). A diagram above the cards
-// is drawn from gauntlet-graph.mjs's `layout`, the same function the game's
-// `gauntlet.layout` is, so it is the picture the game will show; it never
-// edits (docs/design/gauntlet.md, "Lanes on the board").
+// The graph is the editor. It is drawn by the game's own drawer from
+// gauntlet-graph.mjs's `layout`, the same function as the game's
+// `gauntlet.layout`, so it is the picture the game will show. A tap selects a
+// stage, and the one card under the graph is that stage's. Arrows round the
+// selected stage move it a row or a column; a dashed box at the foot of each
+// column adds a stage there, joined to nothing; the card's Add lane, then a
+// stage or a dashed box, draws a lane from it; a tap on a lane opens its options
+// (two-way, a gate, hidden) in the card. The author places each stage (its
+// `at`), and no edit moves a stage or draws a lane the author didn't ask for
+// (docs/design/gauntlet.md, "Lanes on the board"). Ctrl+Z and Ctrl+Shift+Z (or
+// the buttons by the graph) undo and redo an edit.
 //
 // The draft lives in localStorage under DRAFT_KEY as the form was typed, so a
 // reload loses nothing; once saved, the stored row is the record and the draft
@@ -26,11 +31,12 @@ import { GAME_URL } from "./config.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary } from "./format.mjs";
 import {
-  GAUNTLET_ID, LIMITS, addStage, botWins, buildBody, checkBody, draftFromBody, draftProblem, dropLane, emptyDraft,
-  fileName, gameLink, joinLane, laneBack, laneFrom, linkTarget, meetsTarget, moveStage, parentsOf, readDraft, removeStage,
-  postedBest, setStart, setupProblem, stageSetup, targetText, textLength, tidy,
+  GAUNTLET_ID, LIMITS, addStageAt, botWins, buildBody, checkBody, draftFromBody, draftNames, draftProblem, dropLane,
+  emptyDraft, fileName, gameLink, joinLane, laidOutApart, layOutFromLanes, laneBack, laneFrom, linkTarget,
+  meetsTarget, moveOptions, moveStageTo, newStageName, opens as laneOpens, parentsOf, placeStages, readDraft,
+  removeStage, postedBest, setOpens, setStart, setupProblem, shutLanes, stageName, stageSetup, targetText, textLength, tidy,
 } from "./gauntlet-build.mjs";
-import { depths, goals, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
+import { depths, goals, grantsLife, graphOf, hiddenStages, laneLabel, layout, reachable, ways } from "./gauntlet-graph.mjs";
 // The game's own drawer, so the board draws the picture its gauntlet list shows (one site: /play/ and /board/).
 import { drawGraph } from "/play/js/stagegraph.mjs";
 import { inflate } from "./inflate-browser.mjs";
@@ -61,10 +67,11 @@ const readings = new WeakMap();
 // fills: a promise of `boardScores`' answer. Dropped when the link changes.
 const botBests = new WeakMap();
 let saved = null;   // {id, body} once saved, until the draft changes again
-let openLane = null;   // the lane whose options show under its near stage's card
-let view = "author";   // the diagram as the author sees it, or as a new player does
-// Past this many stages a card shows only its lit chips, the rest in a select.
-const ALL_CHIPS = 16;
+let openLane = null;   // the lane whose options show in its near stage's card
+let view = "author";   // the graph as the author sees it, or as a new player does
+let picked = null;     // the selected stage's key: its card is the one shown
+let linking = false;   // Add lane pressed: the next stage or dashed box pressed is joined from `picked`
+let said = "";         // what the last edit on the graph did, said under it
 
 const $ = (id) => document.getElementById(id);
 
@@ -76,15 +83,137 @@ function keep() {
   }
 }
 
-function changed() {
+let redraw = 0;
+
+/** After an edit: remember it for undo, keep the draft and redraw the graph (after a pause in typing, with `soon`). */
+function changed({ soon = false } = {}) {
+  remember(soon);
   keep();
-  drawDiagram();
-  if (saved) {
-    saved = null;
-    $("result").hidden = true;
-    say("");
-  }
+  clearTimeout(redraw);
+  if (soon) redraw = setTimeout(drawDiagram, 200);
+  else drawDiagram();
+  unsave();
   showProblem();
+}
+
+/** The draft has changed since it was saved: the saved link no longer shows it. */
+function unsave() {
+  if (!saved) return;
+  saved = null;
+  $("result").hidden = true;
+  say("");
+}
+
+// -- undo and redo -------------------------------------------------------------
+// Every edit is remembered as the draft it left, with the stage then selected,
+// so Ctrl+Z (or Undo) steps back through them and Ctrl+Shift+Z or Ctrl+Y (or
+// Redo) forward again. Typing in one go is one step. In a text field the
+// author has typed in since focusing it, the keys are the field's own.
+
+const UNDO_STEPS = 100;
+const TYPING_MS = 1500;
+let past = [];      // the states before each edit, oldest first
+let future = [];    // the states undone, the latest last
+let shown = null;   // the state as history last saw it: {draft (JSON), picked}
+let typedAt = 0;    // when the last edit happened, if it was typing
+
+function snapshot() {
+  return { draft: JSON.stringify(draft), picked };
+}
+
+/** Start history afresh on the draft as it stands. */
+function forget() {
+  past = [];
+  future = [];
+  shown = snapshot();
+  typedAt = 0;
+  showHistory();
+}
+
+/** Remember an edit just made, folding typing that follows typing into one step. */
+function remember(typing) {
+  const now = snapshot();
+  if (!shown || now.draft === shown.draft) {
+    shown = shown || now;
+    return;
+  }
+  if (!(typing && Date.now() - typedAt < TYPING_MS)) {
+    past.push(shown);
+    if (past.length > UNDO_STEPS) past.shift();
+  }
+  future = [];
+  shown = now;
+  typedAt = typing ? Date.now() : 0;
+  showHistory();
+}
+
+/** Put the draft back as `entry` had it, keeping what each unchanged link was read as. */
+async function restore(entry, word) {
+  const back = readDraft(entry.draft);
+  if (!back) return;
+  const was = new Map(draft.stages.map((stage) => [stage.key, stage]));
+  const unread = [];
+  for (const stage of back.stages) {
+    const old = was.get(stage.key);
+    if (old && old.link === stage.link && readings.has(old)) {
+      readings.set(stage, readings.get(old));
+      if (botBests.has(old)) botBests.set(stage, botBests.get(old));
+    } else if (stage.link.trim()) {
+      unread.push(stage);
+    }
+  }
+  draft = placeStages(back);
+  picked = entry.picked;
+  openLane = null;
+  linking = false;
+  said = word;
+  shown = snapshot();
+  typedAt = 0;
+  keep();
+  unsave();
+  render();
+  showHistory();
+  if (unread.length) {
+    await Promise.all(unread.map(readLink));
+    render();
+  }
+}
+
+function undo() {
+  if (!past.length) return;
+  future.push(snapshot());
+  restore(past.pop(), "Undone.");
+}
+
+function redo() {
+  if (!future.length) return;
+  past.push(snapshot());
+  restore(future.pop(), "Redone.");
+}
+
+function showHistory() {
+  $("undo").disabled = !past.length;
+  $("redo").disabled = !future.length;
+}
+
+// What each text field held when it was focused, so Ctrl+Z there is the
+// field's own only once something has been typed in it.
+const heldOnFocus = new WeakMap();
+const TEXT = "textarea, input:not([type=checkbox]):not([type=radio]):not([type=file])";
+
+function typingIn(target) {
+  return Boolean(target?.matches?.(TEXT)) && target.value !== heldOnFocus.get(target);
+}
+
+function undoKeys(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || $("way-build").hidden) return;
+  const key = event.key.toLowerCase();
+  const back = key === "z" && !event.shiftKey;
+  const ahead = (key === "z" && event.shiftKey) || key === "y";
+  if ((!back && !ahead) || typingIn(event.target)) return;
+  event.preventDefault();
+  if (back) undo();
+  else redo();
 }
 
 function say(message, kind = "") {
@@ -156,9 +285,9 @@ async function boardRows(stage) {
 
 const stageAt = (key) => draft.stages.find((s) => s.key === key);
 
-/** A stage's name on a chip or in the diagram: its title, else "Stage N". */
+/** A stage's name on a chip or in the graph: its title, else "Stage 2-1" for its place. */
 function nameOf(stage) {
-  return tidy(stage?.title) || `Stage ${draft.stages.indexOf(stage) + 1}`;
+  return stageName(draft, stage);
 }
 
 /** "≤12", "≤12/30", "beat 31/12": a gate in a tight spot. */
@@ -190,7 +319,7 @@ function textField(id, value, placeholder, limit, onInput, multiline = false) {
   field.addEventListener("input", () => {
     onInput(field.value);
     if (limit) counter(count, field.value, limit);
-    changed();
+    changed({ soon: true });
   });
   return [field, count];
 }
@@ -338,12 +467,15 @@ function targetControl(holder, near, idFor, noneText, onChange) {
   return { row, show };
 }
 
-/** The options of the lane `lane`, shown under its near stage's card. */
-function renderLane(lane) {
+/** The options of the lane `lane`, shown under the card of `stage`, one of its ends. */
+function renderLane(lane, stage) {
   const near = stageAt(lane.from);
-  const far = stageAt(lane.to);
-  const idFor = (name) => `lane-${lane.from}-${lane.to}-${name}`;
-  const { row: gate } = targetControl(lane, near, idFor("aim"), `No gate: any clear of ${nameOf(near)} opens it.`,
+  const here = stage;
+  const there = stageAt(lane.from === stage.key ? lane.to : lane.from);
+  const ends = [here.key, there.key].sort((x, y) => x - y);
+  const idFor = (name) => `lane-${ends[0]}-${ends[1]}-${name}`;
+  const plain = lane.shut ? "No gate." : `No gate: any clear of ${nameOf(near)} opens it.`;
+  const { row: gate } = targetControl(lane, near, idFor("aim"), plain,
     () => {
       if (!lane.target) lane.hidden = hidden.checked = false;
       hidden.disabled = !lane.target;
@@ -358,13 +490,17 @@ function renderLane(lane) {
     label.textContent = named ? `${named}: ${LABEL_WHY[named]}` : "";
   };
 
-  const twoWay = el("input", { id: idFor("two-way"), type: "checkbox" });
-  twoWay.checked = lane.two_way;
-  twoWay.addEventListener("change", () => {
-    lane.two_way = twoWay.checked;
-    changed();
-    render(idFor("two-way"));
-  });
+  // One box per end, this card's far end first, so neither moves when a tick turns the lane round.
+  const opensBox = (from, to) => {
+    const box = el("input", { id: idFor(`opens-${to.key}`), type: "checkbox" });
+    box.checked = laneOpens(lane, to.key);
+    box.addEventListener("change", () => {
+      setOpens(lane, to.key, box.checked);
+      changed();
+      render(box.id);
+    });
+    return el("label", { class: "check" }, [box, `Clearing ${nameOf(from)} opens ${nameOf(to)}`]);
+  };
   const hidden = el("input", { id: idFor("hidden"), type: "checkbox" });
   hidden.checked = lane.hidden;
   hidden.disabled = !lane.target;
@@ -379,18 +515,21 @@ function renderLane(lane) {
     dropLane(draft, lane);
     openLane = null;
     changed();
-    render(`s${lane.from}-to-${lane.to}`);
+    render("add-link");
   });
   const close = el("button", { class: "drop", type: "button", text: "Done" });
   close.addEventListener("click", () => {
     openLane = null;
-    render(`s${lane.from}-to-${lane.to}`);
+    render(document.getElementById(chipId(lane)) ? chipId(lane) : "add-link");
   });
   showLabel();
 
-  return el("fieldset", { class: "lane-options" }, [
-    el("legend", { text: `Lane: ${nameOf(near)} ${lane.two_way ? "↔" : "→"} ${nameOf(far)}` }),
-    el("label", { class: "check" }, [twoWay, "Two-way (either end opens the other)"]),
+  const arrow = lane.shut ? "–" : lane.two_way ? "↔" : lane.from === here.key ? "→" : "←";
+  return el("fieldset", { class: `lane-options${lane.shut ? " shut" : ""}` }, [
+    el("legend", { text: `Lane: ${nameOf(here)} ${arrow} ${nameOf(there)}` }),
+    opensBox(here, there),
+    opensBox(there, here),
+    lane.shut ? el("p", { class: "warn", text: "It opens neither stage: tick one, or remove it." }) : null,
     el("span", { class: "label", text: "Gate (what opens it)" }), gate,
     el("label", { class: "check" }, [hidden, "Hidden until met (needs a gate)"]),
     label,
@@ -405,35 +544,27 @@ const LABEL_WHY = {
   Gated: "it opens on a target, not a plain win.",
 };
 
-/** The "Leads to" chips of `stage`: one per other stage, lit where a lane runs. */
+/** A lane's chip's id, the same whichever way it runs. */
+function chipId(lane) {
+  return `lane-${Math.min(lane.from, lane.to)}-${Math.max(lane.from, lane.to)}`;
+}
+
+/**
+ * The "Leads to" chips of `stage`: one per lane out, each opening its options,
+ * and one (red) per lane that opens neither end, on both its stages.
+ */
 function renderChips(stage) {
-  const many = draft.stages.length > ALL_CHIPS;
-  const chips = [];
-  const unlit = [];
-  for (const other of draft.stages) {
-    if (other === stage) continue;
-    const lane = laneFrom(draft, stage.key, other.key);
-    const back = !lane && laneBack(draft, stage.key, other.key);
-    if (many && !lane) {
-      unlit.push([other, back]);
-      continue;
-    }
-    const text = lane
-      ? `${nameOf(other)}${lane.two_way ? " ↔" : ""}${lane.target ? ` · ${shortTarget(lane.target)}` : ""}${lane.hidden && lane.target ? " · hidden" : ""}`
-      : back ? `${nameOf(other)}: ↔ make two-way` : nameOf(other);
+  const chips = (draft.lanes || []).filter((l) => leadsOut(l, stage.key)).map((lane) => {
+    const other = stageAt(lane.from === stage.key ? lane.to : lane.from);
+    const text = `${nameOf(other)}${lane.shut ? " · opens neither" : lane.two_way ? " ↔" : ""}`
+      + `${lane.target ? ` · ${shortTarget(lane.target)}` : ""}${lane.hidden && lane.target ? " · hidden" : ""}`;
     const chip = el("button", {
-      id: `s${stage.key}-to-${other.key}`, type: "button", text,
-      class: `chip${lane ? " lit" : ""}${lane && lane === openLane ? " open" : ""}`,
-      "aria-pressed": String(Boolean(lane)),
+      id: chipId(lane), type: "button", text,
+      class: `chip lit${lane.shut ? " shut" : ""}${lane === openLane ? " open" : ""}`,
+      "aria-expanded": String(lane === openLane),
     });
     chip.addEventListener("click", () => {
-      if (lane) {
-        openLane = openLane === lane ? null : lane;
-      } else {
-        const made = joinLane(draft, stage.key, other.key);
-        openLane = back ? made : openLane;
-        changed();
-      }
+      openLane = openLane === lane ? null : lane;
       render(chip.id);
     });
     const glow = (on) => () => lightLane(on ? [stage.key, other.key] : null);
@@ -441,27 +572,10 @@ function renderChips(stage) {
     chip.addEventListener("focus", glow(true));
     chip.addEventListener("mouseleave", glow(false));
     chip.addEventListener("blur", glow(false));
-    chips.push(chip);
-  }
-  const row = el("div", { class: "chips" }, chips);
-  if (unlit.length) {
-    const pick = el("select", { id: `s${stage.key}-lane-to`, class: "plain", "aria-label": "Add a lane to" }, [
-      el("option", { value: "", text: "+ Lane to…" }),
-      ...unlit.map(([other, back]) => el("option", {
-        value: String(other.key), text: back ? `${nameOf(other)}: ↔ make two-way` : nameOf(other),
-      })),
-    ]);
-    pick.addEventListener("change", () => {
-      const key = Number(pick.value);
-      if (!pick.value) return;
-      joinLane(draft, stage.key, key);
-      changed();
-      render(`s${stage.key}-to-${key}`);
-    });
-    row.append(pick);
-  }
-  if (!chips.length && !unlit.length) row.append(el("span", { class: "hint", text: "Add a stage to join it to." }));
-  return row;
+    return chip;
+  });
+  if (!chips.length) chips.push(el("span", { class: "hint", text: "None yet: + Add lane draws one." }));
+  return el("div", { class: "chips" }, chips);
 }
 
 /** "From Stage 1 · from Stage 3 (two-way)": the lanes into a stage, so either end explains one. */
@@ -474,42 +588,32 @@ function fromNote(stage) {
 }
 
 function renderStage(stage, i, dupes) {
-  const n = draft.stages.length;
   const id = (name) => `s${stage.key}-${name}`;
+  const place = draftNames(draft).get(stage.key);
   const summary = el("p");
   renderSummary(summary, stage, dupes.has(i));
 
-  const move = (step, focus) => {
-    draft.stages = moveStage(draft.stages, i, step);
-    changed();
-    render(focus);
-  };
-  const tools = el("div", { class: "row stage-tools" }, [
-    el("button", { id: id("after"), class: "drop", type: "button", text: "+ After",
-                   title: "A new stage below this one, with a lane from this one" }),
-    el("button", { id: id("branch"), class: "drop", type: "button", text: "+ Branch",
-                   title: "A new stage beside this one: the same lanes in, so a fork" }),
-    el("button", { id: id("up"), class: "drop", type: "button", "aria-label": "Move up", text: "↑" }),
-    el("button", { id: id("down"), class: "drop", type: "button", "aria-label": "Move down", text: "↓" }),
-    el("button", { class: "drop", type: "button", text: "Remove" }),
-  ]);
-  const [after, branch, up, down, remove] = tools.children;
-  after.disabled = branch.disabled = n >= LIMITS.stages;
-  up.disabled = i === 0;
-  down.disabled = i === n - 1;
-  remove.disabled = n === 1;
-  const grow = (how) => () => {
-    const made = addStage(draft, how);
-    changed();
-    render(`s${made.key}-link`);
-  };
-  after.addEventListener("click", grow({ after: stage.key }));
-  branch.addEventListener("click", grow({ beside: stage.key }));
-  up.addEventListener("click", () => move(-1, id("up")));
-  down.addEventListener("click", () => move(1, id("down")));
+  const join = el("button", { id: "add-link", class: `drop link${linking ? " on" : ""}`, type: "button",
+                              "aria-pressed": String(linking), text: linking ? "Cancel" : "+ Add lane",
+                              title: "Then tap a stage to join this one to it, or a dashed box for a new stage" });
+  join.disabled = view !== "author";
+  join.addEventListener("click", () => {
+    linking = !linking;
+    openLane = null;
+    said = "";
+    render("add-link");
+  });
+  const remove = el("button", { id: id("remove"), class: "drop", type: "button", text: "Delete stage" });
+  remove.disabled = draft.stages.length === 1;
   remove.addEventListener("click", () => {
+    const gone = nameOf(stage);
+    const at = draft.stages.indexOf(stage);
     removeStage(draft, stage.key);
+    placeStages(draft);
     if (openLane && !draft.lanes.includes(openLane)) openLane = null;
+    picked = (draft.stages[at] || draft.stages[at - 1]).key;
+    linking = false;
+    said = `Deleted ${gone} and its lanes.`;
     changed();
     render();
   });
@@ -525,9 +629,9 @@ function renderStage(stage, i, dupes) {
     keep();
     drawDiagram();
   });
-  const [title, titleCount] = textField(id("title"), stage.title, `Stage ${i + 1}`, LIMITS.title,
+  const [title, titleCount] = textField(id("title"), stage.title, `Stage ${place}`, LIMITS.title,
                                         (v) => { stage.title = v; });
-  // The chips and notes on other cards name this stage: redraw them once it is typed.
+  // The chips, notes and the graph name this stage: redraw them once it is typed.
   title.addEventListener("change", () => render());
   const [hint, hintCount] = textField(id("hint"), stage.hint, "One line, shown beside the board",
                                       LIMITS.hint, (v) => { stage.hint = v; });
@@ -559,11 +663,22 @@ function renderStage(stage, i, dupes) {
     changed();
     render(id("start"));
   });
-  const lane = openLane && openLane.from === stage.key && draft.lanes.includes(openLane) ? openLane : null;
+  const lane = openLane && [openLane.from, openLane.to].includes(stage.key) && draft.lanes.includes(openLane)
+    ? openLane : null;
+
+  // Ticked by default for a dead end (no lane out, not a goal); a tick either
+  // way sticks, so adding a lane out later doesn't untick one the author set.
+  const life = el("input", { id: id("life"), type: "checkbox" });
+  life.checked = typeof stage.bonus_life === "boolean" ? stage.bonus_life : grantsLife(graphOf(buildBody(draft)), i);
+  life.addEventListener("change", () => {
+    stage.bonus_life = life.checked;
+    changed();
+    render(id("life"));
+  });
 
   return el("fieldset", { class: "stage", id: `card-${stage.key}` }, [
-    el("legend", { text: `Stage ${i + 1}${tidy(stage.title) ? `: ${tidy(stage.title)}` : ""}` }),
-    tools,
+    el("legend", { text: `Stage ${place}${tidy(stage.title) ? `: ${tidy(stage.title)}` : ""}` }),
+    el("div", { class: "row stage-tools" }, [join, remove]),
     el("label", { for: id("link"), text: "Map link" }), link, summary,
     el("label", { for: id("title"), text: "Title" }), title, titleCount,
     el("label", { for: id("brief-0"), text: "Briefing (shown on a card as the stage starts)" }),
@@ -572,20 +687,31 @@ function renderStage(stage, i, dupes) {
     el("label", { for: id("hint"), text: "Hint" }), hint, hintCount,
     el("span", { class: "label", text: "Target (to open the stages beyond)" }), aim,
     el("label", { class: "check" }, [opens, "Open from the start"]),
-    el("span", { class: "label", text: "Leads to (tap a lit one for its options)" }),
+    el("label", { class: "check" }, [life, "Grants a bonus life (♥) the first time a run wins it"]),
+    el("span", { class: "label", text: "Leads to (tap one for its options)" }),
     renderChips(stage),
-    lane ? renderLane(lane) : null,
+    lane ? renderLane(lane, stage) : null,
     fromNote(stage),
   ]);
 }
 
-// -- the diagram ---------------------------------------------------------------
+/** Is `lane` one of `key`'s "Leads to": out of it either way it runs, or shut at either end? */
+function leadsOut(lane, key) {
+  return lane.from === key || (lane.to === key && (lane.two_way || lane.shut));
+}
+
+// -- the graph -----------------------------------------------------------------
 // Drawn from the body the draft builds, so a stage is placed where the game's
 // `gauntlet.layout` will place it, by the game's own drawer (stagegraph.mjs,
-// the one its gauntlet list uses). Read-only: a click on a stage scrolls to its
-// card, and hovering a chip lights its lane.
+// the one its gauntlet list uses), and edited where it is drawn.
 
 let diagram = null;   // what drawGraph answered, to light a lane with
+const nodeKey = (key) => `stage-${key}`;
+const keyOfNode = (node) => Number(node.slice("stage-".length));
+// The arrows round the selected stage, and where each sits beside its box.
+const ARROWS = { left: "←", right: "→", up: "↑", down: "↓" };
+const ARROW_PX = 28;
+const ARROW_GAP = 8;
 
 /** The draft as the drawer takes it: stages at their cells, the lanes between. */
 function diagramView() {
@@ -597,19 +723,26 @@ function diagramView() {
   const reached = reachable(graph);
   const plain = depths(graph);
   const ends = goals(graph);
-  const keyOf = (sid) => `card-${draft.stages[sid].key}`;
+  const keyOf = (sid) => nodeKey(draft.stages[sid].key);
+  const names = draftNames(draft);
+  const places = draftNames(draft, graph.ids.filter((sid) => !unseen.has(sid)).map((sid) => draft.stages[sid].key));
   const words = { start: "open from the start", goal: "ends the gauntlet", stranded: "no start reaches it",
-                  "off-path": "reached only through a gate", hidden: "hidden until met" };
+                  "off-path": "reached only through a gate", hidden: "hidden until met",
+                  life: "grants a bonus life" };
   const nodes = graph.ids.filter((sid) => !unseen.has(sid)).map((sid) => {
+    const stage = draft.stages[sid];
     const marks = [];
     if (graph.start.includes(sid)) marks.push("start");
     if (ends.has(sid)) marks.push("goal");
     if (!reached.has(sid)) marks.push("stranded");
     else if (!plain.has(sid)) marks.push("off-path");
     if (hiddenOnly.has(sid)) marks.push("hidden");
+    if (grantsLife(graph, sid)) marks.push("life");
+    const name = stageName(draft, stage, names);
+    if (stage.key === picked) marks.push(linking ? "source" : "picked");
     const [col, row] = cells.get(sid);
-    return { key: keyOf(sid), col, row, place: String(sid + 1), title: nameOf(draft.stages[sid]), open: true,
-             marks, tip: [`Stage ${sid + 1}: ${nameOf(draft.stages[sid])}`, ...marks.map((m) => words[m])].join(" · ") };
+    return { key: keyOf(sid), col, row, place: places.get(stage.key), title: name, open: true,
+             marks, tip: [name, ...marks.filter((m) => words[m]).map((m) => words[m])].join(" · ") };
   });
   const lanes = [];
   for (const [a, b] of graph.lanes) {
@@ -622,54 +755,184 @@ function diagramView() {
     lanes.push({ from: keyOf(a), to: keyOf(b), gated: Boolean(gate), short: gate ? shortTarget(gate) : "",
                  hidden: graph.hidden.has(pair), two_way: graph.twoWay.has(pair), warn: only });
   }
-  const stranded = graph.ids.filter((sid) => !reached.has(sid)).map((sid) => nameOf(draft.stages[sid]));
-  return { nodes, lanes, stranded, columns: Math.max(1, ...[...cells.values()].map(([c]) => c + 1)) };
+  if (!player) {
+    for (const [a, b] of shutLanes(draft)) lanes.push({ from: nodeKey(a.key), to: nodeKey(b.key), shut: true });
+  }
+  const stranded = graph.ids.filter((sid) => !reached.has(sid)).map((sid) => stageName(draft, draft.stages[sid], names));
+  const shut = shutLanes(draft).map(([a, b]) => `${stageName(draft, a, names)} and ${stageName(draft, b, names)}`);
+  const columns = Math.max(1, ...[...cells.values()].map(([c]) => c + 1));
+  const rows = (c) => [...cells.values()].filter(([cc]) => cc === c).length;
+  return { nodes, lanes, stranded, shut, columns, rows };
+}
+
+/**
+ * The dashed box at the foot of every column, and one past the last: each adds
+ * a stage there (`addStageAt`), joined to nothing, or while adding a lane with
+ * one from the selected stage. Always drawn, so starting a lane never resizes
+ * the graph.
+ */
+function ghosts(shape) {
+  const from = linking ? nameOf(stageAt(picked)) : "";
+  return Array.from({ length: shape.columns + 1 }, (_, col) => {
+    const name = newStageName(draft, col);
+    const box = el("button", {
+      type: "button", class: "sg-ghost", title: `Add ${name}${from ? `, with a lane from ${from}` : ""}`,
+    }, [el("span", { class: "sg-title", text: `+ ${name}` }),
+        from ? el("span", { class: "sg-status", text: `with a lane from ${from}` }) : null].filter(Boolean));
+    box.disabled = draft.stages.length >= LIMITS.stages;
+    box.addEventListener("click", () => {
+      const stage = addStageAt(draft, col, { from: linking ? picked : null });
+      if (!stage) return;
+      said = `Added ${nameOf(stage)}${from ? `, with a lane from ${from}` : ""}.`;
+      picked = stage.key;
+      linking = false;
+      openLane = null;
+      changed();
+      render(`s${picked}-link`);
+      diagram?.show(nodeKey(picked));
+    });
+    return { col, row: shape.rows(col), el: box };
+  });
+}
+
+/** The move arrows round the selected stage, where it can go (`moveOptions`), set once the boxes are placed. */
+function arrows() {
+  if (view !== "author" || linking || picked === null) return () => {};
+  const moves = moveOptions(draft, picked);
+  return (rect, grid) => {
+    for (const old of grid.querySelectorAll(".sg-move")) old.remove();
+    const r = rect(nodeKey(picked));
+    if (!r) return;
+    const spot = {
+      left: [r.x - ARROW_PX - ARROW_GAP, r.y + (r.h - ARROW_PX) / 2],
+      right: [r.x + r.w + ARROW_GAP, r.y + (r.h - ARROW_PX) / 2],
+      up: [r.x + (r.w - ARROW_PX) / 2, r.y - ARROW_PX - ARROW_GAP],
+      down: [r.x + (r.w - ARROW_PX) / 2, r.y + r.h + ARROW_GAP],
+    };
+    for (const dir of moves) {
+      const words = `Move ${dir === "up" || dir === "down" ? `${dir} a row` : `${dir} a column`}`;
+      const button = el("button", { id: `move-${dir}`, type: "button", class: "sg-move", text: ARROWS[dir],
+                                    title: words, "aria-label": words });
+      button.style.left = `${spot[dir][0]}px`;
+      button.style.top = `${spot[dir][1]}px`;
+      button.addEventListener("click", () => {
+        said = moveStageTo(draft, picked, dir) || "";
+        openLane = null;
+        changed();
+        render();
+        (document.getElementById(`move-${dir}`) || diagram?.node(nodeKey(picked)))?.focus({ preventScroll: true });
+      });
+      grid.append(button);
+    }
+  };
 }
 
 function drawDiagram() {
   const box = $("diagram");
   if (!box) return;
+  clearTimeout(redraw);
+  if (picked === null || !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
   const shape = diagramView();
+  const editing = view === "author";
+  const scroll = box.scrollLeft;
   diagram = drawGraph(box, shape, {
     label: `The gauntlet's shape: ${shape.nodes.length} stages in ${shape.columns} columns`,
-    onPress: (key) => {
-      const card = document.getElementById(key);
-      if (!card) return;
-      card.scrollIntoView({ behavior: "smooth", block: "start" });
-      card.classList.remove("flash");
-      void card.offsetWidth;   // restart the animation
-      card.classList.add("flash");
-    },
+    onPress: (node) => pressStage(keyOfNode(node)),
+    extras: editing ? ghosts(shape) : [],
+    onLane: editing ? (from, to) => pressLane(keyOfNode(from), keyOfNode(to)) : null,
+    after: arrows(),
   });
-  $("diagram-note").textContent = shape.stranded.length
-    ? `No start reaches ${shape.stranded.join(", ")}: join it from a stage, or tick it as open from the start.`
-    : "";
+  box.scrollLeft = scroll;
+  box.classList.toggle("linking", linking);
+  $("relayout").disabled = !editing || !laidOutApart(draft);
+  $("diagram-note").textContent = [
+    shape.shut.length ? `The lane between ${shape.shut.join(", and between ")} opens neither stage: `
+      + "tap it to tick an end, or remove it." : "",
+    shape.stranded.length
+      ? `No start reaches ${shape.stranded.join(", ")}: draw a lane to it, or tick it as open from the start.` : "",
+  ].filter(Boolean).join(" ");
+  const hint = $("graph-hint");
+  hint.classList.toggle("linking", linking);
+  hint.textContent = linking
+    ? `Drawing a lane from ${nameOf(stageAt(picked))}: tap a stage to join them, or a dashed box for a new stage with a lane `
+      + "from it. Esc or Cancel stops."
+    : said || (editing ? "Tap a stage to edit it, a lane for its options, or a dashed box to add a stage there."
+                       : "The graph a new player sees: no hidden lanes, and no stage only they reach.");
+}
+
+/** A press on a stage: select it, or while adding a lane join the selected stage to it. */
+function pressStage(key) {
+  if (!linking) {
+    picked = key;
+    openLane = null;
+    said = "";
+    render();
+    return;
+  }
+  linking = false;
+  if (key !== picked) {
+    const there = laneFrom(draft, picked, key);
+    const back = !there && laneBack(draft, picked, key);
+    const lane = joinLane(draft, picked, key);
+    const [a, b] = [nameOf(stageAt(picked)), nameOf(stageAt(key))];
+    said = there ? `${a} already leads to ${b}: its options are below.`
+      : back ? `The lane between ${a} and ${b} now runs both ways.` : `Joined ${a} → ${b}.`;
+    openLane = there || back ? lane : null;
+    changed();
+  } else {
+    said = "";
+  }
+  render();
+  if (openLane) showLane();
+}
+
+/** A press on a lane: select its near stage and open the lane's options. */
+function pressLane(from, to) {
+  const lane = draft.lanes.find((l) => (l.from === from && l.to === to) || (l.shut && l.from === to && l.to === from));
+  if (!lane) return;
+  linking = false;
+  picked = from;
+  openLane = lane;
+  said = "";
+  render();
+  showLane();
+}
+
+/** Bring the open lane's options into view. */
+function showLane() {
+  document.querySelector(".lane-options")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 /** Light the lane between two stage keys (either way), or none. */
 function lightLane(pair) {
-  diagram?.light(pair ? `card-${pair[0]}` : null, pair ? `card-${pair[1]}` : null);
+  diagram?.light(pair ? nodeKey(pair[0]) : null, pair ? nodeKey(pair[1]) : null);
 }
 
 function showView(which) {
   view = which;
+  linking = false;
+  said = "";
   for (const w of ["author", "player"]) {
     const tab = $(`view-${w}`);
     tab.classList.toggle("lit", w === view);
     tab.setAttribute("aria-pressed", String(w === view));
   }
-  drawDiagram();
+  render();
 }
 
-/** Redraw the form (and the diagram), then put the focus back on `focusId`. */
+/** Redraw the form (the selected stage's card and the graph), then put the focus back on `focusId`. */
 function render(focusId = null) {
+  if (picked === null || !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
+  if (shown) shown.picked = picked;   // a selection is no edit, but an undo comes back to it
+  if (openLane && !draft.lanes.includes(openLane)) openLane = null;
   const dupes = duplicates();
-  clear($("stages")).append(...draft.stages.map((stage, i) => renderStage(stage, i, dupes)));
-  $("add-stage").disabled = draft.stages.length >= LIMITS.stages;
+  const i = draft.stages.findIndex((s) => s.key === picked);
+  clear($("stages")).append(...(i >= 0 ? [renderStage(draft.stages[i], i, dupes)] : []));
   $("g-name").value = draft.name;
   counter($("g-name-count"), draft.name, LIMITS.name);
   $("g-by").value = draft.by_name;
   $("g-listing").checked = draft.wants_listing;
+  $("g-lives").value = String(draft.lives ?? 1);
   drawDiagram();
   showProblem();
   if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
@@ -767,6 +1030,7 @@ async function load() {
       if (!response.ok) throw new Error(answer.error || String(response.status));
       draft = await draftFromBody(answer.gauntlet, linkFor);
       openLane = null;
+      picked = null;
       history.replaceState(null, "", location.pathname);
       keep();
       say(`Opened ${tidy(answer.gauntlet.name)}. Saving your edits makes a new link.`);
@@ -782,8 +1046,10 @@ async function load() {
     }
     draft = stored || freshDraft();
   }
+  placeStages(draft);
   await Promise.all(draft.stages.map(readLink));
   render();
+  forget();
 }
 
 /**
@@ -808,8 +1074,9 @@ async function openFile() {
     return;
   }
   if (!confirm("Replace this draft with the file?")) return;
-  draft = { ...opened, by_name: draft.by_name, wants_listing: draft.wants_listing };
+  draft = placeStages({ ...opened, by_name: draft.by_name, wants_listing: draft.wants_listing });
   openLane = null;
+  picked = null;
   changed();
   await Promise.all(draft.stages.map(readLink));
   render();
@@ -827,10 +1094,31 @@ function main() {
   });
   $("g-by").addEventListener("input", () => { draft.by_name = $("g-by").value; changed(); });
   $("g-listing").addEventListener("change", () => { draft.wants_listing = $("g-listing").checked; changed(); });
-  $("add-stage").addEventListener("click", () => {
-    const stage = addStage(draft);
+  $("g-lives").addEventListener("input", () => {
+    const n = Number($("g-lives").value);
+    draft.lives = Number.isInteger(n) ? Math.max(1, Math.min(LIMITS.lives, n)) : 1;
     changed();
-    render(`s${stage.key}-link`);
+    drawDiagram();
+  });
+  $("relayout").addEventListener("click", () => {
+    layOutFromLanes(draft);
+    linking = false;
+    openLane = null;
+    said = "Laid every stage out by its lanes. Ctrl+Z puts them back.";
+    changed();
+    render();
+    if (picked !== null) diagram?.show(nodeKey(picked));
+  });
+  $("undo").addEventListener("click", undo);
+  $("redo").addEventListener("click", redo);
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches?.(TEXT)) heldOnFocus.set(event.target, event.target.value);
+  });
+  document.addEventListener("keydown", undoKeys);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !linking) return;
+    linking = false;
+    render("add-link");
   });
   for (const w of ["author", "player"]) $(`view-${w}`).addEventListener("click", () => showView(w));
   $("open-file").addEventListener("change", openFile);
@@ -839,8 +1127,11 @@ function main() {
   $("download").addEventListener("click", download);
   $("reset").addEventListener("click", () => {
     if (!confirm("Clear this draft and start over?")) return;
-    draft = freshDraft();
+    draft = placeStages(freshDraft());
     openLane = null;
+    picked = null;
+    linking = false;
+    said = "";
     changed();
     render();
   });

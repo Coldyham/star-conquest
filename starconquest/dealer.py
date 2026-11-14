@@ -462,6 +462,35 @@ def _fits(value: int, rule: Rule | None) -> bool:
     return value not in rule.value       # type: ignore[operator]
 
 
+# The ways two stages in a column of a branching gauntlet may differ, in the
+# order a pair's titles name them (`gauntletgen.differ`).
+AXES = ("size", "lane length", "layout")
+# Systems a size differs by: the larger at least this times the smaller.
+SIZE_RATIO = 1.25
+# Turns the median lanes differ by.
+LANE_TURNS_APART = 2
+
+
+def free_axes(spec: Spec) -> list[str]:
+    """The ``AXES`` ``spec`` leaves free to differ between two of its deals:
+    size unless its systems are pinned narrower than ``SIZE_RATIO`` (or never
+    rolled), lane length unless a ``lane_turns`` rule bounds it narrower than
+    ``LANE_TURNS_APART``, layout when both modes may be dealt."""
+    out = []
+    rule = spec.rules.get("systems")
+    if rule is not None or spec.roll:
+        lo, hi = _span("systems", rule) if rule is not None else (config.MIN_PLAYERS + 3, SYSTEMS_ROLL_MAX)
+        if hi >= lo * SIZE_RATIO:
+            out.append("size")
+    lane = spec.rules.get("lane_turns")
+    lo, hi = _span("lane_turns", lane) if lane is not None else (1, LANE_TURNS_MAX)
+    if hi - lo >= LANE_TURNS_APART:
+        out.append("lane length")
+    if ("mode" in spec.rules or spec.roll) and len(_allowed("mode", spec.rules.get("mode")) or []) > 1:
+        out.append("layout")
+    return out
+
+
 def stage_dict(settings: Settings) -> dict:
     """A dealt setup as a gauntlet stage stores it: pruned, as the board stores
     a pasted link's (`gauntlet-build.mjs` `stageSetup`), never a demo and never

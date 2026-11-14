@@ -392,13 +392,18 @@ stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 (`webstore.best` on the stage's keys). A stage is active only while the setup
 matches it (`setupmenu.active_stage`). Built-in stages pin every field and a seed.
 `from_dict` never raises. The play screen never sees a `Gauntlet` (`app.stage_ui`).
-**A run (`run.py`) is the one stored progress**: one way from a start to a
-goal, chosen at each fork (offered for a target or a fork, `run.offered`), one
-life; a gated lane opens on the run's own score (`run.ways_on`). It judges only its own game (`run.finish`), so a
-Retry is free play; Continue resumes that game's log, never a fresh copy.
-**A stage's place on the graph is computed (`gauntlet.layout`, mirrored by
-`gauntlet-graph.mjs`; `gauntlet-layout.json`), never stored**; the board page
-edits lanes by draft key, and a linear draft builds exactly its old body. The
+**A run (`run.py`) is the one stored progress**: from a start to a goal over
+any stage it has opened (`run.frontier`; offered for a target or a fork,
+`run.offered`), on the gauntlet's lives, a loss costing one; a gated lane opens
+on the run's own score. Lives left are derived from the steps
+(`run.lives_left`); a bonus life is `gauntlet.grants_life`, by default a dead
+end's. It judges only its own game (`run.finish`), so a
+rewind is free play; Continue resumes that game's log, never a fresh copy.
+**A stage's place on the graph is computed from the lanes (`gauntlet.layout`,
+mirrored by `gauntlet-graph.mjs`; `gauntlet-layout.json`) unless every stage
+carries its author's `at`**; the board writes `at` only when it differs from the
+computed layout, edits lanes by draft key, never moves a stage or draws a lane
+the author didn't ask for, and a linear draft builds exactly its old body. The
 game's list and the board draw it with one drawer, `webapp/js/stagegraph.mjs`
 (the board imports it from `/play/`; it decides nothing): a tap selects
 (`MenuState.stage_pick`), a second tap plays, and a hidden lane is drawn only

@@ -177,7 +177,8 @@ For authors. A gauntlet is one JSON file:
  "stages": [
    {"id": 0, "title": "First contact", "briefing": ["…", "…"], "hint": "…", "settings": {…}},
    …],
- "lanes": [[0, 1], [1, 2], …]}
+ "lanes": [[0, 1], [1, 2], …],
+ "lives": 3}
 ```
 
 - A stage's `settings` is exactly what the menu's Save writes
@@ -189,8 +190,22 @@ For authors. A gauntlet is one JSON file:
   beat, `{"turns": 31, "lost": 12, "bot": "thinker", "beat": true}` ("Stage
   targets", below). `turns` is a positive int, `lost` an int from 0, `bot` at
   most 24 characters.
+- `lives` is what a run of the gauntlet starts with, an int from 1 to
+  `gauntlet.LIVES_MAX` (9), default 1; `from_dict` clamps it and `to_dict`
+  writes it only when it isn't 1 ("Runs", *Lives*, below).
+- A stage's optional `bonus_life` says whether winning it within its target
+  in a run grants a life, once per run. **Its default follows the graph**: on
+  for a dead end (no lane out at all, and not a goal, such as the tutorial's
+  "Long odds" behind its gate), off otherwise (`gauntlet.grants_life`, mirrored
+  by the board's `gauntlet-graph.mjs` and pinned by `gauntlet-layout.json`).
+  The file writes it only when it differs from that default, so adding a lane
+  out of a dead end turns its bonus off unless the author ticked it.
 - `briefing` is a list of paragraphs, at most six of 240 characters each.
-  `hint` is one line of at most 90. `title` is at most 32 characters.
+  `hint` is one line of at most 90. `title` is at most 32 characters; left blank, the stage is named for its place on the graph ("Stage 3-2", `gauntlet.cell_names`).
+- A stage's optional `at` is where its author put it on the graph,
+  `[column, row]` from 0. It counts only when every stage has one, no two
+  alike; otherwise the graph is laid out from the lanes (`gauntlet.layout`).
+  The board writes it only when the author's places differ from that layout.
 - `lanes` joins stages by `id`, as the weekly campaign's graph does. If `lanes`
   is missing, the stages are joined in list order, so a linear gauntlet can
   leave it out. `start` lists the stages open from the beginning (default: the
@@ -334,26 +349,27 @@ board's halves.
 ## Runs (built 2026-11-04)
 
 A **run** plays a gauntlet's stages from a start to a goal, each won within
-its target, with one life. It is the first step towards the roguelite run
-below: forks (built 2026-11-12, *Forks* below), but no lives or boons. It needs no format change, so a gauntlet already made
-can be run, and in particular a generated one with stage targets (the form's
-"Stage targets", from the probes' wins) or one built on the board with "Beat
-the best bot". The working plan for the rest is
+its target, on the gauntlet's lives (one unless it says more). It is the
+first step towards the roguelite run below: forks, lives and movement over
+every stage opened (*Lives, and moving over everything unlocked* below), but
+no boons. A gauntlet already made can be run, and in particular a generated
+one with stage targets (the form's "Stage targets", from the probes' wins) or
+one built on the board with "Beat the best bot". Boons stay parked in
 [`graphical-gauntlet-maker.md`](../graphical-gauntlet-maker.md).
 
 - **Offered only where it adds something** (`run.offered`). The gauntlet must
   have a goal to end on, and either a stage target or a fork (`run.forks`:
   two starts, or a stage on the main path with more than one way out, gated or
-  not). At a fork the choice is the point: a run that takes a way it can't win
-  is over. On the tutorial, a single path with no target whose gates lead only
+  not). At a fork the choice is the point: a way the run can't win costs it
+  lives. On the tutorial, a single path with no target whose gates lead only
   off its last stage, a run would be the stage list again, so the list shows
   no run there.
 - **Only this game's score counts.** A run game's Next stage asks
   `can_post` and `met_target` on this game, never `stage_met_before`, so a fast
   free-play win on a stage doesn't carry a run over it
   (`Ui.offers_next_stage`). A loss, a win short of the target, or a win not
-  played by hand ends the run (`run.judge`), and so does being knocked out
-  while the bots play on.
+  played by hand costs a life (`run.judge`, `run.COSTS`), and so does being
+  knocked out while the bots play on.
 - **Run games are ordinary games.** They post, file bests and clear stages as
   any other. Nothing reaches `Settings` or the log, so the board and the
   verifier never see a run.
@@ -364,10 +380,12 @@ the best bot". The working plan for the rest is
   starts and again the moment that game is decided. The store keeps the active
   run and the last 20 finished.
 - **A run judges only its own game.** Each step names its game's log file.
-  Only that game moves the run, and only once (`run.finish`). A Retry, a rewind
-  or a fork after the game is decided is free play: `main.run_ui` marks only
-  the run's own game, and the run has already recorded the result. So none of
-  them is blocked. They just aren't the run. While the game is undecided it
+  Only that game moves the run, and only once (`run.finish`). A rewind or a
+  fork after the game is decided is free play: `main.run_ui` marks only the
+  run's own game, and the run has already recorded the result. The decided
+  game's overlay offers no free-play Retry, though: beside Try again (a new
+  step) it would be a fresh game of the same stage that the run doesn't
+  record. While the game is undecided it
   plays ironman (no History or Undo, so no rewind), and the Hint is
   not offered (`Ui.can_hint`).
 - **Quitting doesn't escape a bad game.** Continue run resumes the step's own
@@ -381,41 +399,129 @@ the best bot". The working plan for the rest is
 - **One run at a time.** Starting another gauntlet's run abandons the one
   under way, after a second press. Abandon run also takes two.
 - **An edited gauntlet ends its run.** A run stores a hash of its stages' setups
-  and targets (`run.fingerprint`). A desktop file changed under a run makes it
+  and targets, and of the stages that grant a life once there are any
+  (`run.fingerprint`). A desktop file changed under a run makes it
   a different gauntlet, as an edited stage is a new one (`run.active_for`).
 - **In the list:** a line under the stages ("Best run: 5/8 stages", "Run
   complete ✓", or what a run is), then **Start run**, or **Continue run** and
-  **Abandon run**. The stage the run is on reads "run · …" in its row. On
-  the overlay, the run's line ("Run: stage 2/8 done · Next stage carries it
-  on", "Run over at stage 3/8: Win in 14 turns or fewer not met") takes the
-  stage verdict's place.
+  **Abandon run**. The stages the run may play read "run · …" in their rows.
+  On the overlay, the run's line ("Run: stage 2/8 done · Next stage carries it
+  on", "Run: lost · ♥♥ left", "Run over at stage 3/8: Win in 14 turns or fewer
+  not met") takes the stage verdict's place.
 
-### Forks (built 2026-11-12)
+### Lives, and moving over everything unlocked (built 2026-11-12)
 
-The first build offered runs only on a single path. That left out exactly the
-gauntlets where a run means most: at a fork, the way chosen can end the run.
-This is the movement half of Phase 5 of the plan, without lives or boons.
+Forks came first (2026-11-12), moving a run only from the stage it last won.
+Lives came the same day, and with them a run that may play any stage it has
+opened: a loss costs a life rather than ending the run, and the next go can
+be the same stage (it was close) or another (the other track looked easier).
+That second choice is what turns a second track into a real choice rather
+than a coin toss at the start.
 
-- **A run moves from the stage it last won** (`run.ways_on`), never from bests.
-  At first its ways on are the starts. After a win they are each ungated lane
-  out of that stage to a stage the run hasn't won (so a two-way lane never
-  leads back), and each gated lane whose target **this game's** score meets.
-- **A win with no ungated way on completes the run** (`run.ends`): a goal, or a
-  bonus stage's dead end. A gated lane out of a goal (the tutorial's bonus
-  stages) is not taken, as the plan's "winning a goal wins the run" says.
-- **One way on: Next stage carries it on**, as before. The game works this out
-  from the ways out it was given (`Ui.run_ways`, set by `app.run_ui`) and this
-  game's score, in `app.record_run_step`.
-- **More than one: the list chooses.** The overlay says "choose the way on in
-  the gauntlet list". The list marks every way on "run", and Continue run plays
-  the selected stage, naming it on the button ("Continue run: Nebula Gate").
-  With nothing chosen it asks for a stage marked run. Two starts work the same
-  way for Start run.
+- **The frontier is every stage the run has opened and not yet won**
+  (`run.frontier`). A stage is open if it is a start, if an ungated lane leads
+  to it from a stage the run won, or if a gated lane does from a stage the run
+  won *with a game whose own score met the gate* (`run.unlocked`). Bests never
+  count.
+- **A stage is behind the run once a stage it leads to is won** (`run.behind`),
+  and leaves the frontier: in a concertina, the unplayed half of a pair closes
+  once the waist after it is won, so a run never wanders back. A two-way lane
+  leads back too, so it never puts a stage behind. A dead end leads nowhere,
+  so it stays until it is played; that is what makes its bonus life worth
+  anything.
+- **A stage is spent once winning it would open nothing new** (`run.spent`),
+  and leaves the frontier too: every stage it leads to is open, won or behind
+  already. In a cross-stitch, winning one stage of a pair opens both stages
+  after it, so the other stage of the pair is spent at once rather than once
+  the next column is won. A goal and a stage that grants a life are never
+  spent, since winning either is worth something of its own; a dead end leads
+  nowhere, so it never is. A gate to a stage that would be spent once opened
+  is not worth a replay (`run.gates_left`).
+- **A missed gate can be tried again for a life.** A won stage with a gated
+  lane out to a stage the run hasn't opened or gone past stays on the frontier
+  (`run.gates_left`), even once it is behind: the gate is a bonus, and worth a
+  life to some players. A replay is judged against the gate, not the stage
+  target (`run.finish`): meeting it is MET and opens the far stage; any other
+  win is MISSED and costs a life, or a player could keep winning it and
+  missing the gate for free. A replay wins no stage (`Run.cleared` counts
+  stages). Before lives, a missed gate was lost for good.
+- **A loss costs a life**: LOST, MISSED and VOID each cost one, and the stage
+  stays on the frontier. GONE and ABANDONED still end the run, since
+  restarting would reward a reload or a quit.
+- **Only running out of lives ends the run** (beside GONE and ABANDONED).
+  With a missed gate replayable the frontier can't empty before a goal is won:
+  an ungated way always leads on to a goal, and anything else left can be
+  replayed for a life. So what comes next is always the player's choice.
+  (`run.finish` still ends a run whose frontier empties, which a gauntlet with
+  a goal never reaches.)
+- **Winning a goal completes the run** (`gauntlet.goals`). Before, a win with
+  no ungated way on completed it; once any stage can be played, a won dead end
+  mustn't end a run whose other tracks are still open. A gated lane out of a
+  goal (the tutorial's bonus stages) is not taken: winning the goal wins the
+  run.
+- **Lives are copied, and derived.** `Run.lives` is the gauntlet's `lives` when
+  the run began, so a later edit to the gauntlet never changes a run under way
+  (it stays out of the fingerprint); a record without it reads as 1, so a run
+  begun before lives finishes under the rules it began with. `run.lives_left`
+  counts from the steps: the lives it began with, one more for each first win
+  of a stage that grants one (`gauntlet.grants_life`), one fewer for each step
+  that cost one. The steps are already the complete record, so a stored count
+  could only drift. Meeting a gate earns no life; there is no cap on lives
+  earned past the start.
+- **Next stage plays the run's pick, chosen on the overlay.** Where the run
+  may go more than one way, the win overlay draws where it can go: the stage
+  just played and every frontier stage, at their layout cells closed up
+  (`app.run_graph`, drawn by `stagegraph.mjs`). The way on is picked already
+  (`run.way_on`: the stage a loss just cost a life on, else the one stage not
+  yet won, else one the stage just played leads to, straight on in its row
+  first); a tap picks another, and a second tap or Next stage plays it
+  (`play.over_pick`), so a run never has to go back to the menu. Next stage
+  reads "Replay for its gate" on a won stage kept for its gate. With one way
+  on there is no graph, and Next stage plays it as before. The list's default
+  selection is the same `run.way_on`.
+- **After a loss**, with lives left, the overlay says "Run: lost · ♥♥ left"
+  and offers **Try again**, a fresh game of the same stage as a new step,
+  and, where the run may go another way, the graph with that stage picked:
+  picking another puts Next stage beside Try again. With no other way on it
+  offers **Choose a stage**, to the list. They are all the same: the life is
+  already spent when the loss is recorded, and Try again is only the list's
+  pick made for the player. After the last life: "Run over: no lives left · 3 stages
+  won". A one-life run with no bonus stage says nothing about lives
+  (`run.counts_lives`), as before.
+- **In the list** every frontier stage is marked "run", the run line reads
+  "Run under way: stage 3 · ♥♥ left", and Continue run plays the selected
+  stage, naming it on the button ("Continue run: Nebula Gate", or "Replay for
+  its gate: …" for a won stage). With nothing chosen it plays the one stage
+  not yet won, if there is one. The list's default selection is the run's next
+  stage before the one just played (`setupmenu.picked_stage`), so Continue run
+  never defaults to a replay that costs a life. A stage that grants a life is
+  marked ♥ on gauntlets that offer a run.
+- **With a run under way the menu opens on its list** (`setupmenu.open_run_list`,
+  `Session._run_list`), at boot and on every return from a game, unless the
+  resume prompt or a link has the screen. Running it is what the player came
+  back to do; Close puts the list away as before.
+- **Anything beside a run says it is free play.** In the list, the strip's
+  button reads "Play in run" (or "Replay for its gate") on a stage the run may
+  play now and plays it as Continue run does; on any other stage it reads
+  "Free play", in amber, under a line saying the run won't count it. A second
+  tap or Enter on a run stage plays the run; on any other stage it only
+  selects, so free play is only ever the button that says so
+  (`setupmenu.play_pick`). On the menu, a stage's banner adds "Start is free
+  play, not your run", and in the game the top bar's stage label ends
+  "· free play" (`app.FREE_PLAY_TAG`) where a run's own game ends "· run".
+- **On the board**, a Lives input sits beside the gauntlet's name, shared by
+  Build and Generate, and each stage card has "Grants a bonus life", ticked by
+  default for a dead end; a tick either way sticks in the draft. `checkBody`
+  checks both, and the diagram marks a bonus stage ♥.
 - **No total where runs differ in length** (`run.linear`: a single path with no
   gated lane). The list and overlay say "stage 3", not "stage 3 of 8", and a
   finished run "Run complete: 4 stages".
 - **The fingerprint covers the lanes** of any gauntlet that isn't a plain path,
-  so a lane edited under a run ends it. A plain path hashes as before.
+  so a lane edited under a run ends it, and the stages that grant a life once
+  there are any. A gauntlet with no bonus stage hashes as before.
+- **Not built:** checkpoints (a life already gives what going back to the last
+  waist would); a run on a linear gauntlet with no targets ("finish within
+  three losses" is a different challenge, left to the author to decide).
 
 ## The gauntlet: proposed, not built
 
@@ -652,46 +758,94 @@ The board's gauntlet page edits the graph: Phase 3 of
   the board reads `bot_scores`), `checkBody`, Save and listing. HTML forms also
   edit text better on a phone.
 - **Lanes join stages by a draft key, never by place.** Each draft stage gets a
-  `key` from the draft's `next_key` counter when it is made, so ↑/↓ and Remove
-  never rewire a lane. `draft.lanes` is `{from, to, two_way, aim, target,
-  hidden}` by key, `draft.start` a list of keys (`gauntlet-build.mjs`).
+  `key` from the draft's `next_key` counter when it is made, so a move and a
+  delete never rewire a lane. `draft.lanes` is `{from, to, two_way, aim, target,
+  hidden, shut?}` by key, `draft.start` a list of keys (`gauntlet-build.mjs`).
 - **A linear gauntlet saves exactly the body it saved before**, so its id holds:
   `buildBody` numbers stages in list order and writes `lanes` and `start` only
-  when they differ from what `from_dict` assumes without them. A new draft and
-  **+ Add a stage** join the new stage from the last one, so an author who never
-  touches a lane gets today's gauntlet. A draft kept before lanes reads back as
-  that chain (`readDraft`).
-- **Each card**: *Open from the start*; a row of **Leads to** chips, one per
-  other stage, lit where a lane runs (past 16 stages only the lit ones show,
-  the rest behind "+ Lane to…"); a "Reached from" note, so either end explains
-  a lane; **+ After** (a stage below, with a lane from this one) and **+
-  Branch** (a stage beside it, with this one's lanes in, so a fork). Where the
-  other end already has a one-way lane back, the chip offers "↔ make two-way":
-  the format keeps a pair's first lane and drops the second.
-- **A lit chip opens the lane's options**: two-way; a gate (none, turns typed
+  when they differ from what `from_dict` assumes without them. A draft kept
+  before lanes reads back as that chain (`readDraft`).
+- **The graph is the editor (built 2026-11-13).** A tap selects a stage and the
+  one card under the graph is that stage's, so a 30-stage gauntlet is not 30
+  cards to scroll. The edits are made where the shape shows, and **the author
+  places every stage**: no edit moves a stage or draws a lane the author
+  didn't ask for.
+  - **A dashed box at the foot of every column**, and one past the last, adds a
+    stage there with no lanes and no start mark (`addStageAt`); it shows as
+    unreachable until a lane reaches it. They are always drawn, so starting a
+    lane never resizes the graph.
+  - **+ Add lane** on the card, then a stage, joins the selected stage to it
+    (or makes a lane back two-way, since the format keeps a pair's first lane;
+    a pair already joined opens its options). Then a dashed box adds a stage
+    with that one lane from the selected stage, in whatever column was tapped.
+    Esc or Cancel stops.
+  - **Arrows round the selected stage** move it a cell (`moveOptions`,
+    `moveStageTo`): up and down swap it with its neighbour in the column; left
+    and right take it into the next column at the same row, or into a new
+    column at either end unless it is alone in its own. Lanes stay as they
+    are.
+  - **Lay out from lanes**, by Undo, places every stage as `layout` computes
+    it (`layOutFromLanes`), for lanes left in a tangle by moves; it is lit only
+    when that would move a stage (`laidOutApart`), and is one undo step.
+  - **A tap on a lane** (a wide invisible stroke over it, or its target) opens
+    its options in its near stage's card. **Delete stage** is on the card.
+  - **Undo and redo**: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, and buttons by the
+    graph, over up to 100 edits; typing in one go is one step. In a text field
+    already typed in, the keys are the field's own. An undo restores the
+    selection too, and keeps each unchanged link's reading.
+  The drawer takes these as `extras` (the dashed boxes), `onLane` and
+  `after(rect, grid)` (the arrows); the game passes none of them.
+- **Places are stored (`at`), as cells.** The layout was first computed from
+  lanes alone, so the editor had to draw lanes to put a stage in a column and
+  rewire them to move one; in use that read as the page linking stages behind
+  the author's back. What was being avoided was a freely placed, draggable
+  stage map like the map maker's; a column and row per stage is the
+  compromise, and the computed layout stays one press away. A draft stage keeps its `[column,
+  row]`, closed up after each edit (`placeStages`); a draft opened from a body
+  without places is placed as `layout` computes it. `buildBody` writes `at` on
+  every stage only when the places differ from the computed layout, so a
+  gauntlet laid out as its lanes would lay it out keeps its body and id, and
+  `checkBody` refuses places on only some stages or two in one cell.
+- **A stage's default name is its place** ("Stage 2-1", `draftNames`, the
+  game's `cell_names`), so the card, the graph and Save's problems name a stage
+  as the author sees it. The body stores a blank title as blank, and the game
+  names it the same way.
+- **Each card**: the stage's link, title, briefing, hint and target; *Open from
+  the start*; **Leads to**, one chip per lane out, each opening its options; a
+  "Reached from" note, so either end explains a lane.
+- **A lane's options**: one box per end, "Clearing A opens B" and "Clearing B
+  opens A" (`setOpens`), in the same order whichever way the lane runs, so a
+  tick never moves a box. Both is two-way; one alone turns the lane round to
+  run into the end ticked (`from` and `to` swap; its gate stays, now read from
+  the other stage); neither is a lane that opens neither stage (`shut`). The
+  body has no way to say that, so it builds to no lane: it is drawn red with no
+  arrowhead, listed on both its stages' chips and under the graph, and Save is
+  refused until an end is ticked or it is removed, as an unreachable stage is.
+  Drawing the lane again opens it the way it was drawn. This replaced a
+  two-way box, under which reversing a lane meant removing and redrawing it.
+  Then a gate (none, turns typed
   in, the near stage's link score, or the best bot on it: the stage target's
   choices plus one, through the same `applyAim`); hidden, only when gated; the
   derived label (`laneLabel`) as it is set; remove. A bot gate is read again on
   Save, as a stage's is.
-- **A stage's place is computed, never stored** (`gauntlet.layout`, mirrored by
-  `gauntlet-graph.mjs`): the column is ungated depth, so the main path reads
+- **Without stored places, a stage's place is computed** (`gauntlet.layout`,
+  mirrored by `gauntlet-graph.mjs`): the column is ungated depth, so the main path reads
   left to right and a shortcut is a long arrow; a stage reached only through
   gated lanes is one column past its shallowest source, walked level by level
   so list order never moves it; an unreached stage takes a last column. The
   row is list order, then one pass sorting each column by its parents' mean
-  row, not iterated, so the author's order (↑/↓) decides most of the picture
-  and a small edit never reshuffles it. Hidden stages are laid out too, so
-  revealing one moves nothing. `leaderboard/tests/fixtures/gauntlet-layout.json`
-  is read by both suites. A stored position (an `at` per stage) was decided
-  against: the author would be placing what `layout` already places.
-- **The diagram above the cards is read-only**, drawn by the game's own drawer
-  (*The graph view*, below), so it is the picture the gauntlet list will show:
-  a bar on starts and ★ on goals, dashed gated lanes with their short target,
-  dotted hidden ones; a stage no start reaches is red with a note, and a gated
-  lane that is a stage's only way in is amber (a warning: that is what a bonus
-  stage is). *As a new player sees it* drops hidden lanes and the stages only
-  they reach, leaving the gap the game will leave. Clicking a stage scrolls to
-  its card; hovering a chip lights its lane. It scrolls sideways in its own box.
+  row, not iterated, so a small edit never reshuffles it. Hidden stages are
+  laid out too, so revealing one moves nothing.
+  `leaderboard/tests/fixtures/gauntlet-layout.json` is read by both suites,
+  stored places included.
+- **The graph** is drawn by the game's own drawer (*The graph view*, below), so
+  it is the picture the gauntlet list will show: a bar on starts and ★ on
+  goals, dashed gated lanes with their short target, dotted hidden ones; a stage
+  no start reaches is red with a note, and a gated lane that is a stage's only
+  way in is amber (a warning: that is what a bonus stage is). *As a new player
+  sees it* drops hidden lanes and the stages only they reach, leaving the gap
+  the game will leave, and edits nothing. Hovering a chip lights its lane. It
+  scrolls sideways in its own box.
 
 ### The graph view (built 2026-11-11)
 
@@ -708,7 +862,9 @@ The game's gauntlet list draws the graph in place of a list of rows: Phase 2 of
 - **Layout is CSS.** Each stage is a button in a CSS grid at its cell, sized by
   its text; the lanes are an SVG layer drawn from where the buttons landed and
   redrawn when the grid resizes (a lane to the next column runs edge to edge, a
-  shortcut arcs over what it skips, a lane back dips below). The box scrolls,
+  shortcut arcs over what it skips, a lane back dips below, a lane within a
+  column runs straight down or up, bowing beside the column past a stage
+  between). The box scrolls,
   so the wheel, touch drag and scroll bars are the browser's; nothing keeps an
   offset or hit-tests. The page keeps the box's scroll and focus across the
   redraw each reply makes.
@@ -730,5 +886,13 @@ The game's gauntlet list draws the graph in place of a list of rows: Phase 2 of
 - **Edit on the board** opens a gauntlet the board stored on its maker as a
   draft (`gauntlet.on_board`: the board's id shape, not a generated
   `gen-<hash>`; `paths.LEADERBOARD_MAKER_PATH`).
+- **A node's corner reads column-row** (`gauntlet.cell_names`, mirrored by the
+  board's `cellNames`; the layout fixture pins both): "3" for the only stage in
+  column 3, "3-2" for the second row of a column holding more, so a chain reads
+  1, 2, 3 and only a fork grows a row number. It is counted over the stages the
+  player can see, so a hidden bonus neither takes a number nor makes one
+  appear. It replaced the list index, which read "8 · Stage 6" on a generated
+  concertina whose titles count columns. The win overlay's graph uses the same
+  names, though it closes up the columns it draws.
 - **Every gauntlet draws as a graph, linear ones too**: a chain is one row that
   scrolls sideways, opened on the stage to play next.

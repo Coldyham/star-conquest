@@ -97,8 +97,8 @@ is what switches it:
   fog a pinned board (a daily's, a challenge's, a hand map) is what fog keeps
   from you, so it is a "?" and "Map hidden". A seed left to chance has no board
   yet, so it is a sample, captioned so, which gives nothing away. The actions are folded to six, so no row is
-  left with one (`_compact_action_items`): the board's Recently played and
-  Shared matches share a Leaderboard list, as the desktop footer once did; a
+  left with one (`_compact_action_items`): one Leaderboard button, as on the
+  desktop footer, opens the board's main list; a
   drawn map's x sits inside Edit map; and there is no Quit, which a browser tab
   can't do and a phone leaves to its own controls (the game's overflow list
   keeps it). Tutorial, Daily and Play by post each open something of their

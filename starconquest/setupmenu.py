@@ -82,9 +82,12 @@ SEED_MAX_LEN = len(str(seed_top()))  # a typed seed stops at the newest pool's e
 # puzzle first as on the board site, each item the key a press is handled as.
 DAILY_LABEL = "Daily"
 DAILY_ITEMS = (("puzzle", "Daily puzzle"), ("daily", "Daily map"))
-# A phone's one button for the board's two lists.
+# The footer's one way to the board: its main list, whatever is on the menu.
 BOARD_LABEL = "Leaderboard"
-BOARD_ITEMS = (("browse_configs", "Recently played"), ("browse_matches", "Shared matches"))
+# The board's own lists of what the play-by-post prompt and the gauntlet list
+# start, linked at the foot of each.
+PBP_LOBBY_LINK = "Browse shared matches"
+GAUNTLETS_LINK = "Browse more gauntlets"
 # The HTML build's Save and Load (`files`): the setup and the last match saved
 # as files the browser keeps, and any of them, or a map, opened again.
 FILES_LABEL = "Files"
@@ -132,7 +135,6 @@ class Menu:
     drag_key: str | None = None
     strategy_open: bool = False
     daily_open: bool = False
-    board_open: bool = False
     files_open: bool = False
     confirm_quit: bool = False
     strategies: list[str] = field(default_factory=lambda: strategy_options())
@@ -1003,9 +1005,7 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
             "tutorial": gauntlets_label(ms) if ms.gauntlets else None,
             "daily": DAILY_LABEL if board else None,
             "get_link": True,
-            "shared": shared,
-            "recent": board,
-            "board": BOARD_LABEL if board and shared else None,
+            "leaderboard": BOARD_LABEL if board else None,
             "play_by_post": shared,
             "create": "Edit map" if drawn else "Create map",
             "clear_map": drawn,
@@ -1014,8 +1014,6 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
         },
         "lists": {"daily": {"open": ms.daily_open,
                             "items": [{"key": k, "label": label} for k, label in DAILY_ITEMS]},
-                  "board": {"open": ms.board_open,
-                            "items": [{"key": k, "label": label} for k, label in BOARD_ITEMS]},
                   "files": {"open": ms.files_open,
                             "items": [{"key": k, "label": label} for k, label in FILES_ITEMS]},
                   "share_save": {"open": ms.files_open,
@@ -1023,7 +1021,7 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
         "hint": None if touch else KEY_HINT,
         "modal": modal(ms, settings, touch),
         "pbp_prompt": pbp_prompt_view(ms, settings, touch),
-        "tutorial": tutorial_view(ms, settings, touch),
+        "tutorial": tutorial_view(ms, settings, touch, board=board),
         "sketch": sketch_view(ms),
         "dragging": ms.drag_key,
     }
@@ -1133,6 +1131,7 @@ def pbp_prompt_view(ms, settings: Settings, touch: bool) -> dict | None:
                   "limit": cap, "editing": ms.pbp_editing == which} for label, which, cap in PBP_TEXT_ROWS],
         "go": {"key": "pbp_confirm", "label": go},
         "stay": {"key": "pbp_cancel", "label": stay},
+        "link": {"key": "pbp_lobby", "label": PBP_LOBBY_LINK},
     }
 
 
@@ -1145,8 +1144,13 @@ HIGHLIGHT = (120, 150, 210)   # `menu._HL_BORDER`: an open stage's status
 COPY_GAUNTLET = "Copy link"
 TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_", "run_")
 RUN_KEYS = ("run_start", "run_continue", "run_abandon")
-RUN_ABOUT = "Run: every stage in order, each within its target, one life"
-RUN_ABOUT_FORK = "Run: one way through to the end, each stage within its target, one life"
+# Beside a run under way, what plays outside it says so: the list's strip,
+# and the stage banner over the menu's Start.
+FREE_PLAY = "Free play"
+FREE_PLAY_NOTE = "Not part of your run: free play, which the run doesn't count"
+FREE_PLAY_BANNER = "Start is free play, not your run: continue the run from {label}"
+RUN_ABOUT = "Run: every stage in order, each within its target, {lives}"
+RUN_ABOUT_FORK = "Run: any stage you've opened, to the end, each within its target, {lives}"
 PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
 
 Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
@@ -1248,7 +1252,10 @@ def stage_lines(ms, settings: Settings) -> list[tuple[str, tuple[int, int, int]]
     mine = webstore.best(*settings.challenge_keys())
     if mine is not None:
         bits.append(f"your best: {mine[0]} turns / {mine[1]} lost")
-    return [(head, START_BORDER), ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
+    lines = [(head, START_BORDER), ("   ·   ".join(bits), config.COLOR_TEXT_DIM)]
+    if live_run(ms) is not None:
+        lines.append((FREE_PLAY_BANNER.format(label=gauntlets_label(ms)), WARN))
+    return lines
 
 
 def open_tutorial(ms, settings: Settings, say: Say, pick: str | None = None) -> None:
@@ -1268,6 +1275,17 @@ def open_tutorial(ms, settings: Settings, say: Say, pick: str | None = None) -> 
     ms.tutorial_open = bool(ms.gauntlets)
     if not ms.gauntlets:
         say("No tutorial found in this build", False)
+
+
+def open_run_list(ms, settings: Settings, say: Say) -> bool:
+    """Open the list on the active run's gauntlet, as the menu does whenever it
+    opens with a run under way. False, and nothing opened, with no run or with
+    its gauntlet gone."""
+    r = gauntlet_run.active()
+    if r is None or gauntlet.find(gauntlet.every(), r.gauntlet_id) is None:
+        return False
+    open_tutorial(ms, settings, say, pick=r.gauntlet_id)
+    return ms.tutorial_open
 
 
 def say_gauntlet(ms, gid: str, text: str, ok: bool, say: Say) -> None:
@@ -1324,8 +1342,9 @@ def live_run(ms):
 def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | None:
     """The list's run line and its buttons, ``(text, [(key, label)])``, or None
     for a gauntlet that can't be run (`run.offered`): the tutorial. Where the
-    run may go more than one way, the button names the selected stage once it
-    is one of them, and the line asks for one until it is."""
+    run may go more than one way, the button names the stage it will play, and
+    the line asks for one until there is one. A stage already won, kept for its
+    gate, is named as a replay."""
     if not gauntlet_run.offered(g):
         return None
     live = live_run(ms)
@@ -1333,26 +1352,35 @@ def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | Non
         at, total = gauntlet_run.position(live, g)
         abandon = "Sure? Abandon" if ms.run_confirm == "run_abandon" else "Abandon run"
         where = f"stage {at} of {total}" if total else f"stage {at}"
+        if gauntlet_run.counts_lives(live, g):
+            where += f" · {gauntlet_run.hearts(gauntlet_run.lives_left(live, g))} left"
         go = "Continue run"
-        ways = gauntlet_run.ways_on(live, g)
+        ways = gauntlet_run.frontier(live, g)
         if len(ways) > 1:
-            stage = g.stage(ms.stage_pick) if ms.stage_pick in ways else None
-            where += " · choose the way on: a stage marked run"
-            go = f"Continue run: {stage.title}" if stage is not None else go
+            sid = gauntlet_run.stage_to_play(live, g, ms.stage_pick)
+            stage = g.stage(sid) if sid is not None else None
+            if stage is None:
+                where += " · choose a stage marked run"
+            elif sid in live.won:
+                go = f"Replay for its gate: {stage.title}"
+            else:
+                go = f"Continue run: {stage.title}"
         return f"Run under way: {where}", [("run_continue", go), ("run_abandon", abandon)]
     if live is not None and ms.run_confirm == "run_start":
         return "Starting this ends your run of another gauntlet", [("run_start", "Start anyway")]
-    about = RUN_ABOUT if gauntlet_run.linear(g) else RUN_ABOUT_FORK
+    lives = "one life" if g.lives == 1 else f"{g.lives} lives"
+    about = (RUN_ABOUT if gauntlet_run.linear(g) else RUN_ABOUT_FORK).format(lives=lives)
     return gauntlet_run.summary(g, ms.runs) or about, [("run_start", "Start run")]
+
 
 
 def run_stages(ms, g: gauntlet.Gauntlet) -> list[int]:
     """The stages to mark "run" on the active run of ``g``: the one it is
-    playing, or every way it may go on."""
+    playing, or every stage on its frontier."""
     live = live_run(ms)
     if live is None or live.gauntlet_id != g.id or live.status != gauntlet_run.ACTIVE:
         return []
-    return [live.playing.stage] if live.playing is not None else gauntlet_run.ways_on(live, g)
+    return [live.playing.stage] if live.playing is not None else gauntlet_run.frontier(live, g)
 
 
 @dataclass(frozen=True)
@@ -1433,23 +1461,36 @@ def tutorial_press(ms, settings: Settings, key: str, web: bool, say: Say,
         ms.gauntlet_pick = (ms.gauntlet_pick + step) % len(ms.gauntlets)
         ms.stage_pick = None
     elif key == "stage_play" and g is not None:
-        return play_pick(ms, settings, g, begin)
+        return play_pick(ms, settings, g, begin, say, chosen=True)
     elif key == "stage_edit" and g is not None:
         edit_on_board(ms, g, say)
     elif key.startswith("stage_") and g is not None and key[len("stage_"):].isdigit():
         sid = int(key[len("stage_"):])
         if sid == picked_stage(ms, settings, g):
-            return play_pick(ms, settings, g, begin)
+            return play_pick(ms, settings, g, begin, say)
         if any(r.stage.id == sid for r in stage_rows(ms, settings, g)):
             ms.stage_pick = sid
     return None
 
 
-def play_pick(ms, settings: Settings, g: gauntlet.Gauntlet,
-              begin: Callable[[str], str | None]) -> str | None:
-    """Play the selected stage, if it is open: load it and start through
-    ``begin``, the gate Start goes through. A locked one only stays selected."""
+def free_play(ms, settings: Settings, g: gauntlet.Gauntlet) -> bool:
+    """Would playing the selected stage be free play beside a run under way:
+    a run is active and the stage isn't one it may play now (`run_stages`)."""
+    return live_run(ms) is not None and picked_stage(ms, settings, g) not in run_stages(ms, g)
+
+
+def play_pick(ms, settings: Settings, g: gauntlet.Gauntlet, begin: Callable[[str], str | None],
+              say: Say, chosen: bool = False) -> str | None:
+    """Play the selected stage, if it is open: a stage the run may play now as
+    the run's next step (Continue run), else load it and start through
+    ``begin``, the gate Start goes through. A locked one only stays selected.
+    Beside a run, free play is only ever ``chosen`` (the strip's button, which
+    says so): a second tap or Enter on a stage off the run only selects it."""
     sid = picked_stage(ms, settings, g)
+    if sid is not None and sid in run_stages(ms, g):
+        return _run_press(ms, settings, g, "run_continue", "", say, begin)
+    if free_play(ms, settings, g) and not chosen:
+        return None
     rows = {r.stage.id: r for r in stage_rows(ms, settings, g)}
     if sid is None or not rows[sid].open or load_stage(ms, settings, g, sid) is None:
         return None
@@ -1459,8 +1500,11 @@ def play_pick(ms, settings: Settings, g: gauntlet.Gauntlet,
 
 def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
     """The selected stage, settled: the pick if it is still shown, else the
-    stage being played, the run's, the first open stage not yet cleared, the
-    first start, in that order (and kept, so arrows step from it)."""
+    stage a run of ``g`` would play next, the stage being played, the first on
+    the run's frontier, the first open stage not yet cleared, the first start,
+    in that order (and kept, so arrows step from it). The run's next
+    (`run.way_on` where it may go more than one way) comes before the stage
+    just played, so Continue run never defaults to a replay for a gate."""
     rows = stage_rows(ms, settings, g)
     shown = {r.stage.id for r in rows}
     if ms.stage_pick not in shown:
@@ -1468,9 +1512,14 @@ def picked_stage(ms, settings: Settings, g: gauntlet.Gauntlet) -> int | None:
         done = gauntlet.cleared(g, bests)
         here = next((r.stage.id for r in rows if r.here), None)
         run_on = next(iter(run_stages(ms, g)), None)
+        live = live_run(ms)
+        mine = live if live is not None and live.gauntlet_id == g.id else None
+        run_next = gauntlet_run.stage_to_play(mine, g) if mine is not None else None
+        if run_next is None and mine is not None:
+            run_next = gauntlet_run.way_on(mine, g)
         fresh = next((r.stage.id for r in rows if r.open and r.stage.id not in done), None)
         start = next((s for s in g.start if s in shown), None)
-        ms.stage_pick = next((s for s in (here, run_on, fresh, start) if s in shown),
+        ms.stage_pick = next((s for s in (run_next, here, run_on, fresh, start) if s in shown),
                              rows[0].stage.id if rows else None)
     return ms.stage_pick
 
@@ -1552,8 +1601,8 @@ def _run_press(ms, settings: Settings, g: gauntlet.Gauntlet, key: str, armed: st
     else:
         sid = gauntlet_run.stage_to_play(mine, g, pick) if mine is not None else None
         action = "run_continue"
-        if sid is None and mine is not None and gauntlet_run.ways_on(mine, g):
-            say_gauntlet(ms, g.id, "Select a stage marked run to choose the way on", False, say)
+        if sid is None and mine is not None and gauntlet_run.frontier(mine, g):
+            say_gauntlet(ms, g.id, "Select a stage marked run to choose where the run goes", False, say)
     if sid is None or load_stage(ms, settings, g, sid) is None:
         return None
     ms.tutorial_open = False
@@ -1570,15 +1619,18 @@ def graph_view(ms, settings: Settings, g: gauntlet.Gauntlet) -> dict:
     ends = gauntlet.goals(g)
     pick = picked_stage(ms, settings, g)
     run_on = run_stages(ms, g)
+    runs = gauntlet_run.offered(g)    # a bonus life means something only in a run
     shown = {r.stage.id for r in rows}
+    places = gauntlet.cell_names(g, shown)
     bests = ms.stage_bests.get(g.id, {})
     nodes = []
     for r in rows:
         sid = r.stage.id
         marks = [m for m, on in (("start", sid in g.start), ("goal", sid in ends), ("run", sid in run_on),
+                                 ("life", runs and gauntlet.grants_life(g, sid)),
                                  ("here", r.here), ("picked", sid == pick)) if on]
         col, row = cells[sid]
-        nodes.append({"key": f"stage_{sid}", "col": col, "row": row, "place": str(r.index + 1),
+        nodes.append({"key": f"stage_{sid}", "col": col, "row": row, "place": places[sid],
                       "title": r.stage.title, "status": r.short, "color": _hex(r.colour),
                       "open": r.open, "marks": marks})
     lanes = []
@@ -1621,13 +1673,22 @@ def pick_view(ms, settings: Settings, g: gauntlet.Gauntlet, web: bool) -> dict |
         label = gauntlet.lane_label(g, a, b) or gauntlet.GATED
         lines.append({"text": f"{label} to {g.stage(b).title}: {gate.text()}", "color": _hex(WARN)})
     edit = bool(web and board_draft(g))
+    play = {"key": "stage_play", "label": "Play", "enabled": r.open, "tone": "start"}
+    live = live_run(ms)
+    if sid in run_stages(ms, g):
+        play["label"] = "Replay for its gate" if live is not None and sid in live.won else "Play in run"
+    elif live is not None:
+        play.update(label=FREE_PLAY, tone="go")
+        if r.open:
+            lines.append({"text": FREE_PLAY_NOTE, "color": _hex(WARN)})
     return {"title": f"{r.index + 1} · {r.stage.title}", "lines": lines,
-            "play": {"key": "stage_play", "label": "Play", "enabled": r.open},
+            "play": play,
             "edit": {"key": "stage_edit", "label": "Edit on the board"} if edit else None}
 
 
-def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True) -> dict | None:
-    """The Tutorial list as it stands, or None while it is shut."""
+def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True, board: bool = False) -> dict | None:
+    """The Tutorial list as it stands, or None while it is shut. ``board`` says
+    there is a leaderboard whose gauntlets to link."""
     g = picked_gauntlet(ms) if ms.tutorial_open else None
     if g is None:
         return None
@@ -1651,4 +1712,5 @@ def tutorial_view(ms, settings: Settings, touch: bool, web: bool = True) -> dict
         "note": PROGRESS_NOTE if web else "",
         "said": {"text": said[1], "ok": said[2]} if said is not None else None,
         "buttons": buttons,
+        "link": {"key": "tutorial_board", "label": GAUNTLETS_LINK} if web and board else None,
     }

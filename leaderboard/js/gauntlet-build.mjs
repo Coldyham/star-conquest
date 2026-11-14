@@ -18,7 +18,7 @@
 // one is a new row. 19 + 1 + 12 = 32, gauntlet.py's NAME_MAX, so the id
 // survives the game's own clamp of a gauntlet's `id` intact.
 
-import { graphOf } from "./gauntlet-graph.mjs";
+import { cellNames, cellOf, deadEnd, graphOf, layout } from "./gauntlet-graph.mjs";
 import { compareScores } from "./standings.mjs";
 
 export const LIMITS = Object.freeze({
@@ -32,6 +32,7 @@ export const LIMITS = Object.freeze({
   bodyBytes: 65536,
   slug: 19,
   bot: 24,
+  lives: 9,
 });
 
 /** `schema.sql`'s check on `gauntlets.gauntlet_id`. */
@@ -198,7 +199,7 @@ export function targetText(target) {
  * it built before the page drew lanes, and keeps its id. A draft with no
  * `lanes` at all (one kept before lanes) is that linear gauntlet.
  */
-export function buildBody(draft) {
+export function buildBody(draft, { at = true } = {}) {
   const list = draft?.stages || [];
   const stages = list.map((stage, i) => ({
     id: i,
@@ -213,7 +214,7 @@ export function buildBody(draft) {
   const id = new Map(list.map((stage, i) => [stage.key, i]));
   const joined = new Set();
   const lanes = draft.lanes
-    .filter((lane) => id.has(lane.from) && id.has(lane.to) && lane.from !== lane.to)
+    .filter((lane) => !lane.shut && id.has(lane.from) && id.has(lane.to) && lane.from !== lane.to)
     .map((lane) => {
       const how = laneHow(lane);
       const pair = [id.get(lane.from), id.get(lane.to)];
@@ -231,7 +232,34 @@ export function buildBody(draft) {
     && lanes.every((pair, i) => pair.length === 2 && pair[0] === i && pair[1] === i + 1);
   if (!linear) body.lanes = lanes;
   if (start.length !== 1 || start[0] !== 0) body.start = start;
+  writeBonus(body, list);
+  const lives = Number(draft.lives);
+  if (Number.isInteger(lives) && lives > 1) body.lives = Math.min(lives, LIMITS.lives);
+  if (at) writeAt(body, draft);
   return body;
+}
+
+/** Each stage's place on the graph onto `body`, on every stage, only when the
+ * draft's places differ from what `layout` computes from the lanes: so a
+ * gauntlet the author never rearranged keeps the body (and id) it had. */
+function writeAt(body, draft) {
+  const cells = placed(draft);
+  if (!cells) return;
+  const computed = layout(graphOf(body));
+  if (cells.every((cell, i) => String(cell) === String(computed.get(i)))) return;
+  cells.forEach((cell, i) => { body.stages[i].at = cell; });
+}
+
+/** Each stage's `bonus_life` onto `body`, written only where it differs from
+ * the graph's default (`gauntlet.to_dict`), so ticking a box back to what the
+ * graph says moves no id. */
+function writeBonus(body, list) {
+  const graph = graphOf(body);
+  for (const [i, stage] of list.entries()) {
+    if (typeof stage.bonus_life === "boolean" && stage.bonus_life !== deadEnd(graph, i)) {
+      body.stages[i].bonus_life = stage.bonus_life;
+    }
+  }
 }
 
 /** A draft lane's third element: its target, hidden (only with one), two-way. */
@@ -251,7 +279,7 @@ function laneHow(lane) {
  * Keeps only the keys the game reads, so nothing else rides along into the
  * table; `id` is left out, being the store's to mint (`mintId`).
  */
-export function checkBody(body) {
+export function checkBody(body, nameOf = (i) => `stage ${i + 1}`) {
   if (!isObject(body)) return "not a gauntlet";
   const name = tidy(body.name);
   if (!name) return "the gauntlet needs a name";
@@ -262,7 +290,7 @@ export function checkBody(body) {
   const stages = [];
   const ids = new Set();
   for (const [i, raw] of body.stages.entries()) {
-    const where = `stage ${i + 1}`;
+    const where = nameOf(i);
     if (!isObject(raw)) return `${where} is not a stage`;
     if (!isInt(raw.id) || raw.id < 0 || ids.has(raw.id)) return `${where} has a bad id`;
     ids.add(raw.id);
@@ -285,7 +313,20 @@ export function checkBody(body) {
       if (typeof target === "string") return `${where} ${target}`;
       stage.target = target;
     }
+    if (raw.bonus_life !== undefined) {
+      if (typeof raw.bonus_life !== "boolean") return `${where}'s bonus_life is not true or false`;
+      stage.bonus_life = raw.bonus_life;
+    }
+    if (raw.at !== undefined) {
+      if (!cellOf(raw.at)) return `${where}'s place on the graph is not two whole numbers from 0 to ${LIMITS.stages - 1}`;
+      stage.at = cellOf(raw.at);
+    }
     stages.push(stage);
+  }
+  const atCount = stages.filter((stage) => stage.at).length;
+  if (atCount && atCount < stages.length) return "some stages have a place on the graph and some don't";
+  if (new Set(stages.filter((stage) => stage.at).map((stage) => String(stage.at))).size < atCount) {
+    return "two stages share a place on the graph";
   }
 
   const out = { name, stages };
@@ -306,8 +347,14 @@ export function checkBody(body) {
     if (!Array.isArray(body.start) || !body.start.every((s) => ids.has(s))) return "start names a stage that is not there";
     out.start = [...body.start];
   }
+  if (body.lives !== undefined) {
+    if (!isInt(body.lives) || body.lives < 1 || body.lives > LIMITS.lives) {
+      return `lives must be a whole number from 1 to ${LIMITS.lives}`;
+    }
+    if (body.lives !== 1) out.lives = body.lives;
+  }
   const stranded = unreachable(out);
-  if (stranded >= 0) return `stage ${stranded + 1} can't be reached from a start`;
+  if (stranded >= 0) return `${nameOf(stranded)} can't be reached from a start`;
   if (new TextEncoder().encode(JSON.stringify(out)).length > LIMITS.bodyBytes) {
     return `the gauntlet is over ${LIMITS.bodyBytes / 1024} KiB`;
   }
@@ -440,12 +487,14 @@ export function fileName(body, gauntletId) {
 // Lanes join stages by a `key` each stage gets when it is made (from the
 // draft's `next_key` counter), never by place, so reordering and removing never
 // rewire a lane: `lanes` is `[{from, to, two_way, target, hidden}]` by key
-// and `start` a list of keys. A stage's or lane's target is whatever numbers
+// and `start` a list of keys. A lane the author has set to open neither stage
+// carries `shut: true`: the body has no way to say that, so it builds to no
+// lane and Save is refused until one end is ticked or the lane removed. A stage's or lane's target is whatever numbers
 // were typed or filled in; an older draft's `aim` beside it is ignored.
 
 /** A stage with nothing in it yet. */
 export function emptyStage(key = 0) {
-  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", target: null };
+  return { key, link: "", settings: null, title: "", briefing: [""], hint: "", target: null, bonus_life: null, at: null };
 }
 
 /** A lane with no options: any clear of `from` opens `to`. */
@@ -462,7 +511,7 @@ function keptTarget(raw) {
 
 /** A draft with one empty stage, open from the start. */
 export function emptyDraft() {
-  return { name: "", by_name: "", wants_listing: false, stages: [emptyStage(0)], lanes: [], start: [0], next_key: 1 };
+  return { name: "", by_name: "", wants_listing: false, lives: 1, stages: [emptyStage(0)], lanes: [], start: [0], next_key: 1 };
 }
 
 /** Each stage joined to the next in list order: a linear gauntlet's lanes. */
@@ -495,6 +544,8 @@ export async function draftFromBody(body, linkFor) {
       briefing: briefing.length ? briefing : [""],
       hint: typeof stage.hint === "string" ? stage.hint : "",
       target,
+      bonus_life: typeof stage.bonus_life === "boolean" ? stage.bonus_life : null,
+      at: cellOf(stage.at),
     });
   }
   if (!stages.length) return emptyDraft();
@@ -513,11 +564,17 @@ export async function draftFromBody(body, linkFor) {
     name: typeof body?.name === "string" ? body.name : "",
     by_name: "",
     wants_listing: false,
+    lives: livesOf(body?.lives),
     stages,
     lanes,
     start: graph.start.map((id) => keyOf.get(id)),
     next_key: stages.length,
   };
+}
+
+/** A kept or stored `lives`, clamped as `Gauntlet.from_dict` clamps it. */
+function livesOf(raw) {
+  return isInt(raw) ? Math.max(1, Math.min(LIMITS.lives, raw)) : 1;
 }
 
 function readLane(raw, have) {
@@ -526,9 +583,10 @@ function readLane(raw, have) {
   return {
     from: raw.from,
     to: raw.to,
-    two_way: raw.two_way === true,
+    two_way: raw.two_way === true && raw.shut !== true,
     target,
     hidden: Boolean(target) && raw.hidden === true,
+    ...(raw.shut === true ? { shut: true } : {}),
   };
 }
 
@@ -561,6 +619,8 @@ export function readDraft(text) {
         ? s.briefing.map(str).slice(0, LIMITS.briefingLines) : [""],
       hint: str(s.hint),
       target,
+      bonus_life: typeof s.bonus_life === "boolean" ? s.bonus_life : null,
+      at: cellOf(s.at),
     };
   });
   if (!stages.length) stages.push(emptyStage(0));
@@ -580,6 +640,7 @@ export function readDraft(text) {
     name: str(data.name),
     by_name: str(data.by_name),
     wants_listing: data.wants_listing === true,
+    lives: livesOf(data.lives),
     stages,
     lanes,
     start,
@@ -590,19 +651,23 @@ export function readDraft(text) {
 /**
  * The first thing stopping a draft from being saved, or "" when it can be:
  * a stage with no link, or one whose link did not decode, is named before the
- * body's own checks run, then a draft with no stage open from the start.
+ * body's own checks run, then a draft with no stage open from the start. A
+ * stage is named as the graph shows it: its title, else "Stage 2-1".
  */
 export function draftProblem(draft) {
-  for (const [i, stage] of (draft?.stages || []).entries()) {
+  const names = draftNames(draft);
+  const name = (stage) => stageName(draft, stage, names);
+  for (const stage of draft?.stages || []) {
     if (!stage.settings) {
-      return stage.link.trim() ? `stage ${i + 1}'s link can't be used as a stage`
-                               : `stage ${i + 1} needs a game link`;
+      return stage.link.trim() ? `${name(stage)}'s link can't be used as a stage` : `${name(stage)} needs a game link`;
     }
   }
   if (Array.isArray(draft?.start) && !draft.stages.some((s) => draft.start.includes(s.key))) {
     return "tick at least one stage as open from the start";
   }
-  const body = checkBody(buildBody(draft));
+  const shut = shutLanes(draft)[0];
+  if (shut) return `the lane between ${name(shut[0])} and ${name(shut[1])} opens neither stage: tick one end, or remove it`;
+  const body = checkBody(buildBody(draft), (i) => name(draft.stages[i]));
   if (typeof body === "string") return body;
   if (checkByName(draft.by_name) === null) return `your name is over ${LIMITS.byName} characters`;
   return "";
@@ -620,40 +685,54 @@ function takeKey(draft) {
 }
 
 /**
- * Add a stage and return it. With `after` (a key) it goes directly below that
- * stage with a lane from it (+ After); with `beside` it goes below that stage
- * with a lane from each of its parents, and is open from the start if that
- * stage is (+ Branch), so it lands in the same column. With neither it goes at
- * the bottom, joined from the stage that was last (+ Stage): an author who never
- * touches a lane gets a linear gauntlet.
+ * Add a stage at the bottom, joined from the stage that was last, and return
+ * it: an author who never touches a lane gets a linear gauntlet. The page adds
+ * stages through `addStageAt`, in the column the author picks.
  */
-export function addStage(draft, { after = null, beside = null } = {}) {
+export function addStage(draft) {
   if (!Array.isArray(draft.lanes)) draft.lanes = chainOf(draft.stages);
   if (!Array.isArray(draft.start)) draft.start = draft.stages.length ? [draft.stages[0].key] : [];
   const stage = emptyStage(takeKey(draft));
-  const near = after ?? beside;
-  const at = draft.stages.findIndex((s) => s.key === near);
-  if (at >= 0) {
-    draft.stages.splice(at + 1, 0, stage);
-    if (after !== null) {
-      draft.lanes.push(emptyLane(after, stage.key));
-    } else {
-      for (const from of parentsOf(draft, beside)) draft.lanes.push(emptyLane(from, stage.key));
-      if (draft.start.includes(beside)) draft.start.push(stage.key);
-    }
-  } else {
-    const last = draft.stages.at(-1);
-    draft.stages.push(stage);
-    if (last) draft.lanes.push(emptyLane(last.key, stage.key));
-    else draft.start.push(stage.key);
-  }
+  const cells = placed(draft, false);
+  if (cells) stage.at = [Math.max(-1, ...cells.map(([col]) => col)) + 1, 0];
+  const last = draft.stages.at(-1);
+  draft.stages.push(stage);
+  if (last) draft.lanes.push(emptyLane(last.key, stage.key));
+  else draft.start.push(stage.key);
   return stage;
 }
 
 /** The stages a lane leads into `key` from, the way each lane runs. */
 export function parentsOf(draft, key) {
-  return (draft.lanes || []).flatMap((lane) => (lane.to === key ? [lane.from]
-                                              : lane.two_way && lane.from === key ? [lane.to] : []));
+  return (draft.lanes || []).flatMap((lane) => (lane.shut ? []
+    : lane.to === key ? [lane.from] : lane.two_way && lane.from === key ? [lane.to] : []));
+}
+
+/** The stage pairs, as `[stage, stage]` in list order, of the lanes set to open neither end. */
+export function shutLanes(draft) {
+  const list = draft?.stages || [];
+  const at = new Map(list.map((s, i) => [s.key, i]));
+  return (draft?.lanes || []).filter((l) => l.shut && at.has(l.from) && at.has(l.to))
+    .map((l) => [at.get(l.from), at.get(l.to)].sort((x, y) => x - y).map((i) => list[i]));
+}
+
+/** Does `lane` open stage `key`: does a clear of its other end lead there? */
+export function opens(lane, key) {
+  return !lane.shut && (lane.to === key || (lane.two_way && lane.from === key));
+}
+
+/**
+ * Tick or untick "opens `key`" on `lane`, one of its ends. Both ends ticked is
+ * two-way; one is a lane into it, so `from` and `to` swap when the end left
+ * ticked is `from`; neither is a shut lane. Its gate stays, read from whichever
+ * stage now leads.
+ */
+export function setOpens(lane, key, on) {
+  const into = new Set([lane.from, lane.to].filter((k) => (k === key ? on : opens(lane, k))));
+  delete lane.shut;
+  lane.two_way = into.size === 2;
+  if (into.size === 0) lane.shut = true;
+  else if (into.size === 1 && into.has(lane.from)) [lane.from, lane.to] = [lane.to, lane.from];
 }
 
 /** Remove a stage with its lanes and its start mark; nothing is rewired. */
@@ -665,13 +744,19 @@ export function removeStage(draft, key) {
 
 /** The lane that runs from `a` to `b` (one-way that way, or two-way), or null. */
 export function laneFrom(draft, a, b) {
-  return (draft.lanes || []).find((l) => (l.from === a && l.to === b) || (l.two_way && l.from === b && l.to === a))
-    ?? null;
+  return (draft.lanes || []).find((l) => !l.shut && ((l.from === a && l.to === b)
+                                                     || (l.two_way && l.from === b && l.to === a))) ?? null;
 }
 
 /** A one-way lane from `b` back to `a`, which `a`'s chip offers to make two-way. */
 export function laneBack(draft, a, b) {
-  return (draft.lanes || []).find((l) => l.from === b && l.to === a && !l.two_way) ?? null;
+  return (draft.lanes || []).find((l) => !l.shut && l.from === b && l.to === a && !l.two_way) ?? null;
+}
+
+/** The lane between `a` and `b` that opens neither, or null. */
+export function laneShut(draft, a, b) {
+  return (draft.lanes || []).find((l) => l.shut && ((l.from === a && l.to === b) || (l.from === b && l.to === a)))
+    ?? null;
 }
 
 /**
@@ -686,6 +771,11 @@ export function joinLane(draft, a, b) {
   if (back) {
     back.two_way = true;
     return back;
+  }
+  const shut = laneShut(draft, a, b);
+  if (shut) {
+    setOpens(shut, b, true);
+    return shut;
   }
   const lane = emptyLane(a, b);
   draft.lanes.push(lane);
@@ -705,11 +795,156 @@ export function setStart(draft, key, on) {
   draft.start = draft.stages.map((s) => s.key).filter((k) => opened.has(k));
 }
 
-/** Move the stage at `from` by `step` places; out of range is a no-op. */
-export function moveStage(stages, from, step) {
-  const to = from + step;
-  if (from < 0 || from >= stages.length || to < 0 || to >= stages.length) return stages;
-  const out = [...stages];
-  [out[from], out[to]] = [out[to], out[from]];
+// -- the graph as the page edits it -------------------------------------------
+// The author places each stage on the graph: a draft stage's `at` is its
+// `[column, row]`, kept closed up (no empty column, rows 0.. in each). Lanes
+// never move a stage, and moving one never touches a lane. A draft opened from
+// a body without places (or kept before them) is placed as `layout` computes it.
+
+/** The draft's graph as the game will read it: stages by list index. */
+function draftGraph(draft) {
+  return graphOf(buildBody(draft));
+}
+
+/**
+ * Each stage's place, by list index, closed up: the draft's own when every
+ * stage has one and no two share, else (unless `compute` is false, when it is
+ * null) what `layout` makes of the lanes.
+ */
+function placed(draft, compute = true) {
+  const list = draft?.stages || [];
+  let cells = list.map((stage) => cellOf(stage.at));
+  if (!cells.every(Boolean) || new Set(cells.map(String)).size !== cells.length) {
+    if (!compute) return null;
+    const computed = layout(graphOf(buildBody(draft, { at: false })));
+    cells = list.map((_, i) => computed.get(i));
+  }
+  const cols = [...new Set(cells.map(([col]) => col))].sort((x, y) => x - y);
+  const out = cells.map(([col]) => [cols.indexOf(col), 0]);
+  for (const col of cols) {
+    const here = cells.map((cell, i) => [cell, i]).filter(([[c]]) => c === col).sort(([x], [y]) => x[1] - y[1]);
+    here.forEach(([, i], row) => { out[i][1] = row; });
+  }
   return out;
+}
+
+/** Give every stage its place, closed up (`placed`). */
+export function placeStages(draft) {
+  placed(draft).forEach((cell, i) => { draft.stages[i].at = cell; });
+  return draft;
+}
+
+/** Each stage's place, by list index, as `layout` makes of the lanes alone, closed up. */
+const fromLanes = (draft) => placed({ ...draft, stages: (draft?.stages || []).map((stage) => ({ ...stage, at: null })) });
+
+/** Whether laying the draft out from its lanes would move any stage. */
+export function laidOutApart(draft) {
+  const here = placed(draft);
+  return fromLanes(draft).some((cell, i) => String(cell) !== String(here[i]));
+}
+
+/**
+ * Place every stage afresh as `layout` makes of the lanes (column by depth,
+ * rows by the stages that lead in), for an author whose moves have left the
+ * lanes in a tangle. Lanes are never touched.
+ */
+export function layOutFromLanes(draft) {
+  fromLanes(draft).forEach((cell, i) => { draft.stages[i].at = cell; });
+  return draft;
+}
+
+/** Each stage's `[column, row]` by key, as the game will draw it. */
+export function draftCells(draft) {
+  const cells = layout(draftGraph(draft));
+  return new Map((draft?.stages || []).map((stage, i) => [stage.key, cells.get(i)]));
+}
+
+/**
+ * Each stage's corner name by key ("2-1", or "2" alone in its column), over
+ * the stages keyed in `shown` (every stage by default): `cellNames`.
+ */
+export function draftNames(draft, shown = null) {
+  const list = draft?.stages || [];
+  const index = new Map(list.map((stage, i) => [stage.key, i]));
+  const names = cellNames(draftGraph(draft), shown === null ? null : [...shown].map((key) => index.get(key)));
+  return new Map(list.flatMap((stage, i) => (names.has(i) ? [[stage.key, names.get(i)]] : [])));
+}
+
+/** A stage's name on the page: its title, else "Stage 2-1", as the game names an untitled one. */
+export function stageName(draft, stage, names = draftNames(draft)) {
+  return tidy(stage?.title) || `Stage ${names.get(stage?.key) ?? "?"}`;
+}
+
+const columnOf = (draft, col) => draft.stages.filter((stage) => stage.at[0] === col)
+  .sort((x, y) => x.at[1] - y.at[1]);
+const lastColumn = (draft) => Math.max(0, ...draft.stages.map((stage) => stage.at[0]));
+
+/** What a stage added at the foot of column `col` will be called: "Stage 3-2". */
+export function newStageName(draft, col) {
+  placeStages(draft);
+  const count = columnOf(draft, col).length;
+  return `Stage ${count ? `${col + 1}-${count + 1}` : `${col + 1}`}`;
+}
+
+/**
+ * Add a stage at the foot of column `col` (at most one past the last) and
+ * return it, or null at the stage limit. It has no lanes, and is open from
+ * nothing, unless `from` is given: then a lane runs to it from that stage.
+ */
+export function addStageAt(draft, col, { from = null } = {}) {
+  placeStages(draft);
+  if (draft.stages.length >= LIMITS.stages) return null;
+  const column = Math.max(0, Math.min(col, lastColumn(draft) + 1));
+  const stage = emptyStage(takeKey(draft));
+  stage.at = [column, columnOf(draft, column).length];
+  draft.stages.push(stage);
+  if (from !== null && draft.stages.some((s) => s.key === from)) joinLane(draft, from, stage.key);
+  placeStages(draft);
+  return stage;
+}
+
+export const DIRECTIONS = ["left", "right", "up", "down"];
+
+/**
+ * The ways stage `key` can move: up or down a row within its column, left or
+ * right a column (into a new column at either end, unless it is alone in its
+ * own, which would leave the picture as it was).
+ */
+export function moveOptions(draft, key) {
+  placeStages(draft);
+  const stage = draft.stages.find((s) => s.key === key);
+  if (!stage) return [];
+  const [col, row] = stage.at;
+  const size = columnOf(draft, col).length;
+  const ok = { up: row > 0, down: row < size - 1, left: col > 0 || size > 1, right: col < lastColumn(draft) || size > 1 };
+  return DIRECTIONS.filter((dir) => ok[dir]);
+}
+
+/**
+ * Move stage `key` one place `dir` and say what moved, or null where it can't
+ * go (`moveOptions`). Up and down swap it with its neighbour in the column;
+ * left and right take it into the next column at the same row (or its foot).
+ * Lanes are never touched.
+ */
+export function moveStageTo(draft, key, dir) {
+  if (!moveOptions(draft, key).includes(dir)) return null;
+  const stage = draft.stages.find((s) => s.key === key);
+  const name = stageName(draft, stage);
+  const [col, row] = stage.at;
+  if (dir === "up" || dir === "down") {
+    const other = columnOf(draft, col)[row + (dir === "up" ? -1 : 1)];
+    [stage.at, other.at] = [other.at, stage.at];
+    return `Moved ${name} ${dir} a row.`;
+  }
+  let to = col + (dir === "left" ? -1 : 1);
+  if (to < 0) {
+    for (const s of draft.stages) s.at = [s.at[0] + 1, s.at[1]];
+    to = 0;
+  }
+  for (const s of columnOf(draft, stage.at[0])) if (s.at[1] > row) s.at = [s.at[0], s.at[1] - 1];
+  const at = Math.min(row, columnOf(draft, to).length);
+  for (const s of columnOf(draft, to)) if (s.at[1] >= at) s.at = [s.at[0], s.at[1] + 1];
+  stage.at = [to, at];
+  placeStages(draft);
+  return `Moved ${name} ${dir} a column.`;
 }

@@ -136,19 +136,14 @@ LEADERBOARD_CAMPAIGN_PATH = "/api/campaign"  # is this setup a campaign node (`c
 LEADERBOARD_GAUNTLET_PATH = "/api/gauntlet"  # a gauntlet built on the board, by id
 LEADERBOARD_DAILY_PATH = "/api/daily"  # a day's daily challenge setup (`daily`)
 # The board's main list (`leaderboard/js/home.mjs`): every map somebody has
-# posted a score on, newest activity first — what the menu's "Recently played"
-# button says it opens. Its "By setup" toggle is one press away from there.
-# Not specific to the setup on the menu right now — there is no way to name an
-# arbitrary, possibly never-played setup's own config page without either
-# shipping the Supabase project straight into the game or reimplementing
-# `sc_config_key`'s Postgres-specific hashing a second time (schema.sql spells
-# out why that hash is deliberately computed nowhere but there). This is the
-# same link the web menu's file row used to spend on a Save/Load row that never
-# actually persisted anything in the browser (see `menu._file_control`).
+# posted a score on, newest activity first. The menu's Leaderboard button always
+# opens it, whatever is on the menu, so where it goes is never a surprise.
 LEADERBOARD_RECENT_PATH = "/board/index.html"
 # The play-by-post lobby. It reads `WEB_PBP_SEATS_KEY` itself, being on the
 # same origin, so the game hands it nothing.
 LEADERBOARD_LOBBY_PATH = "/board/pbp.html"
+# The board's list of gauntlets made there, linked from the game's gauntlet list.
+LEADERBOARD_GAUNTLETS_PATH = "/board/gauntlets.html"
 
 
 def _android_data_dir() -> Path | None:
