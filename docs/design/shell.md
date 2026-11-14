@@ -65,6 +65,19 @@ is what switches it:
   control outright; it now folds them behind a "more" button whose list offers
   them again, on a desktop window too. A compact screen folds the exits (Retry,
   Setup menu, New map) from the start, giving the room to the controls in use.
+- **A phone's buttons are a fingertip tall.** At ~0.69 zoom a 40-unit button
+  was 27 CSS px, and a daily puzzle on a portrait phone was found to hurt the
+  thumbs. On a compact screen every button the strip, the popup and the camera
+  draw is at least 44 CSS px (`--tap`, set by `hud.fitLayout`; the footer's
+  fold measures with it), End Turn upright 56 px. The popup's lines that only
+  say something stay short, so the sheet doesn't grow, and its − and + stand
+  beside the count, not at the screen's edges. Upright, the strip also folds
+  Autoplay and Play (`hud.phone_folds`), never while either runs, leaving
+  Clear, Route and Hint under the thumb; the camera keeps only Reset (a finger
+  pinches) and moves it to the map's top corner, off the bottom corners where
+  the thumb works and the phone's own sliders appear. A touch screen selects
+  no text anywhere (Android's Touch to Search opened a lookup sheet on a
+  tapped word outside the map).
 - **The send popup docks.** Floating over a map a third the size of a
   desktop's, it covered the lane it was about and outgrew the band it was
   clamped to. Landscape, it takes the side panel's place (its title repeats the
