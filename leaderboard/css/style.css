@@ -1441,7 +1441,6 @@ a.cal-day:hover { outline: 1px solid var(--cyan); }
   text-transform: uppercase;
 }
 .gauntlet-form .row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.5rem; }
-.stage-tools { justify-content: flex-end; margin-top: 0; }
 .stage-summary { margin: 0.25rem 0 0; color: var(--green); font-size: 0.85rem; }
 .stage-summary.bad { color: var(--bad); }
 .stage-summary .warn { color: var(--gold); }
@@ -1521,7 +1520,13 @@ button.chip.shut { border-color: var(--bad); color: var(--bad); }
 /* The graph: the gauntlet is edited on it, and it scrolls sideways in its own
  * box, so 64 stages never widen the page. Gaps leave room for the move arrows
  * round the selected stage. */
-.diagram-box { margin-top: 1rem; }
+/* Wider than the page's column where the screen has room (up to 80rem, a 16px
+ * gutter each side), never narrower than it. */
+.diagram-box {
+  --graph-w: max(100%, min(100vw - 32px, 80rem));
+  width: var(--graph-w);
+  margin: 1rem 0 0 calc((100% - var(--graph-w)) / 2);
+}
 .diagram { overflow-x: auto; border: 1px solid var(--line); background: #070a18; }
 .diagram.linking { border-color: var(--magenta); box-shadow: inset 0 0 0 1px var(--magenta); }
 /* The stages and lanes are drawn by the game's own drawer (/play/js/stagegraph.mjs):
@@ -1609,8 +1614,10 @@ button.chip.shut { border-color: var(--bad); color: var(--bad); }
 .diagram-box .history { display: flex; gap: 0.4rem; margin-left: auto; }
 .graph-hint { margin: 0.4rem 0 0; min-height: 3em; color: var(--dim); font-size: 0.85rem; }
 .graph-hint.linking { color: var(--magenta); }
-.stage-tools .drop.link { border-color: var(--magenta); color: var(--magenta); }
-.stage-tools .drop.link.on { background: var(--magenta); color: #070a18; }
+/* The selected stage's tools, just under the graph's bottom right. */
+.gauntlet-form .graph-tools { justify-content: flex-end; margin-top: 0.4rem; }
+.graph-tools .drop.link { border-color: var(--magenta); color: var(--magenta); }
+.graph-tools .drop.link.on { background: var(--magenta); color: #070a18; }
 .diagram-key { margin: 0.4rem 0 0; color: var(--dim); font-size: 0.8rem; }
 .gauntlet-form #reset { align-self: flex-start; margin-top: 2rem; }
 
