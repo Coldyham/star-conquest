@@ -169,9 +169,10 @@
       <strong>Challenge a friend</strong> link's score or a bot's.
     </p>
     <p class="lede">
-      Build it on the graph. Tap a stage to edit it in the card below; the
-      arrows round it move it a row or a column. A dashed box adds a stage to
-      its column. <strong>+ Add lane</strong> on the card, then a stage or a
+      Build it on the graph. Tap a stage to edit it in the card below (tap it
+      again to let it go); the arrows round it move it a row or a column. A
+      dashed box adds a stage to its column. <strong>+ Add lane</strong> under
+      the graph, then a stage or a
       dashed box, draws a lane; tap a lane to have it ask for a target, run
       both ways, or stay hidden until met, for shortcuts and bonus stages.
       If the lanes get in a tangle, <strong>Lay out from lanes</strong> places
@@ -197,6 +198,11 @@
           </span>
         </div>
         <div id="diagram" class="diagram"></div>
+        <div class="row graph-tools">
+          <button id="add-link" class="drop link" type="button" aria-pressed="false"
+                  title="Then tap a stage to join the selected one to it, or a dashed box for a new stage">+ Add lane</button>
+          <button id="remove-stage" class="drop" type="button">Delete stage</button>
+        </div>
         <p class="graph-hint" id="graph-hint" role="status" aria-live="polite"></p>
         <p class="diagram-key">
           A stage's number is its column, then its row where the column holds
