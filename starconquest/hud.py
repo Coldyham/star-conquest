@@ -475,6 +475,19 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     return specs
 
 
+def phone_folds(ui: Ui) -> list[str]:
+    """The footer buttons an upright phone folds behind "more" from the start,
+    beside the exits: handing the game to the AI is no turn-by-turn press, and
+    the strip is where the thumb rests. Each stays out while it is running, so
+    Take control and Pause are one tap away."""
+    folds = []
+    if not ui.autoplay:
+        folds.append("autoplay_button_rect")
+        if not ui.playing:
+            folds.append("play_pause_rect")
+    return folds
+
+
 def rule_rows(state: GameState, ui: Ui, src: int, touch: bool) -> list[Row]:
     """The focused system's standing rule: its hold, then each lane with its share
     and the ships that share sends this turn. The lane the popup is on is picked

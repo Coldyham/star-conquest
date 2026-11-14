@@ -118,6 +118,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.queued { outline: 2px solid var(--text); outline-offset: 2px; }   /* pressed, waiting on the turn */
 .touch .key { display: none; }
+/* A finger's tap or press on a word must not select it: Android Chrome's
+   Touch to Search (and iOS's callout) would open a lookup sheet over the game. */
+.touch body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.touch :is(input, textarea, [contenteditable]) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 
 /* --- the side panel and End Turn ---------------------------------------- */
 #side { grid-column: 2; grid-row: 2 / 4; display: flex; flex-direction: column; min-height: 0; }
@@ -337,7 +341,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* --- a phone (`config.compact`): a touch screen too small for the desktop
    layout. Sideways it keeps the side column, running to the screen's top
    beside a top bar over the map alone; the popup docks in the column's place. */
-:root.compact { --side-w: 236px; --end-h: 64px; }
+:root.compact { --side-w: 236px; --end-h: 64px; --foot-h: calc(var(--tap) + 8px); }
 .compact #top { grid-column: 1; }
 .compact #scores { gap: 14px; }
 .compact #side { grid-row: 1 / 4; }
@@ -347,10 +351,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: fixed; left: auto; top: 0; right: 0; bottom: var(--end-h); width: var(--side-w);
   border-radius: 0; border-width: 2px; z-index: 6; overflow: auto;
 }
-.compact #popup .row, .compact #popup .pb, .compact #popup .tab { min-height: 40px; }
-.compact #popup .step { width: 40px; height: 40px; font-size: 20px; }
+/* A phone's buttons are a fingertip tall (`--tap`, `hud.fitLayout`); the popup's
+   lines that only say something stay short, so the sheet doesn't grow. */
+.compact #popup .row { min-height: 28px; }
+.compact #popup .tabs, .compact #popup .stepper, .compact #popup .lane, .compact #popup .well,
+.compact #popup .pb, .compact #popup .tab { min-height: var(--tap); }
+.compact #popup .step { width: var(--tap); height: var(--tap); font-size: 22px; }
+.compact #popup .pb, .compact #popup .tab { font-size: 18px; }
+.compact #popup .stepper { justify-content: center; gap: 28px; font-size: 24px; }
+.compact #popup .stepper > span { min-width: 72px; text-align: center; }
+.compact #footer .btn, .compact #more .btn { height: var(--tap); min-width: var(--tap); font-size: 20px; }
+.compact #footer .more { width: var(--tap); }
 .compact #popup .pb.done { background: rgb(28, 58, 38); border-color: rgb(96, 190, 120); color: var(--text); }
-.compact #camera .btn { height: 40px; }
+.compact #camera .btn { height: var(--tap); font-size: 18px; }
+/* A finger pinches to zoom, so the camera keeps only Reset. */
+.touch #zoom-in, .touch #zoom-out { display: none; }
 .compact #graph .head .btn { height: 34px; }
 
 /* Upright, a side column would leave the map a sliver: the panel becomes a
@@ -366,7 +381,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   --gesture-gap: 0px;
   --foot-gap: calc(var(--gesture-gap) / var(--zoom, 1));
   --end-gap: max(26px, var(--foot-gap));
-  --end-h: calc(66px + var(--end-gap));
+  /* End Turn a thumb's height (48 CSS pixels, never under the 59 units a tab
+     gives it), over the gesture bar. */
+  --end-h: calc(max(59px, 48px / var(--zoom, 1)) + 7px + var(--end-gap));
   /* The band's height is fixed, as pygame's is (`config.PORTRAIT_PANEL_H`), so the
      map above it never moves as the selection, the popup or route mode change what
      it holds; room for a system's readout beside its lane, and route mode's
@@ -392,8 +409,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .portrait #panel h2 { font-size: 14px; }
 .portrait #footer { grid-column: 1; grid-row: 4; }
 .portrait #end-turn { grid-column: 1; grid-row: 5; width: auto; margin: 7px 12px var(--end-gap); height: auto; }
+/* Reset sits at the map's top corner, out of the thumb's way: the bottom
+   corners are where the thumb works (and where a phone's own sliders appear). */
+.portrait #camera, .portrait #app.graphing #camera { top: 8px; right: 8px; bottom: auto; }
 .portrait #app.history #footer { grid-row: 4 / 6; padding-bottom: var(--foot-gap); }
-.portrait #popup.docked { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 60vh;
+/* The sheet's cap is a share of the screen, so divided by the zoom (as `--band-h`):
+   a bare 60vh came out zoomed too, and clipped Done under a browser's bars. */
+.portrait #popup.docked { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: calc(70dvh / var(--zoom, 1));
   padding-bottom: calc(8px + var(--foot-gap)); }
 .portrait #graph { left: 6px; right: 6px; }
 .portrait #graph .legend { width: 160px; }
@@ -415,7 +437,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .portrait #app.history #footer .scrub-buttons > .spacer { display: block; flex: 1; order: 5; }
 .portrait #graph { height: 58%; }
-.portrait #app.graphing #camera { bottom: calc(58% + 18px); }
 .portrait #graph .chart { flex-direction: column; gap: 6px; }
 .portrait #graph .legend { width: auto; flex-direction: row; flex-wrap: wrap; column-gap: 18px; }
 .portrait #graph .legend .unit { width: 100%; }
