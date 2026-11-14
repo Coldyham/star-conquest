@@ -355,14 +355,26 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Upright, a side column would leave the map a sliver: the panel becomes a
    band under the map, then the strip, then End Turn across the foot, stood
-   clear of the gesture bar; the popup docks as a sheet over all three. */
+   clear of the gesture bar; the popup docks as a sheet over all three.
+   `--gesture-gap` is the strip kept bare at the screen's foot on every upright
+   phone screen (play, the menu, the maker) when installed: a swipe up for the
+   system's own buttons starts there, and mustn't land on End Turn or anything
+   else. In a browser tab its toolbar sits between, so there is none, and End
+   Turn keeps only its own inset. It is in screen pixels, so each zoomed screen
+   divides it by its own zoom. */
 :root.portrait {
-  --end-h: 92px;
+  --gesture-gap: 0px;
+  --foot-gap: calc(var(--gesture-gap) / var(--zoom, 1));
+  --end-gap: max(26px, var(--foot-gap));
+  --end-h: calc(66px + var(--end-gap));
   /* The band's height is fixed, as pygame's is (`config.PORTRAIT_PANEL_H`), so the
      map above it never moves as the selection, the popup or route mode change what
      it holds; room for a system's readout beside its lane, and route mode's
      directions, then it scrolls. */
   --band-h: max(150px, calc(22dvh / var(--zoom, 1)));
+}
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  :root.portrait { --gesture-gap: max(44px, env(safe-area-inset-bottom, 0px)); }
 }
 .portrait #app {
   grid-template-columns: minmax(0, 1fr);
@@ -379,9 +391,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .portrait #panel p { white-space: pre-wrap; }
 .portrait #panel h2 { font-size: 14px; }
 .portrait #footer { grid-column: 1; grid-row: 4; }
-.portrait #end-turn { grid-column: 1; grid-row: 5; width: auto; margin: 7px 12px 26px; height: auto; }
-.portrait #app.history #footer { grid-row: 4 / 6; }
-.portrait #popup.docked { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 60vh; }
+.portrait #end-turn { grid-column: 1; grid-row: 5; width: auto; margin: 7px 12px var(--end-gap); height: auto; }
+.portrait #app.history #footer { grid-row: 4 / 6; padding-bottom: var(--foot-gap); }
+.portrait #popup.docked { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 60vh;
+  padding-bottom: calc(8px + var(--foot-gap)); }
 .portrait #graph { left: 6px; right: 6px; }
 .portrait #graph .legend { width: 160px; }
 .compact #graph .head .note { order: 1; flex-basis: 100%; text-align: left; white-space: normal; }

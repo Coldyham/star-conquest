@@ -452,6 +452,9 @@ COMPACT_END_TURN_H = 64
 # raises its toolbar instead). So the row is taller and the drawn bar stands
 # `PORTRAIT_FOOT_INSET` clear of the edge; the whole row, inset included, answers
 # a press (`end_turn_rect`), so a thumb that lands low or wide still ends the turn.
+# The page answers only the drawn bar; installed, the inset grows to its
+# `--gesture-gap`, left bare on every upright screen, so a swipe up for the
+# phone's own buttons, which starts at the edge, never ends a turn.
 COMPACT_PORTRAIT_END_TURN_H = 92
 PORTRAIT_FOOT_INSET = 26
 COMPACT_HUD_RIGHT_W = 236
