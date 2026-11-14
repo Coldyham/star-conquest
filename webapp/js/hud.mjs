@@ -71,9 +71,9 @@ export function fitLayout() {
   const root = document.documentElement;
   root.style.setProperty("--zoom", String(zoom));
   root.style.setProperty("--menu-zoom", String(menuZoom));
-  // A phone's buttons stand at least 44 CSS pixels tall, a fingertip, however
+  // A phone's buttons stand at least 38 CSS pixels tall, a fingertip, however
   // far the zoom shrinks the rest of the layout (in layout units, as all else).
-  root.style.setProperty("--tap", `${small ? Math.max(40, Math.ceil(44 / zoom)) : 40}px`);
+  root.style.setProperty("--tap", `${small ? Math.max(40, Math.ceil(38 / zoom)) : 40}px`);
   root.classList.toggle("touch", finger);
   root.classList.toggle("compact", small);
   root.classList.toggle("portrait", small && lh > lw);
@@ -353,7 +353,7 @@ export class Hud {
     // offers it again; a phone folds the ways out of this game from the start.
     const finger = touch();
     const text = (b) => b[1] + (b[2] && !finger ? ` (${b[2]})` : "");
-    const fbh = tap(), gap = 10, size = compact() ? 22 : 18;              // play.css .compact #footer .btn
+    const fbh = tap(), gap = 10, size = compact() ? 20 : 18;              // play.css .compact #footer .btn
     const width = (b) => Math.max(fbh, textWidth(text(b), size) + 2 * 14);   // widgets.btn_w
     const avail = nav.clientWidth - 28;
     let shown = [...view.footer];

@@ -6,10 +6,11 @@
 // gauntlet-graph.mjs's `layout`, the same function as the game's
 // `gauntlet.layout`, so it is the picture the game will show. A tap selects a
 // stage, and the one card under the graph is that stage's. Arrows round the
-// selected stage move it a row or a column; a dashed box at the foot of each
-// column adds a stage there, joined to nothing; the card's Add lane, then a
-// stage or a dashed box, draws a lane from it; a tap on a lane opens its options
-// (two-way, a gate, hidden) in the card. The author places each stage (its
+// selected stage move it a row or a column; a second tap (or one on the empty
+// graph, or Esc) lets the selection go, to see the layout bare. A dashed box at
+// the foot of each column adds a stage there, joined to nothing; Add lane under
+// the graph, then a stage or a dashed box, draws a lane from the selected one; a
+// tap on a lane opens its options (two-way, a gate, hidden) in the card. The author places each stage (its
 // `at`), and no edit moves a stage or draws a lane the author didn't ask for
 // (docs/design/gauntlet.md, "Lanes on the board"). Ctrl+Z and Ctrl+Shift+Z (or
 // the buttons by the graph) undo and redo an edit.
@@ -69,7 +70,7 @@ const botBests = new WeakMap();
 let saved = null;   // {id, body} once saved, until the draft changes again
 let openLane = null;   // the lane whose options show in its near stage's card
 let view = "author";   // the graph as the author sees it, or as a new player does
-let picked = null;     // the selected stage's key: its card is the one shown
+let picked = null;     // the selected stage's key: its card is the one shown (null: none, to see the layout bare)
 let linking = false;   // Add lane pressed: the next stage or dashed box pressed is joined from `picked`
 let said = "";         // what the last edit on the graph did, said under it
 
@@ -593,31 +594,6 @@ function renderStage(stage, i, dupes) {
   const summary = el("p");
   renderSummary(summary, stage, dupes.has(i));
 
-  const join = el("button", { id: "add-link", class: `drop link${linking ? " on" : ""}`, type: "button",
-                              "aria-pressed": String(linking), text: linking ? "Cancel" : "+ Add lane",
-                              title: "Then tap a stage to join this one to it, or a dashed box for a new stage" });
-  join.disabled = view !== "author";
-  join.addEventListener("click", () => {
-    linking = !linking;
-    openLane = null;
-    said = "";
-    render("add-link");
-  });
-  const remove = el("button", { id: id("remove"), class: "drop", type: "button", text: "Delete stage" });
-  remove.disabled = draft.stages.length === 1;
-  remove.addEventListener("click", () => {
-    const gone = nameOf(stage);
-    const at = draft.stages.indexOf(stage);
-    removeStage(draft, stage.key);
-    placeStages(draft);
-    if (openLane && !draft.lanes.includes(openLane)) openLane = null;
-    picked = (draft.stages[at] || draft.stages[at - 1]).key;
-    linking = false;
-    said = `Deleted ${gone} and its lanes.`;
-    changed();
-    render();
-  });
-
   const { row: aim, show: showAim } = targetControl(stage, stage, id("aim"),
                                                     "No target: any win opens the way on.", changed);
   const [link] = textField(id("link"), stage.link, "https://…/play/#eNo…", 0, (v) => { stage.link = v; }, true);
@@ -678,7 +654,6 @@ function renderStage(stage, i, dupes) {
 
   return el("fieldset", { class: "stage", id: `card-${stage.key}` }, [
     el("legend", { text: `Stage ${place}${tidy(stage.title) ? `: ${tidy(stage.title)}` : ""}` }),
-    el("div", { class: "row stage-tools" }, [join, remove]),
     el("label", { for: id("link"), text: "Map link" }), link, summary,
     el("label", { for: id("title"), text: "Title" }), title, titleCount,
     el("label", { for: id("brief-0"), text: "Briefing (shown on a card as the stage starts)" }),
@@ -778,7 +753,8 @@ function ghosts(shape) {
     const box = el("button", {
       type: "button", class: "sg-ghost", title: `Add ${name}${from ? `, with a lane from ${from}` : ""}`,
     }, [el("span", { class: "sg-title", text: `+ ${name}` }),
-        from ? el("span", { class: "sg-status", text: `with a lane from ${from}` }) : null].filter(Boolean));
+        // Always one short line, so drawing a lane neither grows nor reflows a box.
+        el("span", { class: "sg-status", text: from ? "with a lane in" : "joined to nothing" })]);
     box.disabled = draft.stages.length >= LIMITS.stages;
     box.addEventListener("click", () => {
       const stage = addStageAt(draft, col, { from: linking ? picked : null });
@@ -831,7 +807,7 @@ function drawDiagram() {
   const box = $("diagram");
   if (!box) return;
   clearTimeout(redraw);
-  if (picked === null || !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
+  if (picked !== null && !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
   const shape = diagramView();
   const editing = view === "author";
   const scroll = box.scrollLeft;
@@ -856,13 +832,15 @@ function drawDiagram() {
   hint.textContent = linking
     ? `Drawing a lane from ${nameOf(stageAt(picked))}: tap a stage to join them, or a dashed box for a new stage with a lane `
       + "from it. Esc or Cancel stops."
-    : said || (editing ? "Tap a stage to edit it, a lane for its options, or a dashed box to add a stage there."
+    : said || (editing ? "Tap a stage to edit it (again, or the empty graph, to let it go), a lane for its options, "
+                         + "or a dashed box to add a stage there."
                        : "The graph a new player sees: no hidden lanes, and no stage only they reach.");
 }
 
-/** A press on a stage: select it, or while adding a lane join the selected stage to it. */
+/** A press on a stage: select it (or let it go, if it is already), or while adding a lane join the selected stage to it. */
 function pressStage(key) {
   if (!linking) {
+    if (key === picked) return deselect();
     picked = key;
     openLane = null;
     said = "";
@@ -920,14 +898,59 @@ function showView(which) {
   render();
 }
 
+/** The selected stage's tools under the graph: + Add lane (Cancel while drawing one) and Delete stage. */
+function showTools() {
+  const join = $("add-link");
+  join.textContent = linking ? "Cancel" : "+ Add lane";
+  join.classList.toggle("on", linking);
+  join.setAttribute("aria-pressed", String(linking));
+  join.disabled = view !== "author" || picked === null;
+  $("remove-stage").disabled = view !== "author" || picked === null || draft.stages.length === 1;
+}
+
+function addLane() {
+  if (picked === null) return;
+  linking = !linking;
+  openLane = null;
+  said = "";
+  render("add-link");
+}
+
+function deleteStage() {
+  const stage = stageAt(picked);
+  if (!stage || draft.stages.length === 1) return;
+  const gone = nameOf(stage);
+  const at = draft.stages.indexOf(stage);
+  removeStage(draft, stage.key);
+  placeStages(draft);
+  if (openLane && !draft.lanes.includes(openLane)) openLane = null;
+  picked = (draft.stages[at] || draft.stages[at - 1]).key;
+  linking = false;
+  said = `Deleted ${gone} and its lanes.`;
+  changed();
+  render();
+}
+
+/** Let the selection go: no card, no arrows, the layout bare. */
+function deselect() {
+  if (picked === null) return;
+  picked = null;
+  linking = false;
+  openLane = null;
+  said = "";
+  render();
+}
+
 /** Redraw the form (the selected stage's card and the graph), then put the focus back on `focusId`. */
 function render(focusId = null) {
-  if (picked === null || !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
+  if (picked !== null && !stageAt(picked)) picked = draft.stages[0]?.key ?? null;
   if (shown) shown.picked = picked;   // a selection is no edit, but an undo comes back to it
   if (openLane && !draft.lanes.includes(openLane)) openLane = null;
   const dupes = duplicates();
   const i = draft.stages.findIndex((s) => s.key === picked);
-  clear($("stages")).append(...(i >= 0 ? [renderStage(draft.stages[i], i, dupes)] : []));
+  clear($("stages")).append(i >= 0 ? renderStage(draft.stages[i], i, dupes)
+    : el("p", { class: "hint", text: "No stage selected: tap one on the graph to edit it." }));
+  showTools();
   $("g-name").value = draft.name;
   counter($("g-name-count"), draft.name, LIMITS.name);
   $("g-by").value = draft.by_name;
@@ -1030,7 +1053,6 @@ async function load() {
       if (!response.ok) throw new Error(answer.error || String(response.status));
       draft = await draftFromBody(answer.gauntlet, linkFor);
       openLane = null;
-      picked = null;
       history.replaceState(null, "", location.pathname);
       keep();
       say(`Opened ${tidy(answer.gauntlet.name)}. Saving your edits makes a new link.`);
@@ -1047,6 +1069,7 @@ async function load() {
     draft = stored || freshDraft();
   }
   placeStages(draft);
+  picked = draft.stages[0]?.key ?? null;
   await Promise.all(draft.stages.map(readLink));
   render();
   forget();
@@ -1076,7 +1099,7 @@ async function openFile() {
   if (!confirm("Replace this draft with the file?")) return;
   draft = placeStages({ ...opened, by_name: draft.by_name, wants_listing: draft.wants_listing });
   openLane = null;
-  picked = null;
+  picked = draft.stages[0]?.key ?? null;
   changed();
   await Promise.all(draft.stages.map(readLink));
   render();
@@ -1116,9 +1139,20 @@ function main() {
   });
   document.addEventListener("keydown", undoKeys);
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !linking) return;
-    linking = false;
-    render("add-link");
+    if (event.key !== "Escape" || $("way-build").hidden) return;
+    if (linking) {
+      linking = false;
+      render("add-link");
+    } else if (!typingIn(event.target) && !event.target.closest?.(".stage")) {
+      deselect();
+    }
+  });
+  $("add-link").addEventListener("click", addLane);
+  $("remove-stage").addEventListener("click", deleteStage);
+  // A tap on the graph's empty space (not a stage, a box, an arrow or a lane) lets the selection go.
+  $("diagram").addEventListener("click", (event) => {
+    if (view !== "author" || linking || event.target.closest("button, .sg-lane")) return;
+    deselect();
   });
   for (const w of ["author", "player"]) $(`view-${w}`).addEventListener("click", () => showView(w));
   $("open-file").addEventListener("change", openFile);
@@ -1129,7 +1163,7 @@ function main() {
     if (!confirm("Clear this draft and start over?")) return;
     draft = placeStages(freshDraft());
     openLane = null;
-    picked = null;
+    picked = draft.stages[0]?.key ?? null;
     linking = false;
     said = "";
     changed();

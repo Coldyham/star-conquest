@@ -772,9 +772,11 @@ The board's gauntlet page edits the graph: Phase 3 of
   didn't ask for.
   - **A dashed box at the foot of every column**, and one past the last, adds a
     stage there with no lanes and no start mark (`addStageAt`); it shows as
-    unreachable until a lane reaches it. They are always drawn, so starting a
-    lane never resizes the graph.
-  - **+ Add lane** on the card, then a stage, joins the selected stage to it
+    unreachable until a lane reaches it. They are always drawn, each with one
+    short second line ("joined to nothing", or "with a lane in" while drawing
+    one), so starting a lane never resizes the graph (2026-11-14: the line
+    once named the source stage, and its wrap grew every row).
+  - **+ Add lane** just under the graph's bottom right, then a stage, joins the selected stage to it
     (or makes a lane back two-way, since the format keeps a pair's first lane;
     a pair already joined opens its options). Then a dashed box adds a stage
     with that one lane from the selected stage, in whatever column was tapped.
@@ -788,7 +790,13 @@ The board's gauntlet page edits the graph: Phase 3 of
     it (`layOutFromLanes`), for lanes left in a tangle by moves; it is lit only
     when that would move a stage (`laidOutApart`), and is one undo step.
   - **A tap on a lane** (a wide invisible stroke over it, or its target) opens
-    its options in its near stage's card. **Delete stage** is on the card.
+    its options in its near stage's card. **Delete stage** sits beside + Add
+    lane under the graph (2026-11-14: on the card, a phone scrolled to reach
+    both).
+  - **Nothing selected** shows the layout bare, without arrows or a card: a
+    second tap on the selected stage, a tap on the graph's empty space, or Esc
+    (outside the card) lets it go. The graph box is wider than the page's
+    column where the screen has room (up to 80rem).
   - **Undo and redo**: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, and buttons by the
     graph, over up to 100 edits; typing in one go is one step. In a text field
     already typed in, the keys are the field's own. An undo restores the

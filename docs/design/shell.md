@@ -68,8 +68,11 @@ is what switches it:
 - **A phone's buttons are a fingertip tall.** At ~0.69 zoom a 40-unit button
   was 27 CSS px, and a daily puzzle on a portrait phone was found to hurt the
   thumbs. On a compact screen every button the strip, the popup and the camera
-  draw is at least 44 CSS px (`--tap`, set by `hud.fitLayout`; the footer's
-  fold measures with it), End Turn upright 56 px. The popup's lines that only
+  draw is at least 38 CSS px (`--tap`, set by `hud.fitLayout`; the footer's
+  fold measures with it), End Turn upright 48 px: a middle ground, as 44 and
+  56 crowded the screen and pushed the send sheet's Done off it. The docked
+  sheet's cap is 70% of the screen divided by the zoom (a bare `60vh` was
+  zoomed too, and clipped under a browser's bars). The popup's lines that only
   say something stay short, so the sheet doesn't grow, and its − and + stand
   beside the count, not at the screen's edges. Upright, the strip also folds
   Autoplay and Play (`hud.phone_folds`), never while either runs, leaving
