@@ -26,10 +26,29 @@ const mid = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 /**
  * The curve of a lane from box `a` to box `b`, `step` columns on: `{start, c1,
  * c2, end}` (a cubic Bézier). To the next column it runs edge to edge; further
- * on (a shortcut) it arcs over the stages it skips; back or within a column it
- * dips below the two.
+ * on (a shortcut) it arcs over the stages it skips; back a column or more it
+ * dips below the two. Within a column it runs straight from one box's edge to
+ * the other's, or, with `blocked` (a stage between them), bows out beside the
+ * column: right going down, left going up, so a lane each way stays apart.
  */
-export function laneCurve(a, b, step) {
+export function laneCurve(a, b, step, blocked = false) {
+  if (step === 0) {
+    const down = b.y > a.y;
+    if (blocked) {
+      // Off the side's middle, toward the other box: the middle is where lanes between columns land.
+      const side = down ? (r) => r.x + r.w : (r) => r.x;
+      const lean = down ? 0.25 : -0.25;
+      const start = [side(a), mid(a)[1] + lean * a.h];
+      const end = [side(b), mid(b)[1] - lean * b.h];
+      const out = down ? Math.max(start[0], end[0]) + LOOP : Math.min(start[0], end[0]) - LOOP;
+      return { start, c1: [out, start[1]], c2: [out, end[1]], end };
+    }
+    const x = (r) => mid(r)[0] + (down ? 6 : -6);
+    const start = [x(a), down ? a.y + a.h : a.y];
+    const end = [x(b), down ? b.y : b.y + b.h];
+    const third = (end[1] - start[1]) / 3;
+    return { start, c1: [start[0], start[1] + third], c2: [end[0], end[1] - third], end };
+  }
   if (step === 1) {
     const start = [a.x + a.w, mid(a)[1]];
     const end = [b.x, mid(b)[1]];
@@ -153,7 +172,10 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
       const a = rect(lane.from);
       const b = rect(lane.to);
       if (!a || !b) continue;
-      const curve = laneCurve(a, b, cellOf.get(lane.to).col - cellOf.get(lane.from).col);
+      const [from, to] = [cellOf.get(lane.from), cellOf.get(lane.to)];
+      const [lo, hi] = [Math.min(from.row, to.row), Math.max(from.row, to.row)];
+      const blocked = from.col === to.col && nodes.some((n) => n.col === from.col && n.row > lo && n.row < hi);
+      const curve = laneCurve(a, b, to.col - from.col, blocked);
       const g = svg("g", { class: laneClasses(lane), "data-from": lane.from, "data-to": lane.to }, layer);
       svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}` }, g);
       if (!lane.shut) svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);

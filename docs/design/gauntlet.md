@@ -862,7 +862,9 @@ The game's gauntlet list draws the graph in place of a list of rows: Phase 2 of
 - **Layout is CSS.** Each stage is a button in a CSS grid at its cell, sized by
   its text; the lanes are an SVG layer drawn from where the buttons landed and
   redrawn when the grid resizes (a lane to the next column runs edge to edge, a
-  shortcut arcs over what it skips, a lane back dips below). The box scrolls,
+  shortcut arcs over what it skips, a lane back dips below, a lane within a
+  column runs straight down or up, bowing beside the column past a stage
+  between). The box scrolls,
   so the wheel, touch drag and scroll bars are the browser's; nothing keeps an
   offset or hit-tests. The page keeps the box's scroll and focus across the
   redraw each reply makes.

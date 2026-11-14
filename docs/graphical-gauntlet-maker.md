@@ -396,7 +396,8 @@ by hand.
 - **The diagram's marks**: starts get a bar on the left, goals a ★ and a gold
   border, stages reached only through a gate a dashed border, hidden ones a
   dotted border. A lane that skips columns arcs over the stages it skips; a
-  lane back or within a column dips below.
+  lane back dips below; a lane within a column runs straight between
+  neighbours, or bows out beside the column past a stage between them.
 - **`branches()` is gone** with its warning.
 - Not done: the end-to-end check on a deploy preview.
 - **Superseded 2026-11-13: the graph is the editor.** The cards below gave way
