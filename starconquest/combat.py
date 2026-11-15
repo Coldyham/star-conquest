@@ -24,7 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from . import config
-from .model import Fleet, GameState
+from .model import Fleet, GameState, lane_key
 
 # --------------------------------------------------------------------------- #
 # Shared fight arithmetic
@@ -430,33 +430,96 @@ def heaviest_wave(state: GameState, sid: int, owner: int) -> int:
     lane and every rival together, from the fleets already flying there. A fleet
     bound for a system ``owner`` holds is in full view (`render._fleet_shown`), so
     a player is told nothing they could not count on the map."""
+    return max(_waves(state, sid, owner).values(), default=0)
+
+
+def _waves(state: GameState, sid: int, owner: int) -> dict[int, int]:
+    """Rival ships landing on ``sid`` by turns from now, every lane and rival
+    together (`heaviest_wave` is the largest)."""
     waves: dict[int, int] = {}
     for f in state.fleets:
         if f.dest_id == sid and f.owner_id not in (owner, 0):
             waves[f.turns_remaining] = waves.get(f.turns_remaining, 0) + f.ships
-    return max(waves.values(), default=0)
+    return waves
+
+
+def _reinforcements(state: GameState, sid: int, owner: int) -> dict[int, int]:
+    """``owner``'s own ships landing on ``sid`` by turns from now: already flying,
+    so nothing can call them back, and they pool with the garrison on the turn
+    they land (`resolve_arrival`). With in-lane battles on, a fleet sharing its
+    lane with anyone else's may be fought on the way, so it is not counted."""
+    contested: set = set()
+    if config.IN_LANE_BATTLES:
+        contested = {lane_key(f.source_id, f.dest_id) for f in state.fleets if f.owner_id != owner}
+    inbound: dict[int, int] = {}
+    for f in state.fleets:
+        if (f.dest_id == sid and f.owner_id == owner
+                and lane_key(f.source_id, f.dest_id) not in contested):
+            inbound[f.turns_remaining] = inbound.get(f.turns_remaining, 0) + f.ships
+    return inbound
+
+
+@functools.lru_cache(maxsize=4096)
+def _kept_after(attackers: int, defenders: int, jitter: float, advantage: float) -> int:
+    """Ships a garrison of ``defenders`` keeps against ``attackers`` on the roll
+    most in the attacker's favour (0 if that roll loses it)."""
+    if attackers <= 0:
+        return defenders
+    return preview_fight(attackers, defenders, jitter, advantage).best.defender_survivors
 
 
 def smart_hold(state: GameState, sid: int, owner: int) -> int:
-    """What a smart hold keeps back at ``sid``: enough to hold against its
-    heaviest incoming wave on every roll (`hold_count`), under the rules in force.
-    Production and our own inbound fleets are not counted, so it errs safe."""
-    return hold_count(heaviest_wave(state, sid, owner),
-                      float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE))
+    """What a smart hold keeps back at ``sid``: the fewest ships that, with the
+    hulls it builds and ``owner``'s fleets already flying in, keep the system
+    against every wave of rival ships landing on it, on every roll
+    (`hold_count`), under the rules in force.
+
+    The waves are met in turn order, each on what the one before left standing
+    (its worst roll), so two waves a turn apart are not each priced as if the
+    other never came. Since the hold is sized afresh every turn, a ship built or
+    landing before a wave is there to fight it, and need not be kept back now."""
+    waves = _waves(state, sid, owner)
+    if not waves:
+        return 0
+    jitter, advantage = round(float(config.COMBAT_JITTER), 6), round(float(config.DEFENDER_ADVANTAGE), 6)
+    inbound = _reinforcements(state, sid, owner)
+    base = state.systems[sid].ships
+    steps = []  # (fresh ships by then, attackers) per wave, in turn order
+    prev_t, prev_built = 0, 0
+    for t in sorted(waves):
+        built = garrison_after(state, sid, t) - base
+        fresh = built - prev_built + sum(n for at, n in inbound.items() if prev_t < at <= t)
+        steps.append((fresh, waves[t]))
+        prev_t, prev_built = t, built
+
+    def keeps(hold: int) -> bool:
+        garrison = hold
+        for fresh, attackers in steps:
+            garrison += fresh
+            if garrison < hold_count(attackers, jitter, advantage):
+                return False
+            garrison = _kept_after(attackers, garrison, jitter, advantage)
+        return True
+
+    hi = 1
+    while not keeps(hi):  # enough ships keep it on any roll; double until there
+        hi *= 2
+    lo = -1  # keeps(lo) is False, keeps(hi) is True; a garrison only does better for more ships
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if mid >= 0 and keeps(mid):
+            hi = mid
+        else:
+            lo = mid
+    return hi
 
 
 def holds_unaided(state: GameState, sid: int, owner: int) -> bool:
-    """Can ``sid`` keep every wave flying in on what it holds and builds by the
-    turn each lands, with nothing sent to it? Each wave is priced as `smart_hold`
-    prices the heaviest (`hold_count`), so a system that passes keeps itself
-    under a smart hold however the rest of its ships are forwarded."""
-    waves: dict[int, int] = {}
-    for f in state.fleets:
-        if f.dest_id == sid and f.owner_id not in (owner, 0):
-            waves[f.turns_remaining] = waves.get(f.turns_remaining, 0) + f.ships
-    jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
-    return all(garrison_after(state, sid, t) >= hold_count(n, jitter, advantage)
-               for t, n in waves.items())
+    """Can ``sid`` keep every wave flying in on what it holds, builds and has
+    flying in already, with nothing more sent to it? Exactly when its smart hold
+    is no more than it holds, so a system that passes keeps itself under a smart
+    hold however the rest of its ships are forwarded."""
+    return smart_hold(state, sid, owner) <= state.systems[sid].ships
 
 
 def forecast_landing(state: GameState, owner: int, dest_id: int, turns: int, landing: int) -> Forecast:

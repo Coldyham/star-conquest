@@ -514,14 +514,22 @@ reach: it answers "push *these* there", not "where should everything go".
 system it reaches, so a system behind the front with rival ships inbound — or a
 frontier system the player didn't pick — would forward its garrison away under the
 attack. `_plan_rally` arms a smart hold on any threatened system it rules: it keeps
-what the heaviest wave needs (`combat.smart_hold`) and passes the rest on. It never
+what the attacks need (`combat.smart_hold`) and passes the rest on. It never
 disarms one, and a hand-set hold is kept underneath, as `_add_hop` keeps every hold.
+Chain does the same along its paths (`_plan_chain`): it was written before smart
+holds, and a chain through a system under attack stripped it just as rally did.
+
+*A tap on the panel's "N smart holds" line plans without them* (`Ui.route_smart`,
+`toggle_route_smart`), and the line stays, dimmed and reading "off", so a second
+tap brings them back. It is a preference, like the sub-mode, so it outlives the
+plan. Off still never disarms a smart hold already armed. There is no room for a
+fifth footer button on a phone, and the line already names what it switches, so it
+is not signposted; it is on trial, to see whether it is used.
 
 So auto-route no longer rallies on every threatened system. The front
 (`Ui.frontier_systems`) is always a rally point; a system threatened only by inbound
 ships is one only when it can't keep them off alone — `combat.holds_unaided`, its
-garrison plus what it builds by the turn each wave lands, against `hold_count` of that
-wave. One that can hold is left to the plan, so it passes its surplus on rather than
+smart hold no more than it holds now. One that can hold is left to the plan, so it passes its surplus on rather than
 soaking up everything nearer to it than the front is; one that can't is a sink, so
 ships gather to save it. With no front at all there is nowhere to pass ships on to, so
 every threatened system is a rally point, as before.
@@ -625,17 +633,27 @@ between "keep N" and "send N%" was mocked up and rejected: "keep N" really means
 to be a percent, and the switch had to explain that. Splitting the two quantities
 by what they are about removes the switch altogether.
 
-**A smart hold sizes itself against the heaviest wave.** In practice a hold was
+**A smart hold sizes itself against the waves flying in.** In practice a hold was
 set to beat the largest turn's worth of enemy ships flying in (a retaliatory 2 held
 by 3, or several 1s landing together) and taken off once they were dealt with. The
-hold row's "smart" chip (`ForwardRule.smart`) does that every turn:
-`combat.heaviest_wave` sums the rival ships landing on the system per turn, every
-lane and rival together, and `combat.hold_count` keeps the fewest ships that beat
-the largest of them on every roll, read off `preview_fight`'s corner most in the
+hold row's "smart" chip (`ForwardRule.smart`) does that every turn
+(`combat.smart_hold`): rival ships landing on the system are summed per turn into
+waves, every lane and rival together, and `combat.hold_count` is the fewest ships
+that beat a wave on every roll, read off `preview_fight`'s corner most in the
 attacker's favour (the defending edge, `edge_defending`, exactly, so a near tie
-that would wipe both sides out counts as lost). Production and our own inbound
-fleets are not counted, so it errs safe. Every fleet bound for a system we hold is
-drawn (`render._fleet_shown`), so it reads nothing the player cannot count.
+that would wipe both sides out counts as lost). Every fleet bound for a system we
+hold is drawn (`render._fleet_shown`), so it reads nothing the player cannot count.
+
+*It keeps back only what has to wait at home.* The hold is sized afresh every turn,
+so a hull built, or one of our fleets already flying in, that lands by a wave is
+there to fight it and need not be kept now: the hold is the fewest ships that,
+with those, meet every wave in turn order. Each wave meets what the one before
+left on its worst roll, so two waves a turn apart are not each priced as if the
+other never came. With in-lane battles on, a fleet of ours sharing its lane with
+anyone else's may be fought on the way, so it is not counted. The first version
+counted neither production nor reinforcements, and held for the heaviest wave
+alone: safe against one wave, but it kept a front's whole garrison idle while the
+ships forwarded to it were a turn out, and could still lose to a second wave.
 `Ui.hold_of` is the one figure, used by `forward_this_turn`, the popup, the badge
 ("smart N", shown even at 0 so it reads as armed) and the panel. −/+ on a smart
 hold take it back by hand from the figure it had reached. Where the row is too

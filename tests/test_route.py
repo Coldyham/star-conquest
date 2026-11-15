@@ -11,7 +11,7 @@ from __future__ import annotations
 
 
 from starconquest import app
-from starconquest import combat, config, mapgen, model
+from starconquest import combat, config, hud, mapgen, model, session
 from starconquest.geometry import WorldView
 from starconquest.model import ForwardRule, GameState, Player, System
 from starconquest.viewstate import IDLE, ROUTING, Ui
@@ -155,7 +155,19 @@ def test_an_un_owned_destination_is_legal():
     ui = _ui(s)
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
-    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0)}
+    # 1 borders the enemy, so it is threatened and keeps a smart hold on the way
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0, smart=True)}
+
+
+def test_a_threatened_system_a_chain_routes_through_gets_a_smart_hold():
+    s = _line(4, owned=range(4))
+    _inbound(s, 1, 3)
+    ui = _ui(s)
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 3)
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0, smart=True)
+    assert ui.route_plan[0] == ForwardRule({1: 100}, 0)
+    assert ui.route_newly_smart() == {1}
 
 
 def test_no_destination_yet_means_nothing_is_unroutable():
@@ -869,6 +881,15 @@ def test_holds_unaided_counts_what_is_built_before_each_wave():
     assert not combat.holds_unaided(s, 0, 1)
 
 
+def test_holds_unaided_counts_our_own_fleets_already_flying_in():
+    s = _line(2, owned={0, 1})
+    s.systems[0].ships, s.systems[0].production = 0, 0
+    _inbound(s, 0, 3, turns=2)
+    assert not combat.holds_unaided(s, 0, 1)
+    _inbound(s, 0, 20, turns=1, owner=1)
+    assert combat.holds_unaided(s, 0, 1)
+
+
 def test_route_sids_take_only_our_own_systems():
     state = _line(5, owned={0, 1, 3})
     ui = _ui(state)
@@ -877,3 +898,34 @@ def test_route_sids_take_only_our_own_systems():
     assert ui.route_sel == {0, 3}
 
 
+
+
+def test_the_smart_holds_line_turns_them_off_and_back_on():
+    """A tap on the panel's "N smart holds" line plans without them; the line
+    stays, dimmed, so a second tap brings them back."""
+    s = _line(4, owned=range(4))
+    _inbound(s, 1, 3)
+    ui = _rally(s, {3})
+    assert hud.route_lines(s, ui)[-1] == ("1 smart hold", "text", "toggle_route_smart")
+    session.UI_CALLS["toggle_route_smart"](ui, s)
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0)
+    assert ui.route_newly_smart() == set()
+    assert hud.route_lines(s, ui)[-1] == ("1 smart hold off", "dim", "toggle_route_smart")
+    ui.reset_route()
+    ui.begin_route()
+    ui.route_sel = {3}
+    ui.recompute_route(s)
+    assert not ui.route_plan[1].smart               # a preference: it outlives the plan
+    ui.toggle_route_smart(s)
+    assert ui.route_plan[1].smart
+
+
+def test_planning_without_smart_holds_never_disarms_one():
+    s = _line(3, owned=range(3))
+    _inbound(s, 0, 3)
+    ui = _ui(s)
+    ui.route_rally, ui.route_smart = True, False
+    ui.auto_forward[0] = ForwardRule({2: 100}, 0, smart=True)
+    ui.route_sel = {2}
+    ui.recompute_route(s)
+    assert ui.route_plan[0].smart and ui.route_smart_offered == set()
