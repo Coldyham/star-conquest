@@ -1430,7 +1430,7 @@ class Ui:
         system's own safety, whichever way its ships go — so re-running a route over
         a conveyor that is already correct is idempotent rather than quietly
         resetting tuning. ``smart`` arms a smart hold on top (a threatened system,
-        in rally); it never disarms one. An existing rule is reported replaced only
+        in either sub-mode); it never disarms one. An existing rule is reported replaced only
         when its lanes change."""
         old = self.auto_forward.get(node)
         if old is not None and old.shares != shares:
@@ -1454,11 +1454,15 @@ class Ui:
 
         Two selected systems can never disagree about a shared hop: `parent` is a
         dict, so the next hop is a function of the node alone.
+
+        A threatened system on a path gets a smart hold, as in rally
+        (`_plan_rally`): pushing ships on never strips a system under attack.
         """
         if self.route_dest is None or self.route_dest not in state.systems:
             return
         parent = model.flow_field(state, self._owned(state), {self.route_dest},
                                   by_turns=True)
+        threatened = self.threatened_systems(state)
         for sid in sorted(self.route_sources()):
             node = sid
             while node != self.route_dest:
@@ -1468,7 +1472,7 @@ class Ui:
                 if nxt is None:
                     self.route_unroutable.add(sid)
                     break
-                self._add_hop(node, {nxt: 100})
+                self._add_hop(node, {nxt: 100}, node in threatened)
                 node = nxt
 
     def _plan_rally(self, state: GameState) -> None:

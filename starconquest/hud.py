@@ -755,7 +755,8 @@ def route_hint(ui: Ui) -> str:
                 "rival in reach, your border with neutral systems); a system under "
                 "attack behind it keeps what it needs and passes the rest on.")
     return ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
-            "un-aim, and to drop it from the group.")
+            "un-aim, and to drop it from the group. A system under attack on the way "
+            "keeps what it needs and passes the rest on.")
 
 
 def route_confirm(ui: Ui) -> tuple[str, bool]:

@@ -155,7 +155,19 @@ def test_an_un_owned_destination_is_legal():
     ui = _ui(s)
     ui.route_sel = {0}
     ui.set_route_dest(s, 2)
-    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0)}
+    # 1 borders the enemy, so it is threatened and keeps a smart hold on the way
+    assert ui.route_plan == {0: ForwardRule({1: 100}, 0), 1: ForwardRule({2: 100}, 0, smart=True)}
+
+
+def test_a_threatened_system_a_chain_routes_through_gets_a_smart_hold():
+    s = _line(4, owned=range(4))
+    _inbound(s, 1, 3)
+    ui = _ui(s)
+    ui.route_sel = {0}
+    ui.set_route_dest(s, 3)
+    assert ui.route_plan[1] == ForwardRule({2: 100}, 0, smart=True)
+    assert ui.route_plan[0] == ForwardRule({1: 100}, 0)
+    assert ui.route_newly_smart() == {1}
 
 
 def test_no_destination_yet_means_nothing_is_unroutable():
@@ -867,6 +879,15 @@ def test_holds_unaided_counts_what_is_built_before_each_wave():
     assert combat.holds_unaided(s, 0, 1)           # five hulls built by the time it lands
     _inbound(s, 0, 40, turns=2)
     assert not combat.holds_unaided(s, 0, 1)
+
+
+def test_holds_unaided_counts_our_own_fleets_already_flying_in():
+    s = _line(2, owned={0, 1})
+    s.systems[0].ships, s.systems[0].production = 0, 0
+    _inbound(s, 0, 3, turns=2)
+    assert not combat.holds_unaided(s, 0, 1)
+    _inbound(s, 0, 20, turns=1, owner=1)
+    assert combat.holds_unaided(s, 0, 1)
 
 
 def test_route_sids_take_only_our_own_systems():

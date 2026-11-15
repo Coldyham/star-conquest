@@ -12,6 +12,7 @@ ships or is dropped, delete its line here (and add it to
 - bot-api.md · Who builds a compiled bot, and whether any bot may be slow (the baseline roster is `ladder.md`'s). *Open questions.*
 - campaign.md · Whether to bring back campaign fleets once claimed names are taken up widely: opt-in identity, whether arrival needs a notification, and whether wait timers make it a chore. *Revisit if claimed names take hold.*
 - campaign.md · The daily allowance of moves: whether to build it, its rate (`ceil(field / 4)` fitted to one solo player on 12 nodes), whether a home claim starts the bank, and whether a retake outside the grace costs less. *A daily allowance of moves (proposed).*
+- shell.md · Whether route mode gets a switch to plan without smart holds (both sub-modes arm one on every threatened system they rule); the phone footer has no room for a fifth button, so it would need a home such as the panel's "N smart holds" line. *Route mode.*
 - settings / menu · Whether the setup menu exposes the fragile config (production-weights dict, world-size ratios) and cosmetics ("Pass 3"); a deliberate pause, not an oversight.
 
 ## Proposed, not built
