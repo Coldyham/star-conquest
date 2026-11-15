@@ -428,7 +428,8 @@ select
   c.week_start,
   (node ->> 'id')::integer as node_id,
   node ->> 'kind' as kind,
-  g.game_key
+  g.game_key,
+  node ->> 'name' as node_name   -- a crater's name, flavour only; null on older weeks
 from public.campaigns c
 cross join lateral jsonb_array_elements(c.graph -> 'nodes') node
 join public.games g

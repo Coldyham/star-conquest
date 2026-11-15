@@ -46,6 +46,7 @@ from starconquest.settings import (
     ROLL_FLOORS, build_state, randomise_knobs, roll_seed,
 )
 from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credentials
+from tools.craters import CRATERS
 
 GRAPH_VERSION = 1
 FIELD_PER_PLAYER = 4          # field nodes per player active last week...
@@ -308,8 +309,25 @@ def build_campaign(start: dt.date, games: list[dict], active: int,
         })
     lanes = [list(pair) for pair in lanes]
     lanes += [[edge, n_field + i] for i, (edge, _p) in enumerate(homes)]
+    name_nodes(nodes, rng)
     return {"version": GRAPH_VERSION, "week_start": start.isoformat(), "nodes": nodes,
             "lanes": lanes}
+
+
+def name_nodes(nodes: list[dict], rng: random.Random, craters=None) -> None:
+    """Stamp a lunar crater's name and card on each node (``tools/craters.py``),
+    drawn last so a name never moves a map, as ``mapgen._name_systems`` does for
+    stars. Flavour only: a node stays keyed by its ``id``. With too few names
+    (no Gazetteer export generated yet) every node goes unnamed, and the board
+    calls it "Node 3" as before."""
+    craters = CRATERS if craters is None else craters
+    if len(craters) < len(nodes):
+        return
+    for node, name in zip(nodes, rng.sample(sorted(craters), len(nodes))):
+        crater = craters[name]
+        node["name"] = name
+        node["lore"] = {"origin": crater.origin, "diameter_km": crater.diameter_km,
+                        "approved": crater.approved}
 
 
 def active_players(api: Supabase, start: dt.date) -> int:

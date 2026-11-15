@@ -52,6 +52,9 @@ test("the answer is attemptStatus, plus the holder", () => {
   assert.deepEqual(onZero.holder, { name: "ann", turns: 30, lost: 0 });
   assert.equal(onZero.status.why, "no-home");
   assert.equal(answer(graph, scores, graph.nodes[0], "", T0).status.why, "no-name");
+  assert.equal(reply.node.name, undefined);   // an older week's nodes have no name
+  const named = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, name: `C${n.id}` })) };
+  assert.equal(answer(named, scores, named.nodes[1], "Ann", T0).node.name, "C1");
 });
 
 test("the handler finds this week's node and answers for the name given", async () => {

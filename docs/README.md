@@ -136,4 +136,5 @@ records under `results/`; the argparse ones take `--help`, and each module docst
 | `try_daily.py` | Deal a weekday's daily map or puzzle (or a real day's) and open it in the game, served locally, to feel and tune the spec | daily.md |
 | `check_pbp.py` | Play a whole play-by-post match against a real endpoint | pbp.md |
 | `gen_starnames.py` | Regenerate `starnames.py`/`starlore.py` | core.md |
+| `gen_craternames.py` | Regenerate `tools/craters.py`, the campaign's node names | campaign.md |
 | `dump_challenge_fixtures.py` | Real challenge tokens as fixtures for the board's JS decoder | core.md |

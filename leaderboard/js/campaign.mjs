@@ -296,13 +296,30 @@ export function canAttempt(graph, state, nodeId, name, now = Date.now(), game = 
  */
 export function campaignMark(entry, thisWeek) {
   const current = entry.week_start === weekParam(thisWeek);
-  const node = `${entry.kind === "home" ? "Home" : "Node"} ${entry.node_id}`;
+  const node = nodeTitle({ id: entry.node_id, kind: entry.kind, name: entry.node_name });
   const week = current ? "" : `week=${entry.week_start}&`;
   return {
     current,
     label: `${current ? "Campaign" : "Past campaign"} · ${node}`,
     href: `campaign.html?${week}node=${entry.node_id}`,
   };
+}
+
+/**
+ * A node as a heading: its crater name (`tools/campaign.py`'s `name_nodes`), or
+ * "Home 3" / "Node 7" for a week made before nodes were named. Flavour only: a
+ * node is keyed by its id everywhere.
+ */
+export function nodeTitle(node) {
+  if (node?.name) return node.name;
+  return `${node?.kind === "home" ? "Home" : "Node"} ${node?.id}`;
+}
+
+/** A node inside a sentence: "home Tycho" or "Mädler", else "home 3" or "node 7". */
+export function nodeRef(node) {
+  const home = node?.kind === "home";
+  if (node?.name) return home ? `home ${node.name}` : node.name;
+  return `${home ? "home" : "node"} ${node?.id}`;
 }
 
 /** A node's circle radius in the page's own units, growing with its systems. */

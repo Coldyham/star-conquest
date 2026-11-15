@@ -144,6 +144,48 @@ out, and `_mystery` rolls its knobs again until they pass.
   shows it as one again. It labels the slow node but still deals it, and
   flags the playable rolled ones too.
 
+## Node names: lunar craters
+
+A node is named after a crater on the Moon, the way a game's systems are named
+after IAU-named stars, and its card on the campaign page has an info button
+(as a system's star card has in the game) saying who the crater is named after.
+Like a star's name, it is flavour: a node is keyed by its `id` everywhere, and
+`campaign_games`, `fold` and `attemptStatus` never read the name.
+
+- **The list** is the IAU Gazetteer of Planetary Nomenclature's lunar craters,
+  exported as CSV to `tools/iau-lunar-craters.csv` and turned into
+  `tools/craters.py` by `tools/gen_craternames.py` (regenerate, don't
+  hand-edit). The site builds its CSV in the browser from the results table,
+  so the export of 2026-11-15 was read from the results page's HTML: 1,666
+  named craters, 1,615 approved, median 45 km across. Kept: approved,
+  unlettered (never a satellite such as "Copernicus A"), at most `MAX_KM`
+  (30 km) across, named after a person (the origin line gives life dates, so
+  first-name craters such as "Ina" and landing-site names are out), short
+  enough for a heading, not one of the game's star names, and not on the
+  short `FAMOUS` list of household names small enough to pass the size cut
+  (Kepler is 29.5 km in the Gazetteer; Galilaei, Euclides, Freud, Euler…).
+  That leaves 389, against a week's 50 or so nodes. Only the worker reads
+  `craters.py`; it is not in the game's zip.
+- **The origin line** is the Gazetteer's with the surname put back
+  (`gen_craternames._origin`): "Johann Heinrich; German astronomer" reads
+  "Johann Heinrich Mädler, German astronomer", and a Latinised name's
+  "Hove, Martin van den" reads "Martin van den Hove (Hortensius)".
+- **Stamped when the week is made, and stored** (`campaign.name_nodes`): each
+  node gets `name` and `lore` (`origin`, `diameter_km`, `approved`) in the
+  week's graph. The names are a roll of the week like its seeds, so they are
+  the definition, not derived; the card travels with them so the page needs no
+  crater table. They are drawn from the rng **last**, after every map is dealt,
+  so naming never moves a map (`mapgen._name_systems` does the same for stars).
+  With fewer names than nodes (no export generated yet) nothing is named.
+- **Older weeks** have no names and keep "Home 3" / "Node 7": every reader goes
+  through `campaign.mjs`'s `nodeTitle` / `nodeRef`, and the game's
+  `campaign.Status.name`. `campaign_games` carries `node_name` for a map's
+  campaign badge; `/api/campaign` adds `node.name` to its answer, and the game
+  says "Campaign: Mädler" before Start and "Mädler: open" in the side panel.
+- *Considered: galaxy names.* There is no official list (the IAU names no
+  galaxies; the common names are about a hundred nicknames such as "Black Eye"
+  and "Mice"), too few for a 40-node week and odd as places.
+
 ## The week's replay
 
 The campaign page can play the week back. Under the map are a scrubber and

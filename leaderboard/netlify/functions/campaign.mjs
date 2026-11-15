@@ -68,7 +68,7 @@ export function answer(graph, scores, node, name, now, game = {}) {
   return {
     week_start: graph.week_start,
     now,
-    node: { id: node.id, kind: node.kind },
+    node: { id: node.id, kind: node.kind, ...(node.name ? { name: node.name } : {}) },
     holder: held ? { name: held.name, turns: held.turns, lost: held.lost } : null,
     status: attemptStatus(graph, state, node.id, name, now, game),
   };
