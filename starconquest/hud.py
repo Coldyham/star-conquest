@@ -712,11 +712,12 @@ def share_label(ui: Ui) -> tuple[str, str]:
     return ("Copy daily result" if ui.daily_day else "Challenge a friend"), "C"
 
 
-def route_lines(state: GameState, ui: Ui) -> list[tuple[str, Role]]:
+def route_lines(state: GameState, ui: Ui) -> list[tuple]:
     """What route mode is holding, and what confirming it would do: counts rather
     than a list of hops, since the map shows every hop and the numbers are what
-    isn't obvious from looking."""
-    lines: list[tuple[str, Role]] = []
+    isn't obvious from looking. Each line is ``(text, role)``, or
+    ``(text, role, call)`` for one a tap acts on (a `session.UI_CALLS` name)."""
+    lines: list[tuple] = []
     if ui.route_rally:
         n = len(ui.route_sel)
         lines.append((f"{n} rally point{'' if n == 1 else 's'}", "route"))
@@ -737,8 +738,11 @@ def route_lines(state: GameState, ui: Ui) -> list[tuple[str, Role]]:
         lines.append((f"{len(ui.route_replaces)} replaced", "likely"))
     if ui.route_clears:
         lines.append((f"{len(ui.route_clears)} cleared", "likely"))
-    if smart := ui.route_newly_smart():
-        lines.append((f"{len(smart)} smart hold{'' if len(smart) == 1 else 's'}", "text"))
+    if offered := ui.route_smart_offered:
+        # A tap plans without them, and back; unsignposted while it is tried out
+        n = f"{len(offered)} smart hold{'' if len(offered) == 1 else 's'}"
+        lines.append((n, "text", "toggle_route_smart") if ui.route_smart
+                     else (f"{n} off", "dim", "toggle_route_smart"))
     if ui.route_unroutable:
         lines.append((f"{len(ui.route_unroutable)} unreachable", "gamble"))
     if ui.route_cycles:

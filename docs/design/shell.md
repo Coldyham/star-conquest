@@ -519,6 +519,13 @@ disarms one, and a hand-set hold is kept underneath, as `_add_hop` keeps every h
 Chain does the same along its paths (`_plan_chain`): it was written before smart
 holds, and a chain through a system under attack stripped it just as rally did.
 
+*A tap on the panel's "N smart holds" line plans without them* (`Ui.route_smart`,
+`toggle_route_smart`), and the line stays, dimmed and reading "off", so a second
+tap brings them back. It is a preference, like the sub-mode, so it outlives the
+plan. Off still never disarms a smart hold already armed. There is no room for a
+fifth footer button on a phone, and the line already names what it switches, so it
+is not signposted; it is on trial, to see whether it is used.
+
 So auto-route no longer rallies on every threatened system. The front
 (`Ui.frontier_systems`) is always a rally point; a system threatened only by inbound
 ships is one only when it can't keep them off alone — `combat.holds_unaided`, its

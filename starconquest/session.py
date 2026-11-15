@@ -61,6 +61,7 @@ UI_CALLS = {
     "reset_route": lambda ui, state: ui.reset_route(),
     "set_route_rally": lambda ui, state, rally: ui.set_route_rally(state, bool(rally)),
     "auto_rally": lambda ui, state: ui.auto_rally(state),
+    "toggle_route_smart": lambda ui, state: ui.toggle_route_smart(state),
     "route_clear": lambda ui, state: play.route_clear(state, ui),
     "add_route_sids": lambda ui, state, sids: ui.add_route_sids(state, [int(s) for s in sids]),
     "open_odds": lambda ui, state: setattr(ui, "odds_open", ui.mode == CHOOSING and not ui.forward_armed),

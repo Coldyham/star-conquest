@@ -285,7 +285,9 @@ export class Hud {
     if (view.route) {
       const r = view.route;
       panel.replaceChildren(...you, ...(portrait() ? [] : notes), h("section", {}, h("h2", {}, r.title),
-        ...r.lines.map(([text, role]) => h("p", { style: `color:${this.color(role)}` }, text)),
+        ...r.lines.map(([text, role, act]) => h("p", act
+          ? { style: `color:${this.color(role)};cursor:pointer`, onclick: () => this.on.call(act, []) }
+          : { style: `color:${this.color(role)}` }, text)),
         h("p", { class: "wrap hint" }, r.hint)));
       return;
     }
