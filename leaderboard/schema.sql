@@ -964,6 +964,32 @@ returns jsonb language sql stable security definer set search_path = public as $
   limit 1
 $$;
 
+-- Every day from p_from to p_to (at most 400 days) whose puzzle the signed-in
+-- caller's own best posted score matches or beats, as sc_my_puzzle_par judges
+-- each: [{day, turns_only}], turns_only true when it matched only the par's
+-- turns (the par lost fewer ships). Their own streak calendar on their player
+-- card paints those days gold (js/streaks-card.mjs); no figure of the par is
+-- returned, and nobody else's card is ever asked.
+create or replace function public.sc_my_par_days(p_from date, p_to date)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('day', x.day, 'turns_only', x.turns_only)
+                            order by x.day), '[]'::jsonb)
+  from (
+    select p.day, (b.turns, b.lost) > (p.turns, p.lost) as turns_only
+    from public.users u
+    join public.daily_games g on g.kind = 'puzzle' and g.day between p_from and p_to
+    join lateral (
+      select s.turns, s.lost from public.counted_scores s
+      where s.game_key = g.game_key and s.user_id = u.id and s.hand >= s.turns
+      order by s.turns, s.lost limit 1) b on true
+    join public.puzzle_pars p on p.day = g.day
+    join public.dailies d on d.day = g.day and d.kind = 'puzzle' and d.rules_version = p.rules_version
+    where auth.uid() is not null and u.owner = auth.uid()
+      and p_to - p_from <= 400
+      and b.turns <= p.turns
+  ) x
+$$;
+
 -- Whether the caller may post as this user row: it is unclaimed, or theirs.
 -- Security definer because the public cannot read users.owner (see the grants).
 create or replace function public.sc_may_use_user(p_user_id bigint)
@@ -1121,6 +1147,8 @@ grant execute on function public.sc_puzzle_par(date, integer, integer) to anon, 
 -- ...and to a signed-in player about their own posted score only.
 revoke execute on function public.sc_my_puzzle_par(date) from public, anon;
 grant execute on function public.sc_my_puzzle_par(date) to authenticated;
+revoke execute on function public.sc_my_par_days(date, date) from public, anon;
+grant execute on function public.sc_my_par_days(date, date) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Grants to service_role, the secret key the workers and functions hold. It

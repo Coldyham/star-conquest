@@ -111,6 +111,24 @@ def test_a_player_who_met_only_the_turns_is_told_the_turns(board):
     assert '"turns": 10' in got and '"lost": null' in got and '"my_lost": 5' in got
 
 
+def _days(board: str, who: str) -> str:
+    uid = f"00000000-0000-0000-0000-00000000000{who}" if who else ""
+    return _psql(f"set role authenticated; set request.jwt.claim.sub = '{uid}';"
+                 f" select sc_my_par_days({_TODAY} - 7, {_TODAY})", board)
+
+
+def test_the_streak_calendar_hears_only_its_owners_par_days(board):
+    assert '"turns_only": false' in _days(board, "a")
+    assert '"turns_only": true' in _days(board, "e")
+    assert _days(board, "b") == "[]"      # short of it
+    assert _days(board, "") == "[]"       # signed out
+    assert '"turns":' not in _days(board, "a")  # no figure of the par
+    out = subprocess.run(["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
+                          f"set role anon; select sc_my_par_days({_TODAY}, {_TODAY})"],
+                         capture_output=True, text=True, check=False)
+    assert out.returncode != 0 and "permission denied" in out.stderr
+
+
 def test_nobody_else_is_told(board):
     assert _mine(board, "b") == ""        # short of it
     assert _mine(board, "c") == ""        # turns not played by hand

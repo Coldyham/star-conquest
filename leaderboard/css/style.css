@@ -1272,6 +1272,12 @@ button.streak-week:active:not(:disabled) { transform: none; box-shadow: none; }
 .pip.day { background: var(--green); box-shadow: 0 0 6px rgba(107, 255, 143, 0.5); }
 .pip.later { border: 2px solid var(--green); background: rgba(107, 255, 143, 0.15); }
 .pip.miss { background: #1a1f36; }
+/* The player's own card only: a puzzle day whose par they met is gold, striped
+   when they matched only its turns; outlined, as "later", when won from the archive. */
+.pip.day.par { background: var(--gold); box-shadow: 0 0 6px rgba(255, 210, 63, 0.55); }
+.pip.day.par-turns { background: repeating-linear-gradient(135deg, var(--gold) 0 4px, #6b5410 4px 8px); box-shadow: 0 0 6px rgba(255, 210, 63, 0.4); }
+.pip.later.par { border-color: var(--gold); background: rgba(255, 210, 63, 0.18); }
+.pip.later.par-turns { border-color: var(--gold); background: repeating-linear-gradient(135deg, rgba(255, 210, 63, 0.35) 0 4px, transparent 4px 8px); }
 .pip.today { border: 2px dashed var(--cyan); }
 .pip.future, .pip.none { border: 1px solid #1a1f36; }
 .wk-day .pip.is-today { outline: 1px solid var(--cyan); outline-offset: 2px; }
@@ -1309,6 +1315,10 @@ button.cal-nav:active:not(:disabled) { transform: none; box-shadow: none; }
 a.cal-day:hover { outline: 1px solid var(--cyan); }
 .cal-day.day { background: var(--green); color: #05070f; font-weight: bold; }
 .cal-day.later { border: 2px solid var(--green); background: rgba(107, 255, 143, 0.15); color: var(--green); }
+.cal-day.day.par { background: var(--gold); }
+.cal-day.day.par-turns { background: repeating-linear-gradient(135deg, var(--gold) 0 5px, #c9a22a 5px 10px); }
+.cal-day.later.par { border-color: var(--gold); background: rgba(255, 210, 63, 0.15); color: var(--gold); }
+.cal-day.later.par-turns { border-color: var(--gold); background: repeating-linear-gradient(135deg, rgba(255, 210, 63, 0.3) 0 5px, transparent 5px 10px); color: var(--gold); }
 .cal-day.miss { background: #12162a; }
 .cal-day.today { border: 2px dashed var(--cyan); color: var(--cyan); }
 .cal-day.future, .cal-day.none { opacity: 0.45; }
