@@ -650,6 +650,15 @@ It shows under an embargo as well, beside *Your scores*: the figures are the
 player's own. A remembered name that is not claimed is not enough, as for *Your
 scores*.
 
+**Gold on the player's own streak calendar** (the author, 2026-11-15). On
+their own player card (signed in, owning the name) the puzzle streak's bar and
+calendar paint a day gold when their best posted score there met the par by the
+rule above, striped gold when it matched only the turns; outlined, as any
+archive win, when won later. `sc_my_par_days(from, to)` answers the days and
+whether each was turns only, never a figure of the par, from `auth.uid()` alone,
+so another player's card, or a signed-out visitor, sees the green it always did
+(`streaks-card.mjs`, `daily.mjs`'s `parDays`).
+
 **A convenience, not a secret.** `puzzle_pars` has no policy and no public grant,
 and its `line` (the winning `GameLog`, the solution) never leaves the table. But
 the check takes a claimed result, so a forged claim of 1 turn reads the par. A

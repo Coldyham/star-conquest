@@ -224,6 +224,18 @@ export function playerDays(scores, dailyGames) {
 }
 
 /**
+ * The rows `sc_my_par_days` answers (`[{day, turns_only}]`) as a Map of day to
+ * `"par"` (the player's best matched or beat the puzzle's par) or `"par-turns"`
+ * (matched only its turns). The player card's streak bar and calendar paint
+ * those days gold, solid or striped, on the player's own card alone.
+ */
+export function parDays(rows) {
+  return new Map((Array.isArray(rows) ? rows : [])
+    .filter((r) => r && typeof r.day === "string")
+    .map((r) => [r.day, r.turns_only ? "par-turns" : "par"]));
+}
+
+/**
  * A map that was a day's daily (a `daily_games` row, `{day, kind}`), for
  * game.html's badge and button: `{label, button, href}`, the day's own page.
  */

@@ -6,7 +6,7 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
-  addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parNote, playerDays, playerStreaks,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parDays, parNote, playerDays, playerStreaks,
   postedOn, resultLine, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
@@ -194,6 +194,12 @@ test("a player's streaks are counted per kind, mended and true", () => {
   const both = [{ game_key: "p31", hand: 1, submitted_at: "2026-11-02T09:00:00Z" },
     { game_key: "p31", hand: 1, submitted_at: "2026-10-31T09:00:00Z" }];
   assert.equal(playerDays(both, games).puzzle.get("2026-10-31"), "day");
+});
+
+test("par days read as solid gold, or striped for the turns alone", () => {
+  const got = parDays([{ day: "2026-11-01", turns_only: false }, { day: "2026-11-02", turns_only: true }, { turns_only: false }]);
+  assert.deepEqual([...got], [["2026-11-01", "par"], ["2026-11-02", "par-turns"]]);
+  assert.equal(parDays(null).size, 0);
 });
 
 test("the streak calendar's weeks and months run Monday first", () => {

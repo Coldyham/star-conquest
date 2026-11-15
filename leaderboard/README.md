@@ -865,7 +865,9 @@ test bot within a turn cap that grows from 80 to 110.
   asks `sc_puzzle_par`, which answers the par only to a result that matches or
   beats it, so the game congratulates only that player. The puzzle page and the
   map page show the same line to a signed-in player whose own posted score met
-  it (`sc_my_puzzle_par`, `post.mjs`'s `ownPar`). Tests:
+  it (`sc_my_puzzle_par`, `post.mjs`'s `ownPar`), and their own player card
+  paints those days gold in the puzzle streak, striped for the turns alone
+  (`sc_my_par_days`). Tests:
   `tests/test_puzzle_par_sql.py`, `tests/daily.test.mjs`.
 
 ## Badges
