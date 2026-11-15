@@ -271,3 +271,19 @@ def test_the_stamp_taken_at_start_rides_on_the_posted_score(monkeypatch):
     app.stamp_campaign(ui, watch)
     again = app.challenge_settings(settings, state, ui, 42, log).challenge
     assert again is not None and again.campaign == ""
+
+
+def test_a_named_node_goes_by_its_crater():
+    """A week whose nodes carry crater names (`tools/campaign.name_nodes`)
+    says the name where it said "Node 3"; an older week keeps the number."""
+    t = time.monotonic()
+    body = json.loads(answer())
+    body["node"]["name"] = "Mädler"
+    named = campaign.parse(json.dumps(body), t)
+    assert named.name == "Mädler"
+    assert campaign.label(named, t) == "Mädler: open"
+    late = campaign.parse(json.dumps({**body, "status": {"can": False, "why": "not-adjacent"}}), t)
+    assert campaign.confirm(late, t)[0] == "Campaign: Mädler"
+    shy = campaign.parse(json.dumps({**body, "status": {"can": False, "why": "no-name"}}), t)
+    assert campaign.label(shy, t) == "Campaign: Mädler"
+    assert campaign.parse(answer(), t).name == "Node 3"

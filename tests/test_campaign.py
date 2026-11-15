@@ -212,3 +212,31 @@ def test_a_config_whose_home_cannot_match_the_neutrals_in_time_is_never_a_node()
     for seed in range(40):
         for node in _graph(games=GAMES + [slow], seed=seed)["nodes"]:
             assert campaign.starts_in_time(Settings.from_dict(dict(node["settings"])))
+
+
+def _craters(count: int) -> dict:
+    return {f"Crater{i:03d}": _crater(i) for i in range(count)}
+
+
+def _crater(i: int):
+    from tools.craters import Crater
+    return Crater(f"Somebody {i}, astronomer.", 10.0 + i % 20, "1935")
+
+
+def test_names_are_drawn_last_so_they_never_move_a_map(monkeypatch):
+    """Naming draws from the rng after every map is dealt, as stars are named
+    after the board: with names or without, the week's maps are the same."""
+    bare = _graph(seed=5)
+    monkeypatch.setattr(campaign, "CRATERS", _craters(200))
+    named = _graph(seed=5)
+    assert [{k: v for k, v in n.items() if k not in ("name", "lore")} for n in named["nodes"]] == bare["nodes"]
+    names = [n["name"] for n in named["nodes"]]
+    assert len(set(names)) == len(names)
+    first = named["nodes"][0]
+    assert first["lore"] == {"origin": _craters(200)[first["name"]].origin,
+                             "diameter_km": _craters(200)[first["name"]].diameter_km, "approved": "1935"}
+
+
+def test_too_few_names_leaves_every_node_unnamed(monkeypatch):
+    monkeypatch.setattr(campaign, "CRATERS", _craters(3))
+    assert not any("name" in n for n in _graph()["nodes"])

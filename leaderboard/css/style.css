@@ -1223,6 +1223,17 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
   color: var(--gold); text-transform: uppercase;
 }
 .campaign-detail p { margin: 0.35rem 0; }
+.campaign-detail .head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
+.campaign-detail .head-row h3 { margin-bottom: 0.5rem; }
+.campaign-detail h3 .kind { color: var(--dim); }
+.campaign-detail .lore {
+  flex: none; width: 1.4rem; height: 1.4rem; padding: 0; border: 1px solid var(--dim); border-radius: 50%;
+  background: none; color: var(--dim); font: italic bold 0.85rem/1 Georgia, serif;
+  text-transform: none; box-shadow: none; cursor: pointer;
+}
+.campaign-detail .lore[aria-expanded="true"] { border-color: var(--gold); color: var(--gold); }
+.campaign-detail .lore-card { margin: 0 0 0.6rem; padding-left: 0.7rem; border-left: 2px solid var(--dim); }
+.campaign-detail .lore-card .dim { color: var(--dim); }
 .campaign-detail .can, .campaign-note .can { color: var(--green); }
 .campaign-detail .cannot, .campaign-note .cannot { color: var(--dim); }
 .campaign-detail .timer, .campaign-note .timer { color: var(--gold); }

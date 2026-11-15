@@ -381,7 +381,7 @@ async function configHead(game) {
 async function campaignMarks() {
   const thisWeek = weekStart(new Date());
   const rows = await select(
-    `campaign_games?select=game_key,week_start,node_id,kind&week_start=${eq(weekParam(thisWeek))}`,
+    `campaign_games?select=game_key,week_start,node_id,kind,node_name&week_start=${eq(weekParam(thisWeek))}`,
   ).catch(() => []);
   return new Map(rows.map((entry) => [entry.game_key, campaignMark(entry, thisWeek)]));
 }

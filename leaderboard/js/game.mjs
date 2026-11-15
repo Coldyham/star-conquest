@@ -506,7 +506,7 @@ async function load() {
       // Quiet for the same reason: a board without the campaign views just
       // shows no badge.
       select(
-        `campaign_games?select=week_start,node_id,kind&game_key=${eq(gameKey)}` +
+        `campaign_games?select=week_start,node_id,kind,node_name&game_key=${eq(gameKey)}` +
           `&order=week_start.desc&limit=1`,
       ).catch(() => []),
       // Quiet too: the day this map was the daily of, if it was one.
