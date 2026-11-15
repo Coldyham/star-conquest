@@ -226,6 +226,7 @@ def _crater(i: int):
 def test_names_are_drawn_last_so_they_never_move_a_map(monkeypatch):
     """Naming draws from the rng after every map is dealt, as stars are named
     after the board: with names or without, the week's maps are the same."""
+    monkeypatch.setattr(campaign, "CRATERS", {})
     bare = _graph(seed=5)
     monkeypatch.setattr(campaign, "CRATERS", _craters(200))
     named = _graph(seed=5)

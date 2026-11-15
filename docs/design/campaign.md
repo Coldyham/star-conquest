@@ -155,13 +155,21 @@ Like a star's name, it is flavour: a node is keyed by its `id` everywhere, and
 - **The list** is the IAU Gazetteer of Planetary Nomenclature's lunar craters,
   exported as CSV to `tools/iau-lunar-craters.csv` and turned into
   `tools/craters.py` by `tools/gen_craternames.py` (regenerate, don't
-  hand-edit). Kept: adopted, unlettered (never a satellite such as
-  "Copernicus A"), at most `MAX_KM` (30 km) across, named after a person (a
-  first-name crater such as "Ina" is left out), short enough for a heading,
-  and not one of the game's star names. The Moon has about 1,600 named craters;
-  the size cut is what keeps the famous ones (Copernicus, Tycho, Plato,
-  Kepler at 31 km, Aristarchus at 40) out, so the names read as unfamiliar
-  scientists. Only the worker reads `craters.py`; it is not in the game's zip.
+  hand-edit). The site builds its CSV in the browser from the results table,
+  so the export of 2026-11-15 was read from the results page's HTML: 1,666
+  named craters, 1,615 approved, median 45 km across. Kept: approved,
+  unlettered (never a satellite such as "Copernicus A"), at most `MAX_KM`
+  (30 km) across, named after a person (the origin line gives life dates, so
+  first-name craters such as "Ina" and landing-site names are out), short
+  enough for a heading, not one of the game's star names, and not on the
+  short `FAMOUS` list of household names small enough to pass the size cut
+  (Kepler is 29.5 km in the Gazetteer; Galilaei, Euclides, Freud, Euler…).
+  That leaves 389, against a week's 50 or so nodes. Only the worker reads
+  `craters.py`; it is not in the game's zip.
+- **The origin line** is the Gazetteer's with the surname put back
+  (`gen_craternames._origin`): "Johann Heinrich; German astronomer" reads
+  "Johann Heinrich Mädler, German astronomer", and a Latinised name's
+  "Hove, Martin van den" reads "Martin van den Hove (Hortensius)".
 - **Stamped when the week is made, and stored** (`campaign.name_nodes`): each
   node gets `name` and `lore` (`origin`, `diameter_km`, `approved`) in the
   week's graph. The names are a roll of the week like its seeds, so they are
