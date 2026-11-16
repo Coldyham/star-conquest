@@ -87,6 +87,27 @@ def test_every_node_builds_and_reports_its_real_system_count():
         assert len(build_state(settings, settings.seed).systems) == node["systems"]
 
 
+def test_every_node_deals_the_default_bot_to_the_players_seat():
+    """Seat 1 is the player's: a "?" node (every seat random) and a family copied
+    from a setup posted with a bot watched in seat 1 both deal it the default,
+    so a win played by hand keys to the node however the game was started. The
+    other seats keep what they were dealt."""
+    watched = Settings.defaults()
+    watched.ai_strategy = ["knower", "thinker"] + watched.ai_strategy[2:]
+    watched.ai[0].aux = 3.0
+    games = [_game("w", 4, ai_strategy=watched.ai_strategy, ai=watched.ai)]
+    plain = Settings()
+    for seed in range(5):
+        nodes = [n for n in _graph(games=games, seed=seed)["nodes"] if "settings" in n]
+        assert any(n["mystery"] for n in nodes)
+        for node in nodes:
+            setup = Settings.from_dict(dict(node["settings"]))
+            assert setup.ai_strategy[0] == plain.ai_strategy[0]
+            assert setup.ai[0] == plain.ai[0]
+            expected = ("random" if node["mystery"] else "thinker")
+            assert setup.ai_strategy[1] == expected
+
+
 def test_there_are_one_or_two_mystery_nodes_and_only_in_the_field():
     for seed in range(5):
         graph = _graph(seed=seed)
