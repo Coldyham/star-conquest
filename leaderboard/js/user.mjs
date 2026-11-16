@@ -297,7 +297,6 @@ async function load() {
         ", or type one above.",
       ]),
     );
-    nameField.focus();
     return;
   }
 
