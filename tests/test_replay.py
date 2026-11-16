@@ -751,6 +751,22 @@ def test_a_bot_that_never_played_a_turn_is_no_part_of_the_map(monkeypatch, tmp_p
                for i in state.systems)
 
 
+def test_a_map_dealt_with_a_random_seat_1_keeps_it_when_played_by_hand(monkeypatch, tmp_path):
+    """A campaign "?" node deals every seat "random", seat 1 included. Opened and
+    played by hand (no autoplay), that seat's bot is the map's own, so the first
+    hand-ended turn must not reset it to the default and move the map's key."""
+    from starconquest import app
+    monkeypatch.setattr(replay, "GAMES_DIR", tmp_path)
+    opened = Settings(players=3, nodes=14, seed=5)
+    opened.ai_strategy = ["random"] * len(opened.ai_strategy)
+    settings = Settings.from_dict(opened.to_dict())
+    state, ui, log = app.start_game(settings, 5, False)
+    app.resolve_turn(state, ui, log, settings)                     # ended by hand
+    assert settings.ai_strategy[0] == "random"
+    assert settings.challenge_key() == opened.challenge_key()
+    assert log.setup_key() == opened.challenge_key()
+
+
 def test_a_bot_that_played_a_turn_stays_in_the_setup(monkeypatch, tmp_path):
     """Taken over after the seat's bot has played: it really played part of the
     game, so the setup keeps it."""
