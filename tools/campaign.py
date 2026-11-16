@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from starconquest import config, mapgen
+from starconquest.model import AiParams
 from starconquest.settings import (
     ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY, Settings, apply_globals,
     ROLL_FLOORS, build_state, randomise_knobs, roll_seed,
@@ -152,8 +153,17 @@ def _fresh_seed(rng: random.Random, taken: set[tuple[str, int]], mode: str) -> i
 def _node_setup(settings: Settings, seed: int) -> tuple[dict, int]:
     """The node's setup in the exact pruned form a posted link stores in
     ``games.settings_json``, and how many systems it really has (a symmetric map
-    can round up). Building it also proves it plays."""
+    can round up). Building it also proves it plays.
+
+    Seat 1, the player's, is always dealt the default bot: a family copies a
+    posted setup that may carry a watched bot there, and a "?" node deals every
+    seat random. The player's seat never decides a turn played by hand, and a
+    non-default bot there is what a game started on Autoplay and rewound to
+    play by hand cannot keep (``app.forget_unplayed_bot``), so the win would
+    post to a different map. Each seat's random pick is derived from the seed
+    and its own seat alone, so this moves no opponent."""
     settings.seed, settings.autoplay, settings.challenge = seed, False, None
+    settings.ai_strategy[0], settings.ai[0] = Settings().ai_strategy[0], AiParams()
     state = build_state(settings, seed)
     return settings.token_dict(), len(state.systems)
 

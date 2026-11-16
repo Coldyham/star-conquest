@@ -1316,7 +1316,8 @@ def forget_unplayed_bot(state: GameState, ui: Ui, log: GameLog, settings: Settin
     """A match whose first turn was ended by hand is a person's game from the
     start, so the bot the human seat was set up with is no part of it: put the
     seat back to the default bot and autoplay off, in the log, the live board and
-    ``settings``, so the match keys to the map it was opened as.
+    ``settings``, so the match keys to the map it was opened as. A setup opened
+    without autoplay is left alone: its seat-1 bot came with the map.
 
     Without this, a seat-1 bot (only on the AI tab while Autoplay is on) moves
     ``challenge_key`` though it never decided a turn: watch Council play a
@@ -1331,8 +1332,11 @@ def forget_unplayed_bot(state: GameState, ui: Ui, log: GameLog, settings: Settin
     index = seat - 1
     recorded = Settings.from_dict(log.settings)
     plain = Settings()
-    if (not recorded.autoplay and recorded.ai_strategy[index] == plain.ai_strategy[index]
-            and recorded.ai[index] == plain.ai[index]):
+    # Without autoplay the seat's bot was never on offer (the AI tab shows seat 1
+    # only while Autoplay is on), so it is the map's own, as opened: a campaign
+    # "?" node deals every seat "random", seat 1 included, and resetting that to
+    # the default posted a hand-played win to a different map.
+    if not recorded.autoplay:
         return
     # A copy, not an edit in place: a fork shares its parent's dict (`GameLog.fork`).
     data = copy.deepcopy(log.settings)

@@ -38,7 +38,11 @@ campaign fleets proposal (decided against). Split out of
   loss splits the field, so a single par-tight score there walls off what lies
   behind it) gets one of the week's biggest maps and never a "?"; meshing the
   field until there were none (1.2) cleared them but turned a big week into a
-  web, so the few left are made the hardest to lock down instead. A node's `settings` is stored in the
+  web, so the few left are made the hardest to lock down instead. Every node deals seat 1, the
+  player's, the default bot (`_node_setup`): a "?" once dealt it `random` and a family
+  copied a watched `knower`, and a game started on Autoplay and rewound to play
+  by hand resets that seat (`app.forget_unplayed_bot`), so its win missed the node
+  (Pei Xiu, 2026-11-16). A node's `settings` is stored in the
   pruned `token_dict` form `games.settings_json` holds, and `campaign_games`
   matches it to its game by seed plus jsonb *equality* — never
   `sc_config_key`, whose text digest tells Python's `0.0` from the `0` a
