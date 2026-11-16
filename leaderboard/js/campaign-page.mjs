@@ -173,7 +173,10 @@ async function drawDetail() {
  */
 function heading(node, title) {
   const kind = node.name && node.kind === "home" ? el("span", { class: "kind", text: " · home" }) : null;
-  const h3 = el("h3", {}, [title, kind].filter(Boolean));
+  // The node's number, as a system card shows its number beside its name: a
+  // name is flavour, the id is what logs, the database and a bug report say.
+  const id = node.name ? el("span", { class: "node-id", text: ` #${node.id}` }) : null;
+  const h3 = el("h3", {}, [title, id, kind].filter(Boolean));
   const lore = node.lore;
   if (!lore?.origin) return [h3];
   const facts = [
