@@ -158,7 +158,7 @@ line gives only the verdict. Ideas that lost are in
 - bots.md · **Lane length across the parameter space.** Nodes and ship speed move lane length over an order of magnitude; a constant keyed to travel time is live in one regime of three.
 - bots.md · **The person's habits** (pointer to `learner.md`). **Positions from real games** (`position_suite`: `faster`, `median gain`, `recovered`, never blurred).
 - bots.md · **The first census and setup sweep off the live board (2026-09).** People mostly play the middle regime.
-- bots.md · **Replaying a bot for the leaderboard.** Best profile, not menu default; guards lifted 100x (`BUDGET_SCALE`); the seat-flag incident.
+- bots.md · **Replaying a bot for the leaderboard.** Best profile, not menu default; guards lifted 100x (`BUDGET_SCALE`), and for a player who ticks *Let the bots take their time* (`ai.PATIENT_SCALE`); the seat-flag incident.
 - bots.md · **Break-even margins and the roster back-port.** `min_swing` floors; clearing the edge is not a capture; the honest margin's cost at high jitter is correct.
 - bots.md · **Defender advantage and the AI** (`ai._frontier_order`). Margins against the effective garrison; the slider caps at 1.5 for stalemates.
 - bots.md · **Rules in full:** `AiParams.aux`, the one bot-defined knob; the `tests/sim` harness; per-seat AI and pricing a fight.

@@ -106,7 +106,10 @@ cost nothing measurable either: +2.51 pts over Off against +2.69 unguarded.
 look-ahead plays a different move, so the same seed opened differently in two
 browser games (8 systems, turn 1: 3→4 with the look-ahead finished, 3→5, the
 policy's own move, when the guard cut it; natively the decide takes 11 ms).
-The work is bounded by count, so the guard is there only against a stall.
+The work is bounded by count, so the guard is there only against a stall. The
+menu warns (`setup_warning`) once a decide's native cost times
+`BROWSER_SLOWDOWN` (4, from that game) reaches the guard: from about 44
+systems.
 
 ## Where it stands
 

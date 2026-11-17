@@ -134,3 +134,14 @@ def test_decide_ms_counts_only_the_look_ahead():
     off = Settings(nodes=31, players=3)
     off.ai[0].aux = 0.0
     assert evo.decide_ms(off, 1) == 0.0
+
+
+def test_setup_warning_only_where_the_guard_may_cut_the_look_ahead():
+    evo = _evolved()
+    small = Settings(nodes=31, players=2)
+    assert evo.setup_warning(small, [2]) == []
+    big = Settings(nodes=100, players=2)
+    lines = evo.setup_warning(big, [2])
+    assert lines and "100 systems" in lines[0] and 'Look-ahead to "Off"' in lines[-1]
+    big.ai[1].aux = 0.0
+    assert evo.setup_warning(big, [2]) == [], "the plain policy never meets the guard"

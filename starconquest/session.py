@@ -93,6 +93,9 @@ class Session:
         self.ui: Ui | None = None
         self.log: GameLog | None = None
         self.seed: int | None = None
+        # The game on the board plays with the bots' guards lifted: Start's
+        # slow-setup modal had "let the bots take their time" ticked.
+        self.patient = False
         # History review: a board, the human's fog and the events per recorded
         # turn (`app.build_history`), and the live fog to restore on leaving.
         self.history: tuple[list, list, list] | None = None
@@ -169,6 +172,7 @@ class Session:
         stage = setupmenu.active_stage(self.menu, self.settings) if menu_setup else None
         self.state, self.ui, self.log = app.start_game(self.settings, self.seed, self.settings.autoplay, stage)
         self.history = self.live_fog = None
+        self.patient = menu_setup and self.menu.patient   # only Start's gate asks
         if menu_setup:
             # What the campaign said about this setup as it begins (Start).
             app.stamp_campaign(self.ui, self.campaign)
@@ -233,6 +237,7 @@ class Session:
             return False
         self.state, self.ui, self.log, self.seed = opened
         self.history = self.live_fog = None
+        self.patient = self.menu.patient
         app.stamp_campaign(self.ui, self.campaign)
         self.resume_log = None
         self.opened = self._started()
@@ -566,6 +571,9 @@ class Session:
         ms, settings = self.menu, self._settings()
         if ms.confirm_unchallenge and key in ("unchallenge_change", "unchallenge_keep"):
             return setupmenu.answer_unchallenge(ms, settings, key == "unchallenge_change", self._say)
+        if ms.confirm_slow and key == "slow_patient":
+            ms.slow_patient = not ms.slow_patient
+            return None
         if ms.confirm_slow and key in ("slow_go", "slow_back"):
             return setupmenu.answer_slow(ms, key == "slow_go")
         if ms.confirm_quit and key in ("quit_yes", "quit_no"):
@@ -667,6 +675,7 @@ class Session:
         ai.load_models()   # a resumed game may name a drop-in strategy
         settings = self._settings()
         self.state, self.ui = app.resume_game(log, settings)
+        self.patient = False            # never asked: plays with the guards on
         self.log, self.seed = log, log.seed
         self.history = self.live_fog = None
         return {"game": self._started()}
@@ -705,7 +714,14 @@ class Session:
                     "fog": self._fog(), "view": self._view(), "snap": False, "ms": 0.0}
         was_over, was_out = self.state.winner is not None, self.state.is_defeated(self.ui.human_id)
         t0 = time.perf_counter()
-        reel = app.resolve_turn(self.state, self.ui, self.log, self.settings)
+        # A game started with "let the bots take their time" ticked plays every
+        # turn with the bots' wall-clock guards lifted; the scale is set between
+        # decides, never during one, and is the same for every turn of a game.
+        ai.set_budget_scale(ai.PATIENT_SCALE if self.patient else 1.0)
+        try:
+            reel = app.resolve_turn(self.state, self.ui, self.log, self.settings)
+        finally:
+            ai.set_budget_scale(1.0)
         ms = (time.perf_counter() - t0) * 1000
         # The page plays the film onto the board it already has; the session's
         # own copy of the playback (`Ui.film`) is the pygame shell's, unused here.
