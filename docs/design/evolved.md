@@ -17,7 +17,7 @@ roster. It was held to four constraints:
 | Constraint | What it means here |
 | --- | --- |
 | **Blind** | It reads only the board. It never reads or runs another seat's code: no `IS_ORACLE`, no `ai.STRATEGIES`, no imports from other bots, no borrowed openings, no rollouts that call a rival's strategy. `tests/test_evolved.py` parses for it. Offline, the roster served as sparring partners; what ships is the weights plus a board-reading policy. |
-| **Browser** | Pure Python, no numpy at runtime; the look-ahead stops at a 50 ms wall-clock guard (`LOOK_BUDGET_S`, scaled by `BUDGET_SCALE`); timed in the web build ("The look-ahead", "Cost"). |
+| **Browser** | Pure Python, no numpy at runtime; the look-ahead's work is bounded by count, with a 150 ms wall-clock catastrophe guard on top (`LOOK_BUDGET_S`, scaled by `BUDGET_SCALE`); timed in the web build ("The look-ahead", "Cost"). |
 | **Deterministic and stateless** | Nothing drawn from `state.rng` or the global `random`; ties break on ids; no memory between turns. |
 | **No foresight of the dice** | The look-ahead's copies never roll the game's own dice (see "The look-ahead"), even though a copy of the board would. |
 
@@ -100,6 +100,13 @@ past 50 ms, the largest 53.6: the guard is checked between plans, so the plan
 in hand finishes. A slower device meets the guard more often, which only
 shortens the look-ahead. Simulating a browser at half speed (guard scale 0.5)
 cost nothing measurable either: +2.51 pts over Off against +2.69 unguarded.
+
+**The guard is now 150 ms (2026-11-17), knower's `SEARCH_BUDGET_S`.** At 50 ms
+"only shortens the look-ahead" was true of strength but not of play: a shorter
+look-ahead plays a different move, so the same seed opened differently in two
+browser games (8 systems, turn 1: 3→4 with the look-ahead finished, 3→5, the
+policy's own move, when the guard cut it; natively the decide takes 11 ms).
+The work is bounded by count, so the guard is there only against a stall.
 
 ## Where it stands
 

@@ -272,7 +272,7 @@ line gives only the verdict. Ideas that lost are in
 ## evolved.md
 - evolved.md · **What it is for, and its constraints.** Blind, browser-sized, deterministic.
 - evolved.md · **The policy.** Priced moves per system naming their principle; a linear scorer plus a residual head.
-- evolved.md · **The look-ahead.** Six turns at the expected roll; rivals hold or strike all-out; the gain is the veto.
+- evolved.md · **The look-ahead.** Six turns at the expected roll; rivals hold or strike all-out; the gain is the veto; work bounded by count, a 150 ms guard (2026-11-17).
 - evolved.md · **Where it stands.** Third of six; weaker multi-seat; borrowed by Council since 2026-10-20.
 - evolved.md · **Training it** (CMA-ES, the turn-40 share); **measuring it** (the +4 bar); **why multi-seat is short** (no blind remedy).
 

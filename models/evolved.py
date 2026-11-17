@@ -869,7 +869,13 @@ LOOK_BANS = 4
 LOOK_FORCES = 4
 LOOK_POSTURE = 0.5
 LOOK_SLACK = 0.002
-LOOK_BUDGET_S = 0.050
+# The look-ahead's work is bounded by count (at most 1 + LOOK_BANS + LOOK_FORCES
+# + 2 plans, two rollouts of LOOK_TURNS each), so the same board plans the same
+# way. This is a catastrophe guard on top of that bound, as knower's
+# SEARCH_BUDGET_S is: 150 ms, about as long as a turn may stall in a human
+# game. Tripping it makes the move depend on the wall clock; at 50 ms a slow
+# browser tripped it on an 8-system turn 1 and played a different opening.
+LOOK_BUDGET_S = 0.150
 # Every fight in a rollout is the square law's expected outcome (each roll
 # dealt as 0.0, the middle of the jitter): no noise and no foresight of the
 # game's own dice, so one rollout per plan is enough.
