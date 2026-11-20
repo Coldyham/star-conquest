@@ -54,13 +54,15 @@ test("fitting to a few points zooms in on them, centred, within the zoom limits"
   assert.equal(cam.zoom, 1);
 });
 
-test("a height-only resize holds the map's top still; a width change keeps the centre", () => {
-  const cam = new Camera(WORLD, SCREEN, 50);
-  const before = cam.toScreen(500, 100);
-  cam.resize([0, 0, 1200, 800]);   // the portrait panel grew by 100
-  assert.deepEqual(cam.toScreen(500, 100), before);
-  const centre = cam.toWorld(600, 400);
-  cam.resize([0, 0, 1000, 800]);
-  const [x, y] = cam.toWorld(500, 400);
+test("a height-only resize moves nothing on screen; a width change keeps the centre", () => {
+  const cam = new Camera([0, 0, 1000, 1000], SCREEN, 50);   // height-bound, so the fit changes
+  const before = [cam.toScreen(0, 0), cam.toScreen(1000, 1000)];
+  cam.resize([0, 0, 1200, 600]);   // the portrait panel grew by 300
+  assert.deepEqual([cam.toScreen(0, 0), cam.toScreen(1000, 1000)], before);
+  cam.resize([0, 0, 1200, 900]);
+  assert.deepEqual([cam.toScreen(0, 0), cam.toScreen(1000, 1000)], before);
+  const centre = cam.toWorld(600, 450);
+  cam.resize([0, 0, 1000, 900]);
+  const [x, y] = cam.toWorld(500, 450);
   assert.ok(Math.abs(x - centre[0]) < 1e-9 && Math.abs(y - centre[1]) < 1e-9);
 });
