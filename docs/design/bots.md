@@ -524,6 +524,16 @@ strictly more reproducible. It remains a guard — a wedged bot is stopped long
 before the workflow's own `timeout-minutes` has to — and `BUDGET_SCALE` stays 1.0
 for every ordinary caller, so a real game is untouched.
 
+**A player may ask for the same lift (2026-11-17).** The slow-setup modal (any
+bot's `setup_warning`) carries one tick, *Let the bots take their time*. A game
+Start lets through with it ticked plays every turn at `ai.PATIENT_SCALE`, the
+worker's 100x, so its bots think as the leaderboard's bot column does; the
+session sets the scale around each turn it resolves (`Session.patient`), never
+during a decide, and puts it back to 1.0 after. It is the modal's answer, held
+with the acknowledged warning (`MenuState.patient`), never a `Settings` field or
+a stored preference: a resumed game and a play-by-post turn play with the guards
+on.
+
 The suite's own reproducibility checks lift them too, and further — to `inf`
 rather than 100x (`tests/test_sim.py::test_a_tuned_replay_is_still_reproducible`,
 `::test_budget_scale_is_wired_and_only_matters_when_it_bites`). A test machine

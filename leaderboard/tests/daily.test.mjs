@@ -167,6 +167,10 @@ test("opponents name each bot once, at its stop, and the lean heuristic", () => 
     ai: [{}, { reserve_fraction: 0, reserve_floor: 0, aux: 1 }] };
   assert.deepEqual(opponents(lean), ["heuristic+lean"]);
   assert.deepEqual(opponents({ players: 2, ai_strategy: ["heuristic", "actuary"] }), ["actuary"]);
+  // A trailing heuristic seat is trimmed from the stored setup, not absent from the game.
+  assert.deepEqual(opponents({ players: 3, ai_strategy: ["heuristic", "thinker"], ai: [{}, { aux: 0 }] }),
+    ["thinker · claudebot", "heuristic"]);
+  assert.deepEqual(opponents({ players: 2 }), ["heuristic"]);
 });
 
 test("a player's streaks are counted per kind, mended and true", () => {
