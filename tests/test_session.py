@@ -320,6 +320,36 @@ def test_history_shows_the_rules_standing_on_the_board_on_screen(session):
     assert session.ui.auto_forward is live and session.ui.live_rules is None
 
 
+def test_history_looks_but_never_orders(session):
+    from starconquest.model import ForwardRule
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    _call(session, "ui.empty")   # one order waiting on the live turn
+    session.ui.auto_forward[home] = ForwardRule({nbr: 100})
+    _call(session, "turn.end")
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    _call(session, "ui.empty")
+    pending = list(session.ui.pending)
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["pending"] == []   # the live turn's orders aren't on a played board
+    view = _call(session, "ui.tap", sid=home)["result"]["view"]
+    assert view["mode"] == "selected" and view["panel"]["focus"] == home
+    view = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    assert view["mode"] == "selected" and view["popup"] is None and view["selected"] == nbr
+    assert _call(session, "ui.tap", sid=nbr)["result"]["view"]["mode"] == "idle"
+    _call(session, "ui.drag", src=home, dest=nbr)
+    view = _call(session, "ui.lane", hits=[["rule", home, nbr]])["result"]["view"]
+    assert view["popup"] is None and view["mode"] == "idle"
+    _call(session, "history.seek", turn=1)   # the rule stood on turn 1
+    panel = _call(session, "ui.tap", sid=home)["result"]["view"]["panel"]
+    assert "Auto-forward" in json.dumps(panel) and "lane" not in json.dumps(panel).split("Auto-forward")[1]
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert session.ui.pending == pending and view["pending"] == [[o.source_id, o.dest_id, o.ships] for o in pending]
+    assert session.ui.auto_forward == {home: ForwardRule({nbr: 100})}
+
+
 def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
     _call(session, "boot", page=PAGE, store={})
     _call(session, "game.start", settings={"players": 2, "nodes": 8}, seed=3)

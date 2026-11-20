@@ -507,6 +507,8 @@ def rule_rows(state: GameState, ui: Ui, src: int, touch: bool) -> list[Row]:
         line = f"-> {d.label if d else f'System {dest}'}  {pct}% · {this_turn.get(dest, 0)}"
         lit = editing and (dest == ui.dest or ui.mode != CHOOSING)
         rows.append((line, "select" if lit else "text", "wrap"))
+    if ui.history:
+        return rows  # a reviewed board's rules were played; nothing edits them
     if touch:
         hint = "−/+: share · Delete: remove" if editing else "tap a lane to edit"
     else:
