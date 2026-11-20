@@ -485,6 +485,8 @@ export class SetupMenu {
       this.modalEl.replaceChildren(h("div", { class: "mmodal", role: "dialog", "aria-modal": "true" },
         h("p", { class: "mtitle" }, modal.title),
         ...modal.lines.filter((l) => l.text).map((l) => h("p", { class: "mline", style: `color:${l.color}` }, l.text)),
+        modal.check ? h("div", { class: "prow" }, h("span", { class: "plabel" }, modal.check.label),
+          this.checkbox(modal.check)) : null,
         h("div", { class: "mbuttons" },
           h("button", { type: "button", class: "mbtn go", onclick: () => this.press(modal.go.key) }, modal.go.label),
           h("button", { type: "button", class: "mbtn stay", onclick: () => this.press(modal.stay.key) }, modal.stay.label))));

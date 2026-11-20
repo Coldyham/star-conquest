@@ -35,8 +35,9 @@ export function numberPrefix(day) {
 export function opponents(settings) {
   const out = [];
   for (let seat = 2; seat <= (settings.players || 2); seat += 1) {
-    const name = (settings.ai_strategy || [])[seat - 1];
-    if (!name) continue;
+    // Trailing default seats are trimmed from a stored setup: a missing or
+    // blank strategy is heuristic, as `sc_bots` and the game read it.
+    const name = String((settings.ai_strategy || [])[seat - 1] || "").trim() || "heuristic";
     const params = (settings.ai || [])[seat - 1] || {};
     const label = name === "heuristic" && params.reserve_fraction === 0 && params.reserve_floor === 0
       ? "heuristic+lean"

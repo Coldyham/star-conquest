@@ -200,6 +200,9 @@ input.seed:focus { border-color: var(--m-hl-edge); }
 .mmodal .mbuttons { display: grid; grid-template-columns: 1fr 1fr; }
 .mmodal .go { border-color: var(--m-warn); }
 .mmodal .stay { background: var(--m-hl); border-color: var(--m-hl-edge); }
+/* The slow-setup modal's one tick ("let the bots take their time"). */
+.mmodal .prow { display: flex; align-items: center; gap: 10px; min-height: 40px; margin-top: 10px; }
+.mmodal .plabel { flex: 1; text-align: left; font-size: 14px; line-height: 1.3; }
 .mmodal.pbp { border-color: var(--m-hl-edge); text-align: left; min-width: 360px; }
 .mmodal.pbp .mtitle { text-align: center; margin-bottom: 10px; }
 .mmodal.pbp .prow { display: flex; align-items: center; gap: 10px; min-height: 40px; margin-bottom: 10px; }
