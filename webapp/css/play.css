@@ -387,10 +387,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   /* The band's height is fixed, so the map above it never moves as the
      selection, the popup or route mode change what it holds. It holds text, so
      it is sized in the app's own units, not as a share of the screen: room for
-     the tallest panel short of the popup, rally with four of its counts (about
-     256), which also fits a system whose rule forwards down three lanes. Past
-     that it scrolls; the docked popup may cover a little of the map. */
-  --band-h: 260px;
+     the tallest panels short of the popup, rally with four of its counts and
+     route with five lines (about 236 each), which also fits a rule down two
+     lanes. Past that (three long-named lanes) it scrolls; the docked popup may
+     cover a little of the map. */
+  --band-h: 240px;
 }
 @media (display-mode: standalone), (display-mode: fullscreen) {
   :root.portrait { --gesture-gap: max(44px, env(safe-area-inset-bottom, 0px)); }
