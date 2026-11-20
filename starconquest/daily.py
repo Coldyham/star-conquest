@@ -167,10 +167,17 @@ def short_date(day: str) -> str:
     return f"{WEEKDAYS[d.weekday()][:3]} {d.day} {d.strftime('%b')}"
 
 
+def title(day: str, kind: str = BOARD, shout: bool = False) -> str:
+    """'Daily puzzle #24 · Fri 20 Nov': which day's of which kind, the kind in
+    capitals for the menu's banner (``shout``)."""
+    name = "Daily puzzle" if kind == PUZZLE else "Daily map"
+    return f"{name.upper() if shout else name} #{number(day)} · {short_date(day)}"
+
+
 def banner(day: str, settings: Settings, kind: str = BOARD) -> tuple[str, str]:
     """The menu banner's two lines for a daily's setup: which day's of which
-    kind, then what the map is."""
-    head = f"{'DAILY PUZZLE' if kind == PUZZLE else 'DAILY MAP'} #{number(day)} · {short_date(day)}"
+    kind (`title`), then what the map is."""
+    head = title(day, kind, shout=True)
     if kind == PUZZLE:
         return head, f"{settings.system_count()} systems · vs {opponent(settings)}"
     return head, dealer.describe(settings)

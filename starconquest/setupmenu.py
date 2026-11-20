@@ -979,9 +979,12 @@ def sketch_view(ms) -> dict | None:
     return out
 
 
-def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_tab: bool = False) -> dict:
+def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_tab: bool = False,
+         campaign: str | None = None) -> dict:
     """The menu on screen, for the page to draw as it stands. ``board`` says
     there is a leaderboard to reach (the dailies, the board's lists).
+    ``campaign`` is the weekly campaign's reminder for this setup
+    (`campaign.label`), said under the banner as the side panel heads with it.
     ``every_tab`` adds the other tabs' rows too (``panels``), for a phone, whose
     panel is as tall as its tallest tab so that it never moves as tabs change
     (`menu._tallest_tab_h`)."""
@@ -990,7 +993,10 @@ def view(ms, settings: Settings, touch: bool = False, board: bool = True, every_
     elif ms.stage_at is not None:
         subtitle = _lines(stage_lines(ms, settings))
     else:
-        subtitle = _lines(daily_lines(settings)) or [{"text": SUBTITLE, "color": _hex(config.COLOR_TEXT_DIM)}]
+        subtitle = _lines(daily_lines(settings))
+    if campaign:
+        subtitle += _lines([(f"CAMPAIGN · {campaign}", config.COLOR_CAMPAIGN)])
+    subtitle = subtitle or [{"text": SUBTITLE, "color": _hex(config.COLOR_TEXT_DIM)}]
     drawn = settings.custom_map is not None
     shared = pbp.configured()
     return {

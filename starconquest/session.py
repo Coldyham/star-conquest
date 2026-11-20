@@ -111,6 +111,7 @@ class Session:
         # link, and the calls whose answers land on the win overlay (the
         # signed-in name, a puzzle's par, a quick post), each with its landing.
         self.campaign = campaign.Watcher()
+        self.menu_campaign: str | None = None   # the reminder the menu last showed
         self.fetching: share.Download | None = None
         self.waits: list[tuple[pbp.Request, Callable[[str, str], None]]] = []
         # Play by post (`pbpclient`): one shared match's calls, stepped by
@@ -325,8 +326,9 @@ class Session:
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
         self.campaign.pump(settings)
+        self.menu_campaign = campaign.label(self.campaign.status)
         out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN),
-                                      every_tab=self.compact),
+                                      every_tab=self.compact, campaign=self.menu_campaign),
                "action": action, "status": None,
                "stale": not setupmenu.surveyed(ms, settings, self.compact)}
         if ms.status:   # said once; the page holds it on screen
@@ -1355,6 +1357,9 @@ class Session:
             app.campaign_tick(self.ui, self.settings, self.campaign)
         else:
             self.campaign.pump(self._settings())
+            # The menu's banner carries the reminder: redraw it when an answer
+            # lands or the grace counts down a minute.
+            menu_landed |= campaign.label(self.campaign.status) != self.menu_campaign
         if self.fetching is not None:
             got, body = self.fetching.poll()
             if got != share.PENDING:

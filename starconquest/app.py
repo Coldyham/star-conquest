@@ -104,6 +104,8 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
         # The daily follows the local ironman preference like any game: a puzzle
         # is exactly where a player wants to take a move back (Undo, U).
         ui.daily_day, ui.daily_kind = daily.daily_of(settings)
+        if ui.daily_day:
+            ui.daily_best = webstore.best(*settings.challenge_keys())
     ui.seat_bots = seat_bot_labels(state)
     if settings is not None:
         ui.random_seats = frozenset(pid for pid in state.players if not state.players[pid].is_neutral

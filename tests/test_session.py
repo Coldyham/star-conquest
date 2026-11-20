@@ -562,6 +562,18 @@ def test_the_campaign_is_asked_about_before_start_and_stamped_on_the_match(sessi
     assert game["view"]["notes"] == [["Node 4: not a move", "campaign"]]
 
 
+def test_the_menu_banner_says_the_campaign_reminder_once_it_lands(session, games, monkeypatch):
+    from starconquest import campaign
+    monkeypatch.setattr(campaign, "SETTLE_S", 0.0)
+    _call(session, "boot", page=PAGE, store={})
+    reply = _call(session, "menu.open", first=True, prefill={"players": 2, "seed": 5})
+    [http] = [e for e in _effects(reply, "http") if "campaign" in e["url"]]
+    body = json.dumps({"node": {"id": 4, "kind": "field", "name": "Slocum"}, "now": 0,
+                       "status": {"why": "open", "can": True}})
+    pushed = _menu(session, "net.reply", req=http["req"], state="ok", body=body)["pushed"]
+    assert pushed["menu"]["menu"]["subtitle"][-1]["text"] == "CAMPAIGN · Slocum: open"
+
+
 def _played_log() -> tuple[str, str]:
     s = Session()
     _call(s, "boot", page=PAGE, store={})

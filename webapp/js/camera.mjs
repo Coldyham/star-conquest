@@ -26,10 +26,14 @@ export class Camera {
     this.resize(screen);
   }
 
-  /** A new screen rectangle: refit, keeping the zoom and the world point at the centre. */
+  /** A new screen rectangle: refit, keeping the zoom and the world point at the
+   * centre, or at the top's middle when only the height moved (the portrait
+   * panel under the map growing or shrinking to its words), so the map stays
+   * put under the finger rather than sliding by half the change. */
   resize(screen) {
-    const centre = this.screen ? this.toWorld(this.screen[0] + this.screen[2] / 2, this.screen[1] + this.screen[3] / 2)
-      : null;
+    const old = this.screen;
+    const heightOnly = old && old[0] === screen[0] && old[1] === screen[1] && old[2] === screen[2];
+    const centre = old ? this.toWorld(old[0] + old[2] / 2, old[1] + (heightOnly ? 0 : old[3] / 2)) : null;
     this.screen = screen;
     const [wx0, wy0, wx1, wy1] = this.world;
     const [, , sw, sh] = screen;
@@ -39,7 +43,7 @@ export class Camera {
       this.reset();
     } else {
       this.offX = screen[0] + sw / 2 - centre[0] * this.scale;
-      this.offY = screen[1] + sh / 2 - centre[1] * this.scale;
+      this.offY = screen[1] + (heightOnly ? 0 : sh / 2) - centre[1] * this.scale;
       this.clamp();
     }
   }
