@@ -759,7 +759,7 @@ def route_lines(state: GameState, ui: Ui) -> list[tuple]:
 def route_hint(ui: Ui) -> str:
     """How route mode's current sub-mode is driven."""
     if ui.route_rally:
-        return ("Tap the systems ships should gather at — tap again to drop one. Everything else you hold forwards to the nearest of them."
+        return ("Tap the systems ships should gather at — tap again to drop one. Everything else you hold forwards to the nearest of them. "
                 "Auto-route picks your front line; a system under attack behind it keeps what it needs and passes the rest on.")
     return ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
             "un-aim, and to drop it from the group. A system under attack on the way "
