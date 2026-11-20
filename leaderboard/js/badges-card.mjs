@@ -91,7 +91,7 @@ export async function loadFacts(nameKey, now = new Date()) {
     campaignWeeks(id),
     // Optional: a board whose schema predates gauntlets has no such table, and
     // that leaves one badge unknown rather than the panel gone.
-    select("gauntlets?select=gauntlet_id,stages:body->stages&listed=is.true&limit=1000").catch(() => null),
+    select("gauntlets?select=gauntlet_id,stages:body->stages,lanes:body->lanes,start:body->start&listed=is.true&limit=1000").catch(() => null),
     count(`/api/pbp?action=record&name=${encodeURIComponent(name)}`),
     count(`/api/gauntlet?by=${encodeURIComponent(name)}`),
     // Optional too: a board from before the daily, or before its puzzle,
