@@ -89,11 +89,11 @@ test("a campaign home counts at once; a week is won only once it has closed", ()
 });
 
 test("a gauntlet is cleared by a win on its last stage's setup, whatever the key order", () => {
-  const stage = (settings) => ({ settings });
+  const stage = (id, settings) => ({ id, settings });
   const gauntlets = [
-    { gauntlet_id: "two-aaaaaaaaaaaa", stages: [stage({ players: 2, nodes: 9, seed: 1 }),
-                                                stage({ players: 3, nodes: 12, seed: 7, mode: "random" })] },
-    { gauntlet_id: "one-bbbbbbbbbbbb", stages: [stage({ players: 2, nodes: 9, seed: 1 })] },
+    { gauntlet_id: "two-aaaaaaaaaaaa", stages: [stage(0, { players: 2, nodes: 9, seed: 1 }),
+                                                stage(1, { players: 3, nodes: 12, seed: 7, mode: "random" })] },
+    { gauntlet_id: "one-bbbbbbbbbbbb", stages: [stage(0, { players: 2, nodes: 9, seed: 1 })] },
     { gauntlet_id: "bad-cccccccccccc", stages: null },
   ];
   // A posted win's settings_json: keys in another order, autoplay along for the ride.
@@ -101,6 +101,21 @@ test("a gauntlet is cleared by a win on its last stage's setup, whatever the key
   assert.equal(gauntletsCleared(gauntlets, wins), 1);
   assert.equal(gauntletsCleared(gauntlets, [{ players: 2, nodes: 9, seed: 1 }]), 1);
   assert.equal(gauntletsCleared(gauntlets, []), 0);
+});
+
+test("a gauntlet with lanes is cleared on any of its goals, never on a gated dead end", () => {
+  const setup = (seed) => ({ players: 2, nodes: 9, seed });
+  // 0 forks to 1 and 2, both goals; 3 is listed last but is a bonus behind a
+  // gate off 1, so it is not a goal and the end of the list is no longer the end.
+  const forked = {
+    gauntlet_id: "fork-dddddddddddd",
+    stages: [0, 1, 2, 3].map((id) => ({ id, settings: setup(id + 10) })),
+    lanes: [[0, 1], [0, 2], [1, 3, { turns: 20 }]],
+  };
+  assert.equal(gauntletsCleared([forked], [setup(11)]), 1);
+  assert.equal(gauntletsCleared([forked], [setup(12)]), 1);
+  assert.equal(gauntletsCleared([forked], [setup(13)]), 0);
+  assert.equal(gauntletsCleared([forked], [setup(10)]), 0);
 });
 
 test("each way to play is read off the setup, and a hand-drawn map is neither mode", () => {
@@ -191,10 +206,12 @@ test("a count a function couldn't answer is unknown, never locked", () => {
   assert.equal(known.architect, true);
 });
 
-test("every ladder bot has a badge, every id is unique, and groups stay together", () => {
+test("every ladder bot and chaotic has a badge, every id is unique, and groups stay together", () => {
   const ids = BADGES.map((b) => b.id);
   assert.equal(new Set(ids).size, ids.length);
-  for (const bot of LADDER_ORDER) assert.ok(ids.includes(`bot-${bot}`), bot);
+  for (const bot of [...LADDER_ORDER, "chaotic"]) assert.ok(ids.includes(`bot-${bot}`), bot);
+  assert.ok(earned(factsFrom({ wins: [{ game_key: "z", mode: "random", settings_json: {}, bots: ["chaotic"] }] }))
+    .has("bot-chaotic"));
   const groups = grouped(badgeList(factsFrom({}))).map((g) => g.group);
   assert.equal(new Set(groups).size, groups.length);
 });
