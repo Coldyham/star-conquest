@@ -545,6 +545,33 @@ starts another. A log written before the field existed, or edited by hand into a
 shape `_MATCH_ID_RE` refuses, is given a fresh id on load rather than carrying
 that text into an upload.
 
+### Take-backs: the turn played again (`"rewound"`, 2026-11-20)
+
+Undo (U) made rewinding one press, so a posted log became the line a player
+settled on after trying others, most of all in the short daily puzzles, where
+a turn can be replayed until it works ([`learning.md`](learning.md),
+"Caveats"). A turn played from a board the player took the match back to
+(Undo, or History's *Rewind to here*, mid-game or forking a decided game)
+carries `"rewound": true` (`GameLog.turn_was_rewound`). It is disclosure, like
+`"ai"`: no replay reads it, and `RULES_VERSION` did not move.
+
+- **One mark, not the fragments.** The turns taken back are not kept: a player
+  undoing and replaying a turn to try different sends would leave a heap of
+  dead branches, and keeping them would need a structure of its own. The mark
+  says only that the turn was played with sight of what followed it once.
+  Undoing several turns before playing on marks only the turn play resumes
+  from; a later take-back drops the marks it cuts off with the turns.
+- **Written at the take-back, not with the turn.** `truncate` and `fork` set
+  `GameLog.rewound_to` (saved at once, as `hinted_from` is) and `record_turn`
+  moves it onto the next turn recorded, so quitting between Undo and End Turn
+  does not shed it. A `rewound_to` that is not the board the log ends on is
+  dropped on load.
+- **Board 0 is a fresh start, not a take-back.** Going back to the opening
+  keeps nothing of the game, exactly as Retry (`fork(0)`) or starting the
+  setup again from the menu does, so it marks nothing.
+- **Not yet shown or posted.** The mark travels inside an uploaded replay, but
+  no score column, verifier check or win-overlay line reads it.
+
 ## Star names (`starnames.py`, `System.name`)
 
 Flavour with no mechanical weight: systems are still keyed by integer id
@@ -673,7 +700,8 @@ is for: bumped by hand with such a change, stamped on every log, and read by the
 verifier to report `outdated` (unverifiable) rather than `mismatch` (wrong). Version-1 logs can't be replayed faithfully
 and `latest_log` skips them. A turn still carries `"ai"` (was the human seat
 autoplayed) — not for replay, but for `GameLog.hand_turns` (which `main.hand_turns`
-delegates to, and the leaderboard's verifier recomputes). A log also carries a
+delegates to, and the leaderboard's verifier recomputes), and a turn played
+again after a take-back carries `"rewound"` (**Take-backs**, above). A log also carries a
 `match_id`, minted per match from `settings.fresh_rng` and likewise not part of
 what makes a replay reproduce: it is how a posted score names its replay
 (`GameLog.encoded` is the wire form — the token's own deflate+base64url). A

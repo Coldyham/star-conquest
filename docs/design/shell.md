@@ -300,7 +300,9 @@ rewinds from History, which forks it, and a play-by-post match is never ours to
 rewind. A run game plays ironman, so it has none. The win overlay offered Undo
 for a day (2026-11-20, forking the log as History's rewind does) and dropped it
 once History opened with its graphs closed: *History & coach*, back a turn and
-*Rewind to here* is then short enough.
+*Rewind to here* is then short enough. The turn played again after an Undo or
+a rewind is marked `"rewound"` in the log ([`core.md`](core.md),
+"Take-backs").
 
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and

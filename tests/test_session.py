@@ -220,6 +220,20 @@ def test_flow_actions_undo_retry_and_restart(session):
     assert view["playing"]
 
 
+def test_undo_is_recorded_on_the_turn_played_again(session):
+    _human_game(session)
+    for _ in range(3):
+        _call(session, "turn.end")
+    _call(session, "game.action", name="undo")
+    _call(session, "game.action", name="undo")
+    assert session.log.rewound_to == 1
+    for _ in range(2):
+        _call(session, "turn.end")
+    assert [session.log.turn_was_rewound(i) for i in range(3)] == [False, True, False]
+    _call(session, "game.action", name="retry")
+    assert session.log.rewound_to is None and session.log.turn_count == 0
+
+
 def test_end_turn_stops_a_running_clock(session):
     _human_game(session)
     assert _menu(session, "game.view")["view"]["end"] == ["End Turn", "end_turn"]
