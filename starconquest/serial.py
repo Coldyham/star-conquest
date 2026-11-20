@@ -124,7 +124,8 @@ def view(state: GameState, ui: Ui) -> dict:
         "source": ui.source(state),
         "sel_order": ui.sel_order,
         "sel_forward": ui.sel_forward,
-        "pending": [[o.source_id, o.dest_id, o.ships] for o in ui.pending],
+        # the live turn's orders; a history board shows only what was played
+        "pending": [] if ui.history else [[o.source_id, o.dest_id, o.ships] for o in ui.pending],
         "rules": rules(state, ui),
         "editing_rule": ui.selected if ui.mode == CHOOSING and ui.forward_armed else ui.sel_forward,
         "available": {str(sid): ui.available(state, sid) for sid, s in sorted(state.systems.items())

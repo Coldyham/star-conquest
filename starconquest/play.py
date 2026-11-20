@@ -100,7 +100,10 @@ def lane_pick(ui: Ui, hits: list[LaneTag]) -> LaneTag | None:
 
 
 def tap_lane(state: GameState, ui: Ui, tag: LaneTag) -> None:
-    """Open the order or rule ``tag`` names in the popup."""
+    """Open the order or rule ``tag`` names in the popup. Not in history: what
+    it shows was played, and the live turn's orders are not on screen."""
+    if ui.history:
+        return
     if tag[0] == "order":
         ui.edit_order(state, tag[1])
     else:
@@ -126,8 +129,8 @@ def cancel(ui: Ui) -> None:
 def drag_send(state: GameState, ui: Ui, src: int | None, target: int | None, shift: bool = False) -> None:
     """Release of a drag from ``src`` over ``target``: if it's an adjacent
     neighbour of the source, open the send/forward popup for that lane (same as
-    tapping it)."""
-    if src is None or target is None or target == src:
+    tapping it). Not in history, which orders nothing."""
+    if ui.history or src is None or target is None or target == src:
         return
     if not state.are_adjacent(src, target):
         return
@@ -302,9 +305,17 @@ def route_key(state: GameState, ui: Ui, name: str) -> str | None:
 
 
 def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
-    """A press on system ``node`` in whichever scene is up: route mode's pick,
-    else live play's."""
-    if ui.mode == ROUTING:
+    """A press on system ``node`` in whichever scene is up: history's look
+    (select it for the panel, or let it go; never a send, since the presses
+    would land on the live turn's orders), route mode's pick, else live play's."""
+    if ui.history:
+        selected = ui.selected
+        ui.reset_selection()
+        ui.sel_forward = None
+        if node != selected:
+            ui.selected = node
+            ui.mode = SELECTED
+    elif ui.mode == ROUTING:
         ui.route_tap(state, node)
     else:
         tap_system(state, ui, node, shift)
