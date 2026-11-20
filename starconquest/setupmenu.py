@@ -151,6 +151,11 @@ class Menu:
     slow_action: str | None = None
     slow_ack: tuple[str, ...] | None = None
     slow_title: str = ""
+    # The slow-setup modal's "let the bots take their time" tick, and whether
+    # the setup Start last let through plays with it (`unless_slow`); the
+    # session lifts the bots' guards for that game's turns (`ai.PATIENT_SCALE`).
+    slow_patient: bool = False
+    patient: bool = False
     lane_key: tuple | None = None
     lane_ly: list[float] = field(default_factory=list)
     sketch_at: tuple | None = None
@@ -727,9 +732,13 @@ def unless_slow(ms, settings: Settings, action: str, people: set[int] | None = N
     if asked is not None:
         title, campaign_lines = asked
         lines = campaign_lines + lines
-    if not lines or tuple(lines) == ms.slow_ack:
+    if not lines:
+        ms.patient = False
         return action
+    if tuple(lines) == ms.slow_ack:
+        return action               # played through before: as it was answered
     ms.confirm_slow, ms.slow_lines, ms.slow_action = True, lines, action
+    ms.slow_patient = False
     ms.slow_title = title
     return None
 
@@ -741,7 +750,11 @@ def answer_slow(ms, play: bool) -> str | None:
     if not play:
         return None
     ms.slow_ack = tuple(ms.slow_lines)
+    ms.patient = ms.slow_patient
     return action
+
+
+PATIENT_LABEL = "Let the bots take their time (turns may be slow)"
 
 
 # --------------------------------------------------------------------------- #
@@ -950,6 +963,7 @@ def modal(ms, settings: Settings, touch: bool) -> dict | None:
         go, stay = slow_labels(touch)
         return {"kind": "slow", "title": ms.slow_title or "This setup may play slowly",
                 "lines": [{"text": line, "color": warn if i == 0 else dim} for i, line in enumerate(ms.slow_lines)],
+                "check": {"key": "slow_patient", "label": PATIENT_LABEL, "on": ms.slow_patient},
                 "go": {"key": "slow_go", "label": go}, "stay": {"key": "slow_back", "label": stay}}
     if ms.confirm_clear_map:
         go, stay = clear_map_labels(touch)

@@ -328,6 +328,12 @@ def decide_ms(name: str, settings, seat: int) -> float:
     return ms if math.isfinite(ms) and ms > 0 else 0.0
 
 
+# The lift a live game asks for when the player ticks "let the bots take their
+# time" on the slow-setup modal: the leaderboard bot column's
+# (`tools/bot_replay.py`), so such a game's bots think as the column's do.
+PATIENT_SCALE = 100.0
+
+
 def set_budget_scale(scale: float) -> list[str]:
     """Widen (or restore) every registered strategy's wall-clock guards.
 
@@ -350,8 +356,10 @@ def set_budget_scale(scale: float) -> list[str]:
     under load is exactly the slow runner such a guard was sized against; a real
     batch caller keeps a finite lift so a wedged bot is still stopped.
 
-    Never call this from inside a model, and never mid-game: it is process-wide,
-    so it must be set once at startup, before any ``decide`` runs.
+    Never call this from inside a model, and never while a ``decide`` runs: it is
+    process-wide. A caller sets it once at startup, or (the session, for a game
+    whose player asked the bots to take their time) around each turn it resolves,
+    the same scale for every turn of a game.
     """
     touched: list[str] = []
     for name, fn in sorted(STRATEGIES.items()):

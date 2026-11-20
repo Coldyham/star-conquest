@@ -226,3 +226,18 @@ def test_only_a_gauntlet_the_board_stored_offers_edit_on_the_board():
     assert setupmenu.board_draft(made) == ""
     ms, g = _forked({})
     assert setupmenu.pick_view(ms, Settings(), g, True)["edit"] is None
+
+
+def test_a_slow_setup_can_let_the_bots_take_their_time(menu, monkeypatch):
+    settings = Settings()
+    _said, say = _say()
+    monkeypatch.setattr(setupmenu, "setup_warnings", lambda s, people=None: ["Seat 2 is slow."])
+    assert setupmenu.start(menu, settings, "start", say) is None
+    check = setupmenu.modal(menu, settings, touch=False)["check"]
+    assert check["key"] == "slow_patient" and not check["on"]
+    menu.slow_patient = True
+    assert setupmenu.answer_slow(menu, True) == "start" and menu.patient
+    assert setupmenu.start(menu, settings, "start", say) == "start" and menu.patient, \
+        "the same warning played through keeps its answer"
+    monkeypatch.setattr(setupmenu, "setup_warnings", lambda s, people=None: [])
+    assert setupmenu.start(menu, settings, "start", say) == "start" and not menu.patient

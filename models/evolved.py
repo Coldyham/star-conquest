@@ -869,7 +869,13 @@ LOOK_BANS = 4
 LOOK_FORCES = 4
 LOOK_POSTURE = 0.5
 LOOK_SLACK = 0.002
-LOOK_BUDGET_S = 0.050
+# The look-ahead's work is bounded by count (at most 1 + LOOK_BANS + LOOK_FORCES
+# + 2 plans, two rollouts of LOOK_TURNS each), so the same board plans the same
+# way. This is a catastrophe guard on top of that bound, as knower's
+# SEARCH_BUDGET_S is: 150 ms, about as long as a turn may stall in a human
+# game. Tripping it makes the move depend on the wall clock; at 50 ms a slow
+# browser tripped it on an 8-system turn 1 and played a different opening.
+LOOK_BUDGET_S = 0.150
 # Every fight in a rollout is the square law's expected outcome (each roll
 # dealt as 0.0, the middle of the jitter): no noise and no foresight of the
 # game's own dice, so one rollout per plan is enough.
@@ -892,6 +898,38 @@ def decide_ms(settings, seat) -> float:
     drawn = getattr(settings, "custom_map", None)
     nodes = len(drawn.nodes) if drawn is not None else settings.nodes
     return COST_DECIDE_MS * (max(1, nodes) / COST_REF_NODES) ** COST_NODES_EXP
+
+
+# How much slower than native CPython a browser may run a decide before the
+# menu warns: the 2026-11-17 game tripped the old 50 ms guard on 11 ms of
+# native work, so some browsers run several times slower than the Apple-silicon
+# one measured at native speed ("Cost").
+BROWSER_SLOWDOWN = 4.0
+
+
+def setup_warning(settings, seats, people=()) -> list[str]:
+    """The menu's warning (`ai.setup_warning`): lines when a seat with the
+    look-ahead on may meet its guard (`LOOK_BUDGET_S`) in a slower browser. A
+    cut look-ahead plays the policy's own move or a shorter search's, so the
+    same seed can open differently from game to game."""
+    looking = [seat for seat in seats if decide_ms(settings, seat) > 0]
+    if not looking:
+        return []
+    one = max(decide_ms(settings, seat) for seat in looking)
+    if one * BROWSER_SLOWDOWN < LOOK_BUDGET_S * 1000:
+        return []
+    drawn = getattr(settings, "custom_map", None)
+    nodes = len(drawn.nodes) if drawn is not None else settings.nodes
+    lines = [f"Evolved's look-ahead on {nodes} systems needs ~{one:.0f} ms a turn, "
+             "several times that in a slower browser",
+             f"It stops at {LOOK_BUDGET_S * 1000:.0f} ms, and a look-ahead cut short can "
+             "play a different move, so the same seed may not play the same twice"]
+    if len(looking) > 1:
+        lines.append(f"{len(looking)} Evolved seats: about {one * len(looking):.0f} ms "
+                     "per turn to resolve, longer in a browser")
+    smaller = "use a smaller map" if drawn is not None else "reduce System count"
+    lines.append(f'Set Evolved\'s Look-ahead to "Off" or {smaller} to avoid this')
+    return lines
 
 
 def _shift(vec, group: str, feature: str, delta: float) -> list[float]:
