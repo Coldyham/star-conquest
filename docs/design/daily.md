@@ -630,6 +630,14 @@ score on the win overlay (`Ui.par_note`, `daily.par_note`): *Perfect puzzle!* fo
 proved par, *Par!* for a likely one, *Beyond par!* for a result better than it.
 Nothing is stored or posted, and *Copy daily result* does not mention it.
 
+**Matching only the turns is told the turns** (the author, 2026-11-14). A result
+that wins in the par's turns but loses more ships than it is answered with the
+turns and `lost: null`, and the line says so without the par's ships lost:
+*Fastest win!* (a proved turn) or *Par turns!* (a likely one), each ending "a win
+losing fewer ships exists". Before this, such a result heard nothing, though
+matching a proved fastest win is the harder half. The board's line below follows
+the same rule.
+
 **On the board too, for a signed-in player who posted it** (the author,
 2026-11-05). `puzzle.html` for that day and the map's `game.html` show the same
 gold line (`.par-note`, `daily.mjs`'s `parNote`, worded as the game's and pinned
@@ -641,6 +649,15 @@ out: a signed-out visitor, another player, or a score short of it gets nothing.
 It shows under an embargo as well, beside *Your scores*: the figures are the
 player's own. A remembered name that is not claimed is not enough, as for *Your
 scores*.
+
+**Gold on the player's own streak calendar** (the author, 2026-11-15). On
+their own player card (signed in, owning the name) the puzzle streak's bar and
+calendar paint a day gold when their best posted score there met the par by the
+rule above, striped gold when it matched only the turns; outlined, as any
+archive win, when won later. `sc_my_par_days(from, to)` answers the days and
+whether each was turns only, never a figure of the par, from `auth.uid()` alone,
+so another player's card, or a signed-out visitor, sees the green it always did
+(`streaks-card.mjs`, `daily.mjs`'s `parDays`).
 
 **A convenience, not a secret.** `puzzle_pars` has no policy and no public grant,
 and its `line` (the winning `GameLog`, the solution) never leaves the table. But

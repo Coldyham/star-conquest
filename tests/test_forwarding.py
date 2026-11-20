@@ -245,21 +245,81 @@ def test_smart_hold_is_the_edge_against_the_heaviest_wave(monkeypatch):
     monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
     monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
     state, ui = _hub(), _ui()
+    state.systems[0].production = 0                     # nothing built: the hold stands alone
     ui.auto_forward[0] = ForwardRule({1: 100}, 0, smart=True)
     assert ui.hold_of(state, 0) == 0                    # nothing coming: hold nothing
     _incoming(state, 2, 3)
     assert ui.hold_of(state, 0) == 3                    # a retaliatory 2 is held by 3
     # several 1s: those landing on the same turn are one wave, whatever their lane
-    _incoming(state, 1, 1)
+    state.fleets.clear()
     _incoming(state, 1, 2)
     _incoming(state, 1, 2, owner=3)
     _incoming(state, 1, 2, src=1)
     assert combat.heaviest_wave(state, 0, 1) == 3
     assert ui.hold_of(state, 0) == combat.hold_count(3, 0.10, 1.0) == 4
     assert ui.forward_this_turn(state, 0) == {1: 12 - 4}
-    # our own fleets flying in are no threat
-    _incoming(state, 9, 2, owner=1, src=1)
-    assert ui.hold_of(state, 0) == 4
+    # our own fleets flying in are no threat; landing by the wave, they fight it
+    _incoming(state, 2, 2, owner=1, src=1)
+    assert ui.hold_of(state, 0) == 2
+
+
+def test_a_smart_hold_counts_what_is_built_before_each_wave(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state = _hub()
+    sys0 = state.systems[0]
+    sys0.production, sys0.prod_progress = 1, 0          # a hull a turn, the landing turn's included
+    _incoming(state, 2, 3)
+    assert combat.smart_hold(state, 0, 1) == 0          # three hulls built by then hold off 2
+    _incoming(state, 4, 1)
+    assert combat.smart_hold(state, 0, 1) == combat.hold_count(4, 0.10, 1.0) - 1
+
+
+def test_a_smart_hold_counts_reinforcements_landing_by_each_wave(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state = _hub()
+    state.systems[0].production = 0
+    _incoming(state, 6, 2)
+    need = combat.hold_count(6, 0.10, 1.0)
+    assert combat.smart_hold(state, 0, 1) == need
+    _incoming(state, 3, 1, owner=1, src=1)              # lands a turn before the wave
+    assert combat.smart_hold(state, 0, 1) == need - 3
+    _incoming(state, 30, 3, owner=1, src=2)             # lands after it: no help
+    assert combat.smart_hold(state, 0, 1) == need - 3
+
+
+def test_a_reinforcement_that_may_be_fought_on_its_lane_is_not_counted(monkeypatch):
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state = _hub()
+    state.systems[0].production = 0
+    _incoming(state, 6, 2)
+    _incoming(state, 3, 1, owner=1, src=1)
+    state.fleets.append(Fleet(owner_id=2, source_id=0, dest_id=1, ships=1,
+                              turns_total=2, turns_remaining=2))  # on the same lane, outbound
+    need = combat.hold_count(6, 0.10, 1.0)
+    monkeypatch.setattr(config, "IN_LANE_BATTLES", False)
+    assert combat.smart_hold(state, 0, 1) == need - 3
+    monkeypatch.setattr(config, "IN_LANE_BATTLES", True)
+    assert combat.smart_hold(state, 0, 1) == need
+
+
+def test_a_smart_hold_meets_each_wave_on_what_the_last_one_left(monkeypatch):
+    """Two waves a turn apart: the second meets what the first left standing,
+    so holding for the heavier alone is not enough."""
+    monkeypatch.setattr(config, "COMBAT_JITTER", 0.10)
+    monkeypatch.setattr(config, "DEFENDER_ADVANTAGE", 1.0)
+    state = _hub()
+    state.systems[0].production = 0
+    _incoming(state, 5, 1)
+    _incoming(state, 5, 2)
+    hold = combat.smart_hold(state, 0, 1)
+    assert hold > combat.hold_count(5, 0.10, 1.0)
+    left = combat.preview_fight(5, hold, 0.10, 1.0).best.defender_survivors
+    assert left >= combat.hold_count(5, 0.10, 1.0)
+    left = combat.preview_fight(5, hold - 1, 0.10, 1.0).best.defender_survivors
+    assert left < combat.hold_count(5, 0.10, 1.0)
 
 
 def test_hold_count_clears_every_roll_including_a_mutual_wipe():

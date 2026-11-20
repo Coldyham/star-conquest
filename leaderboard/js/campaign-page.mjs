@@ -2,7 +2,8 @@ import { configured, eq, select } from "./api.mjs";
 import { GAME_URL } from "./config.mjs";
 import { parseWeek, weekAfter, weekBefore, weekParam, weekStart } from "./crowns.mjs";
 import {
-  attemptLines, attemptStatus, canAttempt, fieldCounts, fold, nodeRadius, playerHue, weekHistory, weekQueries,
+  attemptLines, attemptStatus, canAttempt, fieldCounts, fold, nodeRadius, nodeRef, nodeTitle, playerHue,
+  weekHistory, weekQueries,
 } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
 import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
@@ -35,6 +36,7 @@ let state = null;
 let boards = new Map();   // nodeId -> game_key, for the nodes somebody has posted on
 let ticker = null;
 let selected = params.has("node") ? Number(params.get("node")) : null;
+let loreOpen = false;      // the selected node's crater card, shut again on choosing another
 // The replay: one frame per move (campaign.weekHistory), and where the
 // scrubber stands. `pos === frames.length` is now, the live map; anything less
 // is the map just after move `pos` (0: before the first).
@@ -101,13 +103,19 @@ function drawMap() {
     const who = holder ? `held by ${holder.name}` : "unclaimed";
     const group = svg("g", {
       class: classes.join(" "), tabindex: "0", role: "button",
-      "aria-label": `${node.kind === "home" ? "Home" : "Node"} ${node.id}, ${label} systems, ${who}`,
+      "aria-label": `${node.name ? `${node.name}, ${node.kind === "home" ? "home" : "node"}` : nodeTitle(node)}, ${label} systems, ${who}`,
     }, [
       svg("circle", { class: "ring", cx: node.x, cy: node.y, r: r + 6 }),
       svg("circle", { class: "body", cx: node.x, cy: node.y, r, fill: fillFor(holder) }),
       svg("text", { x: node.x, y: node.y }, [document.createTextNode(label)]),
+      ...(node.name ? [svg("title", {}, [document.createTextNode(node.name)])] : []),
     ]);
-    const choose = () => { selected = node.id; drawMap(); drawDetail(); };
+    const choose = () => {
+      if (selected !== node.id) loreOpen = false;
+      selected = node.id;
+      drawMap();
+      drawDetail();
+    };
     group.addEventListener("click", choose);
     group.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
@@ -131,7 +139,7 @@ async function drawDetail() {
   const node = graph.nodes.find((n) => n.id === selected);
   if (!node) { clear(detailBox); return; }
   const holder = holdersNow().get(node.id);
-  const title = node.kind === "home" ? `Home ${node.id}` : `Node ${node.id}`;
+  const title = nodeTitle(node);
   const setup = node.settings;
   let play = null;
   if (current && GAME_URL) {
@@ -146,7 +154,7 @@ async function drawDetail() {
     ? el("a", { class: "btn ghost", href: `game.html?key=${encodeURIComponent(board)}`, text: "Scores" })
     : null;
   clear(detailBox).append(
-    el("h3", { text: title }),
+    ...heading(node, title),
     el("p", { text: node.mystery ? "Mystery map — settings randomised" : mapSummary(setup) }),
     el("p", {}, holder
       ? [live() ? "Held by " : "Then held by ", el("a", { href: userHref([holder.name]), text: holder.name }),
@@ -159,6 +167,37 @@ async function drawDetail() {
   );
 }
 
+/**
+ * The card's heading, with an info button that opens what the IAU says about
+ * the crater the node is named after, as a system's star card does in the game.
+ */
+function heading(node, title) {
+  const kind = node.name && node.kind === "home" ? el("span", { class: "kind", text: " · home" }) : null;
+  // The node's number, as a system card shows its number beside its name: a
+  // name is flavour, the id is what logs, the database and a bug report say.
+  const id = node.name ? el("span", { class: "node-id", text: ` #${node.id}` }) : null;
+  const h3 = el("h3", {}, [title, id, kind].filter(Boolean));
+  const lore = node.lore;
+  if (!lore?.origin) return [h3];
+  const facts = [
+    lore.diameter_km ? `A lunar crater ${lore.diameter_km} km across` : "A lunar crater",
+    lore.approved ? `, named in ${lore.approved}.` : ".",
+  ].join("");
+  const card = el("div", { class: "lore-card", id: `lore-${node.id}`, hidden: loreOpen ? null : "" },
+    [el("p", { text: lore.origin }), el("p", { class: "dim", text: facts }),
+      el("p", { class: "dim", text: "Source: IAU Gazetteer of Planetary Nomenclature" })]);
+  const button = el("button", {
+    type: "button", class: "lore", text: "i", "aria-label": `About ${node.name}`,
+    "aria-expanded": String(loreOpen), "aria-controls": card.id,
+  });
+  button.addEventListener("click", () => {
+    loreOpen = !loreOpen;
+    card.hidden = !loreOpen;
+    button.setAttribute("aria-expanded", String(loreOpen));
+  });
+  return [el("div", { class: "head-row" }, [h3, button]), card];
+}
+
 function drawStandings() {
   if (!state.standings.length) {
     clear(standingsBox).append(el("p", { class: "empty", text: "Nobody has claimed a home yet." }));
@@ -168,7 +207,7 @@ function drawStandings() {
     el("div", { class: "tally-row" }, [
       el("a", { class: "tally-name", href: userHref([row.name]) }, [
         el("span", { class: "swatch", style: `background:${fillFor(row)}`, "aria-hidden": "true" }), row.name]),
-      el("span", { class: "tally-figs", text: `${row.fields} ${row.fields === 1 ? "node" : "nodes"} · home ${row.home ?? "—"}` }),
+      el("span", { class: "tally-figs", text: `${row.fields} ${row.fields === 1 ? "node" : "nodes"} · home ${row.home == null ? "—" : homeName(row.home)}` }),
     ]))));
 }
 
@@ -178,8 +217,8 @@ function drawFeed() {
     ? el("ol", { class: "steals" }, moves.map((move) => el("li", { class: "steal" }, [
       el("a", { href: userHref([move.taker]), text: move.taker }),
       move.from
-        ? [` took node ${move.nodeId} from `, el("a", { href: userHref([move.from]), text: move.from })]
-        : ` claimed ${graph.nodes.find((n) => n.id === move.nodeId)?.kind === "home" ? "home" : "node"} ${move.nodeId}`,
+        ? [` took ${refOf(move.nodeId)} from `, el("a", { href: userHref([move.from]), text: move.from })]
+        : ` claimed ${refOf(move.nodeId)}`,
       `, ${move.turns} turns · ${move.lost} lost `,
       el("span", { class: "when", text: relativeTime(new Date(move.at).toISOString()) }),
     ].flat())))
@@ -195,13 +234,15 @@ function drawStatus() {
   statusLine.textContent = `Ends in ${days ? `${days}d ` : ""}${hours}h. Dashed cyan rings are nodes you can attempt.`;
 }
 
-const kindOf = (nodeId) => (graph.nodes.find((n) => n.id === nodeId)?.kind === "home" ? "home" : "node");
+const nodeOf = (nodeId) => graph.nodes.find((n) => n.id === nodeId) ?? { id: nodeId };
+const refOf = (nodeId) => nodeRef(nodeOf(nodeId));
+const homeName = (nodeId) => nodeOf(nodeId).name ?? String(nodeId);
 const momentLabel = (ms) => new Date(ms).toLocaleString(undefined,
   { weekday: "short", hour: "2-digit", minute: "2-digit" });
 /** One move in a sentence, for the replay's caption. */
 const moveText = (move) => (move.from
-  ? `${move.taker} took node ${move.nodeId} from ${move.from} (${move.turns} turns · ${move.lost} lost)`
-  : `${move.taker} claimed ${kindOf(move.nodeId)} ${move.nodeId} (${move.turns} turns · ${move.lost} lost)`);
+  ? `${move.taker} took ${refOf(move.nodeId)} from ${move.from} (${move.turns} turns · ${move.lost} lost)`
+  : `${move.taker} claimed ${refOf(move.nodeId)} (${move.turns} turns · ${move.lost} lost)`);
 
 /** The week's first and last instants on the chart: Monday to now, or to the close. */
 function span() {

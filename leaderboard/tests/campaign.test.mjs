@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  attemptLines, attemptStatus, campaignMark, canAttempt, fieldCounts, fold, GRACE_MS, nodeRadius, playerHue, waitLabel,
+  attemptLines, attemptStatus, campaignMark, canAttempt, fieldCounts, fold, GRACE_MS, nodeRadius, nodeRef, nodeTitle,
+  playerHue, waitLabel,
   weekHistory, weekQueries,
 } from "../js/campaign.mjs";
 
@@ -243,6 +244,16 @@ test("a map's campaign badge points at its node, in its own week", () => {
   assert.deepEqual(campaignMark({ week_start: "2026-09-21", node_id: 3, kind: "field" }, monday), {
     current: false, label: "Past campaign · Node 3", href: "campaign.html?week=2026-09-21&node=3",
   });
+  assert.equal(campaignMark({ week_start: "2026-09-28", node_id: 3, kind: "field", node_name: "Mädler" }, monday).label,
+    "Campaign · Mädler");
+});
+
+test("a node goes by its crater name, or by its number on an older week", () => {
+  assert.equal(nodeTitle({ id: 3, kind: "field", name: "Mädler" }), "Mädler");
+  assert.equal(nodeTitle({ id: 15, kind: "home" }), "Home 15");
+  assert.equal(nodeRef({ id: 15, kind: "home", name: "Keldysh" }), "home Keldysh");
+  assert.equal(nodeRef({ id: 3, kind: "field", name: "Mädler" }), "Mädler");
+  assert.equal(nodeRef({ id: 3, kind: "field" }), "node 3");
 });
 
 test("every reason reads as one line, and a grace adds its countdown", () => {

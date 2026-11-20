@@ -304,6 +304,7 @@ input.seed:focus { border-color: var(--m-hl-edge); }
 
 /* portrait: title, tabs, the panel as tall as its tallest tab, the map, then the actions */
 .compact.portrait #setup .main { flex: none; }
+.compact.portrait #setup { padding-bottom: calc(10px + var(--gesture-gap, 0px) / var(--menu-zoom, 1)); }   /* play.css */
 .compact #setup .panel { display: grid; align-items: start; }
 .compact #setup .panel > div { grid-area: 1 / 1; }
 .compact #setup .panel > .off { visibility: hidden; }

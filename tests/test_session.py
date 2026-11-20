@@ -75,6 +75,16 @@ def _human_game(session, seed=11):
     return start, home, nbrs[0]
 
 
+def test_an_upright_phone_folds_handing_over_but_never_while_it_runs(session):
+    start, _, _ = _human_game(session)
+    view = start["view"]
+    assert view["phone_folds"] == ["autoplay_button_rect", "play_pause_rect"]
+    shown = {b[0] for b in view["footer"]}
+    assert set(view["phone_folds"]) <= shown       # folded on a phone, still offered
+    view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
+    assert view["phone_folds"] == []               # Take control stays one tap away
+
+
 def test_a_send_is_composed_by_taps_and_resolved_by_end_turn(session):
     start, home, nbr = _human_game(session)
     assert start["view"]["mode"] == "idle" and start["view"]["panel"]["legend"] == "live"

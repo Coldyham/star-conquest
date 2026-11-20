@@ -6,7 +6,7 @@ import test from "node:test";
 
 import handler, { askedDay, askedKind, askedResult } from "../netlify/functions/daily.mjs";
 import {
-  addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parNote, playerDays, playerStreaks,
+  addDays, addMonths, bestOnTheDay, dailyMark, dayNumber, dayParam, numberPrefix, monthWeeks, opponents, parDays, parNote, playerDays, playerStreaks,
   postedOn, resultLine, shortDate, standings, streaks, validDay, weekDays, weekdayOf,
 } from "../js/daily.mjs";
 
@@ -196,6 +196,12 @@ test("a player's streaks are counted per kind, mended and true", () => {
   assert.equal(playerDays(both, games).puzzle.get("2026-10-31"), "day");
 });
 
+test("par days read as solid gold, or striped for the turns alone", () => {
+  const got = parDays([{ day: "2026-11-01", turns_only: false }, { day: "2026-11-02", turns_only: true }, { turns_only: false }]);
+  assert.deepEqual([...got], [["2026-11-01", "par"], ["2026-11-02", "par-turns"]]);
+  assert.equal(parDays(null).size, 0);
+});
+
 test("the streak calendar's weeks and months run Monday first", () => {
   assert.deepEqual(weekDays("2026-11-04"),
     ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08"]);
@@ -240,7 +246,12 @@ test("the par's congratulation is only for a score that met it, in the game's wo
   assert.equal(parNote(likely, 10, 3), "Par! You matched the best line our search found: 10 turns / 3 lost");
   assert.equal(parNote(likely, 9, 8), "Beyond par! You won faster than the par of 10 turns / 3 lost");
   assert.equal(parNote(proved, 10, 2), "Beyond par! The par's 10 turns with fewer ships lost than its 3");
-  assert.equal(parNote(likely, 10, 4), "");
+  assert.equal(parNote({ ...proved, lost: null }, 10, 4),
+    "Fastest win! You matched the par of 10 turns, proven the fastest; a win losing fewer ships exists");
+  assert.equal(parNote({ ...likely, lost: null }, 10, 4),
+    "Par turns! You matched the par of 10 turns; a win losing fewer ships exists");
+  assert.equal(parNote(likely, 10, 4), "Par turns! You matched the par of 10 turns; a win losing fewer ships exists");
+  assert.equal(parNote({ ...likely, lost: null }, 11, 0), "");
   assert.equal(parNote(likely, 11, 0), "");
   assert.equal(parNote(null, 10, 3), "");
 });

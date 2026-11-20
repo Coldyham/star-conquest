@@ -177,6 +177,12 @@ class Ui:
     # The sub-mode is a preference, not part of the proposal: `reset_route` leaves
     # it alone so re-entering the mode comes back where you left it.
     route_rally: bool = True
+    # Whether a plan arms smart holds on the threatened systems it rules, also a
+    # preference (the panel's "N smart holds" line flips it, `toggle_route_smart`).
+    # `route_smart_offered` is what it would arm, kept while it is off so the line
+    # stays to turn it back on.
+    route_smart: bool = True
+    route_smart_offered: set[int] = field(default_factory=set)
     route_plan: dict[int, ForwardRule] = field(default_factory=dict)
     route_replaces: set[int] = field(default_factory=set)
     route_unroutable: set[int] = field(default_factory=set)
@@ -1353,6 +1359,12 @@ class Ui:
         return {sid for sid, rule in self.route_plan.items()
                 if rule.smart and not (sid in self.auto_forward and self.auto_forward[sid].smart)}
 
+    def toggle_route_smart(self, state: GameState) -> None:
+        """Plan with smart holds or without, and re-plan. A hold already armed
+        stays armed either way: a plan never disarms one."""
+        self.route_smart = not self.route_smart
+        self.recompute_route(state)
+
     def add_route_sids(self, state: GameState, sids) -> None:
         """Add those of ``sids`` that are ours to the route's group, as a box
         drawn around them does; a frontend that hit-tests its own map calls this."""
@@ -1398,6 +1410,7 @@ class Ui:
         self.route_unroutable = set()
         self.route_cycles = set()
         self.route_clears = set()
+        self.route_smart_offered = set()
         self._prune_route_sel(state)
         if self.route_rally:
             self._plan_rally(state)
@@ -1430,11 +1443,14 @@ class Ui:
         system's own safety, whichever way its ships go — so re-running a route over
         a conveyor that is already correct is idempotent rather than quietly
         resetting tuning. ``smart`` arms a smart hold on top (a threatened system,
-        in rally); it never disarms one. An existing rule is reported replaced only
-        when its lanes change."""
+        in either sub-mode) unless `route_smart` is off; it never disarms one. An
+        existing rule is reported replaced only when its lanes change."""
         old = self.auto_forward.get(node)
         if old is not None and old.shares != shares:
             self.route_replaces.add(node)
+        if smart and not (old is not None and old.smart):
+            self.route_smart_offered.add(node)
+        smart = smart and self.route_smart
         self.route_plan[node] = (ForwardRule(shares, old.hold, old.smart or smart) if old is not None
                                  else ForwardRule(shares, smart=smart))
 
@@ -1454,11 +1470,15 @@ class Ui:
 
         Two selected systems can never disagree about a shared hop: `parent` is a
         dict, so the next hop is a function of the node alone.
+
+        A threatened system on a path gets a smart hold, as in rally
+        (`_plan_rally`): pushing ships on never strips a system under attack.
         """
         if self.route_dest is None or self.route_dest not in state.systems:
             return
         parent = model.flow_field(state, self._owned(state), {self.route_dest},
                                   by_turns=True)
+        threatened = self.threatened_systems(state)
         for sid in sorted(self.route_sources()):
             node = sid
             while node != self.route_dest:
@@ -1468,7 +1488,7 @@ class Ui:
                 if nxt is None:
                     self.route_unroutable.add(sid)
                     break
-                self._add_hop(node, {nxt: 100})
+                self._add_hop(node, {nxt: 100}, node in threatened)
                 node = nxt
 
     def _plan_rally(self, state: GameState) -> None:

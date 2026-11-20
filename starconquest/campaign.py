@@ -63,10 +63,17 @@ class Status:
     received: float                # time.monotonic() when the answer landed
     grace_until: float | None = None   # server ms: post by then, or it isn't a move
     beat: tuple[int, int, str] | None = None   # (turns, lost, holder) to beat
+    crater: str = ""               # the node's name, a lunar crater; blank on older weeks
 
     @property
     def name(self) -> str:
-        return f"{'Home' if self.kind == 'home' else 'Node'} {self.node_id}"
+        """The node as the board heads it: its crater, or "Home 3" / "Node 7"."""
+        return self.crater or f"{'Home' if self.kind == 'home' else 'Node'} {self.node_id}"
+
+    @property
+    def heading(self) -> str:
+        """"Campaign: Mädler", or "Campaign node 7" for an unnamed node."""
+        return f"Campaign: {self.crater}" if self.crater else f"Campaign {self.name.lower()}"
 
     def left_ms(self, target: float | None, now: float | None = None) -> float | None:
         """Milliseconds until ``target`` (server ms), counted on our own clock
@@ -101,6 +108,7 @@ def parse(text: str, received: float) -> Status | None:
             grace_until=ms(status.get("graceUntil")),
             beat=(int(beat["turns"]), int(beat["lost"]), str(beat.get("name", "")))
             if isinstance(beat, dict) else None,
+            crater=str(node.get("name") or ""),
         )
     except (ValueError, TypeError, KeyError, AttributeError):
         return None
@@ -137,7 +145,7 @@ def confirm(status: Status | None, now: float | None = None) -> tuple[str, list[
     """
     if status is None or status.why in ("no-name", "own", "own-home"):
         return None
-    title = f"Campaign {status.name.lower()}"
+    title = status.heading
     if not status.can:
         reason = _NOT_A_MOVE.get(status.why)
         if reason is None:
@@ -173,7 +181,7 @@ def label(status: Status | None, now: float | None = None) -> str | None:
             return f"{name}: yours, beat {turns}t / {lost} lost"
         return f"{name}: yours"
     if status.why == "no-name":
-        return f"Campaign {name.lower()}"
+        return status.heading
     if not status.can:
         return f"{name}: not a move"
     if status.why == "grace":

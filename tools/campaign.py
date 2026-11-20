@@ -41,11 +41,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from starconquest import config, mapgen
+from starconquest.model import AiParams
 from starconquest.settings import (
     ADV_ECON, ADV_FOG, ADV_MAP, ADV_TRAVEL, RANDOM_STRATEGY, Settings, apply_globals,
     ROLL_FLOORS, build_state, randomise_knobs, roll_seed,
 )
 from tools.bot_replay import MISSING_CREDENTIALS, ApiError, Supabase, credentials
+from tools.craters import CRATERS
 
 GRAPH_VERSION = 1
 FIELD_PER_PLAYER = 4          # field nodes per player active last week...
@@ -151,8 +153,17 @@ def _fresh_seed(rng: random.Random, taken: set[tuple[str, int]], mode: str) -> i
 def _node_setup(settings: Settings, seed: int) -> tuple[dict, int]:
     """The node's setup in the exact pruned form a posted link stores in
     ``games.settings_json``, and how many systems it really has (a symmetric map
-    can round up). Building it also proves it plays."""
+    can round up). Building it also proves it plays.
+
+    Seat 1, the player's, is always dealt the default bot: a family copies a
+    posted setup that may carry a watched bot there, and a "?" node deals every
+    seat random. The player's seat never decides a turn played by hand, and a
+    non-default bot there is what a game started on Autoplay and rewound to
+    play by hand cannot keep (``app.forget_unplayed_bot``), so the win would
+    post to a different map. Each seat's random pick is derived from the seed
+    and its own seat alone, so this moves no opponent."""
     settings.seed, settings.autoplay, settings.challenge = seed, False, None
+    settings.ai_strategy[0], settings.ai[0] = Settings().ai_strategy[0], AiParams()
     state = build_state(settings, seed)
     return settings.token_dict(), len(state.systems)
 
@@ -308,8 +319,25 @@ def build_campaign(start: dt.date, games: list[dict], active: int,
         })
     lanes = [list(pair) for pair in lanes]
     lanes += [[edge, n_field + i] for i, (edge, _p) in enumerate(homes)]
+    name_nodes(nodes, rng)
     return {"version": GRAPH_VERSION, "week_start": start.isoformat(), "nodes": nodes,
             "lanes": lanes}
+
+
+def name_nodes(nodes: list[dict], rng: random.Random, craters=None) -> None:
+    """Stamp a lunar crater's name and card on each node (``tools/craters.py``),
+    drawn last so a name never moves a map, as ``mapgen._name_systems`` does for
+    stars. Flavour only: a node stays keyed by its ``id``. With too few names
+    (no Gazetteer export generated yet) every node goes unnamed, and the board
+    calls it "Node 3" as before."""
+    craters = CRATERS if craters is None else craters
+    if len(craters) < len(nodes):
+        return
+    for node, name in zip(nodes, rng.sample(sorted(craters), len(nodes))):
+        crater = craters[name]
+        node["name"] = name
+        node["lore"] = {"origin": crater.origin, "diameter_km": crater.diameter_km,
+                        "approved": crater.approved}
 
 
 def active_players(api: Supabase, start: dt.date) -> int:

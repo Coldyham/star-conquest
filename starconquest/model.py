@@ -336,8 +336,9 @@ class ForwardRule:
     Dict order is the order lanes were added; the share helpers below break ties
     by it, so it is part of the rule rather than an accident of storage.
 
-    ``smart`` sizes the hold afresh every turn instead: enough to keep the system
-    against the heaviest wave of enemy ships flying in (`combat.smart_hold`).
+    ``smart`` sizes the hold afresh every turn instead: enough, with what it builds
+    and our fleets already flying in, to keep the system against every wave of
+    enemy ships flying in (`combat.smart_hold`).
     ``hold`` is kept while it is on, but unused.
     """
 

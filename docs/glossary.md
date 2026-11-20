@@ -105,6 +105,7 @@ card already has a **map link** on it.
 | --- | --- | --- |
 | **campaign** | the weekly contest map of **nodes** (each node is a map) | `campaign.py`, `campaign_games` |
 | **node** (campaign only) | one map on the campaign's graph: a **home** you claim, or a **field** node | `graph["nodes"]`, `kind` |
+| a node's **name** | the lunar crater it is named after ("Mädler"); older weeks say "Node 7" | `graph["nodes"][i]["name"]`, `lore`; `nodeTitle`, `campaign_games.node_name` |
 | **the daily** | one day's pair: the **daily map** ("Daily map", the Map tab, "Monday's map") and the **daily puzzle** (a small duel) | `daily.py` `BOARD`/`PUZZLE` (kind `"board"`/`"puzzle"`, link `#daily`/`#puzzle`); `dailies` |
 | **Daily challenge** | the heading over both dailies on the board's daily pages | `daily.html`, `puzzle.html` |
 | **par** | a puzzle's best known result, told only to players who meet it | `puzzle_pars` |

@@ -285,8 +285,11 @@ def test_a_par_reply_is_read_only_when_it_names_the_par():
     assert game_daily.par_from_reply(json.dumps(reply)) == game_daily.Par(10, 3, True, True)
     likely = dict(reply, par={"turns": 10, "lost": 3, "status": "likely"})
     assert game_daily.par_from_reply(json.dumps(likely)) == game_daily.Par(10, 3, False, False)
+    turns = dict(reply, par={"turns": 10, "lost": None, "status": "likely"})
+    assert game_daily.par_from_reply(json.dumps(turns)) == game_daily.Par(10, None, False, False)
     for bad in ("", "nope", json.dumps({"par": None}), json.dumps({"par": {"turns": "10", "lost": 3}}),
-                json.dumps({"par": {"turns": True, "lost": 3}}), json.dumps([1])):
+                json.dumps({"par": {"turns": True, "lost": 3}}),
+                json.dumps({"par": {"turns": 10, "lost": "3"}}), json.dumps([1])):
         assert game_daily.par_from_reply(bad) is None
 
 
@@ -297,7 +300,10 @@ def test_the_congratulation_is_only_for_a_result_that_met_the_par():
     assert game_daily.par_note(likely, 10, 3).startswith("Par!")
     assert game_daily.par_note(likely, 9, 8).startswith("Beyond par! You won faster")
     assert game_daily.par_note(proved, 10, 2).startswith("Beyond par! The par's 10 turns")
-    assert game_daily.par_note(likely, 10, 4) == ""
+    assert game_daily.par_note(game_daily.Par(10, None, False, False), 10, 4).startswith("Par turns!")
+    assert game_daily.par_note(game_daily.Par(10, None, True, False), 10, 4).startswith("Fastest win!")
+    assert "3" not in game_daily.par_note(game_daily.Par(10, None, True, True), 10, 4)
+    assert game_daily.par_note(likely, 10, 4).startswith("Par turns!")
     assert game_daily.par_note(likely, 11, 0) == ""
 
 
@@ -307,7 +313,8 @@ def test_the_board_says_it_in_the_games_words():
     js = (Path(__file__).resolve().parent.parent / "leaderboard" / "js" / "daily.mjs").read_text()
     cases = [(game_daily.Par(10, 3, True, False), 10, 3), (game_daily.Par(10, 3, True, True), 10, 3),
              (game_daily.Par(10, 3, False, False), 10, 3), (game_daily.Par(10, 3, False, False), 9, 8),
-             (game_daily.Par(10, 3, True, False), 10, 2)]
+             (game_daily.Par(10, 3, True, False), 10, 2), (game_daily.Par(10, None, True, False), 10, 4),
+             (game_daily.Par(10, None, False, False), 10, 4)]
     tests = (Path(__file__).resolve().parent.parent / "leaderboard" / "tests" / "daily.test.mjs").read_text()
     for par, turns, lost in cases:
         text = game_daily.par_note(par, turns, lost)

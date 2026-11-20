@@ -142,6 +142,7 @@ def view(state: GameState, ui: Ui) -> dict:
         "pbp": pbp(state, ui),
         "scores": scores(state, ui),
         "footer": [list(b) for b in hud.footer(state, ui)],
+        "phone_folds": hud.phone_folds(ui),
         "more_open": ui.more_open,
         "more_labels": {attr: list(pair) for attr, pair in hud.MORE_LABELS.items()},
         "lost": me.ships_lost if me is not None and not ui.spectating else None,

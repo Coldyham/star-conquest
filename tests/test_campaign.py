@@ -87,6 +87,27 @@ def test_every_node_builds_and_reports_its_real_system_count():
         assert len(build_state(settings, settings.seed).systems) == node["systems"]
 
 
+def test_every_node_deals_the_default_bot_to_the_players_seat():
+    """Seat 1 is the player's: a "?" node (every seat random) and a family copied
+    from a setup posted with a bot watched in seat 1 both deal it the default,
+    so a win played by hand keys to the node however the game was started. The
+    other seats keep what they were dealt."""
+    watched = Settings.defaults()
+    watched.ai_strategy = ["knower", "thinker"] + watched.ai_strategy[2:]
+    watched.ai[0].aux = 3.0
+    games = [_game("w", 4, ai_strategy=watched.ai_strategy, ai=watched.ai)]
+    plain = Settings()
+    for seed in range(5):
+        nodes = [n for n in _graph(games=games, seed=seed)["nodes"] if "settings" in n]
+        assert any(n["mystery"] for n in nodes)
+        for node in nodes:
+            setup = Settings.from_dict(dict(node["settings"]))
+            assert setup.ai_strategy[0] == plain.ai_strategy[0]
+            assert setup.ai[0] == plain.ai[0]
+            expected = ("random" if node["mystery"] else "thinker")
+            assert setup.ai_strategy[1] == expected
+
+
 def test_there_are_one_or_two_mystery_nodes_and_only_in_the_field():
     for seed in range(5):
         graph = _graph(seed=seed)
@@ -212,3 +233,32 @@ def test_a_config_whose_home_cannot_match_the_neutrals_in_time_is_never_a_node()
     for seed in range(40):
         for node in _graph(games=GAMES + [slow], seed=seed)["nodes"]:
             assert campaign.starts_in_time(Settings.from_dict(dict(node["settings"])))
+
+
+def _craters(count: int) -> dict:
+    return {f"Crater{i:03d}": _crater(i) for i in range(count)}
+
+
+def _crater(i: int):
+    from tools.craters import Crater
+    return Crater(f"Somebody {i}, astronomer.", 10.0 + i % 20, "1935")
+
+
+def test_names_are_drawn_last_so_they_never_move_a_map(monkeypatch):
+    """Naming draws from the rng after every map is dealt, as stars are named
+    after the board: with names or without, the week's maps are the same."""
+    monkeypatch.setattr(campaign, "CRATERS", {})
+    bare = _graph(seed=5)
+    monkeypatch.setattr(campaign, "CRATERS", _craters(200))
+    named = _graph(seed=5)
+    assert [{k: v for k, v in n.items() if k not in ("name", "lore")} for n in named["nodes"]] == bare["nodes"]
+    names = [n["name"] for n in named["nodes"]]
+    assert len(set(names)) == len(names)
+    first = named["nodes"][0]
+    assert first["lore"] == {"origin": _craters(200)[first["name"]].origin,
+                             "diameter_km": _craters(200)[first["name"]].diameter_km, "approved": "1935"}
+
+
+def test_too_few_names_leaves_every_node_unnamed(monkeypatch):
+    monkeypatch.setattr(campaign, "CRATERS", _craters(3))
+    assert not any("name" in n for n in _graph()["nodes"])
