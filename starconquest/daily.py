@@ -139,8 +139,8 @@ def daily_of(settings: Settings) -> tuple[str, str]:
 
 
 def noun(kind: str) -> str:
-    """'daily puzzle' or 'daily challenge'."""
-    return "daily puzzle" if kind == PUZZLE else "daily challenge"
+    """'daily puzzle' or 'daily map'."""
+    return "daily puzzle" if kind == PUZZLE else "daily map"
 
 
 def opponent(settings: Settings) -> str:
