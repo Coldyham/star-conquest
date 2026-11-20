@@ -192,6 +192,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - shell.md · Rally tie-break by ships/turn toward the rally point drawing less: built, then replaced by an even split once rules could split. *Route mode.*
 - shell.md · A side-panel list of every queued order and rule (capped, scrolled, a × per row): built and removed once the popup opened on edit too. *Send popup and spectating.*
 - shell.md · Unrestricted (enemy-crossing) routes: unrepresentable. Two-stage pick-then-aim; "tap a pick to remove, anything else to aim"; a Chain/Rally button pair; rally claiming only systems nearer than a front; weighting the AI's flow by turns: all rejected. *Route mode.*
+- shell.md · An upright phone folding Autoplay and Play behind "more" from the start (`hud.phone_folds`), beside the exits: removed 2026-11-20; only the exits fold up front, the rest by rank when out of room. *Phones: the compact layout.*
 - shell.md · History's graphs open by default on a finished game: built, then closed by default (2026-11-20), as playtesting found them closed straight away nearly every time. *End-of-game graphs.*
 
 ## turnfilm.md (Turn playback)

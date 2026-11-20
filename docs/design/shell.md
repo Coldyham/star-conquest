@@ -74,14 +74,15 @@ is what switches it:
   sheet's cap is 70% of the screen divided by the zoom (a bare `60vh` was
   zoomed too, and clipped under a browser's bars). The popup's lines that only
   say something stay short, so the sheet doesn't grow, and its − and + stand
-  beside the count, not at the screen's edges. Upright, the strip also folds
-  Hint and Autoplay (`hud.phone_folds`), never while one runs (an open hint
-  keeps its ✗/✓ pair), leaving Clear, Route, Undo and Play under the thumb.
-  Until 2026-11-20 it folded Autoplay and Play and kept Hint; playtesting put
-  Hint with Autoplay, help from the AI rather than a turn-by-turn press, so
-  Play took its place (about the same width), and Hint ranks just below
-  Autoplay in any squeeze. A finger hovers nothing: the page reports no hover
-  for a touch pointer, and on a touch screen closing the send popup drops its
+  beside the count, not at the screen's edges. Only the exits are folded from
+  the start; every other button stays in the strip while there is room, and
+  folds by rank once there isn't. Hint ranks lowest of those, just below
+  Autoplay (help from the AI, not a turn-by-turn press), and an open hint's
+  ✗/✓ pair ranks with Play. Until 2026-11-20 an upright phone also folded
+  Autoplay and Play from the start (`hud.phone_folds`), keeping Hint out;
+  playtesting found that backwards, and wanted any button with room to show.
+  A finger hovers nothing: the page reports no hover for a touch pointer,
+  and on a touch screen closing the send popup drops its
   source too (`Session.op_ui_empty`), so the panel goes straight back to the
   turn's target and the forwarding buttons rather than waiting for a tap on
   empty map (2026-11-20). The camera keeps only Reset (a finger

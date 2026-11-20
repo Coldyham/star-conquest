@@ -359,10 +359,7 @@ export class Hud {
     const width = (b) => Math.max(fbh, textWidth(text(b), size) + 2 * 14);   // widgets.btn_w
     const avail = nav.clientWidth - 28;
     let shown = [...view.footer];
-    // Upright, the strip is in the thumb's reach: what isn't pressed turn by
-    // turn (`hud.phone_folds`) goes behind "more" with the exits.
-    const phone = portrait() ? new Set(view.phone_folds || []) : new Set();
-    const folded = compact() ? shown.filter((b) => b[5] === "left" || phone.has(b[0])) : [];
+    const folded = compact() ? shown.filter((b) => b[5] === "left") : [];
     shown = shown.filter((b) => !folded.includes(b));
     const need = (items) => items.reduce((sum, b) => sum + width(b), 0) + gap * (items.length - 1)
       + (folded.length ? fbh + gap : 0);

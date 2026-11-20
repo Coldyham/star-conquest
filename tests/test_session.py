@@ -75,14 +75,16 @@ def _human_game(session, seed=11):
     return start, home, nbrs[0]
 
 
-def test_an_upright_phone_folds_handing_over_but_never_while_it_runs(session):
+def test_a_squeeze_folds_the_hint_first_but_an_open_hint_late(session):
+    """Past the exits, which a compact screen folds from the start, the footer
+    folds by rank alone: Hint before Autoplay before Play, but an open hint's
+    pair outlasts Autoplay."""
     start, _, _ = _human_game(session)
-    view = start["view"]
-    assert view["phone_folds"] == ["hint_button_rect", "autoplay_button_rect"]   # Play stays, in Hint's place
-    shown = {b[0] for b in view["footer"]}
-    assert set(view["phone_folds"]) <= shown       # folded on a phone, still offered
-    view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
-    assert view["phone_folds"] == []               # Take control stays one tap away
+    rank = {b[0]: b[4] for b in start["view"]["footer"]}
+    assert rank["hint_button_rect"] < rank["autoplay_button_rect"] < rank["play_pause_rect"]
+    session.ui.hint_turn = session.state.turn
+    rank = {b[0]: b[4] for b in _menu(session, "game.view")["view"]["footer"]}
+    assert rank["autoplay_button_rect"] < rank["hint_button_rect"] <= rank["play_pause_rect"]
 
 
 def test_a_send_is_composed_by_taps_and_resolved_by_end_turn(session):
