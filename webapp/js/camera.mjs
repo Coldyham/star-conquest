@@ -26,24 +26,16 @@ export class Camera {
     this.resize(screen);
   }
 
-  /** A new screen rectangle: refit, keeping the zoom and the world point at the
-   * centre. When only the height moved (the portrait panel under the map
-   * growing or shrinking to its words) nothing on screen moves at all: the
-   * scale and the offsets stay, the zoom taking up the new fit, and nothing is
-   * clamped, so the map moves only when the player pans, zooms or resets. */
+  /** A new screen rectangle: refit, keeping the zoom and the world point at the centre. */
   resize(screen) {
-    const old = this.screen;
-    const heightOnly = old && old[0] === screen[0] && old[1] === screen[1] && old[2] === screen[2];
-    const kept = heightOnly ? this.scale : null;
-    const centre = old && !heightOnly ? this.toWorld(old[0] + old[2] / 2, old[1] + old[3] / 2) : null;
+    const centre = this.screen ? this.toWorld(this.screen[0] + this.screen[2] / 2, this.screen[1] + this.screen[3] / 2)
+      : null;
     this.screen = screen;
     const [wx0, wy0, wx1, wy1] = this.world;
     const [, , sw, sh] = screen;
     const ww = Math.max(1e-6, wx1 - wx0), wh = Math.max(1e-6, wy1 - wy0);
     this.fitScale = Math.min(Math.max(1, sw - 2 * this.padding) / ww, Math.max(1, sh - 2 * this.padding) / wh);
-    if (kept !== null) {
-      this.zoom = kept / this.fitScale;
-    } else if (centre === null) {
+    if (centre === null) {
       this.reset();
     } else {
       this.offX = screen[0] + sw / 2 - centre[0] * this.scale;

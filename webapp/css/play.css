@@ -384,25 +384,27 @@ button { font: inherit; color: inherit; cursor: pointer; }
   /* End Turn a thumb's height (48 CSS pixels, never under the 59 units a tab
      gives it), over the gesture bar. */
   --end-h: calc(max(59px, 48px / var(--zoom, 1)) + 7px + var(--end-gap));
-  /* The band's cap: it is as tall as what it holds, up to room for a system's
-     readout beside its lane and route mode's directions, then it scrolls. (A
-     fixed height was pygame's, which couldn't scroll.) The map gives way to it
-     with its top held still (`Camera.resize`); the popup docks over it all. */
-  --band-h: max(150px, calc(22dvh / var(--zoom, 1)));
+  /* The band's height is fixed, so the map above it never moves as the
+     selection, the popup or route mode change what it holds. It holds text, so
+     it is sized in the app's own units, not as a share of the screen: room for
+     the tallest panel short of the popup, rally with four of its counts (about
+     256), which also fits a system whose rule forwards down three lanes. Past
+     that it scrolls; the docked popup may cover a little of the map. */
+  --band-h: 260px;
 }
 @media (display-mode: standalone), (display-mode: fullscreen) {
   :root.portrait { --gesture-gap: max(44px, env(safe-area-inset-bottom, 0px)); }
 }
 .portrait #app {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--top-h) minmax(0, 1fr) auto var(--foot-h) var(--end-h);
+  grid-template-rows: var(--top-h) minmax(0, 1fr) var(--band-h) var(--foot-h) var(--end-h);
 }
 .portrait #top { grid-column: 1; grid-row: 1; }
 .portrait #mapbox { grid-column: 1; grid-row: 2; }
 .portrait #side { display: contents; }
 .portrait #panel {
   grid-column: 1; grid-row: 3; border-left: none; border-top: 1px solid var(--rule); padding: 10px 12px;
-  min-height: 0; max-height: var(--band-h); overflow-y: auto; overscroll-behavior: contain;
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
 }
 .portrait #panel .band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .portrait #panel p { white-space: pre-wrap; }
