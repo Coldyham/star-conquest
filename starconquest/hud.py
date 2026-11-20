@@ -478,16 +478,14 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
 def phone_folds(state: GameState, ui: Ui) -> list[str]:
     """The footer buttons an upright phone folds behind "more" from the start,
     beside the exits: asking the AI for a hint or handing it the game is no
-    turn-by-turn press, and the strip is where the thumb rests. Each stays out
-    while it is running, so the hint's pair, Take control and Pause are one tap
-    away."""
+    turn-by-turn press, and the strip is where the thumb rests. Play stays, in
+    the room Hint leaves. Each stays out while it is running, so the hint's
+    pair and Take control are one tap away."""
     folds = []
     if ui.can_hint(state) and not ui.hint_live(state):
         folds.append("hint_button_rect")
     if not ui.autoplay:
         folds.append("autoplay_button_rect")
-        if not ui.playing:
-            folds.append("play_pause_rect")
     return folds
 
 

@@ -78,7 +78,7 @@ def _human_game(session, seed=11):
 def test_an_upright_phone_folds_handing_over_but_never_while_it_runs(session):
     start, _, _ = _human_game(session)
     view = start["view"]
-    assert view["phone_folds"] == ["hint_button_rect", "autoplay_button_rect", "play_pause_rect"]
+    assert view["phone_folds"] == ["hint_button_rect", "autoplay_button_rect"]   # Play stays, in Hint's place
     shown = {b[0] for b in view["footer"]}
     assert set(view["phone_folds"]) <= shown       # folded on a phone, still offered
     view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
