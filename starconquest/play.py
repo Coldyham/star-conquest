@@ -44,9 +44,15 @@ def press_restore(ui: Ui, snapshot: tuple) -> None:
     ui.auto_forward.update(rules)
 
 
+def lore_allowed(state: GameState, ui: Ui) -> bool:
+    """Can a star's info card be up: in History, decided or not, or in live
+    play until the win veil covers the board."""
+    return ui.history or state.winner is None
+
+
 def open_lore(state: GameState, ui: Ui, sid: int | None) -> None:
     """Put up the star info card for system ``sid``, if the catalogue has its name."""
-    if sid in state.systems and state.systems[sid].name in starlore.LORE:
+    if sid in state.systems and state.systems[sid].name in starlore.LORE and lore_allowed(state, ui):
         ui.lore_sid = sid
 
 
@@ -242,9 +248,7 @@ def over_pick(ui: Ui, sid: int) -> str | None:
 
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:
     """A key on the game-over veil: retry, a new map (or the next stage),
-    the menu, undo, history, and the two ways to share."""
-    if name == "u":
-        return "undo" if ui.can_undo(state) else None
+    the menu, history, and the two ways to share."""
     if name == "t":
         # A run's decided game offers Try again (a new step) or nothing.
         if ui.run_id and ui.run_note:
@@ -325,9 +329,13 @@ def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
 
 def history_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     """A key in history review: scrub the turn, play it back, the graphs and the
-    coach, or leave. ``"reset_view"`` asks the caller to fit the camera."""
+    coach, a star's info card, or leave. ``"reset_view"`` asks the caller to
+    fit the camera."""
     if name in ("Escape", "h"):
         return "toggle_history"
+    if name == "i":
+        open_lore(state, ui, ui.selected if ui.selected is not None else ui.hover)
+        return None
     if name == "p":
         return "toggle_play"  # play/pause the replay at sim speed
     if name == "r":
@@ -387,7 +395,7 @@ def card_up(state: GameState, ui: Ui) -> bool:
     if not ui.odds_card_up():
         ui.odds_open = False
     briefing = ui.briefing_open and ui.in_stage and not ui.history and state.winner is None
-    lore = ui.lore_sid is not None and not ui.history and state.winner is None
+    lore = ui.lore_sid is not None and lore_allowed(state, ui)
     return briefing or lore or ui.odds_open
 
 

@@ -295,13 +295,12 @@ the game has a winner, *History & coach* on the win overlay is offered as usual.
 *Undo* (U, the footer) is History's *Rewind to here* on the turn before, in one
 press and with no confirm (`main.apply_rewind` on `turn_count - 1`). It is a
 rewind, so `Ui.can_undo` asks `can_review` first (ironman hides it with
-History), and adds a game of our own outside review: a play-by-post match is
-never ours to rewind. A run game plays ironman, so it has none until decided.
-A decided game offers it on the win overlay (U, beside *History & coach*),
-where it forks the log as History's rewind does, leaving the finished record
-whole. Until 2026-11-20 a decided game had no Undo: a player who saw only at
-the end that a goal was missed had to open History, scrub back a turn and
-rewind, many more taps than Undo a turn earlier.
+History), and adds live play of an undecided game of our own: a decided game
+rewinds from History, which forks it, and a play-by-post match is never ours to
+rewind. A run game plays ironman, so it has none. The win overlay offered Undo
+for a day (2026-11-20, forking the log as History's rewind does) and dropped it
+once History opened with its graphs closed: *History & coach*, back a turn and
+*Rewind to here* is then short enough.
 
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and

@@ -246,13 +246,20 @@ def test_a_decided_game_shows_its_veil_and_answers_its_keys(session):
     assert not res["view"]["can"]["end_turn"]
     assert _call(session, "ui.key", name="t")["result"]["action"] == "retry"
     assert _call(session, "ui.key", name="Escape")["result"]["action"] == "menu"
-    # Undo takes the deciding turn back on a fork, leaving the decided record whole.
-    assert over["undo"] and _call(session, "ui.key", name="u")["result"]["action"] == "undo"
-    decided, last = session.log, res["board"]["turn"]
-    res = _call(session, "game.action", name="undo")["result"]
-    assert res["fresh"] and res["board"]["turn"] == last - 1 and res["board"]["winner"] is None
-    assert res["view"]["over"] is None and session.log is not decided
-    assert decided.turn_count == last and decided.winner is not None
+    # A decided game is rewound from History, which forks it: the veil has no Undo.
+    assert _call(session, "ui.key", name="u")["result"]["action"] is None
+    # History reads a star's info card, by its button or I, as live play does.
+    last = _call(session, "game.action", name="toggle_history")["result"]["view"]["history"]["turn"]
+    sid = res["board"]["sys"][0][0]
+    view = _call(session, "ui.tap", sid=sid)["result"]["view"]
+    assert view["history"] and view["panel"]["focus"] == sid and view["panel"]["lore"]
+    view = _call(session, "ui.call", method="open_lore")["result"]["view"]
+    assert view["card"]["kind"] == "lore"
+    reply = _call(session, "ui.key", name="ArrowLeft")["result"]
+    assert reply["view"]["card"] is None and reply["view"]["history"]["turn"] == last   # spent putting it away
+    assert _call(session, "ui.key", name="i")["result"]["view"]["card"]["kind"] == "lore"
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["history"] is None and view["card"] is None and view["over"] is not None
 
 
 def test_route_mode_plans_a_chain_and_confirms_it(session):

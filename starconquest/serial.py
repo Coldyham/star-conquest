@@ -18,7 +18,7 @@ from __future__ import annotations
 import dataclasses
 import math
 
-from starconquest import app, combat, hud, mapgen, paths, starlore, stats, turnfilm
+from starconquest import app, combat, hud, mapgen, paths, play, starlore, stats, turnfilm
 from starconquest.model import GameState, lane_key
 from starconquest.viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
@@ -272,7 +272,7 @@ def panel(state: GameState, ui: Ui) -> dict:
         "system": [list(r) for r in hud.system_rows(state, ui, sys)],
         "compact": [list(r) for r in hud.system_rows_compact(state, ui, sys)],
         "lane": [list(r) for r in hud.lane_rows(state, ui, focus, dest)] if dest is not None else [],
-        "lore": focus == ui.selected and sys.name in starlore.LORE and not ui.history,
+        "lore": focus == ui.selected and sys.name in starlore.LORE and play.lore_allowed(state, ui),
     }
 
 
@@ -289,7 +289,6 @@ def over(state: GameState, ui: Ui) -> dict:
         # A run's decided game: Try again in Retry's place (or nothing), and
         # Choose a stage where Next stage would be.
         "retry": not (ui.run_id and ui.run_note),
-        "undo": ui.can_undo(state),
         "try_again": bool(ui.run_id and ui.run_again),
         "choose_stage": bool(ui.run_id and ui.run_on and ui.run_graph is None),
         "next_label": "Replay for its gate" if ui.run_next in ui.run_replays else "Next stage",
@@ -348,15 +347,14 @@ def hint(state: GameState, ui: Ui) -> dict:
 def card(state: GameState, ui: Ui) -> dict | None:
     """The card over the board, if any: a gauntlet stage's briefing, a star's
     lore, or the forecast's breakdown (`render._draw_briefing`, `_draw_lore`,
-    `_draw_odds_card`)."""
-    if ui.history or state.winner is not None:
-        return None
-    if ui.briefing_open and ui.in_stage:
+    `_draw_odds_card`). History shows only a star's lore."""
+    live = not ui.history and state.winner is None
+    if live and ui.briefing_open and ui.in_stage:
         return {"kind": "briefing", "title": ui.stage_title, "sub": ui.stage_label or "",
                 "paras": list(ui.briefing), "notes": list(hud.briefing_notes(ui)),
                 "close": {"keys": hud.briefing_close(False, False), "touch": hud.briefing_close(True, False),
                           "portrait": hud.briefing_close(True, True)}}
-    if ui.lore_sid in state.systems:
+    if ui.lore_sid in state.systems and play.lore_allowed(state, ui):
         name = state.systems[ui.lore_sid].name
         lore = starlore.LORE.get(name)
         if lore is None:
@@ -364,7 +362,7 @@ def card(state: GameState, ui: Ui) -> dict | None:
         paras, close, notes = hud.lore_card(lore, False)
         return {"kind": "lore", "title": name, "sub": lore.language, "paras": list(paras), "notes": list(notes),
                 "close": {"keys": close, "touch": hud.lore_card(lore, True)[1]}}
-    if ui.odds_card_up():
+    if live and ui.odds_card_up():
         odds = hud.odds_card(state, ui)
         line = hud.forecast(state, ui)
         if odds is None or line is None:

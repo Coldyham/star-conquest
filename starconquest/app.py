@@ -1170,6 +1170,7 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     ui.reset_selection()
     ui.reset_route()
     ui.sel_forward = None
+    ui.lore_sid = None
     ui.history_max = len(history_states) - 1
     # Turn 0 is the board as generated, before anyone moved — the frame a replay
     # should start on, and the one that makes the first turn's changes visible as

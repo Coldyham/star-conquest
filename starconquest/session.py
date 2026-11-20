@@ -866,10 +866,7 @@ class Session:
         elif name == "quit_confirmed":
             return {"quit": True, "menu": self._menu(self._leave())}
         elif name == "undo" and ui.can_undo(state):
-            turn = max(self.log.turn_count - 1, 0)
-            if state.winner is not None:
-                return self._fork(turn)
-            self.state, self.ui = app.apply_rewind(self.log, self.settings, turn)
+            self.state, self.ui = app.apply_rewind(self.log, self.settings, max(self.log.turn_count - 1, 0))
             self.ui.campaign_start = ui.campaign_start   # the same match, so the same start
             self._stage_again()
             return self._whole()
@@ -919,7 +916,7 @@ class Session:
     def _fork(self, turn: int) -> dict:
         """Play on from board ``turn`` in a new save forked from this one, so
         the record left behind stays intact: Retry, and a decided game's
-        rewind or Undo."""
+        rewind."""
         ui = self._ui()
         assert self.log is not None and self.settings is not None
         self.log = self.log.fork(turn)
@@ -970,6 +967,7 @@ class Session:
         """Back to the live board, with its fog exactly as it was (`main`)."""
         ui = self._ui()
         ui.history = False
+        ui.lore_sid = None
         ui.history_chart = None
         ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
         ui.history_graph = ui.graph_full = False

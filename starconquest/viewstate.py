@@ -620,11 +620,12 @@ class Ui:
 
         It is History's rewind to the turn before, so it asks what History does
         (`can_review`: a recorded turn, and not under ironman while undecided),
-        and only outside review of a game of our own: a shared match is never
-        ours to rewind. On a decided game it is the win overlay's, and forks the
-        log as History's rewind does.
+        and only in live play of an undecided game of our own: a decided game is
+        rewound from History, which forks it, and a shared match is never ours
+        to rewind.
         """
-        return self.can_review(state) and not self.in_pbp and not self.history
+        return (self.can_review(state) and state.winner is None
+                and not self.in_pbp and not self.history)
 
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?
