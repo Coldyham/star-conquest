@@ -192,6 +192,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - shell.md · Rally tie-break by ships/turn toward the rally point drawing less: built, then replaced by an even split once rules could split. *Route mode.*
 - shell.md · A side-panel list of every queued order and rule (capped, scrolled, a × per row): built and removed once the popup opened on edit too. *Send popup and spectating.*
 - shell.md · Unrestricted (enemy-crossing) routes: unrepresentable. Two-stage pick-then-aim; "tap a pick to remove, anything else to aim"; a Chain/Rally button pair; rally claiming only systems nearer than a front; weighting the AI's flow by turns: all rejected. *Route mode.*
+- shell.md · History's graphs open by default on a finished game: built, then closed by default (2026-11-20), as playtesting found them closed straight away nearly every time. *End-of-game graphs.*
 
 ## turnfilm.md (Turn playback)
 - turnfilm.md · Pausing the engine between phases; an applier that re-derives outcomes; widening the crossing sort tuple (it would move stored replays); per-beat dwells summed into the film; `FILM_LAUNCH_MS` 220; flat-expiry marks, then marks fading over the film's length; an in-game animation toggle; a loss label summing both sides (a per-side pair, first rejected, now stacks one row per side); lane tracks ranked by position or derived from launch turn; camera moves toward the action; a burst on every arrival: all rejected.

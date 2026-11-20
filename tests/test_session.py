@@ -78,7 +78,7 @@ def _human_game(session, seed=11):
 def test_an_upright_phone_folds_handing_over_but_never_while_it_runs(session):
     start, _, _ = _human_game(session)
     view = start["view"]
-    assert view["phone_folds"] == ["autoplay_button_rect", "play_pause_rect"]
+    assert view["phone_folds"] == ["hint_button_rect", "autoplay_button_rect", "play_pause_rect"]
     shown = {b[0] for b in view["footer"]}
     assert set(view["phone_folds"]) <= shown       # folded on a phone, still offered
     view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
@@ -135,6 +135,17 @@ def test_a_press_on_empty_map_drops_the_hover(session):
     _call(session, "ui.hover", sid=nbr)
     view = _call(session, "ui.empty")["result"]["view"]
     assert view["panel"]["focus"] is None
+
+
+def test_on_a_touch_screen_done_leaves_no_hover(session):
+    """A finger hovers nothing, so closing the popup leaves the panel on the
+    turn's target and the forwarding buttons, not on the send's source."""
+    _, home, nbr = _human_game(session)
+    session.touch = True
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    view = _call(session, "ui.empty")["result"]["view"]
+    assert view["mode"] == "idle" and view["panel"]["focus"] is None
 
 
 def test_a_pinch_puts_back_what_its_first_finger_pressed(session):
@@ -233,6 +244,13 @@ def test_a_decided_game_shows_its_veil_and_answers_its_keys(session):
     assert not res["view"]["can"]["end_turn"]
     assert _call(session, "ui.key", name="t")["result"]["action"] == "retry"
     assert _call(session, "ui.key", name="Escape")["result"]["action"] == "menu"
+    # Undo takes the deciding turn back on a fork, leaving the decided record whole.
+    assert over["undo"] and _call(session, "ui.key", name="u")["result"]["action"] == "undo"
+    decided, last = session.log, res["board"]["turn"]
+    res = _call(session, "game.action", name="undo")["result"]
+    assert res["fresh"] and res["board"]["turn"] == last - 1 and res["board"]["winner"] is None
+    assert res["view"]["over"] is None and session.log is not decided
+    assert decided.turn_count == last and decided.winner is not None
 
 
 def test_route_mode_plans_a_chain_and_confirms_it(session):
@@ -350,7 +368,7 @@ def test_history_looks_but_never_orders(session):
     assert session.ui.auto_forward == {home: ForwardRule({nbr: 100})}
 
 
-def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
+def test_a_decided_games_history_opens_with_its_graphs_and_coach_a_press_away(session):
     _call(session, "boot", page=PAGE, store={})
     _call(session, "game.start", settings={"players": 2, "nodes": 8}, seed=3)
     _call(session, "game.action", name="toggle_autoplay")
@@ -358,6 +376,8 @@ def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
         if _call(session, "turn.end")["result"]["board"]["winner"] is not None:
             break
     view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["graph"] is None and view["history"]["graphs"] and not view["history"]["graph_on"]
+    view = _call(session, "ui.call", method="toggle_graph")["result"]["view"]
     g = view["graph"]
     assert view["history"]["reveal"] and g is not None and g["tabs"][-1] == "Coach"
     assert json.loads(json.dumps(view)) == view

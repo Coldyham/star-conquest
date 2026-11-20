@@ -143,7 +143,7 @@ def view(state: GameState, ui: Ui) -> dict:
         "pbp": pbp(state, ui),
         "scores": scores(state, ui),
         "footer": [list(b) for b in hud.footer(state, ui)],
-        "phone_folds": hud.phone_folds(ui),
+        "phone_folds": hud.phone_folds(state, ui),
         "more_open": ui.more_open,
         "more_labels": {attr: list(pair) for attr, pair in hud.MORE_LABELS.items()},
         "lost": me.ships_lost if me is not None and not ui.spectating else None,
@@ -290,6 +290,7 @@ def over(state: GameState, ui: Ui) -> dict:
         # A run's decided game: Try again in Retry's place (or nothing), and
         # Choose a stage where Next stage would be.
         "retry": not (ui.run_id and ui.run_note),
+        "undo": ui.can_undo(state),
         "try_again": bool(ui.run_id and ui.run_again),
         "choose_stage": bool(ui.run_id and ui.run_on and ui.run_graph is None),
         "next_label": "Replay for its gate" if ui.run_next in ui.run_replays else "Next stage",

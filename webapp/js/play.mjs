@@ -721,6 +721,9 @@ function move(event) {
     redraw();
     return;
   }
+  // A finger hovers nothing: what it rests on would hold the side panel in
+  // place of the turn's target and the forwarding buttons.
+  if (event.pointerType === "touch") return;
   const sid = bv.pick(x, y);
   if (sid !== game.hover) {
     game.hover = sid;
@@ -739,6 +742,7 @@ function release(event) {
   game.drag = null;
   game.pan = null;
   game.box = null;
+  if (event.pointerType === "touch") game.hover = null;   // a drag's target, lit only while dragging
   if (box?.active) {
     act("ui.call", { method: "add_route_sids", args: [game.board_view.inBox(box)] });
     return;

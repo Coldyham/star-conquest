@@ -1184,17 +1184,17 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         ui.history_rules = [log.rules_for(i) for i in range(log.turn_count)] + [ui.auto_forward]
         ui.show_history_rules()
     ui.history_reveal = state.winner is not None
-    # The end-of-game graphs: read once off the boards just built, and open by
-    # default on a finished game, where they are the summary the review is for.
+    # The end-of-game graphs: read once off the boards just built, and closed
+    # until asked for (G, or the scrubber's Graphs).
     ui.history_chart = stats.chart(history_states)
     if not ui.history_reveal:
         # mid-game, a rival is charted only for the turns the top bar showed it
         known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
         ui.history_chart = stats.masked(ui.history_chart, known)
-    ui.history_graph = ui.history_reveal
+    ui.history_graph = False
     # The coach: only on a decided game, when nothing is hidden any more, and
-    # opened first when it has something to say beyond the turning point, which
-    # every decided game has. A spectator holds no seat.
+    # the graph panel's first tab when it has something to say beyond the
+    # turning point, which every decided game has. A spectator holds no seat.
     ui.coach_review = None
     ui.coach_open, ui.coach_sel = False, -1
     if ui.history_reveal and ui.human_id in state.players and ui.human_id != 0:

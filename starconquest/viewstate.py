@@ -232,8 +232,8 @@ class Ui:
     # space between the bars; the scrubber stays either way. `history_chart` is
     # read off the history boards once, on entering review (`stats.chart`), and
     # dropped on leaving it; `graph_metric` indexes `stats.METRICS`;
-    # `graph_hidden` is the seats whose lines the legend has switched off. Open
-    # by default on a finished game.
+    # `graph_hidden` is the seats whose lines the legend has switched off.
+    # Closed on entering review.
     history_chart: stats.Chart | None = None
     # Which bot drives each seat, for the top bar's hover tooltip and the graph
     # legend: ``{pid: "Knower · Search"}``, worked out once by `main.new_ui`
@@ -620,12 +620,11 @@ class Ui:
 
         It is History's rewind to the turn before, so it asks what History does
         (`can_review`: a recorded turn, and not under ironman while undecided),
-        and only in live play of an undecided game of our own: a decided game is
-        rewound from History, which forks it, and a shared match is never ours
-        to rewind.
+        and only outside review of a game of our own: a shared match is never
+        ours to rewind. On a decided game it is the win overlay's, and forks the
+        log as History's rewind does.
         """
-        return (self.can_review(state) and state.winner is None
-                and not self.in_pbp and not self.history)
+        return self.can_review(state) and not self.in_pbp and not self.history
 
     def can_fast_forward(self, state: GameState) -> bool:
         """Is the 'just show me who wins' control available?

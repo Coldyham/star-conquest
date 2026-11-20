@@ -75,8 +75,15 @@ is what switches it:
   zoomed too, and clipped under a browser's bars). The popup's lines that only
   say something stay short, so the sheet doesn't grow, and its − and + stand
   beside the count, not at the screen's edges. Upright, the strip also folds
-  Autoplay and Play (`hud.phone_folds`), never while either runs, leaving
-  Clear, Route and Hint under the thumb; the camera keeps only Reset (a finger
+  Hint, Autoplay and Play (`hud.phone_folds`), never while one runs (an open
+  hint keeps its ✗/✓ pair), leaving Clear, Route and Undo under the thumb.
+  Hint was moved there on 2026-11-20: playtesting put it with Autoplay, help
+  from the AI rather than a turn-by-turn press, and it ranks just below
+  Autoplay in any squeeze. A finger hovers nothing: the page reports no hover
+  for a touch pointer, and on a touch screen closing the send popup drops its
+  source too (`Session.op_ui_empty`), so the panel goes straight back to the
+  turn's target and the forwarding buttons rather than waiting for a tap on
+  empty map (2026-11-20). The camera keeps only Reset (a finger
   pinches) and moves it to the map's top corner, off the bottom corners where
   the thumb works and the phone's own sliders appear. A touch screen selects
   no text anywhere (Android's Touch to Search opened a lookup sheet on a
@@ -286,9 +293,13 @@ the game has a winner, *History & coach* on the win overlay is offered as usual.
 *Undo* (U, the footer) is History's *Rewind to here* on the turn before, in one
 press and with no confirm (`main.apply_rewind` on `turn_count - 1`). It is a
 rewind, so `Ui.can_undo` asks `can_review` first (ironman hides it with
-History), and adds live play of an undecided game of our own: a decided game
-rewinds from History, which forks it, and a play-by-post match is never ours to
-rewind. A run game plays ironman, so it has none.
+History), and adds a game of our own outside review: a play-by-post match is
+never ours to rewind. A run game plays ironman, so it has none until decided.
+A decided game offers it on the win overlay (U, beside *History & coach*),
+where it forks the log as History's rewind does, leaving the finished record
+whole. Until 2026-11-20 a decided game had no Undo: a player who saw only at
+the end that a goal was missed had to open History, scrub back a turn and
+rewind, many more taps than Undo a turn earlier.
 
 The top bar shows our seat's `ships_lost` beside the turn counter
 (`render._draw_ships_lost`) all game, since it is a score's tie-break and
@@ -361,8 +372,11 @@ clamp (no ``room``).
   before it known; otherwise the first turn back in sight would carry the whole
   gap's losses as its own. (Until 2026-10-23 a mid-game review charted our seat
   alone, even with fog off.)
-- **Open by default on a finished game**, where it is the summary review is
-  for; closed in a mid-game review, where the board is the point.
+- **Closed on opening History**, finished game or not; G or the scrubber's
+  *Graphs* opens it, on the Coach tab when the coach has more to say than the
+  turning point. Until 2026-11-20 it opened by default on a finished game, as
+  the summary review is for, but playtesting found it closed straight away
+  nearly every time.
 - **The chart lives on `Ui` only while reviewing** and is dropped on the way out.
 - Not yet: the default camera does not reframe into the space above the docked
   chart (on purpose: it would squash the map; the loose camera covers it), and

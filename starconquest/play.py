@@ -242,7 +242,9 @@ def over_pick(ui: Ui, sid: int) -> str | None:
 
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:
     """A key on the game-over veil: retry, a new map (or the next stage),
-    the menu, history, and the two ways to share."""
+    the menu, undo, history, and the two ways to share."""
+    if name == "u":
+        return "undo" if ui.can_undo(state) else None
     if name == "t":
         # A run's decided game offers Try again (a new step) or nothing.
         if ui.run_id and ui.run_note:

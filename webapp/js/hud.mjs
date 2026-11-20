@@ -498,8 +498,11 @@ export class Hud {
       if (all.length % 2 && i === all.length - 1) b.classList.add("odd");
       return b;
     });
-    const buttons = group([first, second, button("Setup menu", "M", "blue", "menu"),
-      button("History & coach", "H", "violet", "toggle_history")]);
+    // Undo pairs with History, the other way back into the game just played.
+    const menuButton = button("Setup menu", "M", "blue", "menu");
+    const history = button("History & coach", "H", "violet", "toggle_history");
+    const buttons = group(over.undo ? [first, second, button("Undo", "U", "amber", "undo"), history, menuButton]
+      : [first, second, menuButton, history]);
     if (over.share) {
       buttons.push(...group([button(over.share[0], over.share[1], "teal", "share"),
         over.board ? button(over.board[0], over.board[1], "gold", "leaderboard") : null], "share"));
