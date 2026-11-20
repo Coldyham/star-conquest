@@ -345,6 +345,9 @@ class Ui:
     # ...and which daily it is, "board" or "puzzle" (`daily.KINDS`), blank with
     # the day.
     daily_kind: str = ""
+    # ...and the player's best on it when the match began, (turns, lost) or
+    # None, for the side panel's note (`hud.match_notes`), as the menu shows it.
+    daily_best: tuple[int, int] | None = None
     # A puzzle won wholly by hand asks the board whether its (turns, lost) met
     # the par (`main`, on `par_due`, which it clears); `par_note` is the
     # congratulation, blank unless it did (`daily.par_note`). The par itself

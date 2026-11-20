@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from . import coach, combat, config, fog, matchnames, stats
+from . import coach, combat, config, daily, fog, matchnames, stats
 from .model import GameState, System, lane_key, shares_even
 from .viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
@@ -639,13 +639,19 @@ def result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, Role]]:
 
 def match_notes(ui: Ui) -> list[tuple[str, Role]]:
     """What this match is for, as ``(text, role)`` lines for the head of the
-    side panel: the gauntlet stage and its target, the weekly campaign's
-    reminder (`app.campaign_tick`), and a challenge link's target. Not in the
-    top bar, which they would share with the scoreboard (on a portrait phone,
-    by covering it)."""
+    side panel: the gauntlet stage and its target, the daily and the best on
+    it, the weekly campaign's reminder (`app.campaign_tick`), and a challenge
+    link's target; the menu's banner says each of them too
+    (`setupmenu.view`). Not in the top bar, which they would share with the
+    scoreboard (on a portrait phone, by covering it)."""
     notes: list[tuple[str, Role]] = []
     if ui.stage_label:
         text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, "teal"))
+    if ui.daily_day:
+        text = daily.title(ui.daily_day, ui.daily_kind or daily.BOARD)
+        if ui.daily_best is not None:
+            text += f" · your best {ui.daily_best[0]}t / {ui.daily_best[1]} lost"
         notes.append((text, "teal"))
     if ui.campaign_label:
         notes.append((ui.campaign_label, "campaign"))
@@ -755,11 +761,8 @@ def route_lines(state: GameState, ui: Ui) -> list[tuple]:
 def route_hint(ui: Ui) -> str:
     """How route mode's current sub-mode is driven."""
     if ui.route_rally:
-        return ("Tap the systems ships should gather at — tap again to drop one. "
-                "Everything else you hold forwards to the nearest of them, and every "
-                "other rule is cleared. Auto-route picks your front line (or, with no "
-                "rival in reach, your border with neutral systems); a system under "
-                "attack behind it keeps what it needs and passes the rest on.")
+        return ("Tap the systems ships should gather at — tap again to drop one. Everything else you hold forwards to the nearest of them. "
+                "Auto-route picks your front line; a system under attack behind it keeps what it needs and passes the rest on.")
     return ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
             "un-aim, and to drop it from the group. A system under attack on the way "
             "keeps what it needs and passes the rest on.")

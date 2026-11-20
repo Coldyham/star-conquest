@@ -104,6 +104,8 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
         # The daily follows the local ironman preference like any game: a puzzle
         # is exactly where a player wants to take a move back (Undo, U).
         ui.daily_day, ui.daily_kind = daily.daily_of(settings)
+        if ui.daily_day:
+            ui.daily_best = webstore.best(*settings.challenge_keys())
     ui.seat_bots = seat_bot_labels(state)
     if settings is not None:
         ui.random_seats = frozenset(pid for pid in state.players if not state.players[pid].is_neutral
@@ -658,10 +660,10 @@ def gauntlet_request() -> tuple[str | None, dict | None]:
 # as a setup, as a pasted challenge link applies one (`daily`,
 # docs/design/daily.md). The messages name the board's; a puzzle's say
 # "daily puzzle" (`_daily_msg`).
-DAILY_OPENING_MSG = "Fetching the daily challenge..."
-DAILY_UNREACHABLE_MSG = "Couldn't fetch the daily challenge from the leaderboard"
-DAILY_MISSING_MSG = "There's no daily challenge for that day"
-DAILY_UNREADABLE_MSG = "The daily challenge downloaded but wouldn't open"
+DAILY_OPENING_MSG = "Fetching the daily map..."
+DAILY_UNREACHABLE_MSG = "Couldn't fetch the daily map from the leaderboard"
+DAILY_MISSING_MSG = "There's no daily map for that day"
+DAILY_UNREADABLE_MSG = "The daily map downloaded but wouldn't open"
 
 
 def _daily_msg(msg: str, kind: str) -> str:

@@ -39,9 +39,9 @@
       "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Daily challenge",
-      "short_name": "Daily",
-      "description": "Play today's daily board",
+      "name": "Daily map",
+      "short_name": "Map",
+      "description": "Play today's daily map",
       "url": "/play/#daily",
       "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
