@@ -145,7 +145,8 @@ At most 24 notes, the costliest kept (ships thrown away, ship-turns idle), and
 the turning point always. They are shown in turn order under a tally ("12
 captures · 3 failed attacks · 4 systems lost").
 
-The Coach tab sits after the chart tabs in the graph panel, opens first when
+The Coach tab sits after the chart tabs in the graph panel (closed until G or
+*Graphs* opens it), opens first when
 it has a note besides the turning point (which every decided game has), and takes the panel's body in place of the plot and legend.
 Click a note, or press Up/Down, to select it (`Ui.select_note`): History jumps
 to its board and rings its systems (`render._draw_coach_marks`). The rows are a

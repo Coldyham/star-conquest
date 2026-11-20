@@ -232,8 +232,8 @@ class Ui:
     # space between the bars; the scrubber stays either way. `history_chart` is
     # read off the history boards once, on entering review (`stats.chart`), and
     # dropped on leaving it; `graph_metric` indexes `stats.METRICS`;
-    # `graph_hidden` is the seats whose lines the legend has switched off. Open
-    # by default on a finished game.
+    # `graph_hidden` is the seats whose lines the legend has switched off.
+    # Closed on entering review.
     history_chart: stats.Chart | None = None
     # Which bot drives each seat, for the top bar's hover tooltip and the graph
     # legend: ``{pid: "Knower · Search"}``, worked out once by `main.new_ui`

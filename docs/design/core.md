@@ -567,8 +567,9 @@ more than a hover already does, and only `Ui.source` (the selection when it is
 ours) sends, rings destinations or lights lanes. The ⓘ button beside a selected
 system's name in the side panel
 (`render._draw_lore_button`) and the I key (selected system, else the hovered
-one) open the card (`Ui.lore_sid`), and any press closes it and is spent, like
-the briefing card's. The card is `render._draw_card`, shared with the briefing:
+one) open the card (`Ui.lore_sid`), in History as in live play, a decided
+game's included (`play.lore_allowed`; until 2026-11-20 History had neither),
+and any press closes it and is spent, like the briefing card's. The card is `render._draw_card`, shared with the briefing:
 it widens to the map, then drops to the small font, before it cuts anything,
 and `test_every_star_card_fits_whole` holds every entry to fitting whole.
 

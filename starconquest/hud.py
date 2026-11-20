@@ -373,9 +373,11 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     mode (History, Clear, Route, Autoplay, Play, Fast forward) packed right.
     Where the strip is too narrow the least essential fold behind a "more"
     button, kept longest first: acting in this game (Clear, Route, Undo), then
-    looking at or handing it over (History, Play, then Hint, which as training
-    help folds before Play, then Autoplay), then leaving it
-    (Menu last, since it reaches everything else). Fast forward outranks them
+    looking at or handing it over (History, Play, Autoplay, then Hint, which
+    as training help goes with Autoplay, though an open hint's pair stays out
+    as long as Play), then leaving it
+    (Menu last, since it reaches everything else). A compact screen folds the
+    ways out of this game from the start, and only those. Fast forward outranks them
     all, being offered only when watching is all there is to do. Route mode
     gets a strip of its own.
     """
@@ -447,11 +449,11 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
         if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", None, "active", 6, "right"))
+            specs.append(("hint_button_rect", "✗", None, "active", 7, "right"))
             if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", None, "green", 6, "right"))
+                specs.append(("hint_apply_rect", "✓", None, "green", 7, "right"))
         else:
-            specs.append(("hint_button_rect", "Hint", "K", "gold", 6, "right"))
+            specs.append(("hint_button_rect", "Hint", "K", "gold", 5, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -460,7 +462,7 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     # guarded, the same treatment End Turn gets while we are waiting — and
     # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
     if not ui.in_pbp:
-        specs.append(("autoplay_button_rect", "Take control" if ui.autoplay else "Autoplay", "A", "active" if ui.autoplay else "blue", 5, "right"))
+        specs.append(("autoplay_button_rect", "Take control" if ui.autoplay else "Autoplay", "A", "active" if ui.autoplay else "blue", 6, "right"))
         if not ui.autoplay:
             specs.append(("play_pause_rect", "Pause" if ui.playing else "Play", "P", "active" if ui.playing else "blue", 7, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
@@ -473,19 +475,6 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
         )
 
     return specs
-
-
-def phone_folds(ui: Ui) -> list[str]:
-    """The footer buttons an upright phone folds behind "more" from the start,
-    beside the exits: handing the game to the AI is no turn-by-turn press, and
-    the strip is where the thumb rests. Each stays out while it is running, so
-    Take control and Pause are one tap away."""
-    folds = []
-    if not ui.autoplay:
-        folds.append("autoplay_button_rect")
-        if not ui.playing:
-            folds.append("play_pause_rect")
-    return folds
 
 
 def rule_rows(state: GameState, ui: Ui, src: int, touch: bool) -> list[Row]:
