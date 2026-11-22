@@ -73,7 +73,11 @@ a resumed save has none, since nothing remembers that it was one.
 **Next stage is the one neighbour further from the start** (`gauntlet.next_stage`,
 by depth), not "the one open, uncleared neighbour" the plan named: judged that
 way, replaying a stage you had already cleared would offer no way on. More than
-one deeper neighbour is a fork, and sends the player to the list to choose.
+one deeper neighbour is a fork. A free-play win at a fork shows the stage and
+the ways on it opens on the win overlay, as a run's overlay does: a tap picks,
+Next stage (or a second tap) plays the pick (`Ui.fork_choices`, `app.fork_graph`).
+Until 2026-11-22 it sent the player to the list to choose, which left a
+concertina's stage 1 with no way on from the overlay at all.
 
 **The briefing card** is drawn over the board on turn 0 while
 `Ui.briefing_open`, measured and centred on the play area. Any press closes it,

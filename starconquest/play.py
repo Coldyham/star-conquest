@@ -234,10 +234,18 @@ def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     return None
 
 
-def over_pick(ui: Ui, sid: int) -> str | None:
-    """A tap on stage ``sid`` in the win overlay's run graph: pick a stage the
-    run may go to; a second tap on the pick plays it, as Next stage does (or
-    Try again, for the stage just lost). Answers that action, or None."""
+def over_pick(state: GameState, ui: Ui, sid: int) -> str | None:
+    """A tap on stage ``sid`` in the win overlay's graph: pick a stage the
+    run (or a free-play win at a fork) may go to; a second tap on the pick
+    plays it, as Next stage does (or Try again, for the stage just lost).
+    Answers that action, or None."""
+    if not ui.run_id:
+        if sid not in ui.fork_choices(state):
+            return None
+        if sid != ui.fork_pick(state):
+            ui.stage_next = sid
+            return None
+        return "next_stage"
     if ui.run_graph is None or sid not in ui.run_choices:
         return None
     if sid != ui.run_next:
