@@ -881,9 +881,9 @@ yet. A locked badge stays on the card with what earns it, which is the point.
 |---|---|
 | The board | a win posted · the first win on a map · a win on a map somebody else opened · a crown stolen · the most steals in a finished week (a tie shares it) |
 | Campaign | a home claimed · the most field nodes when a week closes |
-| Gauntlets | a win on the tutorial's last stage · a win on the last stage of a listed gauntlet · a gauntlet saved under this name |
+| Gauntlets | a win on the tutorial's last stage · a win on a goal of a listed gauntlet (a stage a run ends on) · a gauntlet saved under this name |
 | Ways to play | a win on a random map, a symmetric one, under fog, with in-lane battles, on a hand-drawn map · the first win on a drawing (over every seed of it) |
-| Bots | a win with each `LADDER_ORDER` bot in a seat |
+| Bots | a win with each `LADDER_ORDER` bot in a seat, and with each unranked bot the game ships (`UNRANKED_BOTS`: chaotic) |
 | Daily puzzle | a daily puzzle won · the best score on a day, posted on the day · every day of one Monday-to-Sunday week won (archive wins count) |
 | Daily map | the same three, on the daily map |
 | Play-by-post | a turn played in a match · a match won |
@@ -898,8 +898,11 @@ fetch; `tests/badges.test.mjs`); the reads and the drawing are
   the board can only know by key: `TUTORIAL_FINAL_KEYS` is that stage's
   `challenge_keys()`, pinned by `tests/test_leaderboard_sync.py`. A Settings
   field that moves it gets the new key added, never swapped in.
-- **A listed gauntlet** is matched by its last stage's setup (`setupIdentity`),
-  never a key, since the board can't compute one.
+- **A listed gauntlet** is cleared by a win on any of its goals
+  (`gauntlet-graph.mjs`'s `goals`, as the game's `gauntlet.goals`): the last
+  stage of a gauntlet without lanes, any end of one that forks, never a bonus
+  dead end behind a gate. Matched by setup (`setupIdentity`), never a key,
+  since the board can't compute one.
 - **Two counts come from the functions**, since their tables are closed to the
   public: `/api/pbp?action=record&name=` answers `{played, won}` and
   `/api/gauntlet?by=` answers `{made}`. Counts only, so a private match or an

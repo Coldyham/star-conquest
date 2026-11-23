@@ -17,6 +17,7 @@ import { fold, keyOf } from "./campaign.mjs";
 import { weekAfter, weekParam, weekStart } from "./crowns.mjs";
 import { addDays, bestOnTheDay, dayParam, weekdayOf } from "./daily.mjs";
 import { stageSetup } from "./gauntlet-build.mjs";
+import { goals, graphOf } from "./gauntlet-graph.mjs";
 import { hasFog } from "./setup.mjs";
 import { LADDER_ORDER } from "./standings.mjs";
 import { setupIdentity } from "./token-decode.mjs";
@@ -166,20 +167,32 @@ export function dailyRecord(userId, dailyGames, field, now = new Date()) {
 }
 
 /**
- * How many listed gauntlets the player has cleared: a counted win on the last
- * stage, the board's only record of a run (progress lives in each player's own
- * game). `gauntlets` are `{gauntlet_id, stages}`; `setups` the settings_json
- * of every map the player has a counted win on. Matched by setup, never key,
- * since the board can't compute a challenge key.
+ * How many listed gauntlets the player has cleared: a counted win on one of
+ * its goals (`gauntlet-graph.mjs`'s `goals`, the stages a run ends on), the
+ * board's only record of a run (progress lives in each player's own game). A
+ * gauntlet with no lanes is a chain, whose one goal is its last stage; one that
+ * forks may have several, and a bonus dead end behind a gate is never one.
+ * `gauntlets` are `{gauntlet_id, stages, lanes, start}`; `setups` the
+ * settings_json of every map the player has a counted win on. Matched by setup,
+ * never key, since the board can't compute a challenge key.
  */
 export function gauntletsCleared(gauntlets, setups) {
   const won = new Set(setups.map((setup) => setupIdentity(stageSetup(setup))));
   return gauntlets.filter((gauntlet) => {
     const stages = Array.isArray(gauntlet.stages) ? gauntlet.stages : [];
-    const last = stages[stages.length - 1];
-    return Boolean(last?.settings) && won.has(setupIdentity(stageSetup(last.settings)));
+    const ends = goals(graphOf(gauntlet));
+    return stages.some((stage) => ends.has(stage?.id) && stage.settings
+                                   && won.has(setupIdentity(stageSetup(stage.settings))));
   }).length;
 }
+
+/**
+ * The bots with a Beat badge: the ladder, strongest first, then the unranked
+ * bots the game ships (`models/`), which `LADDER_ORDER` leaves out.
+ * tests/test_leaderboard_sync.py checks every shipped bot has one.
+ */
+export const UNRANKED_BOTS = ["chaotic"];
+export const BADGE_BOTS = [...LADDER_ORDER, ...UNRANKED_BOTS];
 
 /**
  * Everything the badges read, from what badges-card.mjs fetched. `wins` are
@@ -267,7 +280,7 @@ export const BADGES = [
   { id: "graduate", group: "Gauntlets", title: "Graduate",
     how: "Win the tutorial's last stage and post the score.", has: (f) => f.tutorial },
   { id: "gauntlet-runner", group: "Gauntlets", title: "Gauntlet runner",
-    how: "Win the last stage of a listed gauntlet and post the score.",
+    how: "Win a final stage of a listed gauntlet (any way it ends) and post the score.",
     has: (f) => atLeastOne(f.gauntletsCleared) },
   { id: "architect", group: "Gauntlets", title: "Architect",
     how: "Save a gauntlet on the Make a gauntlet page, under this name.",
@@ -286,7 +299,7 @@ export const BADGES = [
   { id: "cartographer", group: "Ways to play", title: "Cartographer",
     how: "Draw a map in the map maker and post the first win on it.", has: (f) => f.drawings > 0 },
 
-  ...LADDER_ORDER.map((bot) => ({
+  ...BADGE_BOTS.map((bot) => ({
     id: `bot-${bot}`, group: "Bots", title: `Beat ${bot}`,
     how: `Win a game with ${bot} in one of the seats.`, has: (f) => f.bots.has(bot),
   })),

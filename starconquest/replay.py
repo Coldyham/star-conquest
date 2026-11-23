@@ -6,7 +6,8 @@ never snapshot a ``GameState``; we record those inputs:
 
     {settings, seed, strategies: {pid: name},
      turns: [{"ai": bool, "orders": [...], "dice": [...], "keyed": bool,
-              "rules": {src: {"hold": n, "to": {dest: pct}}}}, ...], ...}
+              "rules": {src: {"hold": n, "to": {dest: pct}}},
+              "rewound": true}, ...], ...}   # "rewound" only when set
 
 ``reconstruct`` feeds each turn straight back through ``engine.end_turn`` as a
 ``TurnRecord``, so the board is rebuilt without asking a single seat to decide
@@ -41,6 +42,12 @@ shell state (``Ui.auto_forward``), not simulation, and carried so that resuming
 or rewinding hands the player back the routes they set up rather than an empty
 board (``main.resume_game``). Logs from before shares stored ``[dest, keep]``,
 read back as holding ``keep`` and sending 100% to ``dest``.
+
+``rewound`` marks a turn played again: the human took the match back to its
+board (Undo, or History's *Rewind to here*) after seeing what followed. Undoing
+several turns before playing on marks only the turn play resumes from; a rewind
+to board 0 is a fresh start, as Retry is, and marks nothing. The turns taken
+back are not kept. Like ``ai``, it is disclosure, never read by a replay.
 
 Pure core (no pygame): like ``settings``, this serializes trivially and drives
 the headless engine. Replay needs no AI at all now, which is a stronger form of
@@ -241,6 +248,11 @@ class GameLog:
     # (`tools/verify_scores.py`). Written as soon as the hint is taken, not with
     # the turn, so quitting before ending the turn does not shed it.
     hinted_from: int | None = None
+    # The board the human took the match back to (Undo, or History's *Rewind
+    # to here*) while its turn is still unplayed, or None. `record_turn` marks
+    # that turn ``"rewound"``. Kept on the log, written at the take-back, so
+    # quitting before ending the turn does not shed it, as with `hinted_from`.
+    rewound_to: int | None = None
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
     version: int = FORMAT_VERSION
@@ -284,17 +296,20 @@ class GameLog:
         ``human_ai`` records that the human seat was AI-driven this turn (autoplay)
         — not needed to replay it, but it is how ``main.hand_turns`` stays honest
         about a game that was finished on autoplay. ``rules`` is the human's
-        standing auto-forward rules in force for the turn.
+        standing auto-forward rules in force for the turn. A turn played from
+        the board last taken back to (``rewound_to``) is marked ``"rewound"``.
         """
-        self.turns.append(
-            {
-                "ai": bool(human_ai),
-                "orders": [_order_to_dict(o) for o in record.orders],
-                "dice": list(record.dice),
-                "keyed": bool(record.keyed),
-                "rules": rules_to_dict(rules),
-            }
-        )
+        entry = {
+            "ai": bool(human_ai),
+            "orders": [_order_to_dict(o) for o in record.orders],
+            "dice": list(record.dice),
+            "keyed": bool(record.keyed),
+            "rules": rules_to_dict(rules),
+        }
+        if self.rewound_to == len(self.turns):
+            entry["rewound"] = True
+        self.rewound_to = None
+        self.turns.append(entry)
         self.updated_at = _now_iso()
 
     def mark_finished(self, winner: int | None) -> None:
@@ -309,6 +324,7 @@ class GameLog:
         so ``truncate(0)`` rewinds to the opening position) and clears the
         finished/winner outcome so continued play appends to the same file.
         """
+        self.rewound_to = self._rewound_after(n)
         self.turns = self.turns[:n]
         self.winner = None
         self.finished = False
@@ -338,9 +354,27 @@ class GameLog:
             path=_game_path(self.seed),
             # a hint taken on board ``n`` or before was seen in this branch too
             hinted_from=self.hinted_from if self.hinted_from is not None and self.hinted_from <= n else None,
+            rewound_to=self._rewound_after(n),
         )   # `match_id` and `rules_version` are deliberately left to their
             # defaults: a fork is a new match, played on from here under today's
             # rules — and its prefix has just replayed under them (see `truncate`).
+
+    def _rewound_after(self, n: int) -> int | None:
+        """``rewound_to`` once the match is taken back to board ``n``.
+
+        Nothing changes when no turn is dropped. Board 0 keeps nothing of the
+        game, so going back to it is a fresh start, as Retry is (``fork(0)``),
+        and is not recorded.
+        """
+        if n >= len(self.turns):
+            return self.rewound_to
+        return n if n > 0 else None
+
+    def turn_was_rewound(self, turn_index: int) -> bool:
+        """Whether ``turn_index`` was played again: the human took the match back
+        to its board (Undo, or *Rewind to here*) after seeing what followed."""
+        entry = self.turns[turn_index]
+        return isinstance(entry, dict) and entry.get("rewound") is True
 
     def turn_is_ai(self, turn_index: int) -> bool:
         """Whether the human seat was AI-driven on ``turn_index`` (autoplay)."""
@@ -398,6 +432,7 @@ class GameLog:
             "updated_at": self.updated_at,
             # only when set, so a game nobody hinted writes the file it always did
             **({"hinted_from": self.hinted_from} if self.hinted_from is not None else {}),
+            **({"rewound_to": self.rewound_to} if self.rewound_to is not None else {}),
         }
 
     @classmethod
@@ -413,6 +448,7 @@ class GameLog:
         # the next turn. Validated, not merely defaulted — see `_MATCH_ID_RE`.
         match_id = str(data.get("match_id", "") or "")
         hinted = data.get("hinted_from")
+        rewound = data.get("rewound_to")
         return cls(
             seed=int(data.get("seed", 0)),
             settings=settings,
@@ -426,6 +462,9 @@ class GameLog:
             finished=bool(data.get("finished", False)),
             hinted_from=(max(0, hinted) if isinstance(hinted, int) and not isinstance(hinted, bool)
                          else None),
+            # only the board the log ends on can be waiting for its turn
+            rewound_to=(rewound if isinstance(rewound, int) and not isinstance(rewound, bool)
+                        and 0 < rewound == len(turns) else None),
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
             version=int(data.get("version", 1)),   # unversioned files predate the field

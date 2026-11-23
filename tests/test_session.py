@@ -75,14 +75,16 @@ def _human_game(session, seed=11):
     return start, home, nbrs[0]
 
 
-def test_an_upright_phone_folds_handing_over_but_never_while_it_runs(session):
+def test_a_squeeze_folds_the_hint_first_but_an_open_hint_late(session):
+    """Past the exits, which a compact screen folds from the start, the footer
+    folds by rank alone: Hint before Autoplay before Play, but an open hint's
+    pair outlasts Autoplay."""
     start, _, _ = _human_game(session)
-    view = start["view"]
-    assert view["phone_folds"] == ["autoplay_button_rect", "play_pause_rect"]
-    shown = {b[0] for b in view["footer"]}
-    assert set(view["phone_folds"]) <= shown       # folded on a phone, still offered
-    view = _call(session, "game.action", name="toggle_autoplay")["result"]["view"]
-    assert view["phone_folds"] == []               # Take control stays one tap away
+    rank = {b[0]: b[4] for b in start["view"]["footer"]}
+    assert rank["hint_button_rect"] < rank["autoplay_button_rect"] < rank["play_pause_rect"]
+    session.ui.hint_turn = session.state.turn
+    rank = {b[0]: b[4] for b in _menu(session, "game.view")["view"]["footer"]}
+    assert rank["autoplay_button_rect"] < rank["hint_button_rect"] <= rank["play_pause_rect"]
 
 
 def test_a_send_is_composed_by_taps_and_resolved_by_end_turn(session):
@@ -135,6 +137,17 @@ def test_a_press_on_empty_map_drops_the_hover(session):
     _call(session, "ui.hover", sid=nbr)
     view = _call(session, "ui.empty")["result"]["view"]
     assert view["panel"]["focus"] is None
+
+
+def test_on_a_touch_screen_done_leaves_no_hover(session):
+    """A finger hovers nothing, so closing the popup leaves the panel on the
+    turn's target and the forwarding buttons, not on the send's source."""
+    _, home, nbr = _human_game(session)
+    session.touch = True
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    view = _call(session, "ui.empty")["result"]["view"]
+    assert view["mode"] == "idle" and view["panel"]["focus"] is None
 
 
 def test_a_pinch_puts_back_what_its_first_finger_pressed(session):
@@ -207,6 +220,20 @@ def test_flow_actions_undo_retry_and_restart(session):
     assert view["playing"]
 
 
+def test_undo_is_recorded_on_the_turn_played_again(session):
+    _human_game(session)
+    for _ in range(3):
+        _call(session, "turn.end")
+    _call(session, "game.action", name="undo")
+    _call(session, "game.action", name="undo")
+    assert session.log.rewound_to == 1
+    for _ in range(2):
+        _call(session, "turn.end")
+    assert [session.log.turn_was_rewound(i) for i in range(3)] == [False, True, False]
+    _call(session, "game.action", name="retry")
+    assert session.log.rewound_to is None and session.log.turn_count == 0
+
+
 def test_end_turn_stops_a_running_clock(session):
     _human_game(session)
     assert _menu(session, "game.view")["view"]["end"] == ["End Turn", "end_turn"]
@@ -233,6 +260,20 @@ def test_a_decided_game_shows_its_veil_and_answers_its_keys(session):
     assert not res["view"]["can"]["end_turn"]
     assert _call(session, "ui.key", name="t")["result"]["action"] == "retry"
     assert _call(session, "ui.key", name="Escape")["result"]["action"] == "menu"
+    # A decided game is rewound from History, which forks it: the veil has no Undo.
+    assert _call(session, "ui.key", name="u")["result"]["action"] is None
+    # History reads a star's info card, by its button or I, as live play does.
+    last = _call(session, "game.action", name="toggle_history")["result"]["view"]["history"]["turn"]
+    sid = res["board"]["sys"][0][0]
+    view = _call(session, "ui.tap", sid=sid)["result"]["view"]
+    assert view["history"] and view["panel"]["focus"] == sid and view["panel"]["lore"]
+    view = _call(session, "ui.call", method="open_lore")["result"]["view"]
+    assert view["card"]["kind"] == "lore"
+    reply = _call(session, "ui.key", name="ArrowLeft")["result"]
+    assert reply["view"]["card"] is None and reply["view"]["history"]["turn"] == last   # spent putting it away
+    assert _call(session, "ui.key", name="i")["result"]["view"]["card"]["kind"] == "lore"
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["history"] is None and view["card"] is None and view["over"] is not None
 
 
 def test_route_mode_plans_a_chain_and_confirms_it(session):
@@ -320,7 +361,37 @@ def test_history_shows_the_rules_standing_on_the_board_on_screen(session):
     assert session.ui.auto_forward is live and session.ui.live_rules is None
 
 
-def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
+def test_history_looks_but_never_orders(session):
+    from starconquest.model import ForwardRule
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    _call(session, "ui.empty")   # one order waiting on the live turn
+    session.ui.auto_forward[home] = ForwardRule({nbr: 100})
+    _call(session, "turn.end")
+    _call(session, "ui.tap", sid=home)
+    _call(session, "ui.tap", sid=nbr)
+    _call(session, "ui.empty")
+    pending = list(session.ui.pending)
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["pending"] == []   # the live turn's orders aren't on a played board
+    view = _call(session, "ui.tap", sid=home)["result"]["view"]
+    assert view["mode"] == "selected" and view["panel"]["focus"] == home
+    view = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    assert view["mode"] == "selected" and view["popup"] is None and view["selected"] == nbr
+    assert _call(session, "ui.tap", sid=nbr)["result"]["view"]["mode"] == "idle"
+    _call(session, "ui.drag", src=home, dest=nbr)
+    view = _call(session, "ui.lane", hits=[["rule", home, nbr]])["result"]["view"]
+    assert view["popup"] is None and view["mode"] == "idle"
+    _call(session, "history.seek", turn=1)   # the rule stood on turn 1
+    panel = _call(session, "ui.tap", sid=home)["result"]["view"]["panel"]
+    assert "Auto-forward" in json.dumps(panel) and "lane" not in json.dumps(panel).split("Auto-forward")[1]
+    view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert session.ui.pending == pending and view["pending"] == [[o.source_id, o.dest_id, o.ships] for o in pending]
+    assert session.ui.auto_forward == {home: ForwardRule({nbr: 100})}
+
+
+def test_a_decided_games_history_opens_with_its_graphs_and_coach_a_press_away(session):
     _call(session, "boot", page=PAGE, store={})
     _call(session, "game.start", settings={"players": 2, "nodes": 8}, seed=3)
     _call(session, "game.action", name="toggle_autoplay")
@@ -328,6 +399,8 @@ def test_a_decided_games_history_opens_on_its_graphs_and_coach(session):
         if _call(session, "turn.end")["result"]["board"]["winner"] is not None:
             break
     view = _call(session, "game.action", name="toggle_history")["result"]["view"]
+    assert view["graph"] is None and view["history"]["graphs"] and not view["history"]["graph_on"]
+    view = _call(session, "ui.call", method="toggle_graph")["result"]["view"]
     g = view["graph"]
     assert view["history"]["reveal"] and g is not None and g["tabs"][-1] == "Coach"
     assert json.loads(json.dumps(view)) == view
@@ -560,6 +633,18 @@ def test_the_campaign_is_asked_about_before_start_and_stamped_on_the_match(sessi
     game = _menu(session, "game.start")
     assert session.ui.campaign_start == "not-adjacent"
     assert game["view"]["notes"] == [["Node 4: not a move", "campaign"]]
+
+
+def test_the_menu_banner_says_the_campaign_reminder_once_it_lands(session, games, monkeypatch):
+    from starconquest import campaign
+    monkeypatch.setattr(campaign, "SETTLE_S", 0.0)
+    _call(session, "boot", page=PAGE, store={})
+    reply = _call(session, "menu.open", first=True, prefill={"players": 2, "seed": 5})
+    [http] = [e for e in _effects(reply, "http") if "campaign" in e["url"]]
+    body = json.dumps({"node": {"id": 4, "kind": "field", "name": "Slocum"}, "now": 0,
+                       "status": {"why": "open", "can": True}})
+    pushed = _menu(session, "net.reply", req=http["req"], state="ok", body=body)["pushed"]
+    assert pushed["menu"]["menu"]["subtitle"][-1]["text"] == "CAMPAIGN · Slocum: open"
 
 
 def _played_log() -> tuple[str, str]:

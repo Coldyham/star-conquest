@@ -19,7 +19,7 @@ line gives only the verdict. Ideas that lost are in
 - core.md · **Ship-speed growth.** At launch only, compounding; re-times from `length_ly`.
 - core.md · **In-lane battles.** A geometric meeting fought pairwise; the winner only thinned; growth mostly switches it off.
 - core.md · **Persistence, replay & history.** Log format v2 (orders plus dice) and what lost; the `"ai"` flag as seat claim; a resume lands paused; `replay.reseed`, so a rewind is not a re-roll.
-- core.md · *Two streams.* Bots decide in parallel from the turn's start (`engine.decide_seat`); each fight rolls dice keyed to its place (`engine._Dice`); the `keyed` marker; why knower seeing the real dice is fine. *`match_id`.*
+- core.md · *Two streams.* Bots decide in parallel from the turn's start (`engine.decide_seat`); each fight rolls dice keyed to its place (`engine._Dice`); the `keyed` marker; why knower seeing the real dice is fine. *`match_id`.* *Take-backs:* a turn played again after Undo or a rewind carries `"rewound"`; one mark, not the fragments; written at the take-back (`rewound_to`); board 0 is a fresh start; not yet shown or posted.
 - core.md · **Star names.** Generated at build time, stamped last; collision-first labels; `starlore` and the info card.
 - core.md · **Symmetric layouts** (under "Past a standard board the box grows"). Hub, ring, wheel, core; why `hub` is pinned rather than a `RULES_VERSION` bump; where `layout` is inert.
 - core.md · **Rules in full:** in-lane battles; pile-up resolution; replay and history; an all-bot game has no human seat; whole-number floats don't survive the browser; past a standard board the box grows; settings, links and keys; star names.
@@ -263,7 +263,7 @@ line gives only the verdict. Ideas that lost are in
 - learning.md · **Memory off: the prior alone (flag removed).** Learning beats memory-off nowhere against bots; the memory stays, to be improved against people.
 - learning.md · **Five more arms, and three combinations (deleted).** Pressed row, strike size, learned guard, joint strikes, `PRIOR_WEIGHT` 1.
 - learning.md · **The counter-strike (deleted).** An option value from a rival's learned empty rate; failed on fresh seeds; the people-profile question open.
-- learning.md · **The posted games against Learning (2026-11-10).** 30 posted games replayed: Learning is more cautious than Field against the person; `LEARN_REACH` 8 clips the curve above ratio 1.5, so the memory can only act where strikes are rare; the person takes what actuary empties; the riposte is a losing seat's mark, not a person's; one pooled multiplier learns the person faster than 31 bins; undo and rewind leave no record. **What to try next.**
+- learning.md · **The posted games against Learning (2026-11-10).** 30 posted games replayed: Learning is more cautious than Field against the person; `LEARN_REACH` 8 clips the curve above ratio 1.5, so the memory can only act where strikes are rare; the person takes what actuary empties; the riposte is a losing seat's mark, not a person's; one pooled multiplier learns the person faster than 31 bins; undo and rewind left no record until 2026-11-20 (`"rewound"`). **What to try next.**
 - learning.md · **Arm 4, built and measured (deleted).** A convex income so rich systems count for more: worse at every exponent, rich homes included.
 
 ## convoy.md (built, not shipped)

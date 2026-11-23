@@ -738,13 +738,14 @@ after a garrison leaves ([`marshal.md`](marshal.md)).
 - Every posted game is a win for the person, and all but a handful are the
   author's ([`learner.md`](learner.md), "Predicting people").
 - **A posted log is the line the person settled on.** Undo and rewind
-  (`GameLog.truncate`) drop the turns taken back and record nothing, so a
-  habit read off a posted game is a habit with hindsight. That bites hardest
-  in the short daily puzzles, where every ship counts and a turn is replayed
-  until it works, and least in a long game lived with. The 97% success of the
-  person's strikes is partly that. A per-turn count of take-backs in the log
-  (written as `hinted_from` is, the moment it happens) would let a reader
-  weight hand turns, and would cost no rules version.
+  (`GameLog.truncate`) drop the turns taken back, so a habit read off a posted
+  game is a habit with hindsight. That bites hardest in the short daily
+  puzzles, where every ship counts and a turn is replayed until it works, and
+  least in a long game lived with. The 97% success of the person's strikes is
+  partly that. Since 2026-11-20 a turn played again after a take-back carries
+  `"rewound": true` (`GameLog.turn_was_rewound`; [`core.md`](core.md),
+  "Take-backs"), a mark rather than a count, so a reader can drop or weight
+  those turns; games posted before then carry none.
 - Lost and abandoned games exist only in `game_logs`, uploaded by a player with
   *Share replays* ticked; `--private` reads them with the secret key. They are
   the only unbiased signal of play against a person.
@@ -779,7 +780,8 @@ with `tools/learning_humans.py`, which costs nothing.
    memory.
 5. **Measure against people, not instead of them.** Turn *Share replays* on,
    so lost games reach `game_logs`, and read them with `--private`: a win rate
-   by stop is the only gate that counts. Record take-backs in the log. A
+   by stop is the only gate that counts. Take-backs are in the log now
+   (`"rewound"`, above). A
    stand-in person for self-play is worth building only if it first beats
    "the person holds" on `learner_check.py --logs public`'s Brier, as a
    `GUESSES` entry; knower's blind plan, marshal and actuary all failed that.

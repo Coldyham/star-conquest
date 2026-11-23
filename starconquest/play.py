@@ -44,9 +44,15 @@ def press_restore(ui: Ui, snapshot: tuple) -> None:
     ui.auto_forward.update(rules)
 
 
+def lore_allowed(state: GameState, ui: Ui) -> bool:
+    """Can a star's info card be up: in History, decided or not, or in live
+    play until the win veil covers the board."""
+    return ui.history or state.winner is None
+
+
 def open_lore(state: GameState, ui: Ui, sid: int | None) -> None:
     """Put up the star info card for system ``sid``, if the catalogue has its name."""
-    if sid in state.systems and state.systems[sid].name in starlore.LORE:
+    if sid in state.systems and state.systems[sid].name in starlore.LORE and lore_allowed(state, ui):
         ui.lore_sid = sid
 
 
@@ -100,7 +106,10 @@ def lane_pick(ui: Ui, hits: list[LaneTag]) -> LaneTag | None:
 
 
 def tap_lane(state: GameState, ui: Ui, tag: LaneTag) -> None:
-    """Open the order or rule ``tag`` names in the popup."""
+    """Open the order or rule ``tag`` names in the popup. Not in history: what
+    it shows was played, and the live turn's orders are not on screen."""
+    if ui.history:
+        return
     if tag[0] == "order":
         ui.edit_order(state, tag[1])
     else:
@@ -126,8 +135,8 @@ def cancel(ui: Ui) -> None:
 def drag_send(state: GameState, ui: Ui, src: int | None, target: int | None, shift: bool = False) -> None:
     """Release of a drag from ``src`` over ``target``: if it's an adjacent
     neighbour of the source, open the send/forward popup for that lane (same as
-    tapping it)."""
-    if src is None or target is None or target == src:
+    tapping it). Not in history, which orders nothing."""
+    if ui.history or src is None or target is None or target == src:
         return
     if not state.are_adjacent(src, target):
         return
@@ -302,9 +311,17 @@ def route_key(state: GameState, ui: Ui, name: str) -> str | None:
 
 
 def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
-    """A press on system ``node`` in whichever scene is up: route mode's pick,
-    else live play's."""
-    if ui.mode == ROUTING:
+    """A press on system ``node`` in whichever scene is up: history's look
+    (select it for the panel, or let it go; never a send, since the presses
+    would land on the live turn's orders), route mode's pick, else live play's."""
+    if ui.history:
+        selected = ui.selected
+        ui.reset_selection()
+        ui.sel_forward = None
+        if node != selected:
+            ui.selected = node
+            ui.mode = SELECTED
+    elif ui.mode == ROUTING:
         ui.route_tap(state, node)
     else:
         tap_system(state, ui, node, shift)
@@ -312,9 +329,13 @@ def tap(state: GameState, ui: Ui, node: int, shift: bool = False) -> None:
 
 def history_key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     """A key in history review: scrub the turn, play it back, the graphs and the
-    coach, or leave. ``"reset_view"`` asks the caller to fit the camera."""
+    coach, a star's info card, or leave. ``"reset_view"`` asks the caller to
+    fit the camera."""
     if name in ("Escape", "h"):
         return "toggle_history"
+    if name == "i":
+        open_lore(state, ui, ui.selected if ui.selected is not None else ui.hover)
+        return None
     if name == "p":
         return "toggle_play"  # play/pause the replay at sim speed
     if name == "r":
@@ -374,7 +395,7 @@ def card_up(state: GameState, ui: Ui) -> bool:
     if not ui.odds_card_up():
         ui.odds_open = False
     briefing = ui.briefing_open and ui.in_stage and not ui.history and state.winner is None
-    lore = ui.lore_sid is not None and not ui.history and state.winner is None
+    lore = ui.lore_sid is not None and lore_allowed(state, ui)
     return briefing or lore or ui.odds_open
 
 

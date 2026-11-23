@@ -114,6 +114,7 @@ class Session:
         # link, and the calls whose answers land on the win overlay (the
         # signed-in name, a puzzle's par, a quick post), each with its landing.
         self.campaign = campaign.Watcher()
+        self.menu_campaign: str | None = None   # the reminder the menu last showed
         self.fetching: share.Download | None = None
         self.waits: list[tuple[pbp.Request, Callable[[str, str], None]]] = []
         # Play by post (`pbpclient`): one shared match's calls, stepped by
@@ -330,8 +331,9 @@ class Session:
     def _menu(self, action: str | None = None) -> dict:
         ms, settings = self.menu, self._settings()
         self.campaign.pump(settings)
+        self.menu_campaign = campaign.label(self.campaign.status)
         out = {"menu": setupmenu.view(ms, settings, self.touch, bool(paths.LEADERBOARD_ORIGIN),
-                                      every_tab=self.compact),
+                                      every_tab=self.compact, campaign=self.menu_campaign),
                "action": action, "status": None,
                "stale": not setupmenu.surveyed(ms, settings, self.compact)}
         if ms.status:   # said once; the page holds it on screen
@@ -760,13 +762,15 @@ class Session:
         A press on nothing is over nothing, so it drops the hover too: a finger
         leaves no pointer behind to clear it, and the side panel would keep the
         last system pressed in place of the legend and its buttons. Done on the
-        popup is the exception: `play.cancel` leaves its source lit as the hover."""
+        popup is the exception with a mouse, where `play.cancel` leaves its
+        source lit as the hover; on a touch screen it goes too."""
         ui = self._ui()
         ui.press_undo = play.press_snapshot(ui)
         if ui.mode != ROUTING:
-            if ui.mode != CHOOSING:
-                ui.hover = None
+            closing = ui.mode == CHOOSING
             play.cancel(ui)
+            if self.touch or not closing:
+                ui.hover = None
         return {"view": self._view()}
 
     def op_ui_unpress(self) -> dict:
@@ -834,19 +838,7 @@ class Session:
                 return {"fresh": False, "view": self._view(),
                         "modal": {"kind": "rewind", "title": title, "body": body, "confirm": confirm,
                                   "then": "rewind_confirmed"}}
-            # A finished game: fork a new save so the completed record stays intact.
-            self.log = self.log.fork(ui.history_turn)
-            try:
-                self.log.save()
-            except OSError:
-                pass
-            self.seed = self.log.seed
-            self.history = self.live_fog = None
-            self.state, self.ui = app.resume_game(self.log, self.settings)
-            if not ui.watched:
-                app.stamp_campaign(self.ui, self.campaign)
-                self._stage_again()
-            return self._whole()
+            return self._fork(ui.history_turn)
         elif name == "rewind_confirmed" and ui.history and not ui.in_pbp:
             self.history = self.live_fog = None
             self.state, self.ui = app.apply_rewind(self.log, self.settings, ui.history_turn)
@@ -864,20 +856,8 @@ class Session:
             self.state, self.ui, self.log = app.start_game(self.settings, self.seed, app.carry_autoplay(ui))
             return self._whole()
         elif name == "retry" and not (ui.run_id and ui.run_note):
-            # Fork the log at turn 0, so the finished record stays intact. Not
-            # on a run's decided game: a fresh game the run wouldn't record.
-            self.log = self.log.fork(0)
-            try:
-                self.log.save()
-            except OSError:
-                pass
-            self.seed = self.log.seed
-            self.history = self.live_fog = None
-            self.state, self.ui = app.resume_game(self.log, self.settings)
-            if not ui.watched:
-                app.stamp_campaign(self.ui, self.campaign)
-                self._stage_again()
-            return self._whole()
+            # Not on a run's decided game: a fresh game the run wouldn't record.
+            return self._fork(0)
         elif name == "quit":
             title, body, confirm = hud.confirm_quit()
             return {"fresh": False, "view": self._view(),
@@ -933,6 +913,25 @@ class Session:
             self._leaderboard()
         return {"fresh": False, "view": self._view()}
 
+    def _fork(self, turn: int) -> dict:
+        """Play on from board ``turn`` in a new save forked from this one, so
+        the record left behind stays intact: Retry, and a decided game's
+        rewind."""
+        ui = self._ui()
+        assert self.log is not None and self.settings is not None
+        self.log = self.log.fork(turn)
+        try:
+            self.log.save()
+        except OSError:
+            pass
+        self.seed = self.log.seed
+        self.history = self.live_fog = None
+        self.state, self.ui = app.resume_game(self.log, self.settings)
+        if not ui.watched:
+            app.stamp_campaign(self.ui, self.campaign)
+            self._stage_again()
+        return self._whole()
+
     def _stage_again(self) -> None:
         """A Retry, undo or rewind keeps the stage being played, but not its
         briefing, read the first time round (`app.stage_ui`)."""
@@ -968,6 +967,7 @@ class Session:
         """Back to the live board, with its fog exactly as it was (`main`)."""
         ui = self._ui()
         ui.history = False
+        ui.lore_sid = None
         ui.history_chart = None
         ui.coach_review, ui.coach_open, ui.coach_sel = None, False, -1
         ui.history_graph = ui.graph_full = False
@@ -1371,6 +1371,9 @@ class Session:
             app.campaign_tick(self.ui, self.settings, self.campaign)
         else:
             self.campaign.pump(self._settings())
+            # The menu's banner carries the reminder: redraw it when an answer
+            # lands or the grace counts down a minute.
+            menu_landed |= campaign.label(self.campaign.status) != self.menu_campaign
         if self.fetching is not None:
             got, body = self.fetching.poll()
             if got != share.PENDING:

@@ -364,6 +364,67 @@ def test_fork_branches_without_mutating_original():
     assert log.winner == original_winner and log.finished == original_finished
 
 
+def _blank_log(turns: int) -> replay.GameLog:
+    log = replay.new_log(Settings(), 1)
+    for _ in range(turns):
+        log.record_turn(_record([]))
+    return log
+
+
+def test_a_take_back_marks_the_turn_played_again():
+    log = _blank_log(6)
+    log.truncate(5)
+    log.truncate(3)   # undo twice: play resumes from board 3
+    assert log.rewound_to == 3
+    for _ in range(3):
+        log.record_turn(_record([]))
+    assert [log.turn_was_rewound(i) for i in range(6)] == [False] * 3 + [True, False, False]
+    assert log.rewound_to is None
+    log.truncate(5)
+    log.record_turn(_record([]))
+    assert [i for i in range(6) if log.turn_was_rewound(i)] == [3, 5]
+    log.truncate(4)   # a later take-back drops the marks it cuts, keeps the rest
+    assert [i for i in range(4) if log.turn_was_rewound(i)] == [3]
+
+
+def test_a_take_back_survives_quitting_before_the_turn_is_played():
+    log = _blank_log(4)
+    log.truncate(2)
+    back = replay.GameLog.from_dict(log.to_dict())
+    assert back.rewound_to == 2
+    back.record_turn(_record([]))
+    assert back.turn_was_rewound(2)
+    assert "rewound_to" not in back.to_dict()
+
+
+def test_board_zero_and_the_board_on_screen_are_not_take_backs():
+    log = _blank_log(3)
+    log.truncate(3)   # nothing dropped
+    assert log.rewound_to is None
+    log.truncate(2)
+    log.truncate(0)   # a fresh start, as Retry is
+    assert log.rewound_to is None
+    log.record_turn(_record([]))
+    assert not log.turn_was_rewound(0)
+    stale = _blank_log(3).to_dict() | {"rewound_to": 2}   # not the board the log ends on
+    assert replay.GameLog.from_dict(stale).rewound_to is None
+
+
+def test_a_fork_records_the_take_back_but_retry_does_not():
+    log = _blank_log(5)
+    log.truncate(2)
+    for _ in range(3):
+        log.record_turn(_record([]))
+    original = copy.deepcopy(log.turns)
+    assert log.fork(1).rewound_to == 1
+    assert log.fork(0).rewound_to is None   # Retry
+    assert log.fork(5).rewound_to is None   # a decided game's last board drops nothing
+    branch = log.fork(4)
+    branch.record_turn(_record([]))
+    assert [i for i in range(5) if branch.turn_was_rewound(i)] == [2, 4]
+    assert log.turns == original and log.rewound_to is None
+
+
 def test_forked_log_reconstructs_to_branch_point():
     with _preserve_config():
         _, log = _play(1357, policy="autoplay", max_turns=30)

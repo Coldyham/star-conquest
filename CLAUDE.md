@@ -52,6 +52,8 @@ uv run python tools/try_daily.py sat            # play a fresh Saturday daily ma
 uv run python tools/puzzle_par.py --daily FILE  # a puzzle's par, stored nothing (with SUPABASE_*: today's and tomorrow's)
 uv run python tools/check_bot.py NAME           # validate a models/ or bots/ bot
 uv run python tools/bot_replay.py --dry-run     # leaderboard bot column (needs SUPABASE_*)
+uv run python tools/bot_rerun.py NAME --plan    # bot rows a changed bot could have moved; without
+                                                # --plan (and with --env FILE) snapshots, reruns, compares
 uv run python tools/verify_scores.py --dry-run  # check each posted score's log
 uv run python tools/admin.py matches            # moderation (dry run until --yes)
 uv run python tools/playstyle.py --baseline     # regenerate the Playstyle bots column
@@ -245,6 +247,11 @@ Per-seat URLs onto a shared match, played asynchronously. Reasons:
 - **The bot column is computed offline, never served** (`tools/bot_replay.py`).
   `bot_scores` has no public insert path. An embargoed map is not replayed
   until its embargo lifts.
+- **After a bot's play changes, rerun the rows it reached:**
+  `tools/bot_rerun.py NAME` (its own rows, and every map where a seat plays,
+  deals or borrows it; snapshot and before/after report). Nothing else redoes
+  them: the hourly worker only fills missing rows, and `--stale` follows
+  `engine_rev`, which no bot file moves.
 - **Replays are uploaded; scores are checked against them**
   (`tools/verify_scores.py`). Only *Post to leaderboard* and *Share replays*
   send (and a generated gauntlet whose link ticked "Ask for it to be listed

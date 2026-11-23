@@ -104,6 +104,8 @@ def new_ui(state: GameState, autoplay: bool, settings: Settings | None = None,
         # The daily follows the local ironman preference like any game: a puzzle
         # is exactly where a player wants to take a move back (Undo, U).
         ui.daily_day, ui.daily_kind = daily.daily_of(settings)
+        if ui.daily_day:
+            ui.daily_best = webstore.best(*settings.challenge_keys())
     ui.seat_bots = seat_bot_labels(state)
     if settings is not None:
         ui.random_seats = frozenset(pid for pid in state.players if not state.players[pid].is_neutral
@@ -658,10 +660,10 @@ def gauntlet_request() -> tuple[str | None, dict | None]:
 # as a setup, as a pasted challenge link applies one (`daily`,
 # docs/design/daily.md). The messages name the board's; a puzzle's say
 # "daily puzzle" (`_daily_msg`).
-DAILY_OPENING_MSG = "Fetching the daily challenge..."
-DAILY_UNREACHABLE_MSG = "Couldn't fetch the daily challenge from the leaderboard"
-DAILY_MISSING_MSG = "There's no daily challenge for that day"
-DAILY_UNREADABLE_MSG = "The daily challenge downloaded but wouldn't open"
+DAILY_OPENING_MSG = "Fetching the daily map..."
+DAILY_UNREACHABLE_MSG = "Couldn't fetch the daily map from the leaderboard"
+DAILY_MISSING_MSG = "There's no daily map for that day"
+DAILY_UNREADABLE_MSG = "The daily map downloaded but wouldn't open"
 
 
 def _daily_msg(msg: str, kind: str) -> str:
@@ -1168,6 +1170,7 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
     ui.reset_selection()
     ui.reset_route()
     ui.sel_forward = None
+    ui.lore_sid = None
     ui.history_max = len(history_states) - 1
     # Turn 0 is the board as generated, before anyone moved — the frame a replay
     # should start on, and the one that makes the first turn's changes visible as
@@ -1182,17 +1185,17 @@ def open_history(state: GameState, ui: Ui, log: GameLog):
         ui.history_rules = [log.rules_for(i) for i in range(log.turn_count)] + [ui.auto_forward]
         ui.show_history_rules()
     ui.history_reveal = state.winner is not None
-    # The end-of-game graphs: read once off the boards just built, and open by
-    # default on a finished game, where they are the summary the review is for.
+    # The end-of-game graphs: read once off the boards just built, and closed
+    # until asked for (G, or the scrubber's Graphs).
     ui.history_chart = stats.chart(history_states)
     if not ui.history_reveal:
         # mid-game, a rival is charted only for the turns the top bar showed it
         known = stats.sightings(history_states, [f[0] for f in history_fog], ui.human_id)
         ui.history_chart = stats.masked(ui.history_chart, known)
-    ui.history_graph = ui.history_reveal
+    ui.history_graph = False
     # The coach: only on a decided game, when nothing is hidden any more, and
-    # opened first when it has something to say beyond the turning point, which
-    # every decided game has. A spectator holds no seat.
+    # the graph panel's first tab when it has something to say beyond the
+    # turning point, which every decided game has. A spectator holds no seat.
     ui.coach_review = None
     ui.coach_open, ui.coach_sel = False, -1
     if ui.history_reveal and ui.human_id in state.players and ui.human_id != 0:

@@ -232,8 +232,8 @@ class Ui:
     # space between the bars; the scrubber stays either way. `history_chart` is
     # read off the history boards once, on entering review (`stats.chart`), and
     # dropped on leaving it; `graph_metric` indexes `stats.METRICS`;
-    # `graph_hidden` is the seats whose lines the legend has switched off. Open
-    # by default on a finished game.
+    # `graph_hidden` is the seats whose lines the legend has switched off.
+    # Closed on entering review.
     history_chart: stats.Chart | None = None
     # Which bot drives each seat, for the top bar's hover tooltip and the graph
     # legend: ``{pid: "Knower · Search"}``, worked out once by `main.new_ui`
@@ -345,6 +345,9 @@ class Ui:
     # ...and which daily it is, "board" or "puzzle" (`daily.KINDS`), blank with
     # the day.
     daily_kind: str = ""
+    # ...and the player's best on it when the match began, (turns, lost) or
+    # None, for the side panel's note (`hud.match_notes`), as the menu shows it.
+    daily_best: tuple[int, int] | None = None
     # A puzzle won wholly by hand asks the board whether its (turns, lost) met
     # the par (`main`, on `par_due`, which it clears); `par_note` is the
     # congratulation, blank unless it did (`daily.par_note`). The par itself

@@ -244,6 +244,16 @@ def test_a_dailys_setup_carries_its_banner_until_a_knob_moves(store):
     assert setupmenu.view(ms, s)["subtitle"] == plain
 
 
+def test_a_dailys_game_heads_its_panel_with_the_day_and_best(store):
+    from starconquest import app, hud
+    from starconquest.settings import build_state
+    s = daily.candidates(MONDAY, limit=1)[0]
+    game_daily.remember("2026-11-10", s, game_daily.PUZZLE)
+    webstore.record_best(s.challenge_key(), 9, 4)
+    ui = app.new_ui(build_state(s, s.seed), False, s)
+    assert hud.match_notes(ui) == [("Daily puzzle #14 · Tue 10 Nov · your best 9t / 4 lost", "teal")]
+
+
 def test_the_result_line_gives_nothing_away():
     """Wordle-short: the day's number and the result, then the link. No date,
     map size, opponent or seed."""

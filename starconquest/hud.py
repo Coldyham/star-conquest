@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from . import coach, combat, config, fog, matchnames, stats
+from . import coach, combat, config, daily, fog, matchnames, stats
 from .model import GameState, System, lane_key, shares_even
 from .viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
@@ -373,9 +373,11 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     mode (History, Clear, Route, Autoplay, Play, Fast forward) packed right.
     Where the strip is too narrow the least essential fold behind a "more"
     button, kept longest first: acting in this game (Clear, Route, Undo), then
-    looking at or handing it over (History, Play, then Hint, which as training
-    help folds before Play, then Autoplay), then leaving it
-    (Menu last, since it reaches everything else). Fast forward outranks them
+    looking at or handing it over (History, Play, Autoplay, then Hint, which
+    as training help goes with Autoplay, though an open hint's pair stays out
+    as long as Play), then leaving it
+    (Menu last, since it reaches everything else). A compact screen folds the
+    ways out of this game from the start, and only those. Fast forward outranks them
     all, being offered only when watching is all there is to do. Route mode
     gets a strip of its own.
     """
@@ -447,11 +449,11 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     # caption names their keys (`_draw_hint`).
     if ui.can_hint(state):
         if ui.hint_live(state):
-            specs.append(("hint_button_rect", "✗", None, "active", 6, "right"))
+            specs.append(("hint_button_rect", "✗", None, "active", 7, "right"))
             if ui.hint_left(state):
-                specs.append(("hint_apply_rect", "✓", None, "green", 6, "right"))
+                specs.append(("hint_apply_rect", "✓", None, "green", 7, "right"))
         else:
-            specs.append(("hint_button_rect", "Hint", "K", "gold", 6, "right"))
+            specs.append(("hint_button_rect", "Hint", "K", "gold", 5, "right"))
     # autoplay hands the human seat's decisions to the AI, or takes control back;
     # shown either way, unlike play/pause. Neither is offered in a shared match:
     # a play-by-post turn advances when the last seat submits, so there is no
@@ -460,7 +462,7 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
     # guarded, the same treatment End Turn gets while we are waiting — and
     # `_FOOTER_RECTS` zeroes both, so neither answers a tap either.
     if not ui.in_pbp:
-        specs.append(("autoplay_button_rect", "Take control" if ui.autoplay else "Autoplay", "A", "active" if ui.autoplay else "blue", 5, "right"))
+        specs.append(("autoplay_button_rect", "Take control" if ui.autoplay else "Autoplay", "A", "active" if ui.autoplay else "blue", 6, "right"))
         if not ui.autoplay:
             specs.append(("play_pause_rect", "Pause" if ui.playing else "Play", "P", "active" if ui.playing else "blue", 7, "right"))
     # Fast forward: only while the human is knocked out and the match plays on, so
@@ -473,19 +475,6 @@ def footer(state: GameState, ui: Ui) -> list[FooterButton]:
         )
 
     return specs
-
-
-def phone_folds(ui: Ui) -> list[str]:
-    """The footer buttons an upright phone folds behind "more" from the start,
-    beside the exits: handing the game to the AI is no turn-by-turn press, and
-    the strip is where the thumb rests. Each stays out while it is running, so
-    Take control and Pause are one tap away."""
-    folds = []
-    if not ui.autoplay:
-        folds.append("autoplay_button_rect")
-        if not ui.playing:
-            folds.append("play_pause_rect")
-    return folds
 
 
 def rule_rows(state: GameState, ui: Ui, src: int, touch: bool) -> list[Row]:
@@ -507,6 +496,8 @@ def rule_rows(state: GameState, ui: Ui, src: int, touch: bool) -> list[Row]:
         line = f"-> {d.label if d else f'System {dest}'}  {pct}% · {this_turn.get(dest, 0)}"
         lit = editing and (dest == ui.dest or ui.mode != CHOOSING)
         rows.append((line, "select" if lit else "text", "wrap"))
+    if ui.history:
+        return rows  # a reviewed board's rules were played; nothing edits them
     if touch:
         hint = "−/+: share · Delete: remove" if editing else "tap a lane to edit"
     else:
@@ -637,13 +628,19 @@ def result_lines(state: GameState, ui: Ui) -> list[tuple[str, str, Role]]:
 
 def match_notes(ui: Ui) -> list[tuple[str, Role]]:
     """What this match is for, as ``(text, role)`` lines for the head of the
-    side panel: the gauntlet stage and its target, the weekly campaign's
-    reminder (`app.campaign_tick`), and a challenge link's target. Not in the
-    top bar, which they would share with the scoreboard (on a portrait phone,
-    by covering it)."""
+    side panel: the gauntlet stage and its target, the daily and the best on
+    it, the weekly campaign's reminder (`app.campaign_tick`), and a challenge
+    link's target; the menu's banner says each of them too
+    (`setupmenu.view`). Not in the top bar, which they would share with the
+    scoreboard (on a portrait phone, by covering it)."""
     notes: list[tuple[str, Role]] = []
     if ui.stage_label:
         text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        notes.append((text, "teal"))
+    if ui.daily_day:
+        text = daily.title(ui.daily_day, ui.daily_kind or daily.BOARD)
+        if ui.daily_best is not None:
+            text += f" · your best {ui.daily_best[0]}t / {ui.daily_best[1]} lost"
         notes.append((text, "teal"))
     if ui.campaign_label:
         notes.append((ui.campaign_label, "campaign"))
@@ -753,11 +750,8 @@ def route_lines(state: GameState, ui: Ui) -> list[tuple]:
 def route_hint(ui: Ui) -> str:
     """How route mode's current sub-mode is driven."""
     if ui.route_rally:
-        return ("Tap the systems ships should gather at — tap again to drop one. "
-                "Everything else you hold forwards to the nearest of them, and every "
-                "other rule is cleared. Auto-route picks your front line (or, with no "
-                "rival in reach, your border with neutral systems); a system under "
-                "attack behind it keeps what it needs and passes the rest on.")
+        return ("Tap the systems ships should gather at — tap again to drop one. Everything else you hold forwards to the nearest of them. "
+                "Auto-route picks your front line; a system under attack behind it keeps what it needs and passes the rest on.")
     return ("Drag a box to pick a group. Tap a system to aim at it — tap it again to "
             "un-aim, and to drop it from the group. A system under attack on the way "
             "keeps what it needs and passes the rest on.")

@@ -58,6 +58,16 @@ def test_the_board_ranks_bots_in_the_games_ladder_order():
     assert _js_string_list(js, "LADDER_ORDER") == ai.LADDER_ORDER
 
 
+def test_every_shipped_bot_has_a_beat_badge():
+    """The player card's Bots badges are the ladder plus `UNRANKED_BOTS`, so a
+    bot shipped in `models/` outside `LADDER_ORDER` (chaotic) needs adding there
+    or it never gets a "Beat" badge."""
+    js = ROOT / "leaderboard" / "js" / "badges.mjs"
+    shipped = {ai.family(name) for name in ai.load_models()}
+    badged = set(ai.LADDER_ORDER) | set(_js_string_list(js, "UNRANKED_BOTS"))
+    assert shipped <= badged, f"add {sorted(shipped - badged)} to UNRANKED_BOTS"
+
+
 def test_seat_names_and_colours_match_the_game():
     """The lobby names and colours each seat as the game draws it."""
     assert _js_string_list(CONFIG_MJS, "PLAYER_NAMES") == config.PLAYER_NAMES
