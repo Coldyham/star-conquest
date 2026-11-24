@@ -247,6 +247,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* The run's graph (`app.run_graph`), drawn as the gauntlet list's (menu.css). */
 #veil .vgraph { margin-top: 12px; max-width: min(100%, 720px); max-height: 40vh; }
 #veil .vgraph .sg { padding: 2rem 1rem 1.5rem; }
+/* The campaign node just taken and its neighbours (`css/campaignmap.css`), sized here. */
+#veil .vmap { margin-top: 12px; }
+#veil .vmap svg { display: block; width: min(100%, 360px); max-height: 34vh; margin: 0 auto; }
+#veil .vmap-caption { margin-top: 4px; }
 /* the result lines' roles (`hud.result_lines`) */
 :root { --beat: rgb(130, 200, 150); --tie: rgb(190, 205, 225); --miss: rgb(214, 172, 92);
   --par: rgb(255, 220, 60); --failed: rgb(214, 130, 110); }

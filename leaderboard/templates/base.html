@@ -7,6 +7,8 @@
     description  a <meta name="description">
     main_class   a class on <main>
     script       the page's module, relative to the board root (or a list of them)
+    styles       more stylesheets after css/style.css (a path or a list of them), e.g. the
+                 game's /play/css/campaignmap.css, shared with the game
 
   Rendered by tools/render_board.py; nothing serves this directory raw.
 #}
@@ -22,6 +24,11 @@
 <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
+{% if styles is defined %}
+{% for href in ([styles] if styles is string else styles) %}
+<link rel="stylesheet" href="{{ href }}">
+{% endfor %}
+{% endif %}
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0c14">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">

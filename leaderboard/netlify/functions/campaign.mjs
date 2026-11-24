@@ -31,7 +31,7 @@
 
 import { inflateSync } from "node:zlib";
 
-import { attemptStatus, fold, neighbours, weekQueries } from "../../js/campaign.mjs";
+import { attemptStatus, fold, neighbours, nodeRadius, playerHue, weekQueries } from "../../js/campaign.mjs";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../../js/config.mjs";
 import { weekParam, weekStart } from "../../js/crowns.mjs";
 import { decodeToken, setupIdentity } from "../../js/token-decode.mjs";
@@ -61,17 +61,21 @@ export function nodeFor(graph, setup) {
   return graph.nodes.find((node) => setupIdentity(node.settings) === want) || null;
 }
 
-const holderOf = (state, nodeId) => {
+const holderOf = (state, nodeId, hue = false) => {
   const held = state.holders.get(nodeId);
-  return held ? { name: held.name, turns: held.turns, lost: held.lost } : null;
+  if (!held) return null;
+  return { name: held.name, turns: held.turns, lost: held.lost, ...(hue ? { hue: playerHue(held.name) } : {}) };
 };
 
 /**
  * The node and its neighbours on the week's map, for the game's win screen
- * once the node is yours: each at its map position (`x`, `y`), with its holder
- * and what a game started on it now would be for `name` (`attemptStatus`,
- * `starting`), and the stored setup a press plays; `lanes` are the lanes
- * among them. The node itself is first.
+ * once the node is yours, drawn as campaign.html draws them
+ * (/play/js/campaignmap.mjs): each at its map position (`x`, `y`) with its
+ * circle's radius (`r`, `nodeRadius`) and what is written in it (`text`: its
+ * systems, or "?" for a mystery node), its holder with their colour (`hue`,
+ * `playerHue`), what a game started on it now would be for `name`
+ * (`attemptStatus`, `starting`), and the stored setup a press plays; `lanes`
+ * are the lanes among them. The node itself is first.
  */
 export function around(graph, state, node, name, now) {
   const near = neighbours(graph).get(node.id) || new Set();
@@ -82,7 +86,9 @@ export function around(graph, state, node, name, now) {
     ...(n.name ? { name: n.name } : {}),
     x: n.x ?? 0,
     y: n.y ?? 0,
-    holder: holderOf(state, n.id),
+    r: nodeRadius(n.systems),
+    text: n.mystery ? "?" : String(n.systems ?? ""),
+    holder: holderOf(state, n.id, true),
     status: attemptStatus(graph, state, n.id, name, now, { starting: true }),
     settings: n.settings,
   }));

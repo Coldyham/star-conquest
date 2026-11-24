@@ -10,6 +10,7 @@ import { clear, el, mapSummary, relativeTime, showError, userHref } from "./form
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { encodeToken } from "./token-encode.mjs";
+import { drawCampaignMap } from "/play/js/campaignmap.mjs";
 
 const SVG = "http://www.w3.org/2000/svg";
 const PAD = 40;   // page units around the outermost node
@@ -74,57 +75,31 @@ function svg(tag, attrs = {}, children = []) {
   return node;
 }
 
-const fillFor = (holder) => (holder ? `hsl(${playerHue(holder.name)} 70% 58%)` : "#3a3f55");
-
 function drawMap() {
   mapBox.classList.remove("loading");
-  const xs = graph.nodes.map((n) => n.x);
-  const ys = graph.nodes.map((n) => n.y);
-  const x0 = Math.min(...xs) - PAD;
-  const y0 = Math.min(...ys) - PAD;
-  const width = Math.max(...xs) - x0 + PAD;
-  const height = Math.max(...ys) - y0 + PAD;
-  const at = new Map(graph.nodes.map((n) => [n.id, n]));
-
-  const lanes = graph.lanes.map(([a, b]) => svg("line", {
-    class: "lane", x1: at.get(a).x, y1: at.get(a).y, x2: at.get(b).x, y2: at.get(b).y,
-  }));
   const shown = holdersNow();
   const moved = !live() && pos ? frames[pos - 1].move.nodeId : null;
   const nodes = graph.nodes.map((node) => {
     const holder = shown.get(node.id);
-    const r = nodeRadius(node.systems);
-    const classes = ["node", node.kind];
-    if (!holder) classes.push("neutral");
-    if (current && live() && canAttempt(graph, state, node.id, me, Date.now())) classes.push("open");
-    if (node.id === moved) classes.push("moved");
-    if (selected === node.id) classes.push("selected");
+    const marks = [];
+    if (current && live() && canAttempt(graph, state, node.id, me, Date.now())) marks.push("open");
+    if (node.id === moved) marks.push("moved");
+    if (selected === node.id) marks.push("selected");
     const label = node.mystery ? "?" : String(node.systems);
     const who = holder ? `held by ${holder.name}` : "unclaimed";
-    const group = svg("g", {
-      class: classes.join(" "), tabindex: "0", role: "button",
-      "aria-label": `${node.name ? `${node.name}, ${node.kind === "home" ? "home" : "node"}` : nodeTitle(node)}, ${label} systems, ${who}`,
-    }, [
-      svg("circle", { class: "ring", cx: node.x, cy: node.y, r: r + 6 }),
-      svg("circle", { class: "body", cx: node.x, cy: node.y, r, fill: fillFor(holder) }),
-      svg("text", { x: node.x, y: node.y }, [document.createTextNode(label)]),
-      ...(node.name ? [svg("title", {}, [document.createTextNode(node.name)])] : []),
-    ]);
-    const choose = () => {
-      if (selected !== node.id) loreOpen = false;
-      selected = node.id;
-      drawMap();
-      drawDetail();
+    return {
+      key: node.id, x: node.x, y: node.y, r: nodeRadius(node.systems), hue: holder ? playerHue(holder.name) : null,
+      kind: node.kind, text: label, title: node.name || "", marks,
+      aria: `${node.name ? `${node.name}, ${node.kind === "home" ? "home" : "node"}` : nodeTitle(node)}, ${label} systems, ${who}`,
     };
-    group.addEventListener("click", choose);
-    group.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
-    });
-    return group;
   });
-  clear(mapBox).append(svg("svg", {
-    viewBox: `${x0} ${y0} ${width} ${height}`, role: "group", "aria-label": "This week's campaign map",
-  }, [...lanes, ...nodes]));
+  const choose = (id) => {
+    if (selected !== id) loreOpen = false;
+    selected = id;
+    drawMap();
+    drawDetail();
+  };
+  drawCampaignMap(mapBox, { nodes, lanes: graph.lanes }, { onPress: choose, label: "This week's campaign map", pad: PAD });
 }
 
 /** Why `me` can or can't move on the selected node, and when, in a line or two. */

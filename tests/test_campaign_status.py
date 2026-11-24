@@ -291,7 +291,7 @@ def test_a_named_node_goes_by_its_crater():
 
 def _near(node, x, y, why="adjacent", can=True, kind="field", holder=None, name=None):
     """A node of the answer's ``around``, as netlify/functions/campaign.mjs writes one."""
-    return {"id": node, "kind": kind, **({"name": name} if name else {}), "x": x, "y": y,
+    return {"id": node, "kind": kind, **({"name": name} if name else {}), "x": x, "y": y, "r": 21, "text": "12",
             "holder": holder, "status": {"can": can, "why": why}, "settings": {"players": 2, "seed": 100 + node}}
 
 
@@ -302,8 +302,9 @@ def mine_around(why="own") -> campaign.Status:
     body["around"] = {
         "nodes": [_near(3, 100, 100, why=why, can=False, name="Mädler"),
                   _near(5, 200, 110),
-                  _near(6, 90, 0, holder={"name": "bo", "turns": 30, "lost": 2}),
-                  _near(9, 0, 100, why="has-home", can=False, kind="home", holder={"name": "bo", "turns": 9, "lost": 0})],
+                  _near(6, 90, 0, holder={"name": "bo", "turns": 30, "lost": 2, "hue": 200}),
+                  _near(9, 0, 100, why="has-home", can=False, kind="home",
+                        holder={"name": "bo", "turns": 9, "lost": 0, "hue": 200})],
         "lanes": [[3, 5], [3, 6], [9, 3], [5, 6], [5, 77]]}
     parsed = campaign.parse(json.dumps(body), 0.0)
     assert parsed is not None
@@ -332,32 +333,21 @@ def test_the_win_screen_draws_a_node_only_once_it_is_yours():
     assert campaign.graph(mine_around(why="own-home")) is not None
 
 
-def test_the_graph_lays_neighbours_out_as_on_the_map():
+def test_the_map_draws_the_neighbourhood_as_the_board_does():
     g = campaign.graph(mine_around())
     assert g is not None
-    at = {n["key"]: (n["col"], n["row"]) for n in g["nodes"]}
-    # Middle; east; north; west. Screen y runs down, as on the campaign page.
-    assert at == {"node_3": (1, 1), "node_5": (2, 1), "node_6": (1, 0), "node_9": (0, 1)}
-    said = {n["key"]: (n["title"], n["status"], n["marks"], n["open"]) for n in g["nodes"]}
-    assert said["node_3"] == ("Mädler", "yours", ["here"], True)
-    assert said["node_5"] == ("Node 5", "open", ["move"], True)
-    assert said["node_6"] == ("Node 6", "bo: beat 30t / 2 lost", ["move"], True)
-    assert said["node_9"] == ("Home 9", "bo's home", [], False)
-    # Lanes run left to right (down a column), without heads: a campaign lane runs both ways.
-    assert [(lane["from"], lane["to"]) for lane in g["lanes"]] == [
-        ("node_3", "node_5"), ("node_6", "node_3"), ("node_9", "node_3"), ("node_6", "node_5")]
-    assert all(lane["plain"] for lane in g["lanes"])
-    assert g["focus"] == "node_3"
-
-
-def test_a_crowded_neighbourhood_takes_the_next_cell_round():
-    body = json.loads(answer(why="own", can=False))
-    body["around"] = {"nodes": [_near(0, 0, 0, why="own", can=False)]
-                      + [_near(i, 10 + i, 0) for i in range(1, 11)], "lanes": []}
-    g = campaign.graph(campaign.parse(json.dumps(body), 0.0))
-    assert g is not None
-    cells = [(n["col"], n["row"]) for n in g["nodes"]]
-    assert len(set(cells)) == len(cells) == 11    # ten all due east: no two share a cell
+    drawn = {n["key"]: (n["x"], n["y"], n["r"], n["hue"], n["kind"], n["text"], n["marks"]) for n in g["nodes"]}
+    assert drawn == {
+        "node_3": (100, 100, 21, None, "field", "12", ["moved"]),    # the node just taken: a gold ring
+        "node_5": (200, 110, 21, None, "field", "12", ["open"]),     # a win there would be a move
+        "node_6": (90, 0, 21, 200, "field", "12", ["open"]),
+        "node_9": (0, 100, 21, 200, "home", "12", []),
+    }
+    assert g["nodes"][0]["title"] == "Mädler"
+    assert g["nodes"][3]["aria"] == "Home 9, home, 12 systems, held by bo"
+    assert g["lanes"] == [["node_3", "node_5"], ["node_3", "node_6"], ["node_9", "node_3"], ["node_5", "node_6"]]
+    assert g["caption"] == "Mädler is yours. Choose a ringed neighbour to play it next."
+    assert campaign.graph(mine_around(why="own-home"))["caption"].startswith("Mädler is your home.")
 
 
 def test_a_tap_picks_a_neighbour_and_a_second_plays_it():
@@ -369,9 +359,13 @@ def test_a_tap_picks_a_neighbour_and_a_second_plays_it():
     assert play.over_node(ui, 3) is None and ui.campaign_pick is None    # the node itself
     assert play.over_node(ui, 5) is None and ui.campaign_pick == 5
     g = campaign.graph(ui.campaign_status, ui.campaign_pick)
-    assert g is not None and g["focus"] == "node_5"
-    [picked] = [n for n in g["nodes"] if "picked" in n["marks"]]
-    assert (picked["key"], picked["status"]) == ("node_5", "press again to play")
+    assert g is not None
+    assert [n["key"] for n in g["nodes"] if "selected" in n["marks"]] == ["node_5"]
+    assert g["caption"] == "Node 5 · open — choose it again to play it"
+    assert play.over_node(ui, 6) is None
+    assert campaign.graph(ui.campaign_status, ui.campaign_pick)["caption"] == \
+        "Node 6 · bo's, beat 30t / 2 lost — choose it again to play it"
+    assert play.over_node(ui, 5) is None and ui.campaign_pick == 5
     assert play.over_node(ui, 5) == "campaign_play"
 
 

@@ -646,10 +646,10 @@ def test_a_campaign_node_won_and_held_shows_its_neighbours_and_plays_one(session
                                   "lanes": [[4, 7]]}})
     session.ui.campaign_status = campaign.parse(body, 0.0)   # as the page's tick lands it (`app.campaign_tick`)
     graph = _menu(session, "game.view")["view"]["over"]["campaign_graph"]
-    assert [(n["key"], n["status"]) for n in graph["nodes"]] == [("node_4", "yours"), ("node_7", "open")]
+    assert [(n["key"], n["marks"]) for n in graph["nodes"]] == [("node_4", ["moved"]), ("node_7", ["open"])]
     old = session.ui
     view = _menu(session, "game.action", name="node_7")["view"]       # a tap picks
-    assert session.ui is old and view["over"]["campaign_graph"]["focus"] == "node_7"
+    assert session.ui is old and view["over"]["campaign_graph"]["nodes"][1]["marks"] == ["open", "selected"]
     res = _menu(session, "game.action", name="node_7")                # a second tap plays it
     assert res["fresh"] and session.ui is not old
     assert (session.settings.players, session.settings.nodes, session.seed) == (3, 14, 77)

@@ -223,6 +223,7 @@ nor rejected are in [`open.md`](open.md); the file index is
 - campaign.md · A probe win within a turn cap (the daily's check) as the test of a playable node: rejected, since no probe won the liked fog-and-1-turn-lanes maze or two other rolled nodes in 110 turns. *A node you can start on.*
 - campaign.md · Turns until a sure `edge_attacking` capture of the home's cheapest neighbour, on the built map: set aside for the settings-only average-garrison rule, which needs no map and isn't passed by one cheap neighbour. *A node you can start on.*
 - campaign.md · Flagging a config first dealt as a "?" so later weeks show it as one: rejected, since it still deals the slow ones and flags the playable ones. *A node you can start on.*
+- campaign.md · The run's stage graph (`stagegraph.mjs`) for a held node and its neighbours on the win screen: built and replaced the same day by the board's own map drawer (`campaignmap.mjs`), since a node should look the same wherever it is shown. *In the game*.
 
 ## gauntlet.md (Gauntlets)
 - gauntlet.md · An in-game gauntlet maker built on the map maker: it would lend placing, dragging, pan and zoom, which a gauntlet's lanes don't use, while the board page already edits everything else a stage needs. *Lanes on the board.*

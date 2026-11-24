@@ -1156,21 +1156,8 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 /* -- the weekly campaign (campaign.html) --------------------------------- */
 .campaign-status { margin: 0 0 1rem; color: var(--dim); }
 .campaign-map svg { display: block; width: 100%; height: auto; }
-.campaign-map .lane { stroke: #2a3350; stroke-width: 3; }
-.campaign-map .node { cursor: pointer; }
-.campaign-map .node circle.body { stroke: #0b0f1d; stroke-width: 2; }
-.campaign-map .node.home circle.body { stroke: var(--gold); stroke-width: 3; stroke-dasharray: 5 4; }
-.campaign-map .node.open circle.ring { fill: none; stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 3 4; }
-.campaign-map .node.selected circle.body { stroke: var(--magenta); stroke-width: 4; stroke-dasharray: none; }
-.campaign-map .node:focus { outline: none; }
-.campaign-map .node:focus-visible circle.body { stroke: var(--cyan); stroke-width: 4; }
-.campaign-map .node text {
-  font-family: var(--pixel); font-size: 18px; fill: #0b0f1d;
-  text-anchor: middle; dominant-baseline: central; pointer-events: none;
-}
-.campaign-map .node.neutral text { fill: var(--ink); }
-/* The replay's last move: a gold ring round the node it changed. */
-.campaign-map .node.moved circle.ring { fill: none; stroke: var(--gold); stroke-width: 3; }
+/* The map's nodes and lanes look as the game's win screen draws them:
+ * /play/css/campaignmap.css, loaded by campaign.html. */
 
 /* The replay bar under the map. The box and the tip toggle `hidden`, so neither
  * sets `display` (see the note on `hidden` at the top). */

@@ -346,20 +346,29 @@ The game and the board are one site, so the game can ask before it plays.
   Start, and the link has no way to say the player already answered.
   `weekQueries` is the one copy of the two reads a week is folded from, for the
   two pages and the endpoint.
-- **The win screen shows the node and its neighbours once it is yours**, as a
-  run's win screen shows where the run goes next, drawn by the same
-  `webapp/js/stagegraph.mjs`. The endpoint's answer carries `around` (the node
-  first, then each neighbour with its map position, holder, `attemptStatus` for
-  a game started there now and its stored setup) and the lanes among them;
-  `campaign.graph` lays them out as on the week's map (the node in the middle,
-  each neighbour in the free cell nearest its direction) with undirected
-  (`plain`) lanes. It is drawn only while the answer says the node is yours
-  (`own`, `own-home`), so a win shows it once posted: a quick post that lands
-  asks again at once (`Watcher.ask_again`) rather than at the next refresh.
-  Showing it on an unposted win would mean predicting the capture, which is
-  the board's rule to state. A tap picks a neighbour a win on would be a move
-  (`play.over_node`), a second plays its setup (`Session._play_node`), stamped
-  with that neighbour's answer since the watcher has not looked it up yet.
+- **The win screen shows the node and its neighbours once it is yours**,
+  drawn exactly as campaign.html draws the week's map: one drawer and one
+  stylesheet, `webapp/js/campaignmap.mjs` and `webapp/css/campaignmap.css`,
+  which the board loads from `/play/` as it does `stagegraph.mjs` (campaign.html
+  sets the base template's `styles`). The endpoint's answer carries `around`:
+  the node first, then each neighbour at its map position, with its radius
+  (`nodeRadius`), its text (systems or "?"), its holder and their colour
+  (`playerHue`), `attemptStatus` for a game started there now, and its stored
+  setup; and the lanes among them. The board computes the radius and colour,
+  so the game mirrors neither. `campaign.graph` marks the node just taken with
+  the replay's gold ring (`moved`), a neighbour a win on would be a move as
+  `open` and the pick as `selected`, and writes a caption under it. It is
+  drawn only while the answer says the node is yours (`own`, `own-home`), so a
+  win shows it once posted: a quick post that lands asks again at once
+  (`Watcher.ask_again`) rather than at the next refresh. Showing it on an
+  unposted win would mean predicting the capture, which is the board's rule to
+  state. A press picks an open neighbour (`play.over_node`), a second plays its
+  setup (`Session._play_node`), stamped with that neighbour's answer since the
+  watcher has not looked it up yet. The board's pixel font is served at
+  `/play/fonts/` for the map's numbers (`build_next.FONTS`).
+- **A stage graph was tried first and dropped**: the run's `stagegraph.mjs`
+  boxes in a grid read as a different thing from the board's map; a node should
+  look the same wherever it is shown.
 
 ## A daily allowance of moves (proposed)
 

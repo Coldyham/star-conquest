@@ -61,6 +61,9 @@ class Near:
     crater: str
     x: float
     y: float
+    r: float                       # its circle's radius on the map (`nodeRadius`)
+    text: str                      # what is written in its circle: its systems, or "?"
+    hue: int | None                # its holder's colour (`playerHue`), None for nobody
     holder: str                    # who holds it, blank for nobody
     beat: tuple[int, int] | None   # the holder's (turns, lost)
     why: str                       # attemptStatus's reason for a game started there now
@@ -154,7 +157,9 @@ def _around(raw) -> dict:
             held, status = n.get("holder"), n["status"]
             nodes.append(Near(
                 node_id=int(n["id"]), kind=str(n.get("kind", "field")), crater=str(n.get("name") or ""),
-                x=float(n.get("x", 0)), y=float(n.get("y", 0)),
+                x=float(n.get("x", 0)), y=float(n.get("y", 0)), r=float(n.get("r", 20)),
+                text=str(n.get("text", "")),
+                hue=int(held["hue"]) if isinstance(held, dict) and held.get("hue") is not None else None,
                 holder=str(held.get("name", "")) if isinstance(held, dict) else "",
                 beat=(int(held["turns"]), int(held["lost"])) if isinstance(held, dict) else None,
                 why=str(status.get("why", "")), can=bool(status.get("can")),
@@ -362,54 +367,18 @@ class Watcher:
             self._request = fetch(self._token, webstore.pbp_name(), self._start)
 
 
-def _cells(around: tuple[Near, ...]) -> dict[int, tuple[int, int]]:
-    """Each node's (col, row) in the win screen's grid: the node itself in the
-    middle and each neighbour in the free cell around it whose direction is
-    nearest its own on the week's map (the next ring out once one is full)."""
-    here = around[0]
-    cells = {here.node_id: (0, 0)}
-    taken = {(0, 0)}
-
-    def turn(a: float, b: float) -> float:
-        d = abs(a - b) % math.tau
-        return min(d, math.tau - d)
-
-    rest = sorted(around[1:], key=lambda n: math.atan2(n.y - here.y, n.x - here.x))
-    for n in rest:
-        want = math.atan2(n.y - here.y, n.x - here.x)
-        ring = 1
-        while True:
-            free = [(c, r) for c in range(-ring, ring + 1) for r in range(-ring, ring + 1)
-                    if max(abs(c), abs(r)) == ring and (c, r) not in taken]
-            if free:
-                break
-            ring += 1
-        cell = min(free, key=lambda cr: (turn(math.atan2(cr[1], cr[0]), want), cr))
-        cells[n.node_id] = cell
-        taken.add(cell)
-    return cells
-
-
-def _says(n: Near, here: bool) -> tuple[str, str]:
-    """A node's (status, colour) on the win screen's graph."""
-    if n.why == "own-home":
-        return "your home", "var(--m-start-edge)"
-    if n.why == "own":
-        return "yours", "var(--m-start-edge)"
-    if n.kind == "home":
-        return (f"{n.holder}'s home" if n.holder else "an open home"), ""
-    if n.can and not here:
-        if n.why == "grace":
-            return "yours to retake", "var(--m-warn)"
-        if n.beat is not None:
-            turns, lost = n.beat
-            return f"{n.holder}: beat {turns}t / {lost} lost", "var(--m-hl-edge)"
-        return "open", "var(--m-hl-edge)"
-    return (n.holder or "open"), ""
+def _says(n: Near) -> str:
+    """What a neighbour a win on would be a move is, in the caption's words."""
+    if n.why == "grace":
+        return "yours to retake"
+    if n.beat is not None:
+        turns, lost = n.beat
+        return f"{n.holder}'s, beat {turns}t / {lost} lost"
+    return "open"
 
 
 def node_key(node_id: int) -> str:
-    """A node's key on the win screen's graph, and the action a press sends."""
+    """A node's key on the win screen's map, and the action a press sends."""
     return f"node_{node_id}"
 
 
@@ -423,32 +392,30 @@ def playable(status: Status | None) -> dict[int, Near]:
 
 def graph(status: Status | None, pick: int | None = None) -> dict | None:
     """The win screen's picture of a campaign node you hold and its neighbours,
-    for `webapp/js/stagegraph.mjs`, laid out as on the week's map; None when
-    the node isn't yours or the board sent no neighbourhood. A neighbour a win
-    on would be a move can be pressed: once to pick it (``pick``), again to
-    play it (`play.over_node`)."""
+    drawn as the board's campaign page draws the week's map
+    (`webapp/js/campaignmap.mjs`): circles at their map positions in their
+    holders' colours, the node just taken ringed in gold, a neighbour a win on
+    would be a move ringed as open, the pick selected; and a caption naming the
+    pick. None when the node isn't yours or the board sent no neighbourhood. A
+    press on an open neighbour picks it; a second plays it (`play.over_node`)."""
     if status is None or not status.mine or not status.around:
         return None
-    cells = _cells(status.around)
-    cols = sorted({c for c, _ in cells.values()})
-    rows = sorted({r for _, r in cells.values()})
     can = playable(status)
+    here = status.around[0]
     nodes = []
     for i, n in enumerate(status.around):
-        said, colour = _says(n, i == 0)
-        marks = ["here"] if i == 0 else ["move"] if n.node_id in can else []
+        marks = ["moved"] if i == 0 else ["open"] if n.node_id in can else []
         if n.node_id == pick and n.node_id in can:
-            said, marks = "press again to play", [*marks, "picked"]
-        col, row = cells[n.node_id]
-        nodes.append({"key": node_key(n.node_id), "col": cols.index(col), "row": rows.index(row),
-                      "place": "home" if n.kind == "home" and n.crater else "", "title": n.name, "status": said,
-                      "color": colour, "open": i == 0 or n.node_id in can or n.why in ("own", "own-home"),
-                      "marks": marks})
-    lanes = []
-    for a, b in status.lanes:
-        (ca, ra), (cb, rb) = cells[a], cells[b]
-        if (cb, rb) < (ca, ra):   # left to right (down a column), since a campaign lane runs both ways
-            a, b = b, a
-        lanes.append({"from": node_key(a), "to": node_key(b), "plain": True})
-    focus = node_key(pick) if pick in can else node_key(status.around[0].node_id)
-    return {"nodes": nodes, "lanes": lanes, "focus": focus}
+            marks.append("selected")
+        who = f"held by {n.holder}" if n.holder else "unclaimed"
+        nodes.append({"key": node_key(n.node_id), "x": n.x, "y": n.y, "r": n.r, "hue": n.hue, "kind": n.kind,
+                      "text": n.text, "title": n.name, "marks": marks,
+                      "aria": f"{n.name}, {'home' if n.kind == 'home' else 'node'}, {n.text} systems, {who}"})
+    lanes = [[node_key(a), node_key(b)] for a, b in status.lanes]
+    picked = can.get(pick) if pick is not None else None
+    if picked is not None:
+        caption = f"{picked.name} · {_says(picked)} — choose it again to play it"
+    else:
+        yours = f"{here.name} is your home." if here.why == "own-home" else f"{here.name} is yours."
+        caption = f"{yours} Choose a ringed neighbour to play it next." if can else yours
+    return {"nodes": nodes, "lanes": lanes, "caption": caption}
