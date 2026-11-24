@@ -533,8 +533,11 @@ starts, the maker's own being the default and the recommendation.
   "+ life" (1 to `LIVES_MAX`) and, where a stage has a target, "Targets: on/off"
   (`setupmenu.run_terms`, `change_run_terms`; kept per gauntlet in
   `MenuState.run_choice` until the list is opened afresh). The run line names
-  the terms chosen and, where they differ, the maker's ("…each won, 2 lives
-  (its maker's run: one life, targets on)").
+  the terms chosen beside the maker's, as the recommendation ("Run: play
+  stages back to back in ironman mode, 2 lives, targets off (recommended: 1
+  life, targets on)"). It no longer describes the route ("every stage in
+  order", "any stage you've opened"): the second read as if a run could start
+  from any stage already unlocked, when it always starts from a start.
 - **The run keeps its copy** (`Run.lives`, `Run.targets`, the latter written
   only when off), as it already kept its lives: an edit to the gauntlet never
   changes a run under way, and neither is in the fingerprint.

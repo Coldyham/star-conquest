@@ -1174,9 +1174,7 @@ RUN_TERM_KEYS = ("run_lives_dec", "run_lives_inc", "run_targets")
 FREE_PLAY = "Free play"
 FREE_PLAY_NOTE = "Not part of your run: free play, which the run doesn't count"
 FREE_PLAY_BANNER = "Start is free play, not your run: continue the run from {label}"
-RUN_ABOUT = "Run: every stage in order, {won}, {lives}"
-RUN_ABOUT_FORK = "Run: any stage you've opened, to the end, {won}, {lives}"
-RUN_MAKERS = "its maker's run: {terms}"
+RUN_ABOUT = "Run: play stages back to back in ironman mode, {terms} (recommended: {own})"
 PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
 
 Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
@@ -1370,7 +1368,7 @@ def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | Non
     """The list's run line and its buttons, ``(text, [(key, label)])``, or None
     for a gauntlet that can't be run (`run.offered`: one with no goal). Before
     a run, the buttons set its lives and whether targets count (`run_terms`),
-    and the line says how they differ from the gauntlet's own. Where the
+    and the line says them beside the gauntlet's own, recommended. Where the
     run may go more than one way, the button names the stage it will play, and
     the line asks for one until there is one. A stage already won, kept for its
     gate, is named as a replay."""
@@ -1398,12 +1396,7 @@ def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | Non
     if live is not None and ms.run_confirm == "run_start":
         return "Starting this ends your run of another gauntlet", [("run_start", "Start anyway")]
     lives, targets = run_terms(ms, g)
-    counted = targets and gauntlet_run.has_targets(g)
-    about = (RUN_ABOUT if gauntlet_run.linear(g) else RUN_ABOUT_FORK).format(
-        won="each within its target" if counted else "each won", lives=_lives(lives))
-    if (lives, targets) != (g.lives, True):
-        own = [_lives(g.lives)] + (["targets on"] if gauntlet_run.has_targets(g) else [])
-        about += f" ({RUN_MAKERS.format(terms=', '.join(own))})"
+    about = RUN_ABOUT.format(terms=_terms(g, lives, targets), own=_terms(g, g.lives, True))
     past = gauntlet_run.summary(g, ms.runs)
     buttons = [("run_start", "Start run")]
     if gauntlet_run.has_targets(g):
@@ -1412,8 +1405,13 @@ def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | Non
     return (f"{past} · {about}" if past else about), buttons
 
 
-def _lives(n: int) -> str:
-    return "one life" if n == 1 else f"{n} lives"
+def _terms(g: gauntlet.Gauntlet, lives: int, targets: bool) -> str:
+    """A run's terms as the run line says them: "2 lives", and ", targets
+    off" or on where a stage of ``g`` has one."""
+    out = "1 life" if lives == 1 else f"{lives} lives"
+    if gauntlet_run.has_targets(g):
+        out += ", targets on" if targets else ", targets off"
+    return out
 
 
 def run_terms(ms, g: gauntlet.Gauntlet) -> tuple[int, bool]:

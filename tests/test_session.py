@@ -902,10 +902,11 @@ def test_a_run_starts_on_the_lives_and_targets_chosen_in_the_list(session, games
     tut = _menu(session, "menu.press", key="gauntlet_pick_inc")["menu"]["tutorial"]
     keys = [b["key"] for b in tut["run"]["buttons"]]
     assert keys == ["run_start", "run_targets", "run_lives_dec", "run_lives_inc"]
-    assert "within its target, one life" in tut["run"]["text"] and "maker" not in tut["run"]["text"]
+    assert tut["run"]["text"] == ("Run: play stages back to back in ironman mode, 1 life, targets on "
+                                  "(recommended: 1 life, targets on)")
     _menu(session, "menu.press", key="run_lives_inc")
     tut = _menu(session, "menu.press", key="run_targets")["menu"]["tutorial"]
-    assert "each won, 2 lives (its maker's run: one life, targets on)" in tut["run"]["text"]
+    assert tut["run"]["text"].endswith("ironman mode, 2 lives, targets off (recommended: 1 life, targets on)")
     assert tut["run"]["buttons"][1]["label"] == "Targets: off"
     res = _menu(session, "menu.press", key="run_start")
     if "game" not in res and res["menu"]["modal"]:
