@@ -635,7 +635,8 @@ def match_notes(ui: Ui) -> list[tuple[str, Role]]:
     scoreboard (on a portrait phone, by covering it)."""
     notes: list[tuple[str, Role]] = []
     if ui.stage_label:
-        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        target = ui.shown_target
+        text = ui.stage_label + (f" · {target.short()}" if target is not None else "")
         notes.append((text, "teal"))
     if ui.daily_day:
         text = daily.title(ui.daily_day, ui.daily_kind or daily.BOARD)
@@ -663,7 +664,9 @@ def briefing_close(touch: bool, portrait: bool) -> str:
 def briefing_notes(ui: Ui) -> tuple[str, ...]:
     """The briefing card's target, which it always shows, so the target is
     never a surprise on the win overlay."""
-    return (f"Target: {ui.stage_target.text()}",) if ui.stage_target is not None else ()
+    target = ui.shown_target
+    return (f"Target: {target.text()}",) if target is not None else ()
+
 
 
 def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:

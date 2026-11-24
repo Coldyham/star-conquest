@@ -228,9 +228,11 @@ class Session:
         the match goes to the page with the next menu reply (``opened``). False,
         with the list open again saying why, when there is nothing to play."""
         ms, settings = self.menu, self._settings()
-        opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
+        picked = setupmenu.picked_gauntlet(ms)
+        opened, note = app.open_run(settings, fresh, picked, ms.gauntlets,
                                     lambda g, sid: setupmenu.load_stage(ms, settings, g, sid),
-                                    ms.stage_pick if pick is None else pick)
+                                    ms.stage_pick if pick is None else pick,
+                                    setupmenu.run_terms(ms, picked) if picked is not None else None)
         self._note(note)
         if opened is None:
             if reopen:

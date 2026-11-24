@@ -891,6 +891,30 @@ def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, game
 
 
 
+def test_a_run_starts_on_the_lives_and_targets_chosen_in_the_list(session, games):
+    from starconquest import gauntlet
+    from starconquest import run as gauntlet_run
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    _menu(session, "menu.press", key="tutorial")
+    g = gauntlet.Gauntlet.from_dict(_chain_data())
+    session.menu.gauntlets, session.menu.gauntlet_pick = [g], 0
+    tut = _menu(session, "menu.press", key="gauntlet_pick_inc")["menu"]["tutorial"]
+    keys = [b["key"] for b in tut["run"]["buttons"]]
+    assert keys == ["run_start", "run_targets", "run_lives_dec", "run_lives_inc"]
+    assert "within its target, one life" in tut["run"]["text"] and "maker" not in tut["run"]["text"]
+    _menu(session, "menu.press", key="run_lives_inc")
+    tut = _menu(session, "menu.press", key="run_targets")["menu"]["tutorial"]
+    assert "each won, 2 lives (its maker's run: one life, targets on)" in tut["run"]["text"]
+    assert tut["run"]["buttons"][1]["label"] == "Targets: off"
+    res = _menu(session, "menu.press", key="run_start")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    r = gauntlet_run.active()
+    assert r is not None and (r.lives, r.targets) == (2, False)
+    assert session.ui.run_id and session.ui.shown_target is None and session.ui.stage_target is not None
+
+
 def test_the_footer_and_each_lists_foot_open_their_board_page(session, games):
     from starconquest import paths
 

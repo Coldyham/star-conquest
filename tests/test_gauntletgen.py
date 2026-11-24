@@ -337,7 +337,7 @@ def test_a_shaped_file_joins_each_column_to_the_next_and_lays_out_by_column(cols
         assert [cells[at + j] for j in range(w)] == [(n, j) for j in range(w)]   # "a" above "b"
         at += w
     assert len(g.lanes) == sum(a * b for a, b in itertools.pairwise(cols))
-    assert run.offered(g) == (any(w > 1 for w in cols))
+    assert run.offered(g)
 
 
 def test_a_shaped_job_makes_a_gauntlet_the_game_reads():
