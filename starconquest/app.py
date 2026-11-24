@@ -337,10 +337,11 @@ def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
     match, neither of which can be posted as a campaign move.
     """
     if ui.watched or ui.in_pbp:
-        ui.campaign_label = None
+        ui.campaign_label, ui.campaign_status = None, None
         return
     watch.pump(settings, start=ui.campaign_start)
     ui.campaign_label = campaign.label(watch.status)
+    ui.campaign_status = watch.status
 
 
 def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:

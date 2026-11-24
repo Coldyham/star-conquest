@@ -477,7 +477,7 @@ function playFilm(film, view, before) {
 
 const GAME_ACTIONS = new Set(["toggle_play", "toggle_autoplay", "toggle_fast_forward", "toggle_route", "restart", "retry",
   "undo", "hint", "take_hint", "toggle_history", "rewind", "rewind_confirmed", "quit", "quit_confirmed", "share", "leaderboard", "next_stage",
-  "run_retry", "run_list"]);
+  "run_retry", "run_list", "campaign_play"]);
 
 async function actOn(action) {
   if (action === null || action === undefined) return;
@@ -488,7 +488,7 @@ async function actOn(action) {
   } else if (action === "reset_view") {
     game.board_view.rest(game.view.snap);
     redraw();
-  } else if (GAME_ACTIONS.has(action) || /^stage_\d+$/.test(action)) {   // or a stage on the run's graph
+  } else if (GAME_ACTIONS.has(action) || /^(stage|node)_\d+$/.test(action)) {   // or a stage on the run's graph, a campaign node
     if (game.busy) {
       queue(action);
       return;

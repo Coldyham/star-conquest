@@ -10,8 +10,9 @@
 // changes. The box it is drawn into scrolls; nothing here keeps an offset.
 //
 // A view is `{nodes: [{key, col, row, title, place?, status?, color?, open,
-// marks?}], lanes: [{from, to, gated?, short?, hidden?, two_way?, warn?, shut?}]}`,
-// lanes naming nodes by key. Marks become classes (`sg-start`, `sg-goal`, …),
+// marks?}], lanes: [{from, to, gated?, short?, hidden?, two_way?, warn?, shut?, plain?}]}`,
+// lanes naming nodes by key; a `plain` lane runs both ways and has no heads
+// (the game's campaign graph, `campaign.graph`). Marks become classes (`sg-start`, `sg-goal`, …),
 // which each page styles in its own theme.
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -178,7 +179,7 @@ export function drawGraph(box, view, { onPress = null, onHover = null, label = "
       const curve = laneCurve(a, b, to.col - from.col, blocked);
       const g = svg("g", { class: laneClasses(lane), "data-from": lane.from, "data-to": lane.to }, layer);
       svg("path", { d: `M${curve.start} C${curve.c1} ${curve.c2} ${curve.end}` }, g);
-      if (!lane.shut) svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
+      if (!lane.shut && !lane.plain) svg("polygon", { points: arrowPoints(curve.end, curve.c2).join(" "), class: "sg-head" }, g);
       if (lane.two_way) svg("polygon", { points: arrowPoints(curve.start, curve.c1).join(" "), class: "sg-head" }, g);
       const short = lane.short ? svg("text", { x: curveMid(curve)[0], y: curveMid(curve)[1] - 5, "text-anchor": "middle",
                                                 class: "sg-short" }, g) : null;

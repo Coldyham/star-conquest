@@ -18,7 +18,7 @@ from __future__ import annotations
 import dataclasses
 import math
 
-from starconquest import app, combat, hud, mapgen, paths, play, starlore, stats, turnfilm
+from starconquest import app, campaign, combat, hud, mapgen, paths, play, starlore, stats, turnfilm
 from starconquest.model import GameState, lane_key
 from starconquest.viewstate import CHOOSING, ROUTING, SPECTATE_ROW, Ui
 
@@ -293,6 +293,9 @@ def over(state: GameState, ui: Ui) -> dict:
         "choose_stage": bool(ui.run_id and ui.run_on and ui.run_graph is None),
         "next_label": "Replay for its gate" if ui.run_next in ui.run_replays else "Next stage",
         "run_graph": _run_graph(ui) if ui.run_id and ui.run_note else None,
+        # A campaign node won and yours: it and its neighbours, a press playing one.
+        "campaign_graph": (campaign.graph(ui.campaign_status, ui.campaign_pick)
+                           if state.winner == ui.human_id and not ui.run_id else None),
         "share": list(hud.share_label(ui)) if share else None,
         "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
         "notes": ui.share_msg if share else "",

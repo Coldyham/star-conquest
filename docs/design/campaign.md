@@ -346,6 +346,20 @@ The game and the board are one site, so the game can ask before it plays.
   Start, and the link has no way to say the player already answered.
   `weekQueries` is the one copy of the two reads a week is folded from, for the
   two pages and the endpoint.
+- **The win screen shows the node and its neighbours once it is yours**, as a
+  run's win screen shows where the run goes next, drawn by the same
+  `webapp/js/stagegraph.mjs`. The endpoint's answer carries `around` (the node
+  first, then each neighbour with its map position, holder, `attemptStatus` for
+  a game started there now and its stored setup) and the lanes among them;
+  `campaign.graph` lays them out as on the week's map (the node in the middle,
+  each neighbour in the free cell nearest its direction) with undirected
+  (`plain`) lanes. It is drawn only while the answer says the node is yours
+  (`own`, `own-home`), so a win shows it once posted: a quick post that lands
+  asks again at once (`Watcher.ask_again`) rather than at the next refresh.
+  Showing it on an unposted win would mean predicting the capture, which is
+  the board's rule to state. A tap picks a neighbour a win on would be a move
+  (`play.over_node`), a second plays its setup (`Session._play_node`), stamped
+  with that neighbour's answer since the watcher has not looked it up yet.
 
 ## A daily allowance of moves (proposed)
 

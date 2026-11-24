@@ -57,6 +57,24 @@ test("the answer is attemptStatus, plus the holder", () => {
   assert.equal(answer(named, scores, named.nodes[1], "Ann", T0).node.name, "C1");
 });
 
+test("the answer carries the node's neighbourhood, each as a game started there now", () => {
+  const placed = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, x: 10 * n.id, y: 5 })) };
+  const scores = [at(0, "ann", 10, 40), at(20, "ann", 0, 30)];
+  const { around } = answer(placed, scores, placed.nodes[0], "ann", T0 + 30 * MIN);
+  assert.deepEqual(around.nodes.map((n) => n.id), [0, 1, 10]);   // the node itself first
+  const [here, one, home] = around.nodes;
+  assert.equal(here.status.why, "own");
+  assert.deepEqual(here.holder, { name: "ann", turns: 30, lost: 0 });
+  assert.deepEqual([one.status.why, one.status.can, one.holder], ["adjacent", true, null]);
+  assert.equal(home.status.why, "own-home");
+  assert.deepEqual([one.x, one.y], [10, 5]);
+  assert.deepEqual(one.settings, graph.nodes[1].settings);   // what a press there plays
+  assert.deepEqual(around.lanes, [[0, 1], [10, 0]]);
+  // From node 1 only node 0 is a neighbour, and the home's lane isn't among them.
+  const far = answer(placed, scores, placed.nodes[1], "ann", T0 + 30 * MIN).around;
+  assert.deepEqual([far.nodes.map((n) => n.id), far.lanes], [[1, 0], [[0, 1]]]);
+});
+
 test("the handler finds this week's node and answers for the name given", async () => {
   const day = weekParam(weekStart(new Date()));
   const week = { ...graph, week_start: day };

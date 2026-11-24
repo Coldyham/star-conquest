@@ -287,3 +287,104 @@ def test_a_named_node_goes_by_its_crater():
     shy = campaign.parse(json.dumps({**body, "status": {"can": False, "why": "no-name"}}), t)
     assert campaign.label(shy, t) == "Campaign: Mädler"
     assert campaign.parse(answer(), t).name == "Node 3"
+
+
+def _near(node, x, y, why="adjacent", can=True, kind="field", holder=None, name=None):
+    """A node of the answer's ``around``, as netlify/functions/campaign.mjs writes one."""
+    return {"id": node, "kind": kind, **({"name": name} if name else {}), "x": x, "y": y,
+            "holder": holder, "status": {"can": can, "why": why}, "settings": {"players": 2, "seed": 100 + node}}
+
+
+def mine_around(why="own") -> campaign.Status:
+    """Node 3, yours, with a neighbour on each side of it: an open field node
+    east, one held by bo north, and bo's home west."""
+    body = json.loads(answer(why=why, can=False))
+    body["around"] = {
+        "nodes": [_near(3, 100, 100, why=why, can=False, name="Mädler"),
+                  _near(5, 200, 110),
+                  _near(6, 90, 0, holder={"name": "bo", "turns": 30, "lost": 2}),
+                  _near(9, 0, 100, why="has-home", can=False, kind="home", holder={"name": "bo", "turns": 9, "lost": 0})],
+        "lanes": [[3, 5], [3, 6], [9, 3], [5, 6], [5, 77]]}
+    parsed = campaign.parse(json.dumps(body), 0.0)
+    assert parsed is not None
+    return parsed
+
+
+def test_the_answer_carries_the_nodes_neighbourhood():
+    s = mine_around()
+    assert [n.node_id for n in s.around] == [3, 5, 6, 9]
+    assert s.lanes == ((3, 5), (3, 6), (9, 3), (5, 6))    # the lane to a node it didn't send is dropped
+    assert (s.around[2].holder, s.around[2].beat) == ("bo", (30, 2))
+    assert s.around[1].setup == {"players": 2, "seed": 105}
+    assert set(campaign.playable(s)) == {5, 6}
+    # A neighbourhood it can't read leaves the answer standing, without one.
+    body = json.loads(answer())
+    body["around"] = {"nodes": [{"id": "x"}]}
+    bare = campaign.parse(json.dumps(body), 0.0)
+    assert bare is not None and bare.around == () and campaign.playable(bare) == {}
+    assert campaign.parse(answer(), 0.0).around == ()
+
+
+def test_the_win_screen_draws_a_node_only_once_it_is_yours():
+    assert campaign.graph(None) is None
+    assert campaign.graph(mine_around(why="adjacent")) is None   # a win here, not yet posted
+    assert campaign.graph(status()) is None                      # yours, but an older board sent no neighbours
+    assert campaign.graph(mine_around(why="own-home")) is not None
+
+
+def test_the_graph_lays_neighbours_out_as_on_the_map():
+    g = campaign.graph(mine_around())
+    assert g is not None
+    at = {n["key"]: (n["col"], n["row"]) for n in g["nodes"]}
+    # Middle; east; north; west. Screen y runs down, as on the campaign page.
+    assert at == {"node_3": (1, 1), "node_5": (2, 1), "node_6": (1, 0), "node_9": (0, 1)}
+    said = {n["key"]: (n["title"], n["status"], n["marks"], n["open"]) for n in g["nodes"]}
+    assert said["node_3"] == ("Mädler", "yours", ["here"], True)
+    assert said["node_5"] == ("Node 5", "open", ["move"], True)
+    assert said["node_6"] == ("Node 6", "bo: beat 30t / 2 lost", ["move"], True)
+    assert said["node_9"] == ("Home 9", "bo's home", [], False)
+    # Lanes run left to right (down a column), without heads: a campaign lane runs both ways.
+    assert [(lane["from"], lane["to"]) for lane in g["lanes"]] == [
+        ("node_3", "node_5"), ("node_6", "node_3"), ("node_9", "node_3"), ("node_6", "node_5")]
+    assert all(lane["plain"] for lane in g["lanes"])
+    assert g["focus"] == "node_3"
+
+
+def test_a_crowded_neighbourhood_takes_the_next_cell_round():
+    body = json.loads(answer(why="own", can=False))
+    body["around"] = {"nodes": [_near(0, 0, 0, why="own", can=False)]
+                      + [_near(i, 10 + i, 0) for i in range(1, 11)], "lanes": []}
+    g = campaign.graph(campaign.parse(json.dumps(body), 0.0))
+    assert g is not None
+    cells = [(n["col"], n["row"]) for n in g["nodes"]]
+    assert len(set(cells)) == len(cells) == 11    # ten all due east: no two share a cell
+
+
+def test_a_tap_picks_a_neighbour_and_a_second_plays_it():
+    from starconquest import play
+    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
+    ui.campaign_status = mine_around()
+    assert play.over_node(ui, 9) is None and ui.campaign_pick is None    # bo's home: not a move
+    assert play.over_node(ui, 3) is None and ui.campaign_pick is None    # the node itself
+    assert play.over_node(ui, 5) is None and ui.campaign_pick == 5
+    g = campaign.graph(ui.campaign_status, ui.campaign_pick)
+    assert g is not None and g["focus"] == "node_5"
+    [picked] = [n for n in g["nodes"] if "picked" in n["marks"]]
+    assert (picked["key"], picked["status"]) == ("node_5", "press again to play")
+    assert play.over_node(ui, 5) == "campaign_play"
+
+
+def test_a_post_asks_again_at_once_dropping_a_lookup_in_flight(monkeypatch):
+    monkeypatch.setattr(campaign, "enabled", lambda: True)
+    asked = []
+    monkeypatch.setattr(campaign, "fetch", lambda token, name, start=None: asked.append(start) or FakeRequest(token))
+    watch = campaign.Watcher()
+    settings = Settings(seed=5)
+    watch.pump(settings, now=0.0, start="")
+    watch.pump(settings, now=campaign.SETTLE_S, start="")
+    assert len(asked) == 1
+    watch.ask_again()
+    assert watch._request is None
+    watch.pump(settings, now=campaign.SETTLE_S + 1, start="")
+    assert len(asked) == 2      # long before REFRESH_S

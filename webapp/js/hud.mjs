@@ -505,7 +505,10 @@ export class Hud {
     // stage Next stage plays, a second tap plays it (`play.over_pick`).
     const old = veil.querySelector(".tgraph");
     const scroll = old ? [old.scrollLeft, old.scrollTop] : null;
-    const box = over.run_graph ? h("div", { class: "tgraph vgraph" }) : null;
+    // A campaign node won and held: it and its neighbours, the same way
+    // (`campaign.graph`; a tap picks a neighbour, a second plays it).
+    const graphed = over.run_graph || over.campaign_graph;
+    const box = graphed ? h("div", { class: "tgraph vgraph" }) : null;
     const kids = [
       h("h1", { style: `color:${this.color(over.headline[1])}` }, over.headline[0]),
       ...over.lines.map(([kind, text, role]) => h("p", { class: kind, style: `color:${this.color(role)}` }, text)),
@@ -516,9 +519,10 @@ export class Hud {
     veil.replaceChildren(h("div", { class: "stack" }, ...kids));
     veil.hidden = false;
     if (box) {
-      const graph = drawGraph(box, over.run_graph, { onPress: (key) => this.on.action(key), label: "Where the run goes next" });
+      const label = over.run_graph ? "Where the run goes next" : "This campaign node and its neighbours";
+      const graph = drawGraph(box, graphed, { onPress: (key) => this.on.action(key), label });
       if (scroll) [box.scrollLeft, box.scrollTop] = scroll;
-      if (over.run_graph.focus) graph.show(over.run_graph.focus, scroll ? undefined : { block: "nearest", inline: "center" });
+      if (graphed.focus) graph.show(graphed.focus, scroll ? undefined : { block: "nearest", inline: "center" });
     }
   }
 

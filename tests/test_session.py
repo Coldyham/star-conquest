@@ -635,6 +635,29 @@ def test_the_campaign_is_asked_about_before_start_and_stamped_on_the_match(sessi
     assert game["view"]["notes"] == [["Node 4: not a move", "campaign"]]
 
 
+def test_a_campaign_node_won_and_held_shows_its_neighbours_and_plays_one(session):
+    from starconquest import campaign
+    _won(session)
+    near = {"x": 0, "y": 0, "holder": None}
+    body = json.dumps({"node": {"id": 4, "kind": "field"}, "now": 0, "status": {"why": "own", "can": False},
+                       "around": {"nodes": [{**near, "id": 4, "status": {"why": "own"}, "settings": {}},
+                                            {**near, "id": 7, "x": 50, "status": {"why": "adjacent", "can": True},
+                                             "settings": {"players": 3, "nodes": 14, "seed": 77}}],
+                                  "lanes": [[4, 7]]}})
+    session.ui.campaign_status = campaign.parse(body, 0.0)   # as the page's tick lands it (`app.campaign_tick`)
+    graph = _menu(session, "game.view")["view"]["over"]["campaign_graph"]
+    assert [(n["key"], n["status"]) for n in graph["nodes"]] == [("node_4", "yours"), ("node_7", "open")]
+    old = session.ui
+    view = _menu(session, "game.action", name="node_7")["view"]       # a tap picks
+    assert session.ui is old and view["over"]["campaign_graph"]["focus"] == "node_7"
+    res = _menu(session, "game.action", name="node_7")                # a second tap plays it
+    assert res["fresh"] and session.ui is not old
+    assert (session.settings.players, session.settings.nodes, session.seed) == (3, 14, 77)
+    assert session.ui.campaign_start == "adjacent"
+    # A game lost there, or one not yet yours, draws nothing.
+    assert _menu(session, "game.view")["view"]["over"] is None
+
+
 def test_the_menu_banner_says_the_campaign_reminder_once_it_lands(session, games, monkeypatch):
     from starconquest import campaign
     monkeypatch.setattr(campaign, "SETTLE_S", 0.0)
