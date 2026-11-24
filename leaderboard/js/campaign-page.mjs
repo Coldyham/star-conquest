@@ -10,7 +10,7 @@ import { clear, el, mapSummary, relativeTime, showError, userHref } from "./form
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { encodeToken } from "./token-encode.mjs";
-import { drawCampaignMap } from "/play/js/campaignmap.mjs";
+import { drawCampaignMap, fillFor as hueFill } from "/play/js/campaignmap.mjs";
 
 const SVG = "http://www.w3.org/2000/svg";
 const PAD = 40;   // page units around the outermost node
@@ -74,6 +74,9 @@ function svg(tag, attrs = {}, children = []) {
   for (const child of children) node.append(child);
   return node;
 }
+
+/** A player's colour (a holder, a standings row, a territory band), as the map fills their nodes. */
+const fillFor = (holder) => hueFill(holder ? playerHue(holder.name) : null);
 
 function drawMap() {
   mapBox.classList.remove("loading");
