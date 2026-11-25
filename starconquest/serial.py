@@ -291,8 +291,9 @@ def over(state: GameState, ui: Ui) -> dict:
         "retry": not (ui.run_id and ui.run_note),
         "try_again": bool(ui.run_id and ui.run_again),
         "choose_stage": bool(ui.run_id and ui.run_on and ui.run_graph is None),
-        "next_label": "Replay for its gate" if ui.run_next in ui.run_replays else "Next stage",
-        "run_graph": _run_graph(ui) if ui.run_id and ui.run_note else None,
+        "next_label": "Replay for its gate" if ui.run_id and ui.run_next in ui.run_replays else "Next stage",
+        "run_graph": _run_graph(ui) if ui.run_id and ui.run_note else _fork_graph(state, ui),
+        "graph_label": "Where the run goes next" if ui.run_id else "Where to go next",
         # A campaign node won and yours: it and its neighbours, a press playing one.
         "campaign_graph": (campaign.graph(ui.campaign_status, ui.campaign_pick)
                            if state.winner == ui.human_id and not ui.run_id else None),
@@ -300,6 +301,25 @@ def over(state: GameState, ui: Ui) -> dict:
         "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
         "notes": ui.share_msg if share else "",
     }
+
+
+def _fork_graph(state: GameState, ui: Ui) -> dict | None:
+    """The overlay's graph for a free-play win at a fork (`app.fork_graph`):
+    the stage and the ways on this win opens, closed up, with the pick marked."""
+    ways = ui.fork_choices(state)
+    if not ways or ui.stage_graph is None:
+        return None
+    keep = {ui.stage_graph["here"], *(f"stage_{sid}" for sid in ways)}
+    pick = f"stage_{ui.fork_pick(state)}"
+    nodes = [n for n in ui.stage_graph["nodes"] if n["key"] in keep]
+    cols = sorted({n["cell"][0] for n in nodes})
+    rows = sorted({n["cell"][1] for n in nodes})
+    kept = {n["key"] for n in nodes}
+    nodes = [{**{k: v for k, v in n.items() if k != "cell"}, "col": cols.index(n["cell"][0]),
+              "row": rows.index(n["cell"][1]), "marks": [*n["marks"], "picked"] if n["key"] == pick else n["marks"]}
+             for n in nodes]
+    lanes = [lane for lane in ui.stage_graph["lanes"] if lane["from"] in kept and lane["to"] in kept]
+    return {"nodes": nodes, "lanes": lanes, "focus": pick}
 
 
 def _run_graph(ui: Ui) -> dict | None:

@@ -231,8 +231,14 @@ def stage_ui(ui: Ui, stage: tuple[gauntlet.Gauntlet, gauntlet.Stage] | None,
     # Gated ways out (a hidden bonus stage, say), and whether a best already
     # meets each, so the win overlay can say what this win unlocks.
     mine = gauntlet.best(s)
-    ui.stage_gates = tuple((label, title, target, mine is not None and target.met(mine))
-                           for label, title, target in gauntlet.gates_out(g, s.id))
+    ui.stage_gates = tuple((label, title, target, mine is not None and target.met(mine), far)
+                           for (label, title, target), far in zip(gauntlet.gates_out(g, s.id),
+                                                                   gauntlet.gated_onward(g, s.id), strict=True))
+    # Every way on from here, so a win that opens more than one (a fork) can
+    # show them on the overlay and play the one tapped (`Ui.fork_choices`).
+    ui.stage_ways = tuple(gauntlet.deeper(g, s.id))
+    ways = (*ui.stage_ways, *(gate[4] for gate in ui.stage_gates))
+    ui.stage_graph = fork_graph(g, s.id, ways) if len(set(ways)) > 1 else None
 
 
 def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
@@ -242,6 +248,7 @@ def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     ui.run_at, ui.run_total = gauntlet_run.position(r, g)
     ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
     ui.run_stage = r.playing.stage if r.playing is not None else None
+    ui.run_targets = r.targets
     ui.run_lives = gauntlet_run.lives_left(r, g) if gauntlet_run.counts_lives(r, g) else 0
     ui.run_next, ui.run_again, ui.run_on = None, False, False
     ui.run_graph, ui.run_choices, ui.run_replays = None, (), ()
@@ -274,7 +281,8 @@ def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
     ui.run_replays = tuple(sid for sid in front if sid in done.won)
     ui.run_graph = run_graph(done, g) if len(front) > 1 else None
     ui.has_next_stage = ui.run_next is not None
-    ui.run_note, ui.run_ok = gauntlet_run.note(done, g, ui.run_at, ui.run_total, ui.stage_target)
+    ui.run_note, ui.run_ok = gauntlet_run.note(done, g, ui.run_at, ui.run_total, ui.shown_target)
+
 
 
 # How the overlay's graph says how the game just played went.
@@ -327,6 +335,38 @@ def run_graph(r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> dict:
                       "short": gate.short() if gate is not None else "", "hidden": (a, b) in g.hidden,
                       "two_way": (a, b) in g.two_way})
     return {"nodes": nodes, "lanes": lanes}
+
+
+def fork_graph(g: gauntlet.Gauntlet, sid: int, ways: tuple[int, ...]) -> dict:
+    """The win overlay's picture of where a free-play stage at a fork leads,
+    for `webapp/js/stagegraph.mjs`: the stage and each stage a way on from it
+    reaches, at their `gauntlet.layout` cells, and the lanes between them.
+    `serial.over` keeps only the ways this win opens and marks the pick; a node
+    carries its ``cell`` so the kept ones close up there."""
+    ids = sorted({sid, *ways}, key=g.position)
+    cells = gauntlet.layout(g)
+    places = gauntlet.cell_names(g, (s.id for s in gauntlet.shown(g, set(ids))))
+    found = gauntlet.bests(g)
+    nodes = []
+    for at in ids:
+        s = g.stage(at)
+        if s is None:
+            continue
+        if at == sid:
+            status, colour = "this stage", "var(--m-start-edge)"
+        else:
+            status = s.target.short() if s.target is not None else "next"
+            if gauntlet.met(s, found.get(at)):
+                status += " · cleared"
+            colour = "var(--m-hl-edge)"
+        marks = ["goal"] if at in gauntlet.goals(g) else []
+        nodes.append({"key": f"stage_{at}", "cell": list(cells[at]), "place": places.get(at, ""),
+                      "title": s.title, "status": status, "color": colour, "open": True, "marks": marks})
+    lanes = [{"from": f"stage_{a}", "to": f"stage_{b}", "gated": (a, b) in g.lane_targets,
+              "short": g.lane_targets[(a, b)].short() if (a, b) in g.lane_targets else "",
+              "hidden": (a, b) in g.hidden, "two_way": (a, b) in g.two_way}
+             for a, b in g.lanes if a in ids and b in ids and sid in (a, b)]
+    return {"nodes": nodes, "lanes": lanes, "here": f"stage_{sid}"}
 
 
 def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
@@ -1613,17 +1653,21 @@ Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
 
 def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
              gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None],
-             pick: int | None = None) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
+             pick: int | None = None,
+             terms: tuple[int, bool] | None = None) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
     """Start a run of the gauntlet picked in the list (``fresh``), or carry on
     the active run: resume its undecided game if it has one, never a fresh copy,
     else begin its next stage, ``pick`` (the stage selected in the list) where
     it may go more than one way. None, with a word in the list, when there is
-    nothing to play. ``enter`` puts the menu on a stage, as picking it does."""
+    nothing to play. ``enter`` puts the menu on a stage, as picking it does.
+    ``terms`` are the lives and targets a fresh run starts on, the gauntlet's
+    own unless the player chose others (`setupmenu.run_terms`)."""
     if fresh:
         g = picked
         if g is None or not gauntlet_run.offered(g):
             return None, MenuNote()
-        r: gauntlet_run.Run | None = gauntlet_run.start(g)
+        lives, targets = terms if terms is not None else (g.lives, True)
+        r: gauntlet_run.Run | None = gauntlet_run.start(g, lives=lives, targets=targets)
     else:
         r = gauntlet_run.active()
         g = gauntlet.find(gauntlets, r.gauntlet_id) if r is not None else None

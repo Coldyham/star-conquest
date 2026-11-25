@@ -502,8 +502,9 @@ export class Hud {
       buttons.push(...group([button(over.share[0], over.share[1], "teal", "share"),
         over.board ? button(over.board[0], over.board[1], "gold", "leaderboard") : null], "share"));
     }
-    // Where the run may go more than one way, its graph: a tap picks the
-    // stage Next stage plays, a second tap plays it (`play.over_pick`).
+    // Where the run (or a free-play win at a fork) may go more than one way,
+    // its graph: a tap picks the stage Next stage plays, a second tap plays it
+    // (`play.over_pick`).
     const old = veil.querySelector(".tgraph");
     const scroll = old ? [old.scrollLeft, old.scrollTop] : null;
     const box = over.run_graph ? h("div", { class: "tgraph vgraph" }) : null;
@@ -525,7 +526,7 @@ export class Hud {
     veil.hidden = false;
     if (map) drawCampaignMap(map, near, { onPress: (key) => this.on.action(key), label: "This campaign node and its neighbours" });
     if (box) {
-      const graph = drawGraph(box, over.run_graph, { onPress: (key) => this.on.action(key), label: "Where the run goes next" });
+      const graph = drawGraph(box, over.run_graph, { onPress: (key) => this.on.action(key), label: over.graph_label || "Where the run goes next" });
       if (scroll) [box.scrollLeft, box.scrollTop] = scroll;
       if (over.run_graph.focus) graph.show(over.run_graph.focus, scroll ? undefined : { block: "nearest", inline: "center" });
     }

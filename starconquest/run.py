@@ -1,10 +1,11 @@
 """A run of a gauntlet: from a start to a goal, each stage won within its
 target, on the lives the gauntlet gives — pure core, no pygame.
 
-Offered only where a run adds something to the stage list (``offered``): a
-target to meet, or a fork, where the way chosen matters because losing on it
-costs a life. On the tutorial, a single path with no stage target, a run would
-be the list over again. A run's games are ordinary games. They post, file bests and clear
+Every gauntlet with a goal can be run (``offered``): even a single path with no
+stage target, the tutorial's, is a challenge once a loss costs a life. The
+player sets the run's lives and whether stage targets count when it starts
+(``start``); the gauntlet's own are the default, and the run keeps its copy.
+A run's games are ordinary games. They post, file bests and clear
 stages as any other, and nothing about a run reaches ``Settings`` or the log,
 so the board and the verifier never see one.
 
@@ -92,6 +93,10 @@ class Run:
     # edit to the gauntlet never changes a run under way. A record without it
     # (one begun before runs had lives) reads as 1.
     lives: int = 1
+    # Do the stages' targets count: chosen when it began, on by default. With
+    # them off any first win of a stage by hand is MET; lane gates still open
+    # only on their own score.
+    targets: bool = True
 
     @property
     def playing(self) -> Step | None:
@@ -117,6 +122,8 @@ class Run:
                          for s in self.steps]}
         if self.lives != 1:
             out["lives"] = self.lives
+        if not self.targets:
+            out["targets"] = False
         return out
 
     @classmethod
@@ -140,7 +147,8 @@ class Run:
         lives = _int(data.get("lives"))
         return cls(id=rid, gauntlet_id=gid, gauntlet_hash=ghash, started_at=began,  # type: ignore[arg-type]
                    steps=tuple(steps), status=status,
-                   lives=1 if lives is None else max(1, min(gauntlet.LIVES_MAX, lives)))
+                   lives=1 if lives is None else max(1, min(gauntlet.LIVES_MAX, lives)),
+                   targets=data.get("targets") is not False)
 
 
 def _int(value) -> int | None:
@@ -162,19 +170,26 @@ def _step(row) -> Step | None:
 # --------------------------------------------------------------------------- #
 # Which gauntlets, and in what order
 # --------------------------------------------------------------------------- #
-def forks(g: gauntlet.Gauntlet) -> bool:
-    """Does a run of ``g`` choose its way: more than one start, or a stage
-    reached over ungated lanes with more than one way out, gated or not. A gate
-    out of a stage with no other way on (the tutorial's bonus stages) is not a
-    choice, since a run ends on the stage before it."""
-    main = g.depths()
-    return len(g.start) > 1 or any(len(g.onward(sid)) > 1 and g.onward(sid, gated=False) for sid in main)
-
-
 def offered(g: gauntlet.Gauntlet) -> bool:
-    """Can ``g`` be run: one with a goal to end on, and a stage target or a
-    fork to make it more than the list."""
-    return bool(gauntlet.goals(g)) and (any(s.target is not None for s in g.stages) or forks(g))
+    """Can ``g`` be run: any gauntlet with a goal to end on. A single path with
+    no target is a run too: a loss costs a life, so it can be lost."""
+    return bool(gauntlet.goals(g))
+
+
+def has_targets(g: gauntlet.Gauntlet) -> bool:
+    """Has ``g`` a stage target, which a run may switch off."""
+    return any(s.target is not None for s in g.stages)
+
+
+def terms(r: Run, g: gauntlet.Gauntlet) -> str:
+    """How ``r`` was set up where it differs from the gauntlet's own run
+    ("targets off · 5 lives"), else blank."""
+    out = []
+    if not r.targets and has_targets(g):
+        out.append("targets off")
+    if r.lives != g.lives:
+        out.append("one life" if r.lives == 1 else f"{r.lives} lives")
+    return " · ".join(out)
 
 
 def linear(g: gauntlet.Gauntlet) -> list[int] | None:
@@ -405,8 +420,9 @@ def summary(g: gauntlet.Gauntlet, rs: list[Run] | None = None) -> str:
     has been, else the furthest any reached, else blank."""
     mine = [r for r in (runs() if rs is None else rs)
             if r.gauntlet_id == g.id and r.gauntlet_hash == fingerprint(g) and r.status != ACTIVE]
-    if any(r.status == COMPLETE for r in mine):
-        return "Run complete ✓"
+    done = [terms(r, g) for r in mine if r.status == COMPLETE]
+    if done:
+        return "Run complete ✓" if "" in done else f"Run complete ✓ ({done[0]})"
     if not mine:
         return ""
     best = max(r.cleared for r in mine)
@@ -421,16 +437,19 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def start(g: gauntlet.Gauntlet, now: str | None = None) -> Run:
-    """Begin a run of ``g``, abandoning any run already under way (there is
-    only ever one)."""
+def start(g: gauntlet.Gauntlet, now: str | None = None, lives: int | None = None,
+          targets: bool = True) -> Run:
+    """Begin a run of ``g`` on ``lives`` (the gauntlet's unless the player
+    chose otherwise), its stage targets counting or not, abandoning any run
+    already under way (there is only ever one)."""
     old = active()
     if old is not None:
         abandon(old)
     began = now or _now()
     stamp = re.sub(r"[^0-9]", "", began)
     return save(Run(id=f"{stamp}-{g.id}", gauntlet_id=g.id, gauntlet_hash=fingerprint(g),
-                    started_at=began, lives=g.lives))
+                    started_at=began, lives=max(1, min(gauntlet.LIVES_MAX, lives or g.lives)),
+                    targets=targets))
 
 
 def begin(r: Run, stage: int, log: GameLog) -> Run:
@@ -465,6 +484,9 @@ def finish(run_id: str, log_name: str, outcome: str, turns: int, lost: int,
     sid = r.playing.stage
     if sid in r.won and outcome in (MET, MISSED):
         outcome = MET if any(gate.met((turns, lost)) for gate in gates_left(r, g, sid)) else MISSED
+    elif outcome == MISSED and not r.targets:
+        outcome = MET    # targets off: any win by hand wins the stage
+
     step = replace(r.playing, outcome=outcome, turns=turns, lost=lost)
     r = replace(r, steps=(*r.steps[:-1], step))
     if outcome in COSTS and lives_left(r, g) <= 0:
