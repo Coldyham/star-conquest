@@ -364,8 +364,7 @@ The game and the board are one site, so the game can ask before it plays.
   unposted win would mean predicting the capture, which is the board's rule to
   state. A press picks an open neighbour (`play.over_node`), a second plays its
   setup (`Session._play_node`), stamped with that neighbour's answer since the
-  watcher has not looked it up yet. The board's pixel font is served at
-  `/play/fonts/` for the map's numbers (`build_next.FONTS`).
+  watcher has not looked it up yet.
 - **A stage graph was tried first and dropped**: the run's `stagegraph.mjs`
   boxes in a grid read as a different thing from the board's map; a node should
   look the same wherever it is shown.

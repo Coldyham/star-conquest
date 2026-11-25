@@ -72,12 +72,10 @@ def build_info(zip_path: str) -> str:
             f'export const GAME_ZIP = "{zip_path}";\n')
 
 
-# The game's own font, served to the page at fonts/, and the board's pixel
-# font, which the campaign map draws its numbers in (`css/campaignmap.css`).
+# The game's own font, served to the page at fonts/.
 FONTS = {
     "DejaVuSansMono.ttf": ROOT / "starconquest" / "assets" / "DejaVuSansMono.ttf",
     "DejaVuSansMono-Bold.ttf": ROOT / "starconquest" / "assets" / "DejaVuSansMono-Bold.ttf",
-    "press-start-2p.woff2": ROOT / "leaderboard" / "fonts" / "press-start-2p.woff2",
 }
 
 
