@@ -240,6 +240,7 @@ def run_ui(ui: Ui, r: gauntlet_run.Run, g: gauntlet.Gauntlet) -> None:
     ui.run_at, ui.run_total = gauntlet_run.position(r, g)
     ui.run_id, ui.run_note, ui.run_ok = r.id, "", True
     ui.run_stage = r.playing.stage if r.playing is not None else None
+    ui.run_targets = r.targets
     ui.run_lives = gauntlet_run.lives_left(r, g) if gauntlet_run.counts_lives(r, g) else 0
     ui.run_next, ui.run_again, ui.run_on = None, False, False
     ui.run_graph, ui.run_choices, ui.run_replays = None, (), ()
@@ -272,7 +273,8 @@ def record_run_step(state: GameState, ui: Ui, log: GameLog) -> None:
     ui.run_replays = tuple(sid for sid in front if sid in done.won)
     ui.run_graph = run_graph(done, g) if len(front) > 1 else None
     ui.has_next_stage = ui.run_next is not None
-    ui.run_note, ui.run_ok = gauntlet_run.note(done, g, ui.run_at, ui.run_total, ui.stage_target)
+    ui.run_note, ui.run_ok = gauntlet_run.note(done, g, ui.run_at, ui.run_total, ui.shown_target)
+
 
 
 # How the overlay's graph says how the game just played went.
@@ -1588,17 +1590,21 @@ Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
 
 def open_run(settings: Settings, fresh: bool, picked: gauntlet.Gauntlet | None,
              gauntlets: list[gauntlet.Gauntlet], enter: Callable[[gauntlet.Gauntlet, int], Found | None],
-             pick: int | None = None) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
+             pick: int | None = None,
+             terms: tuple[int, bool] | None = None) -> tuple[tuple[GameState, Ui, GameLog, int] | None, MenuNote]:
     """Start a run of the gauntlet picked in the list (``fresh``), or carry on
     the active run: resume its undecided game if it has one, never a fresh copy,
     else begin its next stage, ``pick`` (the stage selected in the list) where
     it may go more than one way. None, with a word in the list, when there is
-    nothing to play. ``enter`` puts the menu on a stage, as picking it does."""
+    nothing to play. ``enter`` puts the menu on a stage, as picking it does.
+    ``terms`` are the lives and targets a fresh run starts on, the gauntlet's
+    own unless the player chose others (`setupmenu.run_terms`)."""
     if fresh:
         g = picked
         if g is None or not gauntlet_run.offered(g):
             return None, MenuNote()
-        r: gauntlet_run.Run | None = gauntlet_run.start(g)
+        lives, targets = terms if terms is not None else (g.lives, True)
+        r: gauntlet_run.Run | None = gauntlet_run.start(g, lives=lives, targets=targets)
     else:
         r = gauntlet_run.active()
         g = gauntlet.find(gauntlets, r.gauntlet_id) if r is not None else None

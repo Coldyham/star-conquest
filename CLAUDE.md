@@ -400,8 +400,9 @@ stage is its setup, by `challenge_key()`. **Progress is derived, never stored**
 matches it (`setupmenu.active_stage`). Built-in stages pin every field and a seed.
 `from_dict` never raises. The play screen never sees a `Gauntlet` (`app.stage_ui`).
 **A run (`run.py`) is the one stored progress**: from a start to a goal over
-any stage it has opened (`run.frontier`; offered for a target or a fork,
-`run.offered`), on the gauntlet's lives, a loss costing one; a gated lane opens
+any stage it has opened (`run.frontier`; every gauntlet with a goal,
+`run.offered`), on the lives and targets chosen at its start (the gauntlet's by
+default, `setupmenu.run_terms`; kept on the run), a loss costing one; a gated lane opens
 on the run's own score. Lives left are derived from the steps
 (`run.lives_left`); a bonus life is `gauntlet.grants_life`, by default a dead
 end's. It judges only its own game (`run.finish`), so a

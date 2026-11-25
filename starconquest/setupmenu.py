@@ -180,6 +180,10 @@ class Menu:
     gauntlet_note: tuple[str, str, bool] | None = None
     runs: list = field(default_factory=list)
     run_confirm: str = ""
+    # The lives and targets a run of the list's gauntlet will start on, as
+    # (gauntlet id, lives, targets), once the player changes them from the
+    # gauntlet's own (`run_terms`).
+    run_choice: tuple[str, int, bool] | None = None
     # The stage the list's graph has selected (`pick_default`): a tap selects,
     # a second tap or Play plays.
     stage_pick: int | None = None
@@ -1164,13 +1168,13 @@ HIGHLIGHT = (120, 150, 210)   # `menu._HL_BORDER`: an open stage's status
 COPY_GAUNTLET = "Copy link"
 TUTORIAL_KEYS = ("stage_", "tutorial_", "gauntlet_pick_", "run_")
 RUN_KEYS = ("run_start", "run_continue", "run_abandon")
+RUN_TERM_KEYS = ("run_lives_dec", "run_lives_inc", "run_targets")
 # Beside a run under way, what plays outside it says so: the list's strip,
 # and the stage banner over the menu's Start.
 FREE_PLAY = "Free play"
 FREE_PLAY_NOTE = "Not part of your run: free play, which the run doesn't count"
 FREE_PLAY_BANNER = "Start is free play, not your run: continue the run from {label}"
-RUN_ABOUT = "Run: every stage in order, each within its target, {lives}"
-RUN_ABOUT_FORK = "Run: any stage you've opened, to the end, each within its target, {lives}"
+RUN_ABOUT = "Run: play stages back to back in ironman mode, {terms} (recommended: {own})"
 PROGRESS_NOTE = "Progress is kept in this browser — clearing site data resets it"
 
 Found = tuple[gauntlet.Gauntlet, gauntlet.Stage]
@@ -1286,6 +1290,7 @@ def open_tutorial(ms, settings: Settings, say: Say, pick: str | None = None) -> 
     ms.kept_ids = frozenset(g.id for g in gauntlet.remembered())
     ms.runs = gauntlet_run.runs()
     ms.run_confirm = ""
+    ms.run_choice = None
     ms.gauntlet_note = None
     ms.stage_pick = None
     ids = [g.id for g in ms.gauntlets]
@@ -1361,7 +1366,9 @@ def live_run(ms):
 
 def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | None:
     """The list's run line and its buttons, ``(text, [(key, label)])``, or None
-    for a gauntlet that can't be run (`run.offered`): the tutorial. Where the
+    for a gauntlet that can't be run (`run.offered`: one with no goal). Before
+    a run, the buttons set its lives and whether targets count (`run_terms`),
+    and the line says them beside the gauntlet's own, recommended. Where the
     run may go more than one way, the button names the stage it will play, and
     the line asks for one until there is one. A stage already won, kept for its
     gate, is named as a replay."""
@@ -1388,9 +1395,41 @@ def run_row(ms, g: gauntlet.Gauntlet) -> tuple[str, list[tuple[str, str]]] | Non
         return f"Run under way: {where}", [("run_continue", go), ("run_abandon", abandon)]
     if live is not None and ms.run_confirm == "run_start":
         return "Starting this ends your run of another gauntlet", [("run_start", "Start anyway")]
-    lives = "one life" if g.lives == 1 else f"{g.lives} lives"
-    about = (RUN_ABOUT if gauntlet_run.linear(g) else RUN_ABOUT_FORK).format(lives=lives)
-    return gauntlet_run.summary(g, ms.runs) or about, [("run_start", "Start run")]
+    lives, targets = run_terms(ms, g)
+    about = RUN_ABOUT.format(terms=_terms(g, lives, targets), own=_terms(g, g.lives, True))
+    past = gauntlet_run.summary(g, ms.runs)
+    buttons = [("run_start", "Start run")]
+    if gauntlet_run.has_targets(g):
+        buttons.append(("run_targets", "Targets: on" if targets else "Targets: off"))
+    buttons += [("run_lives_dec", "− life"), ("run_lives_inc", "+ life")]
+    return (f"{past} · {about}" if past else about), buttons
+
+
+def _terms(g: gauntlet.Gauntlet, lives: int, targets: bool) -> str:
+    """A run's terms as the run line says them: "2 lives", and ", targets
+    off" or on where a stage of ``g`` has one."""
+    out = "1 life" if lives == 1 else f"{lives} lives"
+    if gauntlet_run.has_targets(g):
+        out += ", targets on" if targets else ", targets off"
+    return out
+
+
+def run_terms(ms, g: gauntlet.Gauntlet) -> tuple[int, bool]:
+    """The lives a run of ``g`` starts on and whether its stage targets count:
+    the player's choice in the list, else the gauntlet's own (its lives,
+    targets on)."""
+    c = ms.run_choice
+    return (c[1], c[2]) if c is not None and c[0] == g.id else (g.lives, True)
+
+
+def change_run_terms(ms, g: gauntlet.Gauntlet, key: str) -> None:
+    """A press on the run line's − life, + life or Targets."""
+    lives, targets = run_terms(ms, g)
+    if key == "run_targets":
+        targets = not targets
+    else:
+        lives = max(1, min(gauntlet.LIVES_MAX, lives + (1 if key.endswith("inc") else -1)))
+    ms.run_choice = (g.id, lives, targets)
 
 
 
@@ -1470,6 +1509,10 @@ def tutorial_press(ms, settings: Settings, key: str, web: bool, say: Say,
     armed, ms.run_confirm = ms.run_confirm, ""   # any other press disarms a run button
     if key in RUN_KEYS and g is not None:
         return _run_press(ms, settings, g, key, armed, say, begin)
+    if key in RUN_TERM_KEYS and g is not None:
+        change_run_terms(ms, g, key)
+        return None
+
     if key == "tutorial_close":
         ms.tutorial_open = False
     elif key == "tutorial_leave":

@@ -405,8 +405,10 @@ class Ui:
     # step. Where the run may go more than one way, `run_graph` is the overlay's
     # picture of it (`app.run_graph`, without the pick), `run_choices` the
     # stages a tap on it may pick (the frontier) and `run_replays` those already
-    # won, kept for a gate.
+    # won, kept for a gate. `run_targets` is off for a run begun with stage
+    # targets off: the target is then not shown in its game (`shown_target`).
     run_stage: int | None = None
+    run_targets: bool = True
     run_lives: int = 0
     run_on: bool = False
     run_next: int | None = None
@@ -789,7 +791,14 @@ class Ui:
     def in_stage(self) -> bool:
         return self.stage_label is not None
 
+    @property
+    def shown_target(self) -> Target | None:
+        """The stage target the game shows: none in a run's own game begun
+        with targets off, where it doesn't count."""
+        return None if self.run_id and not self.run_targets else self.stage_target
+
     def met_target(self, state: GameState) -> bool:
+
         """Does this win meet the stage's target (any win, with none)?"""
         if self.stage_target is None:
             return True

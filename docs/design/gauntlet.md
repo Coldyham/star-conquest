@@ -357,13 +357,11 @@ one with stage targets (the form's "Stage targets", from the probes' wins) or
 one built on the board with "Beat the best bot". Boons stay parked in
 [`graphical-gauntlet-maker.md`](../graphical-gauntlet-maker.md).
 
-- **Offered only where it adds something** (`run.offered`). The gauntlet must
-  have a goal to end on, and either a stage target or a fork (`run.forks`:
-  two starts, or a stage on the main path with more than one way out, gated or
-  not). At a fork the choice is the point: a way the run can't win costs it
-  lives. On the tutorial, a single path with no target whose gates lead only
-  off its last stage, a run would be the stage list again, so the list shows
-  no run there.
+- **Every gauntlet with a goal can be run** (`run.offered`; *Every gauntlet
+  runs* below). Until 2026-11-24 a run was offered only for a stage target or
+  a fork, on the grounds that elsewhere it was the stage list again; but a run
+  can be lost where the list can't, so a single path with no target is a
+  challenge too.
 - **Only this game's score counts.** A run game's Next stage asks
   `can_post` and `met_target` on this game, never `stage_met_before`, so a fast
   free-play win on a stage doesn't carry a run over it
@@ -520,8 +518,41 @@ than a coin toss at the start.
   so a lane edited under a run ends it, and the stages that grant a life once
   there are any. A gauntlet with no bonus stage hashes as before.
 - **Not built:** checkpoints (a life already gives what going back to the last
-  waist would); a run on a linear gauntlet with no targets ("finish within
-  three losses" is a different challenge, left to the author to decide).
+  waist would).
+
+### Every gauntlet runs, on the player's terms (built 2026-11-24)
+
+The author decided the question left open above: every gauntlet can be run,
+and the player sets the run's lives and whether stage targets count when it
+starts, the maker's own being the default and the recommendation.
+
+- **A run needs only a goal** (`run.offered`). The tutorial and any single
+  path with no target are runs: each loss costs a life, and the last ends it
+  ("finish within three losses"). `run.forks` went with the old test.
+- **Lives and targets are chosen in the list** before Start run: "− life",
+  "+ life" (1 to `LIVES_MAX`) and, where a stage has a target, "Targets: on/off"
+  (`setupmenu.run_terms`, `change_run_terms`; kept per gauntlet in
+  `MenuState.run_choice` until the list is opened afresh). The run line names
+  the terms chosen beside the maker's, as the recommendation ("Run: play
+  stages back to back in ironman mode, 2 lives, targets off (recommended: 1
+  life, targets on)"). It no longer describes the route ("every stage in
+  order", "any stage you've opened"): the second read as if a run could start
+  from any stage already unlocked, when it always starts from a start.
+- **The run keeps its copy** (`Run.lives`, `Run.targets`, the latter written
+  only when off), as it already kept its lives: an edit to the gauntlet never
+  changes a run under way, and neither is in the fingerprint.
+- **Targets off makes any first win by hand the stage won** (`run.finish`
+  turns MISSED into MET). A loss or a win not by hand still costs a life. Lane
+  gates are untouched: they open on the run's own score as ever, and a replay
+  for one is still judged against it, since a gate is a bonus, not the bar.
+  The run's game shows no target (`Ui.shown_target`), in the side panel or on
+  the briefing card. The stage itself still clears only on its target, by
+  bests, as in free play.
+- **Easier terms are said, not hidden.** A run complete on terms other than
+  the maker's reads "Run complete ✓ (targets off · 5 lives)" (`run.terms`)
+  unless one on the maker's terms completed too. Fewer lives than the maker's
+  is said the same way: it is the maker's terms that are the reference, not a
+  difficulty order.
 
 ## The gauntlet: proposed, not built
 

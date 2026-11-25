@@ -83,16 +83,54 @@ def test_a_two_way_lane_keeps_a_chain():
     assert g is not None and gauntlet.chain(g) == [0, 1, 2]
 
 
-def test_a_run_needs_a_target_or_a_fork():
+def test_every_gauntlet_with_a_goal_can_be_run():
     assert run.offered(_chain())
-    assert run.offered(_chain((None, None, 9)))       # one target is enough
-    assert not run.offered(_chain((None, None, None)))
+    assert run.offered(_chain((None, None, None)))     # no target: a loss still costs a life
     tutorial = gauntlet.find(gauntlet.builtin(), gauntlet.TUTORIAL_ID)
-    assert tutorial is not None and not run.offered(tutorial)   # its gates lead off goals
-    assert run.offered(_graph([[0, 1], [0, 2]]))                    # a fork, no target
-    assert run.offered(_graph([[0, 1], [0, 2, {"turns": 20}]]))     # a gated fork
-    assert run.offered(_graph([[0, 2], [1, 2]], start=[0, 1]))      # two starts
-    assert not run.offered(_graph([[0, 1], [1, 2]]))
+    assert tutorial is not None and run.offered(tutorial)
+    assert run.offered(_graph([[0, 1], [0, 2]]))
+    assert run.offered(_graph([[0, 1], [1, 2]]))
+    loop = _graph([[0, 1, {"two_way": True}]], n=2)
+    assert not gauntlet.goals(loop) and not run.offered(loop)   # nowhere to end
+
+
+def test_a_linear_run_with_no_target_is_lost_on_its_last_life():
+    g = _chain((None, None, None), lives=2)
+    r = _play(run.start(g), g, 0, 1, run.LOST)
+    assert r.status == run.ACTIVE and run.lives_left(r, g) == 1 and run.frontier(r, g) == [0]
+    r = _play(r, g, 0, 2, run.LOST)
+    assert r.status == run.OVER
+
+
+def test_the_player_sets_lives_and_targets_when_the_run_starts():
+    g = _chain(lives=3)
+    r = run.start(g, lives=5, targets=False)
+    assert (r.lives, r.targets) == (5, False) and run.lives_left(r, g) == 5
+    assert run.Run.from_dict(r.to_dict()) == r and r.to_dict()["targets"] is False
+    assert "targets" not in run.start(g).to_dict() and run.start(g).lives == 3   # the gauntlet's own
+    assert run.start(g, lives=99).lives == gauntlet.LIVES_MAX
+    assert run.terms(run.start(g, lives=1, targets=False), g) == "targets off · one life"
+
+
+def test_with_targets_off_a_win_short_of_the_target_wins_the_stage():
+    g = _chain()
+    r = _play(run.start(g, targets=False), g, 0, 1, run.MISSED, turns=50)
+    assert r.steps[-1].outcome == run.MET and r.cleared == 1
+    r = _play(r, g, 1, 2, run.VOID)                 # not by hand still costs it
+    assert r.status == run.OVER
+
+
+def test_a_run_on_easier_terms_says_so_once_complete():
+    g = _chain()
+    r = run.start(g, targets=False)
+    for n, sid in enumerate((0, 1, 2), 1):
+        r = _play(r, g, sid, n, run.MISSED, turns=50)
+    assert r.status == run.COMPLETE
+    assert run.summary(g) == "Run complete ✓ (targets off)"
+    r = run.start(g)
+    for n, sid in enumerate((0, 1, 2), 4):
+        r = _win(r, g, sid, n)
+    assert run.summary(g) == "Run complete ✓"
 
 
 # --------------------------------------------------------------------------- #
