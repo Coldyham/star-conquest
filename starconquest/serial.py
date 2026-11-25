@@ -281,9 +281,18 @@ def over(state: GameState, ui: Ui) -> dict:
     offers (`render._draw_win_overlay`)."""
     text, role = hud.headline(state, ui)
     share = ui.can_post(state)
+    graph = _run_graph(ui) if ui.run_id and ui.run_note else _fork_graph(state, ui)
+    # A campaign node won and yours: it and its neighbours, a press playing one;
+    # a stage that is also a node keeps its stage graph, the node a line above it.
+    near = (campaign.graph(ui.campaign_status, ui.campaign_pick)
+            if state.winner == ui.human_id and not ui.run_id else None)
+    lines = [list(line) for line in hud.result_lines(state, ui)]
+    if near is not None and graph is not None:
+        lines.append(["small", campaign.label(ui.campaign_status) or "", "teal"])
+        near = None
     return {
         "headline": [text, role],
-        "lines": [list(line) for line in hud.result_lines(state, ui)],
+        "lines": lines,
         "next_stage": ui.offers_next_stage(state),
         "in_stage": ui.in_stage,
         # A run's decided game: Try again in Retry's place (or nothing), and
@@ -292,11 +301,9 @@ def over(state: GameState, ui: Ui) -> dict:
         "try_again": bool(ui.run_id and ui.run_again),
         "choose_stage": bool(ui.run_id and ui.run_on and ui.run_graph is None),
         "next_label": "Replay for its gate" if ui.run_id and ui.run_next in ui.run_replays else "Next stage",
-        "run_graph": _run_graph(ui) if ui.run_id and ui.run_note else _fork_graph(state, ui),
+        "run_graph": graph,
         "graph_label": "Where the run goes next" if ui.run_id else "Where to go next",
-        # A campaign node won and yours: it and its neighbours, a press playing one.
-        "campaign_graph": (campaign.graph(ui.campaign_status, ui.campaign_pick)
-                           if state.winner == ui.human_id and not ui.run_id else None),
+        "campaign_graph": near,
         "share": list(hud.share_label(ui)) if share else None,
         "board": list(hud.board_label(ui)) if share and paths.LEADERBOARD_ORIGIN else None,
         "notes": ui.share_msg if share else "",

@@ -909,6 +909,14 @@ def test_a_free_play_win_at_a_fork_shows_the_ways_on_and_plays_the_pick(session,
     assert [(n["key"], n["col"]) for n in graph["nodes"]] == [("stage_0", 0), ("stage_1", 1), ("stage_2", 1)]
     assert graph["focus"] == "stage_1" and over["next_stage"] and over["next_label"] == "Next stage"
     assert _menu(session, "game.action", name="stage_0")["view"]["over"]["run_graph"]["focus"] == "stage_1"
+    # A stage that is also a campaign node you now hold keeps its stage graph,
+    # and says the node in a line above it.
+    from tests.test_campaign_status import mine_around
+    ui.campaign_status = mine_around()
+    both = serial.over(state, ui)
+    assert both["run_graph"] is not None and both["campaign_graph"] is None
+    assert both["lines"][-1] == ["small", "Node 3: yours", "teal"]
+    ui.campaign_status = None
     view = _menu(session, "game.action", name="stage_2")["view"]     # a tap picks
     assert view["over"]["run_graph"]["focus"] == "stage_2" and session.ui is ui
     res = _menu(session, "game.action", name="stage_2")               # a second tap plays it

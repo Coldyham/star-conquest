@@ -373,6 +373,9 @@ The game and the board are one site, so the game can ask before it plays.
   week still runs (UTC), since the node's map page is embargoed until then;
   after it, the map page, like any other map's (`app.board_page`). A daily
   does the same with its day: daily.html or puzzle.html on the day itself.
+  A gauntlet stage whose setup is a node keeps its own graph at a fork, and
+  the node becomes a line of the result (`campaign.label`): two
+  maps stacked read as two choices of where to go next.
 - **A stage graph was tried first and dropped**: the run's `stagegraph.mjs`
   boxes in a grid read as a different thing from the board's map; a node should
   look the same wherever it is shown.
