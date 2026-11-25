@@ -248,14 +248,14 @@ def over_pick(ui: Ui, sid: int) -> str | None:
 
 def over_node(ui: Ui, node_id: int) -> str | None:
     """A tap on a neighbour on the win overlay's campaign graph
-    (`campaign.graph`): pick one a win on would be a move; a second tap on the
-    pick plays it. Answers that action, or None."""
-    if node_id not in campaign.playable(ui.campaign_status):
+    (`campaign.graph`): pick any node, to read where it stands; a second tap on
+    the pick plays it if it is `campaign.playable`. Answers that action, or None."""
+    if node_id not in campaign.pickable(ui.campaign_status):
         return None
     if node_id != ui.campaign_pick:
         ui.campaign_pick = node_id
         return None
-    return "campaign_play"
+    return "campaign_play" if node_id in campaign.playable(ui.campaign_status) else None
 
 
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:

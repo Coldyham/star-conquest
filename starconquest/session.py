@@ -969,7 +969,7 @@ class Session:
         assert self.settings is not None and self.log is not None and self.seed is not None
         board = ui.board_action()
         if board == "view":
-            ui.share_msg = app.open_map_page(ui.posted_key) or ui.share_msg
+            ui.share_msg = app.open_map_page(ui.posted_key, ui.campaign_status, ui.daily_day, ui.daily_kind) or ui.share_msg
         elif board == "post":
             request = app.quick_post(self.settings, state, ui, self.seed, self.log)
             if request is not None:

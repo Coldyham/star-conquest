@@ -362,9 +362,17 @@ The game and the board are one site, so the game can ask before it plays.
   win shows it once posted: a quick post that lands asks again at once
   (`Watcher.ask_again`) rather than at the next refresh. Showing it on an
   unposted win would mean predicting the capture, which is the board's rule to
-  state. A press picks an open neighbour (`play.over_node`), a second plays its
-  setup (`Session._play_node`), stamped with that neighbour's answer since the
-  watcher has not looked it up yet.
+  state. A press picks any node drawn (`campaign.pickable`, `play.over_node`)
+  and the caption says where it stands for you, in short `attemptLines` words
+  (`campaign._says`): an unclaimed home you can't take otherwise looked
+  inert, with no way to see why. A second press plays its setup
+  (`Session._play_node`) when it is `campaign.playable`: a move, or your own
+  field node, whose score a win betters. It is stamped with that node's answer
+  since the watcher has not looked it up yet. The board button, once posted,
+  opens campaign.html on the node (`?node=`) while the answer's `week_start`
+  week still runs (UTC), since the node's map page is embargoed until then;
+  after it, the map page, like any other map's (`app.board_page`). A daily
+  does the same with its day: daily.html or puzzle.html on the day itself.
 - **A stage graph was tried first and dropped**: the run's `stagegraph.mjs`
   boxes in a grid read as a different thing from the board's map; a node should
   look the same wherever it is shown.

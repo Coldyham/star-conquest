@@ -92,6 +92,7 @@ class Status:
     # them, for the win screen; empty from an older board.
     around: tuple[Near, ...] = ()
     lanes: tuple[tuple[int, int], ...] = ()
+    week: str = ""                 # the week's first day, "2026-11-23"; blank from an older board
 
     @property
     def mine(self) -> bool:
@@ -142,6 +143,7 @@ def parse(text: str, received: float) -> Status | None:
             beat=(int(beat["turns"]), int(beat["lost"]), str(beat.get("name", "")))
             if isinstance(beat, dict) else None,
             crater=str(node.get("name") or ""),
+            week=str(body.get("week_start") or ""),
             **_around(body.get("around")),
         )
     except (ValueError, TypeError, KeyError, AttributeError):
@@ -368,13 +370,33 @@ class Watcher:
 
 
 def _says(n: Near) -> str:
-    """What a neighbour a win on would be a move is, in the caption's words."""
+    """Where a node on the win screen's map stands for you, in the caption's
+    words: the board's `attemptLines`, shortened."""
     if n.why == "grace":
         return "yours to retake"
-    if n.beat is not None:
-        turns, lost = n.beat
-        return f"{n.holder}'s, beat {turns}t / {lost} lost"
-    return "open"
+    if n.can:
+        if n.beat is not None:
+            turns, lost = n.beat
+            return f"{n.holder}'s, beat {turns}t / {lost} lost to take it"
+        return "open, a win takes it"
+    if n.why == "own":
+        if n.beat is not None:
+            turns, lost = n.beat
+            return f"yours at {turns}t / {lost} lost, bettering it raises the bar"
+        return "yours"
+    return _BLOCKED.get(n.why, "not a move for you now")
+
+
+# Why a win on a node of the win screen's map would not be a move.
+_BLOCKED = {
+    "own-home": "your home, which can't be taken",
+    "home-taken": "a claimed home, and homes can't be taken",
+    "has-home": "a home, and you already have one this week",
+    "not-adjacent": "not next to anything you hold yet",
+    "no-home": "claim a home first",
+    "late-start": "you've lost your way in here, and a game started now won't take it",
+    "no-name": "post a score once so the board knows you",
+}
 
 
 def node_key(node_id: int) -> str:
@@ -383,11 +405,16 @@ def node_key(node_id: int) -> str:
 
 
 def playable(status: Status | None) -> dict[int, Near]:
-    """The neighbours a press on the win screen's graph may play: those a win
-    on would be a move."""
+    """The nodes a second press on the win screen's graph plays: those a win
+    on would be a move, and your own field nodes, whose score a win betters."""
     if status is None or not status.around:
         return {}
-    return {n.node_id: n for n in status.around[1:] if n.can}
+    return {n.node_id: n for n in status.around if n.can or n.why == "own"}
+
+
+def pickable(status: Status | None) -> set[int]:
+    """The nodes a press on the win screen's graph selects: every one drawn."""
+    return {n.node_id for n in status.around} if status is not None else set()
 
 
 def graph(status: Status | None, pick: int | None = None) -> dict | None:
@@ -396,26 +423,29 @@ def graph(status: Status | None, pick: int | None = None) -> dict | None:
     (`webapp/js/campaignmap.mjs`): circles at their map positions in their
     holders' colours, the node just taken ringed in gold, a neighbour a win on
     would be a move ringed as open, the pick selected; and a caption naming the
-    pick. None when the node isn't yours or the board sent no neighbourhood. A
-    press on an open neighbour picks it; a second plays it (`play.over_node`)."""
+    pick and where it stands for you. None when the node isn't yours or the
+    board sent no neighbourhood. A press on any node picks it; a second plays
+    it when that is `playable` (`play.over_node`)."""
     if status is None or not status.mine or not status.around:
         return None
     can = playable(status)
     here = status.around[0]
     nodes = []
     for i, n in enumerate(status.around):
-        marks = ["moved"] if i == 0 else ["open"] if n.node_id in can else []
-        if n.node_id == pick and n.node_id in can:
+        marks = ["moved"] if i == 0 else ["open"] if n.can else []
+        if n.node_id == pick:
             marks.append("selected")
         who = f"held by {n.holder}" if n.holder else "unclaimed"
         nodes.append({"key": node_key(n.node_id), "x": n.x, "y": n.y, "r": n.r, "hue": n.hue, "kind": n.kind,
                       "text": n.text, "title": n.name, "marks": marks,
                       "aria": f"{n.name}, {'home' if n.kind == 'home' else 'node'}, {n.text} systems, {who}"})
     lanes = [[node_key(a), node_key(b)] for a, b in status.lanes]
-    picked = can.get(pick) if pick is not None else None
+    picked = next((n for n in status.around if n.node_id == pick), None) if pick is not None else None
     if picked is not None:
-        caption = f"{picked.name} · {_says(picked)} — choose it again to play it"
+        again = " — choose it again to play it" if picked.node_id in can else ""
+        caption = f"{picked.name} · {_says(picked)}{again}"
     else:
         yours = f"{here.name} is your home." if here.why == "own-home" else f"{here.name} is yours."
-        caption = f"{yours} Choose a ringed neighbour to play it next." if can else yours
+        ringed = " Ringed: a win there takes it." if any(n.can for n in status.around) else ""
+        caption = f"{yours} Choose any node to see where it stands.{ringed}"
     return {"nodes": nodes, "lanes": lanes, "caption": caption}
