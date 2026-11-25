@@ -1198,14 +1198,17 @@ def active_stage(ms, settings: Settings) -> Found | None:
     return (g, stage) if stage is not None else None
 
 
-def next_stage(ms, settings: Settings) -> Found | None:
+def next_stage(ms, settings: Settings, pick: int | None = None) -> Found | None:
     """Move the menu onto the stage after the one being played and return it, or
-    None at the end (or a fork): the win overlay's Next stage, so going back to
-    the menu afterwards lands on the stage just started."""
+    None at the end (or a fork with no ``pick``): the win overlay's Next stage,
+    so going back to the menu afterwards lands on the stage just started. At a
+    fork ``pick`` is the way on chosen on the overlay (`Ui.fork_pick`)."""
     found = active_stage(ms, settings)
     if found is None:
         return None
     g, stage = found
+    if pick is not None and pick in g.onward(stage.id):
+        return load_stage(ms, settings, g, pick)
     nxt = gauntlet.next_stage(g, stage.id, gauntlet.bests(g))
     if nxt is None:
         return None

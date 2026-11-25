@@ -384,8 +384,14 @@ class Ui:
     stage_target: Target | None = None
     stage_met_before: bool = False
     # The stage's gated ways out, as (label, far stage's title, target, met by
-    # a best filed before this match): what a win here may unlock.
-    stage_gates: tuple[tuple[str, str, Target, bool], ...] = ()
+    # a best filed before this match, far stage's id): what a win here may unlock.
+    stage_gates: tuple[tuple[str, str, Target, bool, int], ...] = ()
+    # Where a plain clear leads on (`gauntlet.deeper`), and where the stage has
+    # more than one way on, the overlay's picture of them (`app.fork_graph`)
+    # and the one picked there for Next stage (`stage_next`, None for the first).
+    stage_ways: tuple[int, ...] = ()
+    stage_graph: dict | None = None
+    stage_next: int | None = None
     # The run this match is the undecided game of (`run.Run.id`), or blank. Set
     # by `main.run_ui` only on the run's own game: a Retry or fork of it is free
     # play. A run game plays ironman and offers no Hint, and its Next stage
@@ -816,15 +822,37 @@ class Ui:
         on the same `can_post` gate as the best. A way still shut says nothing,
         so a hidden stage stays hidden."""
         score = (state.turn, state.players[self.human_id].ships_lost)
-        return [(label, title) for label, title, target, before in self.stage_gates
+        return [(label, title) for label, title, target, before, _far in self.stage_gates
                 if before or (self.can_post(state) and target.met(score))]
+
+    def fork_choices(self, state: GameState) -> list[int]:
+        """The stages a free-play win here opens, when there is more than one
+        (a fork): the plain ways on once the stage is cleared, and the far end
+        of each gated way open (`unlocked`). Empty otherwise, and in a run,
+        whose own graph says where it goes."""
+        if not self.in_stage or self.run_id or self.stage_graph is None:
+            return []
+        score = (state.turn, state.players[self.human_id].ships_lost)
+        out = list(self.stage_ways) if self.stage_cleared(state) else []
+        out += [far for _label, _title, target, before, far in self.stage_gates
+                if (before or (self.can_post(state) and target.met(score))) and far not in out]
+        return out if len(out) > 1 else []
+
+    def fork_pick(self, state: GameState) -> int | None:
+        """The stage Next stage plays at a fork: the one tapped on the overlay's
+        graph, else the first way on. None away from a fork."""
+        ways = self.fork_choices(state)
+        if not ways:
+            return None
+        return self.stage_next if self.stage_next in ways else ways[0]
 
     def offers_next_stage(self, state: GameState) -> bool:
         """Is Next stage on the win overlay? Only where it leads to a stage the
         list would show open: on along the one ungated lane once the stage is
         cleared (`stage_cleared`), or, with no ungated way on, to the one stage a
-        gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it. A
-        gate open beside an ungated way is a fork: choose on the list. In a run
+        gated lane has open (`unlocked`), as `gauntlet.next_stage` reads it.
+        Where the win opens more than one (a fork), the pick on the overlay's
+        graph (`fork_pick`). In a run
         only this game's score counts: the stage picked to go on to (`run_next`,
         set by `main.record_run_step`, moved by a tap on the overlay's graph),
         unless that is the stage just lost, which Try again plays."""
@@ -833,6 +861,8 @@ class Ui:
         if self.run_id:
             return (bool(self.run_note) and self.run_next is not None
                     and not (self.run_again and self.run_next == self.run_stage))
+        if self.fork_choices(state):
+            return True
         gates = self.unlocked(state)
         if self.has_next_stage:
             return not gates and self.stage_cleared(state)

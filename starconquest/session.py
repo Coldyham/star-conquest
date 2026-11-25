@@ -881,7 +881,7 @@ class Session:
                     self.opened = None
                     return self._whole()
             else:
-                found = setupmenu.next_stage(self.menu, self.settings)
+                found = setupmenu.next_stage(self.menu, self.settings, ui.fork_pick(state))
                 if found is not None:
                     ai.load_models()
                     self.seed = resolve_seed(self.settings)
@@ -892,7 +892,7 @@ class Session:
                     return self._whole()
         elif name.startswith("stage_") and name[len("stage_"):].isdigit():
             # A stage on the overlay's run graph: picked, or played on a second tap.
-            then = play.over_pick(ui, int(name[len("stage_"):]))
+            then = play.over_pick(state, ui, int(name[len("stage_"):]))
             if then is not None:
                 return self.op_game_action(then)
         elif name == "run_retry" and ui.run_again and ui.run_stage is not None:

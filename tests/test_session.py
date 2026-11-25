@@ -863,6 +863,36 @@ def test_next_stage_moves_the_menu_on_and_starts_it(session, games, monkeypatch)
     assert res["view"]["card"]["kind"] == "briefing"
 
 
+def test_a_free_play_win_at_a_fork_shows_the_ways_on_and_plays_the_pick(session, games, monkeypatch):
+    from starconquest import gauntlet, serial, setupmenu
+    from starconquest.viewstate import Ui
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    g = gauntlet.Gauntlet.from_dict({**_chain_data("fork-me"), "lanes": [[0, 1], [0, 2]]})
+    assert g is not None
+    monkeypatch.setattr(gauntlet, "every", lambda: [g])
+    session.menu.gauntlets = [g]
+    setupmenu.load_stage(session.menu, session.settings, g, 0)
+    _menu(session, "game.start")
+    state, ui = session.state, session.ui
+    assert not ui.run_id and ui.stage_ways == (1, 2) and ui.stage_graph is not None
+    assert ui.fork_choices(state) == [] and not ui.offers_next_stage(state)   # not yet won
+    monkeypatch.setattr(Ui, "can_post", lambda self, state: True)
+    monkeypatch.setattr(Ui, "met_target", lambda self, state: True)
+    ui.human_id = ui.human_id or 1
+    state.winner = ui.human_id
+    over = serial.over(state, ui)
+    graph = over["run_graph"]
+    assert [(n["key"], n["col"]) for n in graph["nodes"]] == [("stage_0", 0), ("stage_1", 1), ("stage_2", 1)]
+    assert graph["focus"] == "stage_1" and over["next_stage"] and over["next_label"] == "Next stage"
+    assert _menu(session, "game.action", name="stage_0")["view"]["over"]["run_graph"]["focus"] == "stage_1"
+    view = _menu(session, "game.action", name="stage_2")["view"]     # a tap picks
+    assert view["over"]["run_graph"]["focus"] == "stage_2" and session.ui is ui
+    res = _menu(session, "game.action", name="stage_2")               # a second tap plays it
+    assert res["fresh"] and session.ui is not ui and session.ui.stage_title == "Stage 2"
+    assert session.menu.stage_at == ("fork-me", 2)
+
+
 def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, games):
     from starconquest import gauntlet
     from starconquest import run as gauntlet_run
