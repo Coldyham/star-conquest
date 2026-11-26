@@ -899,4 +899,4 @@ needs its notes and its async bot lookup) and the main wiring for runs.
   gauntlet (`:394`, `:477`).
 - `leaderboard/gauntlet.html` is a Jinja template on `templates/base.html`
   (`tools/render_board.py`), styled by `leaderboard/css/style.css` (the dark
-  arcade cabinet; pixel face for chrome, monospace for prose).
+  arcade cabinet; Courier New for chrome, monospace for prose).

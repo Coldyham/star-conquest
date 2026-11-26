@@ -9,7 +9,9 @@ the same code (``docs/design/html-frontend.md``); ``session`` drives it now.
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import json
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -377,10 +379,11 @@ def campaign_tick(ui: Ui, settings: Settings, watch: campaign.Watcher) -> None:
     match, neither of which can be posted as a campaign move.
     """
     if ui.watched or ui.in_pbp:
-        ui.campaign_label = None
+        ui.campaign_label, ui.campaign_status = None, None
         return
     watch.pump(settings, start=ui.campaign_start)
     ui.campaign_label = campaign.label(watch.status)
+    ui.campaign_status = watch.status
 
 
 def stamp_campaign(ui: Ui, watch: campaign.Watcher) -> None:
@@ -643,13 +646,35 @@ def land_post_name(ui: Ui, status: str, body: str) -> None:
         ui.post_as = name
 
 
-def open_map_page(key: str) -> str:
-    """Open the board's page for the map ``key``. Returns a line for the overlay
-    when it could not, else ``""``."""
-    page = webstore.leaderboard_url(paths.LEADERBOARD_GAME_PATH)
+def board_page(key: str, node: campaign.Status | None = None, daily_day: str = "", daily_kind: str = "",
+               now: float | None = None) -> tuple[str, str]:
+    """(path, query) of the board's page for the map ``key``: while its week
+    or day is still running (UTC), the campaign map with the node selected or
+    the daily's page, since the map's own page is embargoed until then; after
+    that, the map's own page, like any other map's."""
+    today = dt.datetime.fromtimestamp(time.time() if now is None else now, dt.UTC).date()
+    if node is not None and node.week:
+        try:
+            start = dt.date.fromisoformat(node.week)
+        except ValueError:
+            start = None
+        if start is not None and start <= today < start + dt.timedelta(days=7):
+            return paths.LEADERBOARD_CAMPAIGN_PAGE_PATH, f"?node={node.node_id}"
+    if daily_day == today.isoformat():
+        return (paths.LEADERBOARD_PUZZLE_PAGE_PATH if daily_kind == daily.PUZZLE
+                else paths.LEADERBOARD_DAILY_PAGE_PATH), ""
+    return paths.LEADERBOARD_GAME_PATH, f"?key={quote(key, safe='')}"
+
+
+def open_map_page(key: str, node: campaign.Status | None = None, daily_day: str = "",
+                  daily_kind: str = "") -> str:
+    """Open the board's page for the map ``key`` (`board_page`). Returns a
+    line for the overlay when it could not, else ``""``."""
+    path, query = board_page(key, node, daily_day, daily_kind)
+    page = webstore.leaderboard_url(path)
+    url = f"{page}{query}"
     if not page:
         return "No leaderboard is configured"
-    url = f"{page}?key={quote(key, safe='')}"
     if webstore.open_url(url):
         return ""
     if webstore.copy_to_clipboard(url):

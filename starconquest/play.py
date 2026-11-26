@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import copy
 
-from . import starlore, stats
+from . import campaign, starlore, stats
 from .hud import end_turn_button
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
@@ -252,6 +252,18 @@ def over_pick(state: GameState, ui: Ui, sid: int) -> str | None:
         ui.run_next = sid
         return None
     return "run_retry" if ui.run_again and sid == ui.run_stage else "next_stage"
+
+
+def over_node(ui: Ui, node_id: int) -> str | None:
+    """A tap on a neighbour on the win overlay's campaign graph
+    (`campaign.graph`): pick any node, to read where it stands; a second tap on
+    the pick plays it if it is `campaign.playable`. Answers that action, or None."""
+    if node_id not in campaign.pickable(ui.campaign_status):
+        return None
+    if node_id != ui.campaign_pick:
+        ui.campaign_pick = node_id
+        return None
+    return "campaign_play" if node_id in campaign.playable(ui.campaign_status) else None
 
 
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:

@@ -33,7 +33,7 @@ PAGES = (
     "puzzle.html", "account.html", "privacy.html",
 )
 STATIC_FILES = ("favicon.png",)
-STATIC_DIRS = ("css", "js", "fonts")
+STATIC_DIRS = ("css", "js")
 
 
 def environment() -> jinja2.Environment:

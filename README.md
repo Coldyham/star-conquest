@@ -251,9 +251,8 @@ leaderboard features unavailable.
 
 ## License
 
-[MIT](LICENSE). The bundled assets keep their own, both redistributable: the
-DejaVu Sans Mono faces under
-[`starconquest/assets/`](starconquest/assets/DejaVuSansMono-LICENSE.txt) and
-Press Start 2P under the [SIL Open Font License](leaderboard/fonts/OFL.txt).
+[MIT](LICENSE). The bundled DejaVu Sans Mono faces keep their own,
+redistributable licence
+([`starconquest/assets/`](starconquest/assets/DejaVuSansMono-LICENSE.txt)).
 Pyodide, fetched unmodified by [`tools/build_web.sh`](tools/build_web.sh) into
 the web build, is MPL-2.0.

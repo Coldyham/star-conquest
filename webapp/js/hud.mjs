@@ -3,6 +3,7 @@
 // (`serial.view`). The words are Python's (`hud`); this only lays them out,
 // picks the longest wording that fits, and turns presses into calls.
 
+import { drawCampaignMap } from "./campaignmap.mjs";
 import { drawGraph } from "./stagegraph.mjs";
 
 const NEUTRAL = [122, 128, 140];
@@ -507,15 +508,23 @@ export class Hud {
     const old = veil.querySelector(".tgraph");
     const scroll = old ? [old.scrollLeft, old.scrollTop] : null;
     const box = over.run_graph ? h("div", { class: "tgraph vgraph" }) : null;
+    // A campaign node won and held: it and its neighbours as the board's
+    // campaign map draws them (`campaign.graph`); a press on a ringed
+    // neighbour picks it, a second plays it (`play.over_node`).
+    const near = over.campaign_graph;
+    const map = near ? h("div", { class: "campaign-map vmap" }) : null;
     const kids = [
       h("h1", { style: `color:${this.color(over.headline[1])}` }, over.headline[0]),
       ...over.lines.map(([kind, text, role]) => h("p", { class: kind, style: `color:${this.color(role)}` }, text)),
       box,
+      map,
+      near ? h("p", { class: "small vmap-caption" }, near.caption) : null,
       h("div", { class: "grid" }, ...buttons),
     ].filter(Boolean);
     if (over.share && over.notes) kids.push(h("p", { class: "small dim" }, over.notes));
     veil.replaceChildren(h("div", { class: "stack" }, ...kids));
     veil.hidden = false;
+    if (map) drawCampaignMap(map, near, { onPress: (key) => this.on.action(key), label: "This campaign node and its neighbours" });
     if (box) {
       const graph = drawGraph(box, over.run_graph, { onPress: (key) => this.on.action(key), label: over.graph_label || "Where the run goes next" });
       if (scroll) [box.scrollLeft, box.scrollTop] = scroll;

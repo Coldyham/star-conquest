@@ -635,6 +635,29 @@ def test_the_campaign_is_asked_about_before_start_and_stamped_on_the_match(sessi
     assert game["view"]["notes"] == [["Node 4: not a move", "campaign"]]
 
 
+def test_a_campaign_node_won_and_held_shows_its_neighbours_and_plays_one(session):
+    from starconquest import campaign
+    _won(session)
+    near = {"x": 0, "y": 0, "holder": None}
+    body = json.dumps({"node": {"id": 4, "kind": "field"}, "now": 0, "status": {"why": "own", "can": False},
+                       "around": {"nodes": [{**near, "id": 4, "status": {"why": "own"}, "settings": {}},
+                                            {**near, "id": 7, "x": 50, "status": {"why": "adjacent", "can": True},
+                                             "settings": {"players": 3, "nodes": 14, "seed": 77}}],
+                                  "lanes": [[4, 7]]}})
+    session.ui.campaign_status = campaign.parse(body, 0.0)   # as the page's tick lands it (`app.campaign_tick`)
+    graph = _menu(session, "game.view")["view"]["over"]["campaign_graph"]
+    assert [(n["key"], n["marks"]) for n in graph["nodes"]] == [("node_4", ["moved"]), ("node_7", ["open"])]
+    old = session.ui
+    view = _menu(session, "game.action", name="node_7")["view"]       # a tap picks
+    assert session.ui is old and view["over"]["campaign_graph"]["nodes"][1]["marks"] == ["open", "selected"]
+    res = _menu(session, "game.action", name="node_7")                # a second tap plays it
+    assert res["fresh"] and session.ui is not old
+    assert (session.settings.players, session.settings.nodes, session.seed) == (3, 14, 77)
+    assert session.ui.campaign_start == "adjacent"
+    # A game lost there, or one not yet yours, draws nothing.
+    assert _menu(session, "game.view")["view"]["over"] is None
+
+
 def test_the_menu_banner_says_the_campaign_reminder_once_it_lands(session, games, monkeypatch):
     from starconquest import campaign
     monkeypatch.setattr(campaign, "SETTLE_S", 0.0)
@@ -886,6 +909,14 @@ def test_a_free_play_win_at_a_fork_shows_the_ways_on_and_plays_the_pick(session,
     assert [(n["key"], n["col"]) for n in graph["nodes"]] == [("stage_0", 0), ("stage_1", 1), ("stage_2", 1)]
     assert graph["focus"] == "stage_1" and over["next_stage"] and over["next_label"] == "Next stage"
     assert _menu(session, "game.action", name="stage_0")["view"]["over"]["run_graph"]["focus"] == "stage_1"
+    # A stage that is also a campaign node you now hold keeps its stage graph,
+    # and says the node in a line above it.
+    from tests.test_campaign_status import mine_around
+    ui.campaign_status = mine_around()
+    both = serial.over(state, ui)
+    assert both["run_graph"] is not None and both["campaign_graph"] is None
+    assert both["lines"][-1] == ["small", "Node 3: yours", "teal"]
+    ui.campaign_status = None
     view = _menu(session, "game.action", name="stage_2")["view"]     # a tap picks
     assert view["over"]["run_graph"]["focus"] == "stage_2" and session.ui is ui
     res = _menu(session, "game.action", name="stage_2")               # a second tap plays it

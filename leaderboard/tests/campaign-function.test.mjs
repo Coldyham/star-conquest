@@ -7,6 +7,7 @@ import test from "node:test";
 import { deflateSync } from "node:zlib";
 
 import handler, { answer, nodeFor } from "../netlify/functions/campaign.mjs";
+import { nodeRadius, playerHue } from "../js/campaign.mjs";
 import { weekParam, weekStart } from "../js/crowns.mjs";
 
 const MIN = 60000;
@@ -55,6 +56,26 @@ test("the answer is attemptStatus, plus the holder", () => {
   assert.equal(reply.node.name, undefined);   // an older week's nodes have no name
   const named = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, name: `C${n.id}` })) };
   assert.equal(answer(named, scores, named.nodes[1], "Ann", T0).node.name, "C1");
+});
+
+test("the answer carries the node's neighbourhood, each as a game started there now", () => {
+  const placed = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, x: 10 * n.id, y: 5, systems: 12, mystery: n.id === 1 })) };
+  const scores = [at(0, "ann", 10, 40), at(20, "ann", 0, 30)];
+  const { around } = answer(placed, scores, placed.nodes[0], "ann", T0 + 30 * MIN);
+  assert.deepEqual(around.nodes.map((n) => n.id), [0, 1, 10]);   // the node itself first
+  const [here, one, home] = around.nodes;
+  assert.equal(here.status.why, "own");
+  // Drawn as campaign.html draws it: the holder's colour, the radius and the systems.
+  assert.deepEqual(here.holder, { name: "ann", turns: 30, lost: 0, hue: playerHue("ann") });
+  assert.deepEqual([here.r, here.text, one.text], [nodeRadius(12), "12", "?"]);
+  assert.deepEqual([one.status.why, one.status.can, one.holder], ["adjacent", true, null]);
+  assert.equal(home.status.why, "own-home");
+  assert.deepEqual([one.x, one.y], [10, 5]);
+  assert.deepEqual(one.settings, graph.nodes[1].settings);   // what a press there plays
+  assert.deepEqual(around.lanes, [[0, 1], [10, 0]]);
+  // From node 1 only node 0 is a neighbour, and the home's lane isn't among them.
+  const far = answer(placed, scores, placed.nodes[1], "ann", T0 + 30 * MIN).around;
+  assert.deepEqual([far.nodes.map((n) => n.id), far.lanes], [[1, 0], [[0, 1]]]);
 });
 
 test("the handler finds this week's node and answers for the name given", async () => {

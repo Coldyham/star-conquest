@@ -13,6 +13,7 @@ from .geometry import WorldView
 from .model import ForwardRule, GameState, Order
 
 if TYPE_CHECKING:
+    from .campaign import Status
     from .gauntlet import Target
 
 # interaction modes
@@ -363,6 +364,12 @@ class Ui:
     # (`campaign.stamp`), carried onto a posted score as `Challenge.campaign`.
     # Blank for a match nobody looked up, or one resumed from a save.
     campaign_start: str = ""
+    # The campaign's latest answer for this setup (`app.campaign_tick`), which
+    # the win screen draws as the node and its neighbours once the node is
+    # yours (`campaign.graph`); and the neighbour picked there to play next
+    # (`play.over_node`).
+    campaign_status: Status | None = None
+    campaign_pick: int | None = None
     # A gauntlet stage (the tutorial's, say) this match is playing, as plain
     # values `main` copies off the stage when the match starts, so render never
     # sees a `Gauntlet`. `stage_label` ("Tutorial 3/10 · Defender's edge") is None

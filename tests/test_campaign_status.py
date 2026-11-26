@@ -7,12 +7,13 @@ it was told, and never asks when it shouldn't.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import time
 
 
 
-from starconquest import app, campaign, config, mapgen, pbp
+from starconquest import app, campaign, config, mapgen, pbp, webstore
 from starconquest.geometry import WorldView
 from starconquest.settings import Settings
 from starconquest.viewstate import Ui
@@ -287,3 +288,131 @@ def test_a_named_node_goes_by_its_crater():
     shy = campaign.parse(json.dumps({**body, "status": {"can": False, "why": "no-name"}}), t)
     assert campaign.label(shy, t) == "Campaign: Mädler"
     assert campaign.parse(answer(), t).name == "Node 3"
+
+
+def _near(node, x, y, why="adjacent", can=True, kind="field", holder=None, name=None):
+    """A node of the answer's ``around``, as netlify/functions/campaign.mjs writes one."""
+    return {"id": node, "kind": kind, **({"name": name} if name else {}), "x": x, "y": y, "r": 21, "text": "12",
+            "holder": holder, "status": {"can": can, "why": why}, "settings": {"players": 2, "seed": 100 + node}}
+
+
+def mine_around(why="own") -> campaign.Status:
+    """Node 3, yours, with a neighbour on each side of it: an open field node
+    east, one held by bo north, and bo's home west."""
+    body = json.loads(answer(why=why, can=False))
+    body["around"] = {
+        "nodes": [_near(3, 100, 100, why=why, can=False, name="Mädler"),
+                  _near(5, 200, 110),
+                  _near(6, 90, 0, holder={"name": "bo", "turns": 30, "lost": 2, "hue": 200}),
+                  _near(9, 0, 100, why="has-home", can=False, kind="home",
+                        holder={"name": "bo", "turns": 9, "lost": 0, "hue": 200})],
+        "lanes": [[3, 5], [3, 6], [9, 3], [5, 6], [5, 77]]}
+    parsed = campaign.parse(json.dumps(body), 0.0)
+    assert parsed is not None
+    return parsed
+
+
+def test_the_answer_carries_the_nodes_neighbourhood():
+    s = mine_around()
+    assert [n.node_id for n in s.around] == [3, 5, 6, 9]
+    assert s.lanes == ((3, 5), (3, 6), (9, 3), (5, 6))    # the lane to a node it didn't send is dropped
+    assert (s.around[2].holder, s.around[2].beat) == ("bo", (30, 2))
+    assert s.around[1].setup == {"players": 2, "seed": 105}
+    assert set(campaign.playable(s)) == {3, 5, 6}     # the moves, and your own field node to better
+    assert campaign.pickable(s) == {3, 5, 6, 9}
+    # A neighbourhood it can't read leaves the answer standing, without one.
+    body = json.loads(answer())
+    body["around"] = {"nodes": [{"id": "x"}]}
+    bare = campaign.parse(json.dumps(body), 0.0)
+    assert bare is not None and bare.around == () and campaign.playable(bare) == {}
+    assert campaign.parse(answer(), 0.0).around == ()
+
+
+def test_the_win_screen_draws_a_node_only_once_it_is_yours():
+    assert campaign.graph(None) is None
+    assert campaign.graph(mine_around(why="adjacent")) is None   # a win here, not yet posted
+    assert campaign.graph(status()) is None                      # yours, but an older board sent no neighbours
+    assert campaign.graph(mine_around(why="own-home")) is not None
+
+
+def test_the_map_draws_the_neighbourhood_as_the_board_does():
+    g = campaign.graph(mine_around())
+    assert g is not None
+    drawn = {n["key"]: (n["x"], n["y"], n["r"], n["hue"], n["kind"], n["text"], n["marks"]) for n in g["nodes"]}
+    assert drawn == {
+        "node_3": (100, 100, 21, None, "field", "12", ["moved"]),    # the node just taken: a gold ring
+        "node_5": (200, 110, 21, None, "field", "12", ["open"]),     # a win there would be a move
+        "node_6": (90, 0, 21, 200, "field", "12", ["open"]),
+        "node_9": (0, 100, 21, 200, "home", "12", []),
+    }
+    assert g["nodes"][0]["title"] == "Mädler"
+    assert g["nodes"][3]["aria"] == "Home 9, home, 12 systems, held by bo"
+    assert g["lanes"] == [["node_3", "node_5"], ["node_3", "node_6"], ["node_9", "node_3"], ["node_5", "node_6"]]
+    assert g["caption"] == "Mädler is yours. Choose any node to see where it stands. Ringed: a win there takes it."
+    assert campaign.graph(mine_around(why="own-home"))["caption"].startswith("Mädler is your home.")
+
+
+def test_a_tap_picks_any_node_and_a_second_plays_a_playable_one():
+    from starconquest import play
+    state = mapgen.generate_random(1, num_nodes=18, num_players=3)
+    ui = Ui(view=WorldView(mapgen.map_bounds(state), config.play_rect()), human_id=1)
+    ui.campaign_status = mine_around()
+
+    def caption():
+        return campaign.graph(ui.campaign_status, ui.campaign_pick)["caption"]
+
+    # bo's home: picked to read why, but never played.
+    assert play.over_node(ui, 9) is None and ui.campaign_pick == 9
+    assert caption() == "Home 9 · a home, and you already have one this week"
+    assert play.over_node(ui, 9) is None
+    assert play.over_node(ui, 5) is None and ui.campaign_pick == 5
+    g = campaign.graph(ui.campaign_status, ui.campaign_pick)
+    assert g is not None
+    assert [n["key"] for n in g["nodes"] if "selected" in n["marks"]] == ["node_5"]
+    assert caption() == "Node 5 · open, a win takes it — choose it again to play it"
+    assert play.over_node(ui, 6) is None
+    assert caption() == "Node 6 · bo's, beat 30t / 2 lost to take it — choose it again to play it"
+    assert play.over_node(ui, 5) is None and ui.campaign_pick == 5
+    assert play.over_node(ui, 5) == "campaign_play"
+    # Your own field node: played again to better its score.
+    assert play.over_node(ui, 3) is None and ui.campaign_pick == 3
+    assert caption() == "Mädler · yours — choose it again to play it"
+    assert play.over_node(ui, 3) == "campaign_play"
+    assert play.over_node(ui, 77) is None and ui.campaign_pick == 3    # not drawn
+
+
+def test_the_board_button_opens_the_live_campaign_or_daily_then_the_map_page(monkeypatch):
+    """While the week or day runs the map's own page is embargoed, so the board
+    button opens the campaign map on the node, or the daily's page; after it,
+    the map's own page."""
+    body = json.loads(answer())
+    body["week_start"] = "2026-11-23"
+    node = campaign.parse(json.dumps(body), 0.0)
+    wed = dt.datetime(2026, 11, 25, 12, tzinfo=dt.UTC).timestamp()
+    next_mon = dt.datetime(2026, 11, 30, 0, 1, tzinfo=dt.UTC).timestamp()
+    assert app.board_page("k1", node, now=wed) == ("/board/campaign.html", "?node=3")
+    assert app.board_page("k1", node, now=next_mon) == ("/board/game.html", "?key=k1")
+    assert app.board_page("k1", now=wed) == ("/board/game.html", "?key=k1")
+    assert app.board_page("k1", daily_day="2026-11-25", daily_kind="board", now=wed) == ("/board/daily.html", "")
+    assert app.board_page("k1", daily_day="2026-11-25", daily_kind="puzzle", now=wed) == ("/board/puzzle.html", "")
+    assert app.board_page("k1", daily_day="2026-11-24", daily_kind="puzzle", now=wed) == ("/board/game.html", "?key=k1")
+    opened = []
+    monkeypatch.setattr(webstore, "leaderboard_url", lambda path: f"https://site{path}")
+    monkeypatch.setattr(webstore, "open_url", lambda url: opened.append(url) or True)
+    assert app.open_map_page("k1") == ""
+    assert opened == ["https://site/board/game.html?key=k1"]
+
+
+def test_a_post_asks_again_at_once_dropping_a_lookup_in_flight(monkeypatch):
+    monkeypatch.setattr(campaign, "enabled", lambda: True)
+    asked = []
+    monkeypatch.setattr(campaign, "fetch", lambda token, name, start=None: asked.append(start) or FakeRequest(token))
+    watch = campaign.Watcher()
+    settings = Settings(seed=5)
+    watch.pump(settings, now=0.0, start="")
+    watch.pump(settings, now=campaign.SETTLE_S, start="")
+    assert len(asked) == 1
+    watch.ask_again()
+    assert watch._request is None
+    watch.pump(settings, now=campaign.SETTLE_S + 1, start="")
+    assert len(asked) == 2      # long before REFRESH_S

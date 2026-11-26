@@ -1,0 +1,31 @@
+/* The weekly campaign's map (`js/campaignmap.mjs`): the board's campaign page
+ * (as /play/css/campaignmap.css) and the game's win screen both load this, so
+ * a node looks the same in both. The colours are the board's own palette,
+ * named here so the game's theme can't change them. Sizing the svg is each
+ * page's own. */
+
+.campaign-map {
+  --cm-lane: #2a3350;
+  --cm-edge: #0b0f1d;
+  --cm-ink: #d9e6ff;
+  --cm-cyan: #35e6ff;
+  --cm-magenta: #ff3ea5;
+  --cm-gold: #ffd23f;
+  --cm-display: "Courier New", ui-monospace, monospace;
+}
+.campaign-map .lane { stroke: var(--cm-lane); stroke-width: 3; }
+.campaign-map .node { cursor: pointer; }
+.campaign-map .node circle.ring { fill: none; stroke: none; }
+.campaign-map .node circle.body { stroke: var(--cm-edge); stroke-width: 2; }
+.campaign-map .node.home circle.body { stroke: var(--cm-gold); stroke-width: 3; stroke-dasharray: 5 4; }
+.campaign-map .node.open circle.ring { stroke: var(--cm-cyan); stroke-width: 2; stroke-dasharray: 3 4; }
+.campaign-map .node.selected circle.body { stroke: var(--cm-magenta); stroke-width: 4; stroke-dasharray: none; }
+.campaign-map .node:focus { outline: none; }
+.campaign-map .node:focus-visible circle.body { stroke: var(--cm-cyan); stroke-width: 4; }
+.campaign-map .node text {
+  font-family: var(--cm-display); font-size: 18px; fill: var(--cm-edge);
+  text-anchor: middle; dominant-baseline: central; pointer-events: none;
+}
+.campaign-map .node.neutral text { fill: var(--cm-ink); }
+/* A gold ring: the replay's last move on the board, the node just taken in the game. */
+.campaign-map .node.moved circle.ring { stroke: var(--cm-gold); stroke-width: 3; stroke-dasharray: none; }

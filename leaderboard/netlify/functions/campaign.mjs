@@ -22,13 +22,16 @@
  * have been through JSON.parse, so Python's `1.0` and a browser's `1` agree),
  * never by `sc_config_key`.
  *
+ * `around` is the node's neighbourhood (`around`), which the game draws on its
+ * win screen once the node is yours, a press there playing a neighbour.
+ *
  * 404 means "not a campaign node this week" (or no campaign yet), which the
  * game treats as nothing to show.
  */
 
 import { inflateSync } from "node:zlib";
 
-import { attemptStatus, fold, weekQueries } from "../../js/campaign.mjs";
+import { attemptStatus, fold, neighbours, nodeRadius, playerHue, weekQueries } from "../../js/campaign.mjs";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../../js/config.mjs";
 import { weekParam, weekStart } from "../../js/crowns.mjs";
 import { decodeToken, setupIdentity } from "../../js/token-decode.mjs";
@@ -58,19 +61,54 @@ export function nodeFor(graph, setup) {
   return graph.nodes.find((node) => setupIdentity(node.settings) === want) || null;
 }
 
+const holderOf = (state, nodeId, hue = false) => {
+  const held = state.holders.get(nodeId);
+  if (!held) return null;
+  return { name: held.name, turns: held.turns, lost: held.lost, ...(hue ? { hue: playerHue(held.name) } : {}) };
+};
+
+/**
+ * The node and its neighbours on the week's map, for the game's win screen
+ * once the node is yours, drawn as campaign.html draws them
+ * (/play/js/campaignmap.mjs): each at its map position (`x`, `y`) with its
+ * circle's radius (`r`, `nodeRadius`) and what is written in it (`text`: its
+ * systems, or "?" for a mystery node), its holder with their colour (`hue`,
+ * `playerHue`), what a game started on it now would be for `name`
+ * (`attemptStatus`, `starting`), and the stored setup a press plays; `lanes`
+ * are the lanes among them. The node itself is first.
+ */
+export function around(graph, state, node, name, now) {
+  const near = neighbours(graph).get(node.id) || new Set();
+  const ids = new Set([node.id, ...near]);
+  const nodes = [node, ...graph.nodes.filter((n) => near.has(n.id))].map((n) => ({
+    id: n.id,
+    kind: n.kind,
+    ...(n.name ? { name: n.name } : {}),
+    x: n.x ?? 0,
+    y: n.y ?? 0,
+    r: nodeRadius(n.systems),
+    text: n.mystery ? "?" : String(n.systems ?? ""),
+    holder: holderOf(state, n.id, true),
+    status: attemptStatus(graph, state, n.id, name, now, { starting: true }),
+    settings: n.settings,
+  }));
+  const lanes = graph.lanes.filter(([a, b]) => ids.has(a) && ids.has(b));
+  return { nodes, lanes };
+}
+
 /**
  * The reply for `name` on `node` at `now`: pure, so tests can call it. `game`
  * says which game is asking (attemptStatus's `start`/`starting`).
  */
 export function answer(graph, scores, node, name, now, game = {}) {
   const state = fold(graph, scores);
-  const held = state.holders.get(node.id);
   return {
     week_start: graph.week_start,
     now,
     node: { id: node.id, kind: node.kind, ...(node.name ? { name: node.name } : {}) },
-    holder: held ? { name: held.name, turns: held.turns, lost: held.lost } : null,
+    holder: holderOf(state, node.id),
     status: attemptStatus(graph, state, node.id, name, now, game),
+    around: around(graph, state, node, name, now),
   };
 }
 
