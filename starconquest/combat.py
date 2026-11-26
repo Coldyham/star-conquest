@@ -370,6 +370,32 @@ def sure_count(defender: int, jitter: float, advantage: float) -> int:
     return a
 
 
+def chance_count(defender: int, jitter: float, advantage: float) -> int:
+    """The fewest ships that take a garrison of ``defender`` on their best roll:
+    below it no roll can."""
+    return _first_count(max(0, int(defender)), round(max(0.0, float(jitter)), 6),
+                        round(float(advantage), 6), capture=True)
+
+
+def dent_count(defender: int, jitter: float, advantage: float) -> int:
+    """The fewest ships that, on their best roll, leave a garrison of
+    ``defender`` with fewer ships than it had: the least that can thin it."""
+    return _first_count(max(0, int(defender)), round(max(0.0, float(jitter)), 6),
+                        round(float(advantage), 6), capture=False)
+
+
+@functools.lru_cache(maxsize=1024)
+def _first_count(defender: int, jitter: float, advantage: float, capture: bool) -> int:
+    if defender <= 0:
+        return 1 if capture else 0
+    a = 1
+    while True:
+        best = preview_fight(a, defender, jitter, advantage).best
+        if best.winner == ATTACKER if capture else best.defender_survivors < defender:
+            return a
+        a += 1
+
+
 @dataclass(frozen=True)
 class Forecast:
     """What ships landing on a system some turns from now will meet there.
@@ -388,6 +414,9 @@ class Forecast:
     odds: Odds | None  # None when reinforcing
     sure_at: int  # the fewest landing ships that take it on every roll (0 when reinforcing)
     held: int = 0  # the garrison now
+    chance_at: int = 0  # the fewest that take it on their best roll (0 when reinforcing)
+    dent_at: int = 0  # the fewest that, on their best roll, leave it fewer ships (0 when reinforcing)
+    span: CombatPreview | None = None  # the best and worst rolls of this fight (None when reinforcing)
     built: int = 0  # hulls it finishes before we land, the landing turn's included
     inbound: int = 0  # its owner's fleets landing by then (ours landing earlier, reinforcing)
     rivals: tuple[tuple[int, int], ...] = ()  # (owner, ships) of anyone else's landing by then
@@ -545,13 +574,17 @@ def forecast_landing(state: GameState, owner: int, dest_id: int, turns: int, lan
         elif f.owner_id != owner:
             rivals[f.owner_id] = rivals.get(f.owner_id, 0) + f.ships
     garrison = held + built + inbound
-    odds, sure_at = None, 0
+    odds, sure_at, chance_at, dent_at, span = None, 0, 0, 0, None
     if not reinforce:
         jitter, advantage = float(config.COMBAT_JITTER), float(config.DEFENDER_ADVANTAGE)
         odds = fight_odds(landing, garrison, jitter, advantage)
         sure_at = sure_count(garrison, jitter, advantage)
+        chance_at = chance_count(garrison, jitter, advantage)
+        dent_at = dent_count(garrison, jitter, advantage)
+        span = preview_fight(landing, garrison, jitter, advantage)
     return Forecast(turns, landing, garrison, reinforce, odds, sure_at,
-                    held=held, built=built, inbound=inbound, rivals=tuple(sorted(rivals.items())))
+                    held=held, chance_at=chance_at, dent_at=dent_at, span=span,
+                    built=built, inbound=inbound, rivals=tuple(sorted(rivals.items())))
 
 
 def _record_losses(state: GameState, forces: dict[int, int], owner_id: int, ships: int) -> None:

@@ -346,6 +346,39 @@ The game and the board are one site, so the game can ask before it plays.
   Start, and the link has no way to say the player already answered.
   `weekQueries` is the one copy of the two reads a week is folded from, for the
   two pages and the endpoint.
+- **The win screen shows the node and its neighbours once it is yours**,
+  drawn exactly as campaign.html draws the week's map: one drawer and one
+  stylesheet, `webapp/js/campaignmap.mjs` and `webapp/css/campaignmap.css`,
+  which the board loads from `/play/` as it does `stagegraph.mjs` (campaign.html
+  sets the base template's `styles`). The endpoint's answer carries `around`:
+  the node first, then each neighbour at its map position, with its radius
+  (`nodeRadius`), its text (systems or "?"), its holder and their colour
+  (`playerHue`), `attemptStatus` for a game started there now, and its stored
+  setup; and the lanes among them. The board computes the radius and colour,
+  so the game mirrors neither. `campaign.graph` marks the node just taken with
+  the replay's gold ring (`moved`), a neighbour a win on would be a move as
+  `open` and the pick as `selected`, and writes a caption under it. It is
+  drawn only while the answer says the node is yours (`own`, `own-home`), so a
+  win shows it once posted: a quick post that lands asks again at once
+  (`Watcher.ask_again`) rather than at the next refresh. Showing it on an
+  unposted win would mean predicting the capture, which is the board's rule to
+  state. A press picks any node drawn (`campaign.pickable`, `play.over_node`)
+  and the caption says where it stands for you, in short `attemptLines` words
+  (`campaign._says`): an unclaimed home you can't take otherwise looked
+  inert, with no way to see why. A second press plays its setup
+  (`Session._play_node`) when it is `campaign.playable`: a move, or your own
+  field node, whose score a win betters. It is stamped with that node's answer
+  since the watcher has not looked it up yet. The board button, once posted,
+  opens campaign.html on the node (`?node=`) while the answer's `week_start`
+  week still runs (UTC), since the node's map page is embargoed until then;
+  after it, the map page, like any other map's (`app.board_page`). A daily
+  does the same with its day: daily.html or puzzle.html on the day itself.
+  A gauntlet stage whose setup is a node keeps its own graph at a fork, and
+  the node becomes a line of the result (`campaign.label`): two
+  maps stacked read as two choices of where to go next.
+- **A stage graph was tried first and dropped**: the run's `stagegraph.mjs`
+  boxes in a grid read as a different thing from the board's map; a node should
+  look the same wherever it is shown.
 
 ## A daily allowance of moves (proposed)
 

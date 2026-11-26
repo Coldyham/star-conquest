@@ -95,7 +95,7 @@ export function setupSummary(config) {
  * Challenge.summary: turns is the score, fewest lost breaks a tie, and the
  * by-hand count is only worth stating when some turns were autoplayed.
  *
- * Kept terse because the cabinet renders it in a pixel face, which is wide.
+ * Kept terse because the cabinet renders it in a wide display face.
  */
 export function scoreSummary(score) {
   let out = `${score.turns} turns · ${score.lost} lost`;

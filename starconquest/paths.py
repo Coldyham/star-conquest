@@ -128,6 +128,9 @@ NETLIFY_SUFFIX = ".netlify.app"
 LEADERBOARD_SUBMIT_PATH = "/board/submit.html"  # the score-entry form, opened with #<token>
 LEADERBOARD_POST_MODULE_PATH = "/board/js/post.mjs"  # the form's posting, run by quick post
 LEADERBOARD_GAME_PATH = "/board/game.html"  # one map's page, opened with ?key=<game key>
+LEADERBOARD_CAMPAIGN_PAGE_PATH = "/board/campaign.html"  # this week's map, opened with ?node=<id>
+LEADERBOARD_DAILY_PAGE_PATH = "/board/daily.html"  # today's daily map
+LEADERBOARD_PUZZLE_PAGE_PATH = "/board/puzzle.html"  # today's daily puzzle
 LEADERBOARD_MAKER_PATH = "/board/gauntlet.html"  # the gauntlet maker, opened with #<id> as a draft
 LEADERBOARD_LOG_PATH = "/api/log"      # where a replay is uploaded (`share.post_log`)
 LEADERBOARD_REPLAY_PATH = "/api/replay"  # ...and fetched back (`share.fetch_log`)

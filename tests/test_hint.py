@@ -6,7 +6,7 @@ from __future__ import annotations
 import random
 
 from starconquest import ai, combat, config, engine
-from starconquest import app
+from starconquest import app, hud
 from starconquest import settings as settings_mod
 from starconquest.geometry import WorldView
 from starconquest.model import Fleet, ForwardRule, Order
@@ -90,6 +90,47 @@ def test_landing_counts_everything_arriving_together():
     ui.pending = [Order(1, 0, 1, 6), Order(1, 2, 1, 4)]
     assert ui.landing_at(s, 1, 2) == 10
     assert ui.landing_at(s, 1, 3) == 0
+
+
+def test_landing_counts_what_the_rules_forward():
+    """A rule's sends this turn land with the queued ones, as planned sends."""
+    s = make_state([(0, 1, 10, 3), (2, 1, 8, 3), (1, 0, 9, 2)], [(0, 1, 2), (2, 1, 2)])
+    ui = _ui(s)
+    ui.pending = [Order(1, 0, 1, 6)]
+    ui.auto_forward[2] = ForwardRule({1: 100}, 0)
+    assert ui.landing_parts(s, 1, 2) == (6, 8, 0)
+    assert ui.landing_at(s, 1, 2) == 14
+    ui.selected, ui.dest, ui.chosen = 0, 1, 6
+    _title, items = hud.odds_card(s, ui)
+    rows = {it[1]: it[2] for it in items if it[0] == "row"}
+    assert rows["Your rules forward, landing that turn"] == "+8" and rows["You land with"] == "14"
+
+
+def test_chance_and_dent_counts_are_the_best_roll_thresholds():
+    for d in (1, 5, 8, 20):
+        for adv in (1.0, 1.1):
+            c, t = combat.chance_count(d, 0.1, adv), combat.dent_count(d, 0.1, adv)
+            assert combat.preview_fight(c, d, 0.1, adv).best.winner == combat.ATTACKER
+            assert combat.preview_fight(c - 1, d, 0.1, adv).best.winner != combat.ATTACKER
+            assert combat.preview_fight(t, d, 0.1, adv).best.defender_survivors < d
+            assert t == 1 or combat.preview_fight(t - 1, d, 0.1, adv).best.defender_survivors == d
+            assert t <= c <= combat.sure_count(d, 0.1, adv)
+
+
+def test_the_card_gives_the_worst_and_best_rolls():
+    s = make_state([(0, 1, 30, 100), (1, 0, 8, 100)], [(0, 1, 2)])
+    ui = _ui(s)
+    old = config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE
+    config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE = 0.1, 1.1
+    try:
+        ui.pending = [Order(1, 0, 1, 3)]
+        ui.selected, ui.dest, ui.chosen = 0, 1, 3
+        rows = {it[1]: it[2] for it in hud.odds_card(s, ui)[1] if it[0] == "row"}
+    finally:
+        config.COMBAT_JITTER, config.DEFENDER_ADVANTAGE = old
+    assert rows["Your worst roll"] == "lose all 3, 8 of 8 hold"
+    assert rows["Your best roll"] == "lose all 3, 7 of 8 hold"
+    assert rows["Fewest that could take it"] == "8" and rows["Fewest that could thin it"] == "3"
 
 
 def _inbound():

@@ -635,7 +635,8 @@ def match_notes(ui: Ui) -> list[tuple[str, Role]]:
     scoreboard (on a portrait phone, by covering it)."""
     notes: list[tuple[str, Role]] = []
     if ui.stage_label:
-        text = ui.stage_label + (f" · {ui.stage_target.short()}" if ui.stage_target is not None else "")
+        target = ui.shown_target
+        text = ui.stage_label + (f" · {target.short()}" if target is not None else "")
         notes.append((text, "teal"))
     if ui.daily_day:
         text = daily.title(ui.daily_day, ui.daily_kind or daily.BOARD)
@@ -663,7 +664,9 @@ def briefing_close(touch: bool, portrait: bool) -> str:
 def briefing_notes(ui: Ui) -> tuple[str, ...]:
     """The briefing card's target, which it always shows, so the target is
     never a surprise on the win overlay."""
-    return (f"Target: {ui.stage_target.text()}",) if ui.stage_target is not None else ()
+    target = ui.shown_target
+    return (f"Target: {target.text()}",) if target is not None else ()
+
 
 
 def stage_verdict(state: GameState, ui: Ui) -> tuple[str, str, Role]:
@@ -782,15 +785,20 @@ def odds_card(state: GameState, ui: Ui) -> tuple[str, list[tuple]] | None:
     if turns is None:
         return None
     node = state.systems[dest]
-    landing = ui.landing_at(state, dest, turns)
+    queued, forwarded, flying = ui.landing_parts(state, dest, turns)
+    landing = queued + forwarded + flying
     fc = combat.forecast_landing(state, ui.human_id, dest, turns, landing)
     line = forecast(state, ui)
     tone = line[1] if line is not None else "dim"
-    send = min(ui.chosen, landing)
+    send = min(ui.chosen, queued)
     plural = "s" if turns != 1 else ""
     items: list[tuple] = [("row", "Your send", str(send), False)]
-    if landing > send:
-        items.append(("row", "Your other ships landing that turn", f"+{landing - send}", False))
+    if queued > send:
+        items.append(("row", "Your other sends landing that turn", f"+{queued - send}", False))
+    if forwarded:
+        items.append(("row", "Your rules forward, landing that turn", f"+{forwarded}", False))
+    if flying:
+        items.append(("row", "Your fleets in flight landing that turn", f"+{flying}", False))
     items += [("row", "You land with", str(landing), True), ("gap",),
               ("row", f"At {node.short} now", str(fc.held), False),
               ("row", f"Built in the {turns} turn{plural} before you land", f"+{fc.built}", False)]
@@ -813,6 +821,7 @@ def odds_card(state: GameState, ui: Ui) -> tuple[str, list[tuple]] | None:
         else:
             verdict = f"{landing} against {g}: no roll takes it. {fc.sure_at} would take it on every roll."
         items.append(("text", verdict, tone))
+        items += _odds_range(fc)
     for owner, ships in fc.rivals:
         items.append(("note", f"Not counted: {config.player_name(owner)}'s {ships} ships also land "
                               f"there by then, and fight whoever holds it."))
@@ -836,6 +845,29 @@ def odds_card(state: GameState, ui: Ui) -> tuple[str, list[tuple]] | None:
                               "side loses (Lanchester's square law), and the best and worst rolls."))
     title = f"{'Reinforcing' if fc.reinforce else 'Attacking'} {node.short}"
     return title, items
+
+
+def _odds_range(fc: combat.Forecast) -> list[tuple]:
+    """The odds card's range: what each side keeps on our worst and best roll,
+    then the fewest ships that could take the system, and that could thin it,
+    on their best roll, where those differ from the sure count."""
+    span = fc.span
+    assert span is not None
+
+    def outcome(roll: combat.Roll) -> str:
+        if roll.winner == combat.ATTACKER:
+            return f"take it, keep {roll.survivors} of {fc.landing}"
+        if roll.winner == combat.DEFENDER:
+            return f"lose all {fc.landing}, {roll.survivors} of {fc.garrison} hold"
+        return "both wiped out"
+
+    rows: list[tuple] = [("row", "Your worst roll", outcome(span.worst), False),
+                         ("row", "Your best roll", outcome(span.best), False)]
+    if fc.chance_at < fc.sure_at:
+        rows.append(("row", "Fewest that could take it", str(fc.chance_at), False))
+    if fc.dent_at < fc.chance_at:
+        rows.append(("row", "Fewest that could thin it", str(fc.dent_at), False))
+    return rows
 
 
 def lore_card(lore, touch: bool) -> tuple[tuple[str, ...], str, tuple[str, ...]]:

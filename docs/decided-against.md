@@ -223,10 +223,12 @@ nor rejected are in [`open.md`](open.md); the file index is
 - campaign.md · A probe win within a turn cap (the daily's check) as the test of a playable node: rejected, since no probe won the liked fog-and-1-turn-lanes maze or two other rolled nodes in 110 turns. *A node you can start on.*
 - campaign.md · Turns until a sure `edge_attacking` capture of the home's cheapest neighbour, on the built map: set aside for the settings-only average-garrison rule, which needs no map and isn't passed by one cheap neighbour. *A node you can start on.*
 - campaign.md · Flagging a config first dealt as a "?" so later weeks show it as one: rejected, since it still deals the slow ones and flags the playable ones. *A node you can start on.*
+- campaign.md · The run's stage graph (`stagegraph.mjs`) for a held node and its neighbours on the win screen: built and replaced the same day by the board's own map drawer (`campaignmap.mjs`), since a node should look the same wherever it is shown. *In the game*.
 
 ## gauntlet.md (Gauntlets)
 - gauntlet.md · An in-game gauntlet maker built on the map maker: it would lend placing, dragging, pan and zoom, which a gauntlet's lanes don't use, while the board page already edits everything else a stage needs. *Lanes on the board.*
 - gauntlet.md · Stages placed freely by dragging, as the map maker places systems: positions are a column and row per stage (`at`), moved by arrows, with the computed layout one press away. *Lanes on the board.*
+- gauntlet.md · Offering a run only for a stage target or a fork (`run.forks`, built 2026-11-04, dropped 2026-11-24): a run can be lost where the stage list can't, so a single path with no target is a run too. *Runs*, *Every gauntlet runs, on the player's terms.*
 - gauntlet.md · Boons carried between a run's stages (a hand-map edit of the stage): a boon-modified stage scores as a different setup, and the bookkeeping is complicated. Stage targets give a run its pressure instead. *Carry-over.*
 
 ## par.md (Par search)

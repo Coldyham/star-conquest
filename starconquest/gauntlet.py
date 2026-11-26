@@ -629,17 +629,32 @@ def next_stage(g: Gauntlet, sid: int,
     on leads to its stage (a bonus stage just unlocked), and one beside an
     ungated way on makes a fork.
     """
-    depth = g.depths()
     mine = found.get(sid) if found is not None else None
     opened = [] if mine is None else [
         b for a, b, lane in g.ways()
         if a == sid and lane in g.lane_targets and g.lane_targets[lane].met(mine)]
-    deeper = ([n for n in g.onward(sid, gated=False) if depth.get(n, -1) > depth[sid]]
-              if sid in depth else [])
-    if opened and deeper:
+    ways = deeper(g, sid)
+    if opened and ways:
         return None
-    ways = deeper or opened
+    ways = ways or opened
     return ways[0] if len(ways) == 1 else None
+
+
+def deeper(g: Gauntlet, sid: int) -> list[int]:
+    """The stages an ungated lane leads on to from ``sid``, further from the
+    start than it, in order: where a plain clear of it goes (more than one is
+    a fork)."""
+    depth = g.depths()
+    if sid not in depth:
+        return []
+    return sorted((n for n in g.onward(sid, gated=False) if depth.get(n, -1) > depth[sid]),
+                  key=g.position)
+
+
+def gated_onward(g: Gauntlet, sid: int) -> list[int]:
+    """The far stage of each gated way out of ``sid``, in ``gates_out``'s order."""
+    return [b for a, b, lane in g.ways()
+            if a == sid and lane in g.lane_targets and g.stage(b) is not None]
 
 
 def gates_out(g: Gauntlet, sid: int) -> list[tuple[str, str, Target]]:

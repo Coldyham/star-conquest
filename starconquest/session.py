@@ -228,9 +228,11 @@ class Session:
         the match goes to the page with the next menu reply (``opened``). False,
         with the list open again saying why, when there is nothing to play."""
         ms, settings = self.menu, self._settings()
-        opened, note = app.open_run(settings, fresh, setupmenu.picked_gauntlet(ms), ms.gauntlets,
+        picked = setupmenu.picked_gauntlet(ms)
+        opened, note = app.open_run(settings, fresh, picked, ms.gauntlets,
                                     lambda g, sid: setupmenu.load_stage(ms, settings, g, sid),
-                                    ms.stage_pick if pick is None else pick)
+                                    ms.stage_pick if pick is None else pick,
+                                    setupmenu.run_terms(ms, picked) if picked is not None else None)
         self._note(note)
         if opened is None:
             if reopen:
@@ -879,7 +881,7 @@ class Session:
                     self.opened = None
                     return self._whole()
             else:
-                found = setupmenu.next_stage(self.menu, self.settings)
+                found = setupmenu.next_stage(self.menu, self.settings, ui.fork_pick(state))
                 if found is not None:
                     ai.load_models()
                     self.seed = resolve_seed(self.settings)
@@ -890,9 +892,18 @@ class Session:
                     return self._whole()
         elif name.startswith("stage_") and name[len("stage_"):].isdigit():
             # A stage on the overlay's run graph: picked, or played on a second tap.
-            then = play.over_pick(ui, int(name[len("stage_"):]))
+            then = play.over_pick(state, ui, int(name[len("stage_"):]))
             if then is not None:
                 return self.op_game_action(then)
+        elif name.startswith("node_") and name[len("node_"):].isdigit():
+            # A neighbour on the overlay's campaign graph: picked, or played on a second tap.
+            then = play.over_node(ui, int(name[len("node_"):]))
+            if then is not None:
+                return self.op_game_action(then)
+        elif name == "campaign_play":
+            near = campaign.playable(ui.campaign_status).get(ui.campaign_pick)
+            if near is not None:
+                return self._play_node(near)
         elif name == "run_retry" and ui.run_again and ui.run_stage is not None:
             # The same stage again as the run's next step: the life is already
             # spent, so this is only the list's pick made for the player.
@@ -932,6 +943,21 @@ class Session:
             self._stage_again()
         return self._whole()
 
+    def _play_node(self, near: campaign.Near) -> dict:
+        """Play a neighbouring campaign node, picked on the win overlay's graph:
+        its stored setup becomes the menu's, as Start would play it, stamped
+        with the board's answer for a game started there (`campaign.Near.why`,
+        asked as ``starting``), since the watcher has yet to look it up."""
+        autoplay = app.carry_autoplay(self._ui())
+        self.settings = Settings.from_dict(near.setup)
+        self.settings.autoplay = autoplay
+        ai.load_models()
+        self.seed = resolve_seed(self.settings)
+        self.state, self.ui, self.log = app.start_game(self.settings, self.seed, autoplay)
+        self.history = self.live_fog = None
+        self.ui.campaign_start = near.why
+        return self._whole()
+
     def _stage_again(self) -> None:
         """A Retry, undo or rewind keeps the stage being played, but not its
         briefing, read the first time round (`app.stage_ui`)."""
@@ -945,12 +971,17 @@ class Session:
         assert self.settings is not None and self.log is not None and self.seed is not None
         board = ui.board_action()
         if board == "view":
-            ui.share_msg = app.open_map_page(ui.posted_key) or ui.share_msg
+            ui.share_msg = app.open_map_page(ui.posted_key, ui.campaign_status, ui.daily_day, ui.daily_kind) or ui.share_msg
         elif board == "post":
             request = app.quick_post(self.settings, state, ui, self.seed, self.log)
             if request is not None:
                 figures = (state.turn, state.players[ui.human_id].ships_lost)
-                self.waits.append((request, lambda st, body: app.land_quick_post(ui, figures, st, body)))
+
+                def land(st: str, body: str) -> None:
+                    app.land_quick_post(ui, figures, st, body)
+                    if ui.post_state == "posted":
+                        self.campaign.ask_again()   # it may have taken the node: the win screen shows it
+                self.waits.append((request, land))
         elif board == "enter":
             ui.share_msg = app.post_to_leaderboard(self.settings, state, ui, self.seed, self.log)
 

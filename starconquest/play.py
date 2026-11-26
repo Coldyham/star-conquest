@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import copy
 
-from . import starlore, stats
+from . import campaign, starlore, stats
 from .hud import end_turn_button
 from .model import GameState
 from .viewstate import CHOOSING, IDLE, ROUTING, SELECTED, Ui
@@ -234,16 +234,36 @@ def key(state: GameState, ui: Ui, name: str, shift: bool = False) -> str | None:
     return None
 
 
-def over_pick(ui: Ui, sid: int) -> str | None:
-    """A tap on stage ``sid`` in the win overlay's run graph: pick a stage the
-    run may go to; a second tap on the pick plays it, as Next stage does (or
-    Try again, for the stage just lost). Answers that action, or None."""
+def over_pick(state: GameState, ui: Ui, sid: int) -> str | None:
+    """A tap on stage ``sid`` in the win overlay's graph: pick a stage the
+    run (or a free-play win at a fork) may go to; a second tap on the pick
+    plays it, as Next stage does (or Try again, for the stage just lost).
+    Answers that action, or None."""
+    if not ui.run_id:
+        if sid not in ui.fork_choices(state):
+            return None
+        if sid != ui.fork_pick(state):
+            ui.stage_next = sid
+            return None
+        return "next_stage"
     if ui.run_graph is None or sid not in ui.run_choices:
         return None
     if sid != ui.run_next:
         ui.run_next = sid
         return None
     return "run_retry" if ui.run_again and sid == ui.run_stage else "next_stage"
+
+
+def over_node(ui: Ui, node_id: int) -> str | None:
+    """A tap on a neighbour on the win overlay's campaign graph
+    (`campaign.graph`): pick any node, to read where it stands; a second tap on
+    the pick plays it if it is `campaign.playable`. Answers that action, or None."""
+    if node_id not in campaign.pickable(ui.campaign_status):
+        return None
+    if node_id != ui.campaign_pick:
+        ui.campaign_pick = node_id
+        return None
+    return "campaign_play" if node_id in campaign.playable(ui.campaign_status) else None
 
 
 def over_key(state: GameState, ui: Ui, name: str) -> str | None:

@@ -635,6 +635,29 @@ def test_the_campaign_is_asked_about_before_start_and_stamped_on_the_match(sessi
     assert game["view"]["notes"] == [["Node 4: not a move", "campaign"]]
 
 
+def test_a_campaign_node_won_and_held_shows_its_neighbours_and_plays_one(session):
+    from starconquest import campaign
+    _won(session)
+    near = {"x": 0, "y": 0, "holder": None}
+    body = json.dumps({"node": {"id": 4, "kind": "field"}, "now": 0, "status": {"why": "own", "can": False},
+                       "around": {"nodes": [{**near, "id": 4, "status": {"why": "own"}, "settings": {}},
+                                            {**near, "id": 7, "x": 50, "status": {"why": "adjacent", "can": True},
+                                             "settings": {"players": 3, "nodes": 14, "seed": 77}}],
+                                  "lanes": [[4, 7]]}})
+    session.ui.campaign_status = campaign.parse(body, 0.0)   # as the page's tick lands it (`app.campaign_tick`)
+    graph = _menu(session, "game.view")["view"]["over"]["campaign_graph"]
+    assert [(n["key"], n["marks"]) for n in graph["nodes"]] == [("node_4", ["moved"]), ("node_7", ["open"])]
+    old = session.ui
+    view = _menu(session, "game.action", name="node_7")["view"]       # a tap picks
+    assert session.ui is old and view["over"]["campaign_graph"]["nodes"][1]["marks"] == ["open", "selected"]
+    res = _menu(session, "game.action", name="node_7")                # a second tap plays it
+    assert res["fresh"] and session.ui is not old
+    assert (session.settings.players, session.settings.nodes, session.seed) == (3, 14, 77)
+    assert session.ui.campaign_start == "adjacent"
+    # A game lost there, or one not yet yours, draws nothing.
+    assert _menu(session, "game.view")["view"]["over"] is None
+
+
 def test_the_menu_banner_says_the_campaign_reminder_once_it_lands(session, games, monkeypatch):
     from starconquest import campaign
     monkeypatch.setattr(campaign, "SETTLE_S", 0.0)
@@ -863,6 +886,44 @@ def test_next_stage_moves_the_menu_on_and_starts_it(session, games, monkeypatch)
     assert res["view"]["card"]["kind"] == "briefing"
 
 
+def test_a_free_play_win_at_a_fork_shows_the_ways_on_and_plays_the_pick(session, games, monkeypatch):
+    from starconquest import gauntlet, serial, setupmenu
+    from starconquest.viewstate import Ui
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    g = gauntlet.Gauntlet.from_dict({**_chain_data("fork-me"), "lanes": [[0, 1], [0, 2]]})
+    assert g is not None
+    monkeypatch.setattr(gauntlet, "every", lambda: [g])
+    session.menu.gauntlets = [g]
+    setupmenu.load_stage(session.menu, session.settings, g, 0)
+    _menu(session, "game.start")
+    state, ui = session.state, session.ui
+    assert not ui.run_id and ui.stage_ways == (1, 2) and ui.stage_graph is not None
+    assert ui.fork_choices(state) == [] and not ui.offers_next_stage(state)   # not yet won
+    monkeypatch.setattr(Ui, "can_post", lambda self, state: True)
+    monkeypatch.setattr(Ui, "met_target", lambda self, state: True)
+    ui.human_id = ui.human_id or 1
+    state.winner = ui.human_id
+    over = serial.over(state, ui)
+    graph = over["run_graph"]
+    assert [(n["key"], n["col"]) for n in graph["nodes"]] == [("stage_0", 0), ("stage_1", 1), ("stage_2", 1)]
+    assert graph["focus"] == "stage_1" and over["next_stage"] and over["next_label"] == "Next stage"
+    assert _menu(session, "game.action", name="stage_0")["view"]["over"]["run_graph"]["focus"] == "stage_1"
+    # A stage that is also a campaign node you now hold keeps its stage graph,
+    # and says the node in a line above it.
+    from tests.test_campaign_status import mine_around
+    ui.campaign_status = mine_around()
+    both = serial.over(state, ui)
+    assert both["run_graph"] is not None and both["campaign_graph"] is None
+    assert both["lines"][-1] == ["small", "Node 3: yours", "teal"]
+    ui.campaign_status = None
+    view = _menu(session, "game.action", name="stage_2")["view"]     # a tap picks
+    assert view["over"]["run_graph"]["focus"] == "stage_2" and session.ui is ui
+    res = _menu(session, "game.action", name="stage_2")               # a second tap plays it
+    assert res["fresh"] and session.ui is not ui and session.ui.stage_title == "Stage 2"
+    assert session.menu.stage_at == ("fork-me", 2)
+
+
 def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, games):
     from starconquest import gauntlet
     from starconquest import run as gauntlet_run
@@ -889,6 +950,31 @@ def test_a_run_starts_from_the_list_and_its_game_comes_to_the_page(session, game
         res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
     assert res["game"] and session.ui.run_id
 
+
+
+def test_a_run_starts_on_the_lives_and_targets_chosen_in_the_list(session, games):
+    from starconquest import gauntlet
+    from starconquest import run as gauntlet_run
+    _call(session, "boot", page=PAGE, store={})
+    _menu(session, "menu.open", first=True)
+    _menu(session, "menu.press", key="tutorial")
+    g = gauntlet.Gauntlet.from_dict(_chain_data())
+    session.menu.gauntlets, session.menu.gauntlet_pick = [g], 0
+    tut = _menu(session, "menu.press", key="gauntlet_pick_inc")["menu"]["tutorial"]
+    keys = [b["key"] for b in tut["run"]["buttons"]]
+    assert keys == ["run_start", "run_targets", "run_lives_dec", "run_lives_inc"]
+    assert tut["run"]["text"] == ("Run: play stages back to back in ironman mode, 1 life, targets on "
+                                  "(recommended: 1 life, targets on)")
+    _menu(session, "menu.press", key="run_lives_inc")
+    tut = _menu(session, "menu.press", key="run_targets")["menu"]["tutorial"]
+    assert tut["run"]["text"].endswith("ironman mode, 2 lives, targets off (recommended: 1 life, targets on)")
+    assert tut["run"]["buttons"][1]["label"] == "Targets: off"
+    res = _menu(session, "menu.press", key="run_start")
+    if "game" not in res and res["menu"]["modal"]:
+        res = _menu(session, "menu.press", key=res["menu"]["modal"]["go"]["key"])
+    r = gauntlet_run.active()
+    assert r is not None and (r.lives, r.targets) == (2, False)
+    assert session.ui.run_id and session.ui.shown_target is None and session.ui.stage_target is not None
 
 
 def test_the_footer_and_each_lists_foot_open_their_board_page(session, games):

@@ -635,8 +635,11 @@ Reasons: `docs/design/gauntlet.md`.
   `Ui.offers_next_stage`).
 - **A run** (`run.py`) plays a gauntlet from a start to a goal, each stage
   within its target, on the gauntlet's `lives` (1 to `LIVES_MAX`, default 1).
-  It is offered where it adds something to the list: a target, or a fork
-  (`run.offered`, `run.forks`). It may play any stage on its frontier
+  Every gauntlet with a goal can be run (`run.offered`), a single path with no
+  target included. The player may change the lives and switch stage targets
+  off in the list before it starts (`setupmenu.run_terms`); the run keeps its
+  copy (`Run.lives`, `Run.targets`), and with targets off any first win by hand
+  wins the stage while lane gates still judge their own score. It may play any stage on its frontier
   (`run.frontier`): opened (a start, or an ungated lane from a stage it won, or
   a gated one from a stage won with a game whose own score met the gate), not
   won, not behind a won stage, and not spent (winning it would open nothing
@@ -645,7 +648,7 @@ Reasons: `docs/design/gauntlet.md`.
   the gate (`run.gates_left`). LOST, MISSED and VOID cost a life and keep the stage; only the last life, GONE or ABANDONED
   ends the run; a won goal (`gauntlet.goals`) completes it. Lives left are
   derived from the steps (`run.lives_left`), never stored; `Run.lives` is
-  copied from the gauntlet when the run begins. A stage's first win in a run
+  copied from the list's choice (the gauntlet's by default) when the run begins. A stage's first win in a run
   grants a life where `gauntlet.grants_life` says so: the stage's
   `bonus_life`, by default on for a dead end. It is the one piece of gauntlet
   progress that is stored

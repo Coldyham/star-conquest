@@ -52,6 +52,30 @@ REFRESH_S = 120.0
 
 
 @dataclass(frozen=True)
+class Near:
+    """A node of the neighbourhood the board sends with its answer (``around``):
+    the node asked about, or one a lane away, as a game started on it now."""
+
+    node_id: int
+    kind: str
+    crater: str
+    x: float
+    y: float
+    r: float                       # its circle's radius on the map (`nodeRadius`)
+    text: str                      # what is written in its circle: its systems, or "?"
+    hue: int | None                # its holder's colour (`playerHue`), None for nobody
+    holder: str                    # who holds it, blank for nobody
+    beat: tuple[int, int] | None   # the holder's (turns, lost)
+    why: str                       # attemptStatus's reason for a game started there now
+    can: bool                      # would a win there be a move?
+    setup: dict                    # its stored setup (`Settings.from_dict`), what a press plays
+
+    @property
+    def name(self) -> str:
+        return self.crater or f"{'Home' if self.kind == 'home' else 'Node'} {self.node_id}"
+
+
+@dataclass(frozen=True)
 class Status:
     """What the board said about one node, for one player, at one moment."""
 
@@ -64,6 +88,16 @@ class Status:
     grace_until: float | None = None   # server ms: post by then, or it isn't a move
     beat: tuple[int, int, str] | None = None   # (turns, lost, holder) to beat
     crater: str = ""               # the node's name, a lunar crater; blank on older weeks
+    # The node and its neighbours (`Near`, the node first) and the lanes among
+    # them, for the win screen; empty from an older board.
+    around: tuple[Near, ...] = ()
+    lanes: tuple[tuple[int, int], ...] = ()
+    week: str = ""                 # the week's first day, "2026-11-23"; blank from an older board
+
+    @property
+    def mine(self) -> bool:
+        """Is the node yours (a field node or your home)?"""
+        return self.why in ("own", "own-home")
 
     @property
     def name(self) -> str:
@@ -109,9 +143,34 @@ def parse(text: str, received: float) -> Status | None:
             beat=(int(beat["turns"]), int(beat["lost"]), str(beat.get("name", "")))
             if isinstance(beat, dict) else None,
             crater=str(node.get("name") or ""),
+            week=str(body.get("week_start") or ""),
+            **_around(body.get("around")),
         )
     except (ValueError, TypeError, KeyError, AttributeError):
         return None
+
+
+def _around(raw) -> dict:
+    """``Status``'s ``around`` and ``lanes`` from the answer's ``around``, or
+    neither: a neighbourhood it can't read is left out, never the answer."""
+    try:
+        nodes = []
+        for n in raw["nodes"]:
+            held, status = n.get("holder"), n["status"]
+            nodes.append(Near(
+                node_id=int(n["id"]), kind=str(n.get("kind", "field")), crater=str(n.get("name") or ""),
+                x=float(n.get("x", 0)), y=float(n.get("y", 0)), r=float(n.get("r", 20)),
+                text=str(n.get("text", "")),
+                hue=int(held["hue"]) if isinstance(held, dict) and held.get("hue") is not None else None,
+                holder=str(held.get("name", "")) if isinstance(held, dict) else "",
+                beat=(int(held["turns"]), int(held["lost"])) if isinstance(held, dict) else None,
+                why=str(status.get("why", "")), can=bool(status.get("can")),
+                setup=dict(n.get("settings") or {})))
+        ids = {n.node_id for n in nodes}
+        lanes = tuple((int(a), int(b)) for a, b in raw.get("lanes", ()) if int(a) in ids and int(b) in ids)
+        return {"around": tuple(nodes), "lanes": lanes}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return {}
 
 
 def minutes(ms: float) -> str:
@@ -264,6 +323,13 @@ class Watcher:
         self._seen: Settings | None = None
         self._start: str | None = None
 
+    def ask_again(self) -> None:
+        """Ask about the setup at the next pump rather than at the next
+        refresh: a score was just posted that may have taken the node. A
+        lookup still in flight was asked before it, so it is dropped."""
+        if self._asked is not None:
+            self._asked, self._request = -math.inf, None
+
     def pump(self, settings: Settings, now: float | None = None,
              start: str | None = None) -> None:
         """``start`` None for a game about to begin (the menu), else the
@@ -301,3 +367,85 @@ class Watcher:
         if due:
             self._asked = now
             self._request = fetch(self._token, webstore.pbp_name(), self._start)
+
+
+def _says(n: Near) -> str:
+    """Where a node on the win screen's map stands for you, in the caption's
+    words: the board's `attemptLines`, shortened."""
+    if n.why == "grace":
+        return "yours to retake"
+    if n.can:
+        if n.beat is not None:
+            turns, lost = n.beat
+            return f"{n.holder}'s, beat {turns}t / {lost} lost to take it"
+        return "open, a win takes it"
+    if n.why == "own":
+        if n.beat is not None:
+            turns, lost = n.beat
+            return f"yours at {turns}t / {lost} lost, bettering it raises the bar"
+        return "yours"
+    return _BLOCKED.get(n.why, "not a move for you now")
+
+
+# Why a win on a node of the win screen's map would not be a move.
+_BLOCKED = {
+    "own-home": "your home, which can't be taken",
+    "home-taken": "a claimed home, and homes can't be taken",
+    "has-home": "a home, and you already have one this week",
+    "not-adjacent": "not next to anything you hold yet",
+    "no-home": "claim a home first",
+    "late-start": "you've lost your way in here, and a game started now won't take it",
+    "no-name": "post a score once so the board knows you",
+}
+
+
+def node_key(node_id: int) -> str:
+    """A node's key on the win screen's map, and the action a press sends."""
+    return f"node_{node_id}"
+
+
+def playable(status: Status | None) -> dict[int, Near]:
+    """The nodes a second press on the win screen's graph plays: those a win
+    on would be a move, and your own field nodes, whose score a win betters."""
+    if status is None or not status.around:
+        return {}
+    return {n.node_id: n for n in status.around if n.can or n.why == "own"}
+
+
+def pickable(status: Status | None) -> set[int]:
+    """The nodes a press on the win screen's graph selects: every one drawn."""
+    return {n.node_id for n in status.around} if status is not None else set()
+
+
+def graph(status: Status | None, pick: int | None = None) -> dict | None:
+    """The win screen's picture of a campaign node you hold and its neighbours,
+    drawn as the board's campaign page draws the week's map
+    (`webapp/js/campaignmap.mjs`): circles at their map positions in their
+    holders' colours, the node just taken ringed in gold, a neighbour a win on
+    would be a move ringed as open, the pick selected; and a caption naming the
+    pick and where it stands for you. None when the node isn't yours or the
+    board sent no neighbourhood. A press on any node picks it; a second plays
+    it when that is `playable` (`play.over_node`)."""
+    if status is None or not status.mine or not status.around:
+        return None
+    can = playable(status)
+    here = status.around[0]
+    nodes = []
+    for i, n in enumerate(status.around):
+        marks = ["moved"] if i == 0 else ["open"] if n.can else []
+        if n.node_id == pick:
+            marks.append("selected")
+        who = f"held by {n.holder}" if n.holder else "unclaimed"
+        nodes.append({"key": node_key(n.node_id), "x": n.x, "y": n.y, "r": n.r, "hue": n.hue, "kind": n.kind,
+                      "text": n.text, "title": n.name, "marks": marks,
+                      "aria": f"{n.name}, {'home' if n.kind == 'home' else 'node'}, {n.text} systems, {who}"})
+    lanes = [[node_key(a), node_key(b)] for a, b in status.lanes]
+    picked = next((n for n in status.around if n.node_id == pick), None) if pick is not None else None
+    if picked is not None:
+        again = " — choose it again to play it" if picked.node_id in can else ""
+        caption = f"{picked.name} · {_says(picked)}{again}"
+    else:
+        yours = f"{here.name} is your home." if here.why == "own-home" else f"{here.name} is yours."
+        ringed = " Ringed: a win there takes it." if any(n.can for n in status.around) else ""
+        caption = f"{yours} Choose any node to see where it stands.{ringed}"
+    return {"nodes": nodes, "lanes": lanes, "caption": caption}

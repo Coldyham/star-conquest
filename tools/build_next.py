@@ -73,12 +73,15 @@ def build_info(zip_path: str) -> str:
 
 
 # The game's own font, served to the page at fonts/.
-FONTS = ("DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf")
+FONTS = {
+    "DejaVuSansMono.ttf": ROOT / "starconquest" / "assets" / "DejaVuSansMono.ttf",
+    "DejaVuSansMono-Bold.ttf": ROOT / "starconquest" / "assets" / "DejaVuSansMono-Bold.ttf",
+}
 
 
 def font_path(name: str) -> Path:
-    """One of `FONTS` in the game's assets, or a path that does not exist."""
-    return ROOT / "starconquest" / "assets" / name if name in FONTS else ROOT / "missing"
+    """One of `FONTS`, or a path that does not exist."""
+    return FONTS.get(name, ROOT / "missing")
 
 
 def stage(out: Path) -> None:
