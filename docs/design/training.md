@@ -16,7 +16,9 @@ A row in the send popup's Send tab, under "send N · M home":
     lands in 3 turns · garrison unseen
 
 - **What lands.** `Ui.landing_at`: every queued send to the target whose lane
-  takes exactly as long as this one, plus our fleets already that far out. Ships
+  takes exactly as long as this one, what our forwarding rules send down such a
+  lane at the end of this turn (`Ui.forward_orders`: a rule's send is as planned
+  as a queued one), plus our fleets already that far out. Ships
   landing on the same turn pool into one force (`combat.resolve_arrival`), so
   the forecast teaches converging on a turn.
 - **What it meets.** `combat.garrison_after`: the garrison now plus every hull it
@@ -36,6 +38,14 @@ A row in the send popup's Send tab, under "send N · M home":
   "Sure" is the worst corner capturing (`CombatPreview.worst`), and `sure_count`
   is the fewest ships that make it so. Percentages are clamped to 1-99 when not
   sure, so a roll that can still lose never reads "100%".
+- **The range.** The breakdown gives the fight's two corners
+  (`Forecast.span`, `preview_fight`'s best and worst): what each side keeps on
+  our worst and best roll. Below them come `chance_count`, the fewest ships whose
+  best roll takes it, and `dent_count`, the fewest whose best roll leaves the
+  garrison fewer ships, each shown only where it differs from the next count up.
+  Asked for as "was that a lucky roll, or should I wait a turn" and "the least
+  that could knock this neutral down by one to lure the enemy in". Two corners
+  and two counts, not the Combat tab's jitter matrix.
 - **Fog.** A target out of full view (`Ui.sees`) shows "garrison unseen", the
   same rule as the popup title's "?sh". The forecast never reads what the map
   hides.
@@ -43,9 +53,10 @@ A row in the send popup's Send tab, under "send N · M home":
   be there.
 - **The breakdown** (`render._draw_odds_card`, `Ui.odds_open`). The row is a
   button, marked with an i like the star info card's, wherever it reads the
-  target. It opens a card over the board: your send, anything landing with it,
-  what you land with; the garrison now, what it builds before you land, the
-  holder's fleets landing by then, what it will hold; the verdict in words; who
+  target. It opens a card over the board: your send, then your other sends,
+  your rules' sends and your fleets in flight landing with it, what you land
+  with; the garrison now, what it builds before you land, the holder's fleets
+  landing by then, what it will hold; the verdict in words, then the range; who
   else is flying in; then three lines on how a fight is rolled: this game's
   defender advantage ("the 5 holding it fight like 5.5", unrounded, since it
   multiplies strength rather than adding ships), its jitter, and what the

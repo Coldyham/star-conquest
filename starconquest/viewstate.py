@@ -887,15 +887,22 @@ class Ui:
         return sum(o.ships for o in self.pending if o.source_id == sid)
 
     def landing_at(self, state: GameState, dest: int, turns: int) -> int:
-        """Our ships landing on ``dest`` in ``turns`` turns: queued sends whose
-        lane takes exactly that long, and fleets already that far out. They
-        land together, so they fight as one (`combat.resolve_arrival`)."""
-        queued = sum(o.ships for o in self.pending
-                     if o.dest_id == dest and state.travel_turns(o.source_id, dest) == turns)
+        """Our ships landing on ``dest`` in ``turns`` turns (`landing_parts`).
+        They land together, so they fight as one (`combat.resolve_arrival`)."""
+        return sum(self.landing_parts(state, dest, turns))
+
+    def landing_parts(self, state: GameState, dest: int, turns: int) -> tuple[int, int, int]:
+        """``(queued, forwarded, flying)``: our ships landing on ``dest`` in
+        ``turns`` turns from queued sends and from what the rules forward at
+        the end of this turn, down lanes that take exactly that long, and from
+        fleets already that far out."""
+        def down(orders: list[Order]) -> int:
+            return sum(o.ships for o in orders
+                       if o.dest_id == dest and state.travel_turns(o.source_id, dest) == turns)
         flying = sum(f.ships for f in state.fleets
                      if f.owner_id == self.human_id and f.dest_id == dest
                      and f.turns_remaining == turns)
-        return queued + flying
+        return down(self.pending), down(self.forward_orders(state)), flying
 
     def available(self, state: GameState, sid: int) -> int:
         """Ships still free to deploy from a system this turn."""
