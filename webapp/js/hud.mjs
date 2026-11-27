@@ -772,11 +772,44 @@ export class Hud {
     return box;
   }
 
+  /** Drag the floating popup by its background (`Ui.move_popup`): it follows
+   * the pointer inside the map, and the spot is handed in on release. A press on
+   * a control is the control's; a docked popup stays put. `popupMoving` tells
+   * the page not to place it meanwhile. */
+  dragPopup(box) {
+    let grab = null;
+    box.onpointerdown = (e) => {
+      if (e.button !== 0 || compact() || e.target.closest("button, input, .lane")) return;
+      const scale = box.getBoundingClientRect().width / box.offsetWidth || 1;
+      grab = { id: e.pointerId, x: e.clientX, y: e.clientY, left: box.offsetLeft, top: box.offsetTop, scale, moved: false };
+      box.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+    box.onpointermove = (e) => {
+      if (!grab || e.pointerId !== grab.id) return;
+      const parent = box.offsetParent;
+      const dx = (e.clientX - grab.x) / grab.scale, dy = (e.clientY - grab.y) / grab.scale;
+      if (!grab.moved && Math.hypot(dx, dy) < 3) return;
+      grab.moved = this.popupMoving = true;
+      const clamp = (v, hi) => Math.round(Math.max(0, Math.min(hi, v)));
+      box.style.left = `${clamp(grab.left + dx, parent.clientWidth - box.offsetWidth)}px`;
+      box.style.top = `${clamp(grab.top + dy, parent.clientHeight - box.offsetHeight)}px`;
+    };
+    box.onpointerup = box.onpointercancel = (e) => {
+      if (!grab || e.pointerId !== grab.id) return;
+      const moved = grab.moved;
+      grab = null;
+      this.popupMoving = false;
+      if (moved) this.on.call("move_popup", [box.offsetLeft, box.offsetTop]);
+    };
+  }
+
   buildPopup(box, view, shape) {
     const pop = view.popup;
     const call = (method, ...args) => () => this.on.call(method, args);
     box.className = [pop.forward ? "forward" : "", pop.split ? "split" : ""].join(" ").trim();
     const ui = { shape, dragging: false, range: [0, 0] };
+    this.dragPopup(box);
     const step = (label, onclick) => h("button", { type: "button", class: "step", "aria-label": label, onclick },
       label === "Fewer" ? "−" : "+");
     ui.ships = h("span");

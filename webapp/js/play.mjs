@@ -239,15 +239,24 @@ function wake() {
   requestAnimationFrame(frame);
 }
 
-/** Put the popup beside its lane, on whichever side covers the fewest systems
+/** Put the popup where the player dragged it (`Ui.popup_pos`), kept on the
+ * map, or else beside its lane, on whichever side covers the fewest systems
  * (`render._popup_anchor`). */
 function place(box) {
   if (compact()) {   // docked: the stylesheet places it
     box.style.left = box.style.top = "";
     return;
   }
+  if (game.hud.popupMoving) return;   // following the pointer
   const pop = game.view.popup;
   const bv = game.board_view;
+  if (pop.at) {
+    const parent = box.offsetParent;
+    const fit = (v, hi) => Math.max(0, Math.min(hi, v));
+    box.style.left = `${fit(pop.at[0], parent.clientWidth - box.offsetWidth)}px`;
+    box.style.top = `${fit(pop.at[1], parent.clientHeight - box.offsetHeight)}px`;
+    return;
+  }
   const [ax, ay] = bv.pos.get(pop.src);
   const [bx, by] = bv.pos.get(pop.dest);
   const mx = (ax + bx) / 2, my = (ay + by) / 2;

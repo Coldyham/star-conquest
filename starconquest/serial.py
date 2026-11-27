@@ -208,7 +208,8 @@ def pbp(state: GameState, ui: Ui) -> dict | None:
 
 def popup(state: GameState, ui: Ui) -> dict | None:
     """The send popup's content: the lane, the count or share being edited and
-    its slider, the presets, the forecast, and the discard button's word."""
+    its slider, the presets, the forecast, the discard button's word, and where
+    the player dragged it (``at``, or None for the page to place it)."""
     if ui.selected not in state.systems or ui.dest not in state.systems:
         return None
     src, dest = state.systems[ui.selected], state.systems[ui.dest]
@@ -244,6 +245,7 @@ def popup(state: GameState, ui: Ui) -> dict | None:
         "discard": hud.popup_discard(ui),
         "hold": hold,
         "split": split,
+        "at": list(ui.popup_pos) if ui.popup_pos is not None else None,
     }
 
 

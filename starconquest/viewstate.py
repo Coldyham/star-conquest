@@ -1230,6 +1230,12 @@ class Ui:
         self.popup_pos = None
         self.mode = SELECTED if self.selected is not None else IDLE
 
+    def move_popup(self, x: int, y: int) -> None:
+        """The player dragged the send popup to (``x``, ``y``), its top-left in
+        the map's pixels; it stays there until the next target."""
+        if self.mode == CHOOSING:
+            self.popup_pos = (x, y)
+
     # -- route mode --------------------------------------------------------- #
     def can_route(self, state: GameState) -> bool:
         """Is route mode available? Only while there is a human turn left to plan:

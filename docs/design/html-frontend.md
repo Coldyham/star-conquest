@@ -162,6 +162,13 @@ page hit-tests, draws, and keeps what is only about looking.
 - The page keeps the camera (`js/camera.mjs`, `WorldView` with the free
   clamp), the hover and drag between presses, and the film's clock. During a
   film it draws the union of what was visible before and after.
+- The send popup sits beside its lane on whichever side covers the fewest
+  systems, unless it has been dragged. A mouse or a finger drags the floating
+  popup by its background (`hud.dragPopup`; a press on a control is the
+  control's). On release the page hands in its top-left (`Ui.move_popup`, into
+  `popup_pos`), and the page keeps it there, within the map, until a new target
+  clears it. A docked popup doesn't move. The cutover had dropped this along
+  with the shell's drag state, and it was put back after.
 
 Sizes are screen pixels at any zoom, as in `render`: the board draws through
 the camera, and only positions move.
