@@ -247,6 +247,9 @@ h1::after {
 }
 
 .card-main { min-width: 0; }
+/* Play and Map page, side by side on a daily's card. */
+.card-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; flex-shrink: 0; }
+.card-actions .btn { margin-top: 0; }
 
 /* A card whose credit names a player: the card is a div, its setup line the
  * link, stretched over the whole body; the name is a link of its own above it
@@ -1220,8 +1223,7 @@ button:disabled { animation: none; opacity: 0.45; cursor: default; }
 .campaign-detail .can, .campaign-note .can { color: var(--green); }
 .campaign-detail .cannot, .campaign-note .cannot { color: var(--dim); }
 .campaign-detail .timer, .campaign-note .timer { color: var(--gold); }
-.campaign-detail .btn { margin-top: 0.6rem; display: inline-block; }
-.campaign-detail .btn + .btn { margin-left: 0.5rem; }
+.campaign-detail .map-actions { margin-top: 0.6rem; }
 
 /* -- the privacy notice (privacy.html) ------------------------------------ */
 .notice p, .notice ul { margin: 0 0 1rem; }

@@ -5,6 +5,7 @@
 // be parsed as markup.
 
 import { profileLabel, profiles, stopName } from "./bots.mjs";
+import { opponents } from "./daily.mjs";
 import { configTitle, fogLabel, hasFog } from "./setup.mjs";
 import { compareScores } from "./standings.mjs";
 
@@ -88,6 +89,16 @@ export function systemCount(game) {
  */
 export function setupSummary(config) {
   return mapSummary(config).split(" · ").slice(0, 3).join(" · ");
+}
+
+/**
+ * "Random · 4 players · 24 systems · vs marshal, evolved": a stored setup in
+ * one line, as the daily's card and a campaign node's panel both state the map
+ * they link on to. The map page has the rest (seed, fog, every chip).
+ */
+export function challengeSummary(settings) {
+  const bots = opponents(settings);
+  return setupSummary({ ...settings, settings_json: settings }) + (bots.length ? ` · vs ${bots.join(", ")}` : "");
 }
 
 /**
@@ -379,6 +390,15 @@ export function embargoBadge(game) {
  * This map is a node on a campaign (`campaignMark`, campaign.mjs) — a link to
  * that node on the campaign page, or null for a map on none.
  */
+/**
+ * "Scores": from a daily's or a campaign node's own page to the map's board
+ * (game.html), its scores, bots and replays. The way back is `dailyMark`'s
+ * and `campaignMark`'s button there.
+ */
+export function mapPageLink(gameKey) {
+  return el("a", { class: "btn ghost", href: `game.html?key=${encodeURIComponent(gameKey)}`, text: "Scores" });
+}
+
 export function campaignBadge(mark) {
   if (!mark) return null;
   return el("a", { class: "badge campaign", href: mark.href, text: mark.label });

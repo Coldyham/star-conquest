@@ -7,9 +7,11 @@ import {
 } from "./format.mjs";
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
+import { ownName } from "./post.mjs";
 import { BASELINE } from "./playstyle-baseline.mjs";
 import { MIN_GAMES, ROWS, pool, summary } from "./playstyle.mjs";
 import { standings, tally } from "./standings.mjs";
+import { ownReplays, replayCell } from "./watch.mjs";
 
 // Four names is as many as a cabinet row holds before the score column collapses,
 // and past that a "comparison" has stopped being one.
@@ -150,7 +152,9 @@ const nameOf = (entry, comparing) => (comparing
   ? el("a", { class: "nm", href: userHref([entry.name]), text: entry.name })
   : el("span", { class: "nm", text: entry.name }));
 
-function playerLine(entry, comparing) {
+/** `replays`: the signed-in viewer's own replays (`ownReplays`), so Watch shows
+ * on their own lines alone, embargoed maps included. */
+function playerLine(entry, comparing, replays) {
   if (!entry.score) {
     return el("li", { class: "score absent" }, [
       el("span", { class: "rank", text: "—" }),
@@ -174,7 +178,10 @@ function playerLine(entry, comparing) {
       entry.tries > 1 ? el("span", { class: "tries", text: `×${entry.tries}` }) : null,
       el("span", { class: "dots", "aria-hidden": "true" }),
     ]),
-    el("span", { class: "result", text: scoreSummary(entry.score) }),
+    el("span", { class: "result" }, [
+      el("span", { text: scoreSummary(entry.score) }),
+      ...replayCell(entry.score.matchId, replays.get(entry.score.matchId)),
+    ]),
     el("span", {
       class: "when",
       title: relativeTime(entry.score.at),
@@ -183,7 +190,7 @@ function playerLine(entry, comparing) {
   ]);
 }
 
-function mapEntry(row, game, comparing, shown) {
+function mapEntry(row, game, comparing, shown, replays) {
   const field = `${row.fieldSize} ${row.fieldSize === 1 ? "score" : "scores"}`;
   return el("li", { class: "entry" }, [
     el("a", { class: "entry-head", href: `game.html?key=${encodeURIComponent(row.gameKey)}` }, [
@@ -193,7 +200,7 @@ function mapEntry(row, game, comparing, shown) {
     el(
       "ul",
       { class: "lines" },
-      row.entries.filter((entry) => shown.has(entry.key)).map((entry) => playerLine(entry, comparing)),
+      row.entries.filter((entry) => shown.has(entry.key)).map((entry) => playerLine(entry, comparing, replays)),
     ),
   ]);
 }
@@ -279,7 +286,22 @@ const asEntry = (row) => ({
   lost: row.lost,
   hand: row.hand,
   at: row.submitted_at,
+  matchId: row.match_id,
 });
+
+/**
+ * When the signed-in viewer owns a name on the card, the replays of their own
+ * best attempts shown on it (`ownReplays`), embargoed maps' included: nobody
+ * else sees Watch on this card, and the viewer only on their own lines.
+ */
+async function viewersReplays(board, roster) {
+  const own = (await ownName()).trim().toLowerCase();
+  if (!own || !roster.some((player) => player.key === own)) return new Map();
+  const ids = board.flatMap((row) => row.entries)
+    .filter((entry) => entry.key === own && entry.score)
+    .map((entry) => entry.score.matchId);
+  return ownReplays(ids);
+}
 
 async function load() {
   mountNav();
@@ -373,8 +395,9 @@ async function load() {
     // A name with nothing on the board would otherwise add a "not played" line to
     // every single map; the card above already reports that they have none.
     const shown = new Set(sums.players.filter((player) => player.maps).map((player) => player.key));
+    const replays = await viewersReplays(board, roster);
     clear(target).append(
-      el("ul", { class: "entries" }, board.map((row) => mapEntry(row, setups.get(row.gameKey), comparing, shown))),
+      el("ul", { class: "entries" }, board.map((row) => mapEntry(row, setups.get(row.gameKey), comparing, shown, replays))),
     );
     drawPlaystyle(rows, roster, readings);
   } catch (err) {

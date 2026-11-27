@@ -124,7 +124,7 @@ line gives only the verdict. Ideas that lost are in
 
 ## schema.md
 - schema.md · **The trust model** (append-only by absent policies; worker-only and closed tables); **re-pasting upgrades a board** (view columns go last; the `public_replays.rules_version` incident).
-- schema.md · Per relation: games and `game_embargoes`; scores; game_logs; score_checks; playstyle_readings; `sc_config_key`/`sc_bots`; configs and config_tags; bot_scores; campaigns; gauntlets; public_replays; config_summary; counted_scores.
+- schema.md · Per relation: games and `game_embargoes`; scores; game_logs; score_checks; playstyle_readings; `sc_config_key`/`sc_bots`; configs and config_tags; bot_scores; campaigns; gauntlets; public_replays (and `match_replays`, a player's own embargoed replays through `sc_my_replay(s)`); config_summary; counted_scores.
 - schema.md · **The grant trap.** `service_role` skips policies, not grants; three incidents; `tests/test_schema_grants.py`.
 - schema.md · **Play-by-post tables.** Kept apart; inputs, not a board; seat tokens; the deadline; `board_digest`.
 

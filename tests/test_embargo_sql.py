@@ -60,7 +60,10 @@ def board():
         values ({_TODAY}, 'puzzle', jsonb_build_object('mode', 'random', 'players', 2, 'nodes', 18,
                                                      'seed', 8, 'ship_ly_per_turn', 6.0),
                 '{{}}'::jsonb, '[]'::jsonb, 2);
-      insert into users (name) values ('alice');
+      -- alice has signed in and claimed her name; account b holds no name.
+      insert into auth.users (id) values
+        ('00000000-0000-0000-0000-00000000000a'), ('00000000-0000-0000-0000-00000000000b');
+      insert into users (name, owner) values ('alice', '00000000-0000-0000-0000-00000000000a');
       insert into games (game_key, mode, players, nodes, seed, settings_json, embargo_until)
         select 'g' || s, 'random', 2, 18, s,
                jsonb_build_object('mode', 'random', 'players', 2, 'nodes', 18,
@@ -104,6 +107,29 @@ def test_a_live_campaign_node_is_embargoed_until_its_week_ends(board):
 def test_only_replays_off_embargo_are_public(board):
     rows = _psql("select game_key from public_replays order by game_key", board)
     assert rows.splitlines() == ["g4", "g6", "g9"]
+
+
+def _as(board: str, who: str, sql: str) -> str:
+    uid = f"00000000-0000-0000-0000-00000000000{who}" if who else ""
+    return _psql(f"set role authenticated; set request.jwt.claim.sub = '{uid}'; {sql}", board)
+
+
+def test_a_player_may_watch_their_own_replay_under_embargo(board):
+    embargoed = "0000000000000002"      # g2: its own reveal date, a month off
+    got = _as(board, "a", f"select sc_my_replays(array['{embargoed}', '0000000000000009', 'ffffffffffffffff'])")
+    assert f'"match_id": "{embargoed}"' in got and '"0000000000000009"' in got and "ffff" not in got
+    assert _as(board, "a", f"select sc_my_replay('{embargoed}')").strip() == "x"
+
+
+def test_nobody_else_watches_it(board):
+    embargoed = "0000000000000002"
+    assert _as(board, "b", f"select sc_my_replays(array['{embargoed}'])").strip() == "[]"
+    assert _as(board, "b", f"select sc_my_replay('{embargoed}')").strip() == ""
+    assert _as(board, "", f"select sc_my_replays(array['{embargoed}'])").strip() == "[]"   # signed out
+    for sql in (f"select sc_my_replay('{embargoed}')", "select count(*) from match_replays"):
+        out = subprocess.run(["psql", f"{DSN} dbname={board}", "-v", "ON_ERROR_STOP=1", "-qAt", "-c",
+                              f"set role anon; {sql}"], capture_output=True, text=True, check=False)
+        assert out.returncode != 0 and "permission denied" in out.stderr
 
 
 def test_the_public_reads_a_daily_only_once_its_day_has_started(board):

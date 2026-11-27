@@ -292,7 +292,8 @@ export function canAttempt(graph, state, nodeId, name, now = Date.now(), game = 
 
 /**
  * What a map's campaign badge says and where it goes, for one `campaign_games`
- * row: that node on the campaign page, preselected, in its own week.
+ * row (`{current, label, button, href}`): that node on the campaign page,
+ * preselected, in its own week; `button` is game.html's, as `dailyMark`'s.
  */
 export function campaignMark(entry, thisWeek) {
   const current = entry.week_start === weekParam(thisWeek);
@@ -301,6 +302,7 @@ export function campaignMark(entry, thisWeek) {
   return {
     current,
     label: `${current ? "Campaign" : "Past campaign"} · ${node}`,
+    button: "Campaign page",
     href: `campaign.html?${week}node=${entry.node_id}`,
   };
 }

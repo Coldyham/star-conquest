@@ -1,6 +1,6 @@
 import { configured, eq, select } from "./api.mjs";
 import { attemptLines, attemptStatus, campaignMark, fold, weekQueries } from "./campaign.mjs";
-import { CURRENT_RULES_VERSION, GAME_URL } from "./config.mjs";
+import { GAME_URL } from "./config.mjs";
 import { weekStart } from "./crowns.mjs";
 import { dailyMark, dayParam, parNote } from "./daily.mjs";
 import { deflate } from "./deflate-browser.mjs";
@@ -17,6 +17,7 @@ import { botWatchSetup, encodeToken } from "./token-encode.mjs";
 import {
   bestBot, botOrder, botWatchKind, compareScores, displayOrder, embargoLiftedAt, humanVsBots, leaderAt,
 } from "./standings.mjs";
+import { outdatedNote, ownReplays, replayCell, watchLink } from "./watch.mjs";
 
 const heading = document.getElementById("setup");
 const tagsTarget = document.getElementById("setup-tags");
@@ -63,9 +64,6 @@ function verifiedMark() {
 
 /** `rank` null leaves the row unplaced (`ownScores`), shown as a dash. */
 function scoreRow(score, rank, replays, lift) {
-  const version = replays.get(score.match_id);
-  const watchable = version === CURRENT_RULES_VERSION;
-  const outdated = version !== undefined && !watchable;
   return el("li", { class: rank != null && rank <= 3 ? `score rank-${rank}` : "score" }, [
     el("span", { class: "rank", text: rank == null ? "—" : ordinal(rank) }),
     // The dot leader is its own flexible element rather than trailing dots on the
@@ -82,8 +80,7 @@ function scoreRow(score, rank, replays, lift) {
     // empty column and its gap.
     el("span", { class: "result" }, [
       el("span", { text: scoreSummary(score) }),
-      ...(watchable ? [watchLink(score.match_id)] : []),
-      ...(outdated ? [outdatedNote()] : []),
+      ...replayCell(score.match_id, replays.get(score.match_id)),
     ]),
     el("span", { class: "when", title: relativeTime(score.submitted_at), text: shortTime(score.submitted_at) }),
   ]);
@@ -116,40 +113,6 @@ function liftNote(lift, leader) {
     ` was ahead — ${lift.score.turns} turns. `,
     beaten ? `Beaten since by ${name(leader)} — ${leader.turns} turns.` : "Still the record.",
   ]);
-}
-
-/**
- * "Watch" on a score whose replay is actually there.
- *
- * The link goes back into the *game*, not into a player here: the engine is
- * Python and the game already has the whole reviewer — `reconstruct`, the fog
- * replay and the scrubber. Reimplementing any of that in JS would be a second
- * engine to keep in step with the first.
- *
- * Shown only for ids `public_replays` actually returned, so it can never lead to
- * a 404: a score can name a match whose upload never arrived.
- */
-function watchLink(matchId) {
-  return el("a", {
-    class: "watch",
-    href: `${GAME_URL}#log=${matchId}`,
-    title: "Replay this game in the browser",
-    text: "Watch",
-  });
-}
-
-/**
- * Stands in for Watch on a score whose replay exists but predates the current
- * rules — disclosed rather than just dropped, so a historic score reads as
- * "can't replay this one" instead of looking indistinguishable from a score
- * that never had a replay at all.
- */
-function outdatedNote() {
-  return el("span", {
-    class: "outdated",
-    title: "This replay was recorded under an earlier ruleset and can no longer be reconstructed exactly.",
-    text: "Older ruleset",
-  });
 }
 
 /**
@@ -273,15 +236,13 @@ async function renderBots(rows, best, gameSettings) {
 }
 
 /**
- * The ways on from this map: back into the game, and — while the map is a node
- * on this week's campaign — back to that node, to see what is open next, with
- * `note` (campaignNote) saying first whether a win here would be a move —
- * and, for a map that was a day's daily (`dailyMark`), to that day's page.
+ * The ways on from this map: back into the game; for a map that is or was a
+ * campaign node (`campaignMark`), to that node on its week's page, with `note`
+ * (campaignNote) saying first, on a live node, whether a win here would be a
+ * move; and for a map that was a day's daily (`dailyMark`), to that day's page.
  */
 function mapActions(link, campaign, note, daily) {
-  const back = campaign && campaign.current
-    ? el("a", { class: "btn", href: campaign.href, text: "Campaign map" })
-    : null;
+  const back = campaign ? el("a", { class: "btn", href: campaign.href, text: campaign.button }) : null;
   const day = daily ? el("a", { class: "btn", href: daily.href, text: daily.button }) : null;
   const buttons = [link, back, day].filter(Boolean);
   return [note, buttons.length ? el("div", { class: "map-actions" }, buttons) : null].filter(Boolean);
@@ -407,8 +368,8 @@ async function replayVersions(scores) {
 /**
  * The signed-in caller's own scores on an embargoed map: by their claimed name
  * only (`ownName`, schema.sql's `my_name`), never the remembered one, which
- * anyone can type. Unplaced, since the rest of the field stays unread, and with
- * no Watch: `public_replays` holds back every replay here, the owner's too.
+ * anyone can type. Unplaced, since the rest of the field stays unread. Watch is
+ * theirs alone (`ownReplays`): `public_replays` holds back every replay here.
  * Null when signed out, owning no name, with nothing posted here, or on failure.
  */
 async function ownScores() {
@@ -425,13 +386,14 @@ async function ownScores() {
     return null;
   }
   if (!rows.length) return null;
+  const replays = await ownReplays(rows.map((score) => score.match_id));
   return el("section", { class: "own-scores" }, [
     el("h2", { text: "Your scores" }),
     el("p", {
       class: "lede",
-      text: `Shown because you are signed in as ${name}. Their replays stay hidden until the embargo lifts too.`,
+      text: `Shown because you are signed in as ${name}. Only you can watch their replays until the embargo lifts.`,
     }),
-    el("ol", { class: "scores" }, rows.map((score) => scoreRow(score, null, new Map(), null))),
+    el("ol", { class: "scores" }, rows.map((score) => scoreRow(score, null, replays, null))),
   ]);
 }
 

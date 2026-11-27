@@ -412,7 +412,9 @@ create table if not exists public.dailies (
 `daily.html` (joins `render_board.PAGES`), on `base.html` like every page:
 
 - **Today**: the setup in a line, the opponents, a Play link (`../play/#daily`)
-  and a link to its map page once somebody has posted. While the day runs the
+  and a *Scores* button (to its map page) once somebody has posted (a campaign node's panel
+  says the same line and has the same button; the map page links back with
+  *Daily page* or *Campaign page*). While the day runs the
   map is embargoed (see "The day's winner"), so the page shows what game.html
   shows of an embargoed map: who is ahead, by how many turns, and how many
   scores are posted (`game_summary`), and it never fetches that day's turns or

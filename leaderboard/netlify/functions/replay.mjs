@@ -21,13 +21,22 @@
  * row, so nothing on the site needs a second, wider door onto this view just to
  * list what is watchable.
  *
+ * A signed-in player may also watch their own replay while its map is still
+ * embargoed: with an `Authorization: Bearer` from the board's sign-in, an id the
+ * public view has no row for is asked of `sc_my_replay` under that token, which
+ * answers only for a match one of the caller's own scores points at. That
+ * answer is private (`no-store`), never cached for anyone else.
+ *
  * The response is the encoded log itself — `replay.GameLog.encoded` output, which
  * is base64url text — as `text/plain`, because that is precisely what
  * `GameLog.decode` wants and wrapping it in JSON would only make the game unwrap
  * it again.
  */
 
+import { SUPABASE_ANON_KEY } from "../../js/config.mjs";
+
 const MATCH_ID = /^[0-9a-f]{16}$/;
+const BEARER = /^Bearer [A-Za-z0-9._-]+$/;
 
 // Replays are immutable once posted: the match is over and its rows never change.
 // A day of browser caching costs nothing and spares the database every reload of
@@ -40,6 +49,7 @@ const CACHE = "public, max-age=86400";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization",
 };
 
 function reply(status, body, headers = {}) {
@@ -75,10 +85,32 @@ export default async function handler(request) {
   // Absent and not-yet-public are the same answer on purpose: "there is no replay
   // here to watch" tells a visitor everything true without disclosing that some
   // unposted game exists under that id.
-  if (!Array.isArray(rows) || !rows.length || typeof rows[0].log !== "string") {
-    return reply(404, "no replay");
+  if (Array.isArray(rows) && rows.length && typeof rows[0].log === "string") {
+    return reply(200, rows[0].log, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": CACHE });
   }
-  return reply(200, rows[0].log, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": CACHE });
+  const own = await ownReplay(url, id, request.headers.get("authorization") || "");
+  if (own) return reply(200, own, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "private, no-store" });
+  return reply(404, "no replay");
+}
+
+/**
+ * The caller's own replay of `id` (`sc_my_replay`, asked as the caller), or
+ * null: signed out, not theirs, no replay, or any failure.
+ */
+async function ownReplay(url, id, authorization) {
+  if (!BEARER.test(authorization) || !SUPABASE_ANON_KEY) return null;
+  try {
+    const response = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/sc_my_replay`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: authorization, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_match_id: id }),
+    });
+    if (!response.ok) return null;
+    const log = await response.json();
+    return typeof log === "string" && log ? log : null;
+  } catch {
+    return null;
+  }
 }
 
 export const config = { path: "/api/replay" };

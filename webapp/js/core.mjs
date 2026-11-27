@@ -78,14 +78,14 @@ export class Core {
   }
 
   http(e) {
-    const headers = { "Content-Type": "application/json" };
+    const headers = e.body === null ? {} : { "Content-Type": "application/json" };
     if (e.signed) {
       try {
         const auth = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
         if (auth && auth.access_token) headers.Authorization = `Bearer ${auth.access_token}`;
       } catch { /* signed out, as far as the endpoint can tell */ }
     }
-    const init = e.body === null ? {} : { method: "POST", headers, body: e.body };
+    const init = e.body === null ? { headers } : { method: "POST", headers, body: e.body };
     fetch(e.url, init)
       .then((r) => r.text().then((text) => this.answer(e.req,
         r.ok ? "ok" : r.status === 404 ? "missing" : r.status === 403 ? "refused" : "error", text)))
