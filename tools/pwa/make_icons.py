@@ -29,7 +29,6 @@ BG_BOTTOM = (7, 8, 15)
 GLOW = (46, 78, 150)
 LANE = (74, 84, 116)
 HERO = config.PLAYER_COLORS[1]          # human blue
-SPARK = config.COLOR_SELECT             # highlight yellow
 
 # Constellation laid out in a unit square [0,1]; kept inside the maskable safe
 # zone (central ~72%) so it survives Android's circle/squircle crop. Each node is
@@ -72,34 +71,12 @@ def _draw(size: int) -> pygame.Surface:
     for a, b in _LANES:
         pygame.draw.line(surf, LANE, px[a], px[b], max(2, int(0.012 * n)))
 
-    # Nodes (outer dark rim + fill), hero gets a bright ring and a sparkle.
+    # Nodes: plain discs, as the loading screen (webapp/index.html) draws them.
     for i, (_, _, rad, col) in enumerate(_NODES):
         r = int(rad * n)
-        pygame.draw.circle(surf, BG_BOTTOM, px[i], r + max(2, int(0.012 * n)))
         pygame.draw.circle(surf, col, px[i], r)
-        if i == 0:
-            pygame.draw.circle(surf, SPARK, px[i], r, max(2, int(0.010 * n)))
-            _sparkle(surf, px[i], int(rad * 1.7 * n))
 
     return pygame.transform.smoothscale(surf, (size, size))
-
-
-def _sparkle(surf: pygame.Surface, center: tuple[int, int], reach: int) -> None:
-    """A crisp 4-point star highlight over the capital."""
-    cx, cy = center
-    w = max(2, reach // 12)
-    for dx, dy in ((1, 0), (0, 1)):
-        pygame.draw.polygon(
-            surf,
-            SPARK,
-            [
-                (cx + dx * reach, cy + dy * reach),
-                (cx + dy * w, cy + dx * w),
-                (cx - dx * reach, cy - dy * reach),
-                (cx - dy * w, cy - dx * w),
-            ],
-        )
-    pygame.draw.circle(surf, (255, 255, 255), center, max(2, reach // 8))
 
 
 def main() -> None:
