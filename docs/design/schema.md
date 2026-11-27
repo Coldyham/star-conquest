@@ -300,6 +300,18 @@ can fold it onto an older one). A score's `game_key` is guaranteed by its
 foreign key to name a real `games` row. It is a left join so a log whose key
 has no `games` row yet reads as "no embargo" rather than vanishing.
 
+The choice of log, and the score's key, live in `match_replays`, which is
+granted to nobody; `public_replays` is it less what is embargoed. The embargo
+keeps a replay from rivals, not from the person who played it: a signed-in
+player's own replays, embargoed or not, are answered by `sc_my_replays` (which
+of these match ids are mine, for the board's Watch links) and `sc_my_replay`
+(the log, which `netlify/functions/replay.mjs` asks under the caller's own
+token when the public view has no row; that answer is `private, no-store`).
+"Own" is a score posted under the name the caller has claimed, so an unclaimed
+name's replays stay embargoed for everyone. The game sends the board's sign-in
+with its replay fetch (`share.fetch_log`, signed), so the Watch link works in
+the game unchanged.
+
 One upload per match: the log the match's *first* score was checked on
 (`score_checks.log_id`). Before any check, it is the longest uploaded before
 that score was posted, else the longest. The first score, not any verified

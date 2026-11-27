@@ -239,10 +239,10 @@ test("bigger maps draw bigger, and one name is one colour", () => {
 test("a map's campaign badge points at its node, in its own week", () => {
   const monday = new Date(Date.UTC(2026, 8, 28));
   assert.deepEqual(campaignMark({ week_start: "2026-09-28", node_id: 15, kind: "home" }, monday), {
-    current: true, label: "Campaign · Home 15", href: "campaign.html?node=15",
+    current: true, label: "Campaign · Home 15", button: "Campaign page", href: "campaign.html?node=15",
   });
   assert.deepEqual(campaignMark({ week_start: "2026-09-21", node_id: 3, kind: "field" }, monday), {
-    current: false, label: "Past campaign · Node 3", href: "campaign.html?week=2026-09-21&node=3",
+    current: false, label: "Past campaign · Node 3", button: "Campaign page", href: "campaign.html?week=2026-09-21&node=3",
   });
   assert.equal(campaignMark({ week_start: "2026-09-28", node_id: 3, kind: "field", node_name: "Mädler" }, monday).label,
     "Campaign · Mädler");

@@ -11,13 +11,14 @@
 
 import { configured, eq, inList, select } from "./api.mjs";
 import {
-  addDays, bestOnTheDay, dayParam, numberPrefix, opponents, parNote, postedOn, resultLine, shortDate, standings, streaks, validDay,
+  addDays, bestOnTheDay, dayParam, numberPrefix, parNote, postedOn, resultLine, shortDate, standings, streaks, validDay,
   weekdayOf,
   WEEKDAYS,
 } from "./daily.mjs";
-import { clear, el, leaderLink, setupSummary, showError, userHref } from "./format.mjs";
+import { challengeSummary, clear, el, leaderLink, mapPageLink, showError, userHref } from "./format.mjs";
 import { mountNav } from "./nav.mjs";
 import { ownName, ownPar } from "./post.mjs";
+import { ownReplays, replayCell } from "./watch.mjs";
 
 // How far back streaks are read. A streak reaching back that far shows as
 // "60+", since it may run further.
@@ -61,9 +62,6 @@ function drawDays() {
   );
 }
 
-/** A `dailies` row as the summary helpers read a games row. */
-const asGame = (row) => ({ ...row.settings, settings_json: row.settings });
-
 function drawToday(row, keys) {
   todayBox.classList.remove("loading");
   if (!row) {
@@ -72,17 +70,16 @@ function drawToday(row, keys) {
       : `There was no ${noun} that day.` }));
     return;
   }
-  const bots = opponents(row.settings);
   clear(todayBox).append(el("div", { class: "card" }, [
     el("div", { class: "card-body" }, [
       el("div", { class: "card-main" }, [
         el("strong", { text: `${numberPrefix(day)}${WEEKDAYS[weekdayOf(day)]}'s ${kind === "puzzle" ? "puzzle" : "map"}` }),
-        el("div", { class: "card-meta", text: setupSummary(asGame(row)) + (bots.length ? ` · vs ${bots.join(", ")}` : "") }),
-        keys.length
-          ? el("div", { class: "card-meta" }, [el("a", { href: `game.html?key=${encodeURIComponent(keys[0])}`, text: "Map page" })])
-          : null,
+        el("div", { class: "card-meta", text: challengeSummary(row.settings) }),
+      ]),
+      el("div", { class: "card-actions" }, [
+        el("a", { class: "btn play", href: playHref(day), text: "▶ Play" }),
+        keys.length ? mapPageLink(keys[0]) : null,
       ].filter(Boolean)),
-      el("a", { class: "btn play", href: playHref(day), text: "▶ Play" }),
     ]),
   ]));
 }
@@ -98,20 +95,24 @@ async function drawOwnPar() {
 }
 
 /** The end screen's "Copy daily result", for a signed-in player who has posted
- * a win on this day's daily: their best counted score, as `resultLine` words it.
- * Their own figures only, so an embargoed day gives nothing away. */
+ * a win on this day's daily: their best counted score, as `resultLine` words it,
+ * with Watch on its replay, which is theirs to watch even under the embargo
+ * (`ownReplays`). Their own figures only, so an embargoed day gives nothing away. */
 async function drawOwnResult(keys) {
   if (!keys.length) return;
   const name = await ownName();
   if (!name) return;
   let best;
   try {
-    [best] = await select(`counted_scores?select=turns,lost&game_key=${inList(keys)}`
+    [best] = await select(`counted_scores?select=id,turns,lost&game_key=${inList(keys)}`
       + `&user_name=${eq(name)}&order=turns.asc,lost.asc&limit=1`);
   } catch {
     return;   // a convenience: the rest of the page stands without it
   }
   if (!best) return;
+  const [match] = await select(`scores?select=match_id&id=eq.${best.id}`).catch(() => []);
+  const replays = match ? await ownReplays([match.match_id]) : new Map();
+  const watch = match ? replayCell(match.match_id, replays.get(match.match_id)) : [];
   const text = resultLine(day, best.turns, best.lost, kind, location.origin);
   const status = el("span", { class: "share-status", role: "status" });
   const field = el("pre", { class: "share-text", "aria-label": "Your result", text });
@@ -125,7 +126,7 @@ async function drawOwnResult(keys) {
       status.textContent = "Selected: copy it from here";
     }
   });
-  todayBox.append(el("div", { class: "own-result" }, [field, el("div", { class: "own-result-row" }, [copy, status])]));
+  todayBox.append(el("div", { class: "own-result" }, [field, el("div", { class: "own-result-row" }, [copy, ...watch, status])]));
 }
 
 /** Today, under embargo: who is ahead and by how many turns, from

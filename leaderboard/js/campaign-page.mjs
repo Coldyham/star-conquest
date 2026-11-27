@@ -6,7 +6,7 @@ import {
   weekHistory, weekQueries,
 } from "./campaign.mjs";
 import { deflate } from "./deflate-browser.mjs";
-import { clear, el, mapSummary, relativeTime, showError, userHref } from "./format.mjs";
+import { challengeSummary, clear, el, mapPageLink, relativeTime, showError, userHref } from "./format.mjs";
 import { myName } from "./me.mjs";
 import { mountNav } from "./nav.mjs";
 import { encodeToken } from "./token-encode.mjs";
@@ -128,12 +128,10 @@ async function drawDetail() {
     }
   }
   const board = boards.get(node.id);
-  const scores = board
-    ? el("a", { class: "btn ghost", href: `game.html?key=${encodeURIComponent(board)}`, text: "Scores" })
-    : null;
+  const actions = [play, board ? mapPageLink(board) : null].filter(Boolean);
   clear(detailBox).append(
     ...heading(node, title),
-    el("p", { text: node.mystery ? "Mystery map — settings randomised" : mapSummary(setup) }),
+    el("p", { text: node.mystery ? "Mystery map — settings randomised" : challengeSummary(setup) }),
     el("p", {}, holder
       ? [live() ? "Held by " : "Then held by ", el("a", { href: userHref([holder.name]), text: holder.name }),
         ` — ${holder.turns} turns · ${holder.lost} lost`]
@@ -141,7 +139,7 @@ async function drawDetail() {
         ? node.kind === "home" ? "Unclaimed home — win it to join." : "Unclaimed."
         : "Unclaimed then."]),
     ...attemptNote(node),
-    ...[play, scores].filter(Boolean),
+    ...(actions.length ? [el("div", { class: "map-actions" }, actions)] : []),
   );
 }
 

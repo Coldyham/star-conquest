@@ -553,28 +553,24 @@ left join lateral (
 ) daily on true;
 
 -- ---------------------------------------------------------------------------
--- public_replays: the only game_logs rows a visitor can read. A replay is public
--- when a posted score points at it and its map is not embargoed. One upload per
+-- match_replays: the one replay of each match a posted score points at, with
+-- the key of the map that score was posted on (score_game_key). One upload per
 -- match: the log the match's first score was checked on; before any check, the
 -- longest uploaded before that score was posted; else the longest. Anyone can
 -- upload under a public match_id, so the longest alone could be anybody's.
 --
+-- Read only through public_replays and sc_my_replay(s): no grant to the public.
 -- Deliberately NOT security_invoker: it lends out part of a table nobody may
--- read, which needs owner rights. The where clause is the whole consent
--- boundary.
+-- read, which needs owner rights.
 --
--- The embargo joins through scores.game_key, not game_logs.game_key: a log
--- carries the key the game held at upload, which the site may have folded onto
--- another (submit.mjs findTwin), while the score's key is a real games row. A
--- left join, so a key with no games row reads as no embargo.
---
--- rules_version is last because it was added last (see the top of the file).
--- game.mjs's watchableIds swallows the error a stale view gives, so a refused
--- replace takes down every Watch link quietly.
+-- score_game_key, not game_logs.game_key, is the map's: a log carries the key
+-- the game held at upload, which the site may have folded onto another
+-- (submit.mjs findTwin), while the score's key is a real games row.
 -- ---------------------------------------------------------------------------
-create or replace view public.public_replays as
+create or replace view public.match_replays as
 select distinct on (l.match_id)
-  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version
+  l.match_id, l.game_key, l.turns, l.finished, l.won, l.hand, l.log, l.rules_version,
+  s.game_key as score_game_key
 from public.game_logs l
 join lateral (
   select s.game_key, s.submitted_at, c.log_id
@@ -584,10 +580,65 @@ join lateral (
   order by s.submitted_at, s.id
   limit 1
 ) s on true
-left join public.game_embargoes e on e.game_key = s.game_key
-where e.embargo_until is null or e.embargo_until <= now()
 order by l.match_id, (l.id = s.log_id) desc nulls last,
   (l.submitted_at <= s.submitted_at) desc, l.turns desc, l.id desc;
+
+revoke all on public.match_replays from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- public_replays: the only game_logs rows a visitor can read: match_replays
+-- whose map is not embargoed. NOT security_invoker, like match_replays; the
+-- where clause is the whole consent boundary. A left join, so a key with no
+-- games row reads as no embargo.
+--
+-- rules_version is last because it was added last (see the top of the file).
+-- game.mjs's replayVersions swallows the error a stale view gives, so a refused
+-- replace takes down every Watch link quietly.
+-- ---------------------------------------------------------------------------
+create or replace view public.public_replays as
+select
+  r.match_id, r.game_key, r.turns, r.finished, r.won, r.hand, r.log, r.rules_version
+from public.match_replays r
+left join public.game_embargoes e on e.game_key = r.score_game_key
+where e.embargo_until is null or e.embargo_until <= now();
+
+-- ---------------------------------------------------------------------------
+-- The signed-in caller's own replays, embargoed or not: a match one of their
+-- own scores (under the name they have claimed) points at. An embargo keeps a
+-- replay from rivals; the player who played it may watch it. Nobody else's is
+-- ever answered, and a signed-out caller gets nothing.
+--
+-- sc_my_replays: which of p_match_ids (at most 200) are theirs and have a
+-- replay, as [{match_id, rules_version}], for the board's Watch links.
+-- sc_my_replay: one such replay's log, for netlify/functions/replay.mjs, which
+-- calls it under the caller's own token when public_watchable_replays has no
+-- row for the id.
+-- ---------------------------------------------------------------------------
+create or replace function public.sc_my_replays(p_match_ids text[])
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('match_id', r.match_id,
+                                               'rules_version', r.rules_version)), '[]'::jsonb)
+  from public.match_replays r
+  where auth.uid() is not null
+    and cardinality(p_match_ids) <= 200
+    and r.match_id = any(p_match_ids)
+    and exists (
+      select 1 from public.scores s
+      join public.users u on u.id = s.user_id
+      where s.match_id = r.match_id and u.owner = auth.uid())
+$$;
+
+create or replace function public.sc_my_replay(p_match_id text)
+returns text language sql stable security definer set search_path = public as $$
+  select r.log
+  from public.match_replays r
+  where auth.uid() is not null
+    and r.match_id = p_match_id
+    and exists (
+      select 1 from public.scores s
+      join public.users u on u.id = s.user_id
+      where s.match_id = r.match_id and u.owner = auth.uid())
+$$;
 
 -- ---------------------------------------------------------------------------
 -- public_watchable_replays: everything netlify/functions/replay.mjs may serve,
@@ -1150,6 +1201,10 @@ revoke execute on function public.sc_my_puzzle_par(date) from public, anon;
 grant execute on function public.sc_my_puzzle_par(date) to authenticated;
 revoke execute on function public.sc_my_par_days(date, date) from public, anon;
 grant execute on function public.sc_my_par_days(date, date) to authenticated;
+revoke execute on function public.sc_my_replays(text[]), public.sc_my_replay(text)
+  from public, anon;
+grant execute on function public.sc_my_replays(text[]), public.sc_my_replay(text)
+  to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Grants to service_role, the secret key the workers and functions hold. It

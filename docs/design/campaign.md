@@ -72,7 +72,8 @@ campaign fleets proposal (decided against). Split out of
   retrofitted onto one already on the board.
   - **It gates the replay and the detail behind it, never the fact that a
     lead exists.** `public_replays` filters out a match whose map is still
-    embargoed — the DB-level half, real for every caller, not just the
+    embargoed (except, through `sc_my_replay(s)`, to the signed-in player
+    whose own replay it is; schema.md) — the DB-level half, real for every caller, not just the
     site's own UI — and `game.mjs`'s `renderEmbargoed` is the other half: it
     never requests the per-score list at all while a map is embargoed, only
     `game_summary`'s own aggregate (`best_turns`/`best_user_name`/

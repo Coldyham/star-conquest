@@ -368,7 +368,9 @@ def fetch_log(match_id: str) -> Download | None:
             download._result.append((OK, text) if state == OK
                                     else (MISSING if state == MISSING else ERROR, ""))
 
-        hostio.request(url, None, False, deliver)
+        # Signed, so a player may watch their own replay on a map still under
+        # embargo (netlify/functions/replay.mjs); anyone else's answers as before.
+        hostio.request(url, None, True, deliver)
         return download
     return _fetch_desktop(url)
 

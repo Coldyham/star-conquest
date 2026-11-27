@@ -111,14 +111,17 @@ def test_the_schema_grants_everything_the_worker_reads_and_writes():
 
 def test_every_rpc_a_function_calls_is_granted_execute():
     """A Netlify function's `/rest/v1/rpc/<fn>` call needs `execute` on it for some
-    role the functions hold: anon (the publishable key) or service_role."""
+    role the functions hold: anon (the publishable key), service_role, or
+    authenticated, for a call made under the caller's own sign-in token
+    (replay.mjs's `sc_my_replay`)."""
     called = set()
     for path in sorted(FUNCTIONS.glob("*.mjs")):
         called.update(re.findall(r"/rest/v1/rpc/(\w+)", path.read_text()))
     grants = re.findall(r"^grant\s+execute\s+on\s+function\s+(.+?)\s+to\s+([\w,\s]+);",
                         SCHEMA.read_text(), re.MULTILINE | re.DOTALL)
     granted = {re.sub(r"\(.*", "", fn.strip()).removeprefix("public.")
-               for fns, roles in grants if {"anon", "service_role"} & {r.strip() for r in roles.split(",")}
+               for fns, roles in grants
+               if {"anon", "service_role", "authenticated"} & {r.strip() for r in roles.split(",")}
                for fn in re.split(r",\s*(?=public\.)", fns)}
     assert called, "no rpc calls found: has the pattern moved?"
     assert called <= granted, f"no execute grant for: {sorted(called - granted)}"
@@ -210,11 +213,13 @@ def test_the_scrape_actually_found_the_callers():
 
 
 @pytest.mark.parametrize("relation",
-                         ["game_logs", "public_replays", "public_watchable_replays",
+                         ["game_logs", "match_replays", "public_replays", "public_watchable_replays",
                           "pbp_matches", "pbp_orders", "admin_actions"])
 def test_a_replay_is_never_granted_to_the_public(relation):
     """The other half of the rule, and the one that matters more: `game_logs` is
-    readable by nobody but the worker, `public_replays` lends out only the
+    readable by nobody but the worker, `match_replays` (every posted score's
+    replay, embargoed or not) is read only through `public_replays` and the
+    owner-only `sc_my_replay(s)`, `public_replays` lends out only the
     replays a posted score already points at, and `public_watchable_replays`
     (the union `replay.mjs` actually reads) has no grant to the public at all —
     everything it can serve is already reachable some other way (`public_replays`
@@ -228,8 +233,8 @@ def test_a_replay_is_never_granted_to_the_public(relation):
     assert "insert" not in public.get(relation, set())
     assert "update" not in public.get(relation, set())
     assert "delete" not in public.get(relation, set())
-    if relation in ("game_logs", "public_watchable_replays", "pbp_matches", "pbp_orders",
-                    "admin_actions"):
+    if relation in ("game_logs", "match_replays", "public_watchable_replays", "pbp_matches",
+                    "pbp_orders", "admin_actions"):
         assert public.get(relation, set()) == set(), f"{relation} is not directly public"
 
 
