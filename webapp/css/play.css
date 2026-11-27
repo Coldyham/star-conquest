@@ -159,6 +159,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 14px; touch-action: none;
 }
 #popup.forward { border-color: var(--forward); }
+:root:not(.compact) #popup { cursor: move; }
+#popup input { cursor: pointer; }
 #popup .row { height: 22px; display: flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
 #popup .tabs { justify-content: stretch; border-bottom: 1px solid rgb(70, 80, 104); gap: 5px; }
 #popup .tab {

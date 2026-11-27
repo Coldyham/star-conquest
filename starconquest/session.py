@@ -53,6 +53,7 @@ UI_CALLS = {
     "even_split": lambda ui, state: ui.even_split(),
     "delete_all_forward": lambda ui, state: ui.delete_all_forward(),
     "cancel_send": lambda ui, state: ui.cancel_send(),
+    "move_popup": lambda ui, state, x, y: ui.move_popup(int(x), int(y)),
     "clear_all_forward": lambda ui, state: ui.clear_all_forward(),
     "clear_dangerous_forward": lambda ui, state: ui.clear_dangerous_forward(state),
     "clear_selected": lambda ui, state: play.clear_selected(ui),

@@ -124,6 +124,21 @@ def test_a_lane_press_reopens_the_order_on_it(session):
     assert view["pending"] == []
 
 
+def test_a_dragged_popup_stays_put_until_the_next_target(session):
+    _, home, nbr = _human_game(session)
+    _call(session, "ui.tap", sid=home)
+    view = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    assert view["popup"]["at"] is None
+    view = _call(session, "ui.call", method="move_popup", args=[120, 48])["result"]["view"]
+    assert view["popup"]["at"] == [120, 48]
+    view = _call(session, "ui.call", method="step_count", args=[-1])["result"]["view"]
+    assert view["popup"]["at"] == [120, 48]
+    _call(session, "ui.empty")
+    _call(session, "ui.tap", sid=home)
+    view = _call(session, "ui.tap", sid=nbr)["result"]["view"]
+    assert view["popup"]["at"] is None
+
+
 def test_a_press_on_empty_map_drops_the_hover(session):
     """A finger leaves no pointer to clear the hover, so a press on nothing must:
     else the panel keeps the last system and hides the legend's buttons."""
