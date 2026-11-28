@@ -7,7 +7,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { insert, rangeTotal, rpc, selectPage } from "../js/api.mjs";
+import { insert, jwtRetry, rangeTotal, rpc, select, selectPage } from "../js/api.mjs";
+import { SESSION_KEY } from "../js/auth.mjs";
 
 /** Stub fetch to answer with `body` (JSON-encoded on the way out, exactly as
  * PostgREST would), and hand back every call made so a test can inspect the
@@ -135,3 +136,76 @@ test("rangeTotal reads the count after the slash, or null without one", () => {
   assert.equal(rangeTotal("0-49/*"), null);
   assert.equal(rangeTotal(null), null);
 });
+
+// A signed-in token PostgREST turns away. Supabase Auth's clock can run ahead
+// of the database's, so a token refreshed a moment ago reads as "issued at
+// future" for a second or so: the board waits and asks again, falls back to
+// the public key for a read, and never shows PostgREST's words for it.
+
+function signedIn(fn) {
+  return async () => {
+    const data = new Map([[SESSION_KEY, JSON.stringify({
+      access_token: "user-token", refresh_token: "r", expires_at: Date.now() / 1000 + 3600,
+    })]]);
+    globalThis.localStorage = { getItem: (k) => data.get(k) ?? null, setItem: () => {}, removeItem: () => {} };
+    const delays = jwtRetry.delays;
+    jwtRetry.delays = [0, 0];
+    const real = globalThis.fetch;
+    try {
+      await fn();
+    } finally {
+      globalThis.fetch = real;
+      jwtRetry.delays = delays;
+      delete globalThis.localStorage;
+    }
+  };
+}
+
+/** Answer each call with the next of `answers` (status, body), recording the
+ * bearer token each one carried. */
+function scripted(answers) {
+  const tokens = [];
+  globalThis.fetch = async (url, options) => {
+    tokens.push(options.headers.Authorization.replace("Bearer ", ""));
+    const [status, body] = answers[Math.min(tokens.length - 1, answers.length - 1)];
+    return {
+      ok: status < 300,
+      status,
+      text: async () => JSON.stringify(body),
+      json: async () => body,
+      headers: { get: () => null },
+    };
+  };
+  return tokens;
+}
+
+const FUTURE = [401, { code: "PGRST303", message: "JWT issued at future" }];
+
+test("a token issued 'in the future' is asked again with, and then goes through", signedIn(async () => {
+  const tokens = scripted([FUTURE, [200, [{ id: 1 }]]]);
+  assert.deepEqual(await select("campaigns?select=*"), [{ id: 1 }]);
+  assert.deepEqual(tokens, ["user-token", "user-token"]);
+}));
+
+test("a read whose token is still refused falls back to the public key", signedIn(async () => {
+  const tokens = scripted([FUTURE, FUTURE, FUTURE, [200, [{ id: 2 }]]]);
+  assert.deepEqual(await select("campaigns?select=*"), [{ id: 2 }]);
+  assert.equal(tokens.length, 4);
+  assert.notEqual(tokens[3], "user-token");
+}));
+
+test("an expired token isn't waited on: the read goes straight to the public key", signedIn(async () => {
+  const tokens = scripted([[401, { code: "PGRST303", message: "JWT expired" }], [200, []]]);
+  assert.deepEqual(await select("campaigns?select=*"), []);
+  assert.equal(tokens.length, 2);
+  assert.notEqual(tokens[1], "user-token");
+}));
+
+test("a write whose token is refused says so in words, not PostgREST's", signedIn(async () => {
+  scripted([FUTURE]);
+  await assert.rejects(insert("scores", { score: 1 }), (err) => {
+    assert.doesNotMatch(err.message, /JWT/);
+    assert.match(err.message, /sign-in/);
+    return true;
+  });
+}));

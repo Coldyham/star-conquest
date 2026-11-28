@@ -26,23 +26,32 @@ export class ApiError extends Error {
   }
 }
 
-/** Fetch a path and hand back the parsed body plus the raw response, for the
- * one caller that reads a header (selectPage's total). */
-async function send(path, options = {}) {
-  if (!configured()) {
-    throw new ApiError("The leaderboard is not connected to its database yet.", 0, "unconfigured");
-  }
-  let res;
+// How long to wait before asking again when PostgREST turns a just-refreshed
+// sign-in token away as "JWT issued at future": Supabase Auth's clock runs a
+// little ahead of the database's, so a token minted a moment ago can read as
+// not yet valid. A second or two later it is. Exported so tests can shorten it.
+export const jwtRetry = { delays: [1000, 2000] };
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** PostgREST refusing the bearer token itself (PGRST301–303), as opposed to a
+ * row-level refusal or a bad query. */
+export function jwtRejected(status, body) {
+  return status === 401 && (/^PGRST30\d$/.test(body?.code || "") || /\bJWT\b/.test(body?.message || ""));
+}
+
+/** One round trip; `anonymous` leaves the signed-in token out. */
+async function attempt(path, options, anonymous) {
   try {
     // A signed-in caller's own token stands in for the publishable key's, so
     // auth.uid() in schema.sql's policies is theirs: that is all signing in
     // changes, and only for a claimed name (see auth.mjs).
-    res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    return await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
       ...options,
       headers: {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        ...(await authHeader()),
+        ...(anonymous ? {} : await authHeader()),
         "Content-Type": "application/json",
         ...options.headers,
       },
@@ -50,11 +59,40 @@ async function send(path, options = {}) {
   } catch (err) {
     throw new ApiError(`Couldn't reach the leaderboard: ${err.message}`, 0, "network");
   }
+}
 
+/** Fetch a path and hand back the parsed body plus the raw response, for the
+ * one caller that reads a header (selectPage's total). */
+async function send(path, options = {}) {
+  if (!configured()) {
+    throw new ApiError("The leaderboard is not connected to its database yet.", 0, "unconfigured");
+  }
+  let res = await attempt(path, options, false);
+  let body = null;
+  if (!res.ok) {
+    body = await res.json().catch(() => ({}));
+    // A token too fresh for the database's clock: wait it out and ask again.
+    for (const ms of jwtRetry.delays) {
+      if (!(jwtRejected(res.status, body) && /future/i.test(body.message || ""))) break;
+      await sleep(ms);
+      res = await attempt(path, options, false);
+      body = res.ok ? null : await res.json().catch(() => ({}));
+    }
+    // Still refused for the token: every read here is public, so ask again
+    // without it. A write needs the account, so it says so in words instead of
+    // passing PostgREST's message through to the page.
+    if (!res.ok && jwtRejected(res.status, body)) {
+      if ((options.method || "GET").toUpperCase() !== "GET") {
+        throw new ApiError("Your sign-in couldn't be checked just now. Try again in a moment.",
+          res.status, body.code);
+      }
+      res = await attempt(path, options, true);
+      body = res.ok ? null : await res.json().catch(() => ({}));
+    }
+  }
   if (!res.ok) {
     // PostgREST puts the Postgres error code in the body; it's how the caller
     // tells "someone else just inserted this" from a real failure.
-    const body = await res.json().catch(() => ({}));
     throw new ApiError(body.message || `Request failed (${res.status})`, res.status, body.code);
   }
   // A `return=minimal` insert answers 201 with no body at all, so this cannot
